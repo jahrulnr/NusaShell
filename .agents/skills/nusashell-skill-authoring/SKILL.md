@@ -52,7 +52,7 @@ toolbox.
   `references/shared/`, not `references/_shared/`). Go's `//go:embed` drops
   such paths, so the file ships in the repo but never reaches the binary and
   the seeded copy fails its own reference checker. Enforced by
-  `resources/builtin_skills_embed_test.go` and `make skill-check`.
+  `resources/skills_test.go` and `make skill-check`.
 - `skill_manage` is for agent-owned create/edit/write/delete operations and
   approval staging. Builtin and user-owned provenance is protected.
 - There is no `skill_exec`: bundled scripts are reference material and are not

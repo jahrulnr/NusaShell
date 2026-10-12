@@ -8,7 +8,7 @@ more triggers, jobs, and sequential steps inside each job.
 This page is the complete operational guide. The builtin
 `automation-authoring` skill is the compact procedure an agent follows while
 working. The skill package contains the detailed contract, patterns, capability
-matrix, research notes, templates, and a safe template builder.
+matrix, templates, and a safe template builder.
 
 ## 1. Mental model
 
@@ -38,10 +38,8 @@ The important boundaries are:
 - A **run** is observable through a run ID, job/step statuses, logs, and an
   optional bounded webhook summary.
 
-A pipeline is not a persistent chat room. Every `agent` step starts a new
-hidden automation conversation for that turn. The conversation remains
-addressable while running through `automation(op="steer")`, but repeated
-triggers create separate workflow runs and separate agent conversations.
+A pipeline is not a persistent chat room: repeated triggers create separate
+workflow runs and separate hidden agent conversations (see section 9).
 
 ## 2. Start with the builtin skill and templates
 
@@ -54,9 +52,9 @@ file_list(path="<data-dir>/skills/automation-authoring/templates")
 file_read(path="<data-dir>/skills/automation-authoring/SKILL.md")
 ```
 
-The package is seeded from `resources/agent/skills/automation-authoring/` into
-the platform data directory. Templates are support material, not files that
-the automation engine executes automatically.
+The package is seeded into the platform data directory at install time.
+Templates are support material, not files that the automation engine executes
+automatically.
 
 | Template | Level | Trigger | Purpose | Status |
 | --- | --- | --- | --- | --- |
@@ -90,10 +88,8 @@ file_read(path="/tmp/repository-checks.yaml")
 automation(op="validate", yaml="<contents of /tmp/repository-checks.yaml>")
 ```
 
-Use `python` when that is the available executable. The builder rejects a path
-traversal template name, refuses to overwrite an output without `--force`, and
-checks that bundled templates remain disabled. It is a convenience, not a
-replacement for dispatcher validation.
+Use `python` when that is the available executable. The builder is a
+convenience, not a replacement for dispatcher validation.
 
 ## 3. Choose the smallest useful level
 
@@ -324,12 +320,6 @@ triggers:
 - `manual` is started by a person or explicit dispatcher call. It must be
   written as `manual: true`.
 
-A trigger list item must contain exactly one trigger kind. Combining `once`,
-`every`, `when`, and `manual` in one item is rejected instead of silently
-selecting the first field. An empty or omitted `triggers` field is only
-normalized to manual-only during file-pipeline discovery; it is not a
-substitute for an explicit trigger in an API definition.
-
 ### 5.2 Jobs, dependencies, and steps
 
 ```yaml
@@ -388,7 +378,7 @@ jobs:
     steps:
       - uses: conversation.wake
         with:
-          conversation: conv_abc123   # room id from agent.conversations.list
+          conversation: conv_abc123   # room id from conversation(op="list")
           source: minecraft
           message: "[minecraft] ${event.player}: ${event.text}"
 ```
@@ -452,9 +442,6 @@ Rules:
 - Reused conversations grow; the engine's compaction applies to them like any
   other conversation.
 
-Steps in one job remain sequential. Independent jobs can run in parallel. A
-job condition is evaluated against the event and completed job status/output.
-
 ### 5.3 Conditions
 
 The condition language is intentionally small. It supports:
@@ -481,11 +468,10 @@ job attempts automatically. Treat it as declared policy and verify actual
 behavior before relying on it. Do not retry a remote write unless it is
 idempotent or the target state is re-checked.
 
-Artifact and cache models/ports exist, but the current storage/executor wiring
-is incomplete. Do not make correctness depend on `artifacts` or `cache`. For a
-handoff, prefer a known shared workspace file and test that topology, or keep
-the producer and consumer in one job. Shell stdout is logged, but is not
-automatically converted into structured job outputs.
+`artifacts` and `cache` are not usable; do not make correctness depend on
+them. For a handoff, prefer a known shared workspace file and test that
+topology, or keep the producer and consumer in one job. Shell stdout is
+logged, but is not automatically converted into structured job outputs.
 
 ## 6. Event-driven workflows
 
@@ -507,27 +493,18 @@ MCP business-event publishers send a NusaShell-specific notification method,
 
 `schema_version`, `event_id`, and `type` are required. `occurred_at` is an
 optional RFC3339 timestamp; `subject`, `attributes`, and `data` are optional.
-The host owns `event.source` and derives it from the connected MCP server. It
-also namespaces the publisher identity as `mcp:<server-id>:<event_id>` for
-stable deduplication. Unknown top-level fields, unsupported versions, malformed
+The host assigns `event.source` from the connected MCP server and namespaces
+the publisher identity as `mcp:<server-id>:<event_id>` for stable
+deduplication. Unknown top-level fields, unsupported versions, malformed
 identity/timestamps/payloads, non-object attributes, and oversized values are
 rejected. Current limits are 4 KiB per string, 256 KiB serialized attributes,
-and 8 MiB serialized data. The scheduler still accepts empty IDs from its other
-callers by generating a fallback ID, but this MCP envelope requires a stable
-`event_id` so re-delivery is deterministic.
+and 8 MiB serialized data. An MCP publisher must always supply a stable
+`event_id` so re-delivery is deterministic; an event that cannot be persisted
+is rejected instead of starting work that cannot be replayed or deduplicated.
 
-The host persists an accepted normalized event before applying matching `when`
-triggers, so a persistence failure rejects the event instead of starting work
-that cannot be replayed or deduplicated. If a publisher omits an event ID on a
-non-MCP ingestion path, the scheduler may generate one, but an MCP publisher
-must not rely on that fallback.
-
-After persistence, the host applies matching `when` triggers and creates at most
-one delivery for the combination of normalized event ID, trigger ID, and
-workflow ID. A built-in durable store removes that delivery claim if run
-creation fails before work starts, allowing a later replay; custom EventStore
-implementations should provide the optional rollback extension for the same
-guarantee. It does not poll the plugin for this path.
+Deliveries deduplicate on (event, trigger, workflow): at most one delivery is
+created per normalized event ID, trigger ID, and workflow ID, so a failed run
+start may be redelivered. The host does not poll the plugin for this path.
 
 Good, GitHub:
 
@@ -566,7 +543,7 @@ automation_schedule(op="every", interval="30s", yaml="<check whether a message o
 ```
 
 The bad patterns either create unnecessary polling turns or misuse the MCP
-logging/message compatibility method. Use the source's generic event publisher.
+message method. Use the source's generic event publisher.
 
 ### 6.1 Event variables
 
@@ -580,12 +557,11 @@ Agent prompts may use `${event.<key>}`. The renderer supports:
 | `${event.event_id}` | publisher event ID; the host namespaces it for scheduler deduplication |
 | `${event.<custom>}` | direct or dotted publisher attribute |
 
-Telegram-only fields such as `chat_id`, `message_id`, `chat_type`, `text`, and
-`from_me` are not universal event fields. They exist only on the deprecated
-legacy Telegram message bridge. GitHub, trading, and kanban fields such as
-`action`, `repository`, `pull_request_number`, `symbol`, `price`, `board_id`,
-or `card_id` are publisher-dependent. Use them only after observing that the
-publisher emits them. The full `data` payload and normalized event timestamp
+Fields such as `chat_id`, `message_id`, `chat_type`, `text`, and `from_me`
+exist only on Telegram message events. GitHub, trading, and kanban fields such
+as `action`, `repository`, `pull_request_number`, `symbol`, `price`,
+`board_id`, or `card_id` are likewise publisher-dependent. Use them only after
+observing that the publisher emits them. The full `data` payload and normalized event timestamp
 are not automatically interpolated into prompts. Missing values render as
 empty strings. This syntax is prompt rendering only, not shell expansion, and
 it does not interpolate job or step outputs.
@@ -596,15 +572,13 @@ instead of guessing.
 
 ### 6.2 Telegram
 
-`notifications/message` is deprecated for business events. NusaShell keeps it
-only as a compatibility bridge for older messaging plugins, and it admits only
-payloads with a matching plugin/server identity, nonempty `chat_id` and
-`message_id`, and an explicit boolean `from_me: false`. Missing or malformed
-provenance is ignored, and `from_me: true` is ignored so a bot reply cannot
-recursively trigger the same message workflow. MCP logging-shaped
-`notifications/message` notifications are never treated as Telegram events.
-New publishers must use `notifications/nusashell/event`; the Telegram MCP
-refactor is intentionally a separate follow-up.
+Telegram message events arrive as `notifications/message` payloads. The host
+admits only payloads with a matching plugin/server identity, nonempty
+`chat_id` and `message_id`, and an explicit boolean `from_me: false`. Missing
+or malformed provenance is ignored, and `from_me: true` is ignored so a bot
+reply cannot recursively trigger the same message workflow. Logging-shaped
+`notifications/message` payloads are never treated as Telegram events. New
+publishers must use `notifications/nusashell/event`.
 
 An agent should still guard on message fields, verify the exact `chat_id` and
 `message_id` with a discovered read tool, send at most one reply, and inspect
@@ -624,9 +598,10 @@ mcp_call(ref="<returned ref>", arguments_json={<schema-valid object>})
 ### 6.3 GitHub PR review
 
 A GitHub PR workflow needs two separate integrations: an event publisher for
-`github.pull_request` and a live MCP/API provider for reads or writes. The
-current audit found neither as a live GitHub provider. The template is
-therefore integration-dependent and report-only.
+`github.pull_request` and a live MCP/API provider for reads or writes. Ensure
+the publisher plugin and the provider are installed and enabled first — verify
+with `mcp_list`, then discover the exact tools with `mcp_search`. The template
+is therefore integration-dependent and report-only.
 
 Recommended lifecycle:
 
@@ -645,15 +620,15 @@ not a posted review.
 
 ### 6.4 Kanban and board automation
 
-Trello/Jira-style automation suggests a useful model of trigger, conditions,
-actions, scheduled rules, buttons, logs, and test/run-now. In NusaShell, map
-that model to a `when` or `every` trigger plus jobs and steps. Do not invent
-Trello/Jira syntax in NusaShell YAML.
+Map board-style triggers, conditions, and scheduled rules onto `when` or
+`every` triggers plus jobs and steps. Do not invent Trello/Jira syntax in
+NusaShell YAML.
 
-The current audit found `nusashell.kanban` registered but stopped. The kanban
+Ensure the board provider plugin is installed and enabled first — verify with
+`mcp_list`, then discover the exact read tools with `mcp_search`. The kanban
 template is read-only and must not edit, move, archive, delete, comment, or
-assign cards. Enable the provider only after the user wants it, discover the
-exact read tools, and use a separate manually approved mutation workflow.
+assign cards. Enable the provider only after the user wants it, and use a
+separate manually approved mutation workflow.
 
 ### 6.5 Daily ops, alarm, and reminder
 
@@ -756,20 +731,17 @@ Wait timeout is the largest job `timeout` on the workflow, else 30 minutes
 run with status `skipped` and reason `automation.queue.overflow`. A waiter
 whose wait ends by timeout/cancel is finalized as `skipped` with
 `automation.queue.wait_timeout` / `automation.queue.wait_cancelled` — never
-left `running`. Restart drops in-memory waiters; durable lock rows for
-terminal/missing runs are self-healed on the next start.
-
-**Layer ownership:** the scheduler renders the key and starts or enqueues; the
-execution scheduler holds the lock for the active run of that key and owns the
-FIFO waiters. Skip/replace use the same rendered key as queue.
+left `running`. Restart drops in-memory waiters. Skip/replace use the same
+rendered key as queue.
 
 ### Retry
 
 Provider-level agent retries handle eligible transient provider failures inside
 a headless turn. They are not a new workflow run and not proof that a remote
 side effect was absent. YAML job retry is parsed policy but not an automatic
-executor loop yet. `automation(op="retry")` starts a new run from a failed
-workflow definition and must be used only after diagnosing whether a side effect may already have happened.
+executor loop yet. There is no retry op: diagnose the failed job first with
+`automation(op="logs")`, then start a new run of the same workflow with
+`automation(op="run")` after confirming whether a side effect already happened.
 
 Retry transport/runner failures only when the operation is idempotent. Do not
 retry malformed input, permission denial, a destructive call, or a 429 without
@@ -782,10 +754,9 @@ resumes after the due time, including after restart. Completed steps are not
 re-run when the workflow resumes. Use one durable wait rather than holding a
 shell process open.
 
-Event-triggered runs start asynchronously on a detached context: the event
-ingest path only persists the event and starts the run, so job execution
-(including long agent steps) is never bounded by the ingest caller's context
-or timeout. The same applies to event-waited runs resumed by a matching event.
+Event runs are asynchronous: once an event is accepted, job execution
+(including long agent steps) is never bounded by ingest latency or timeouts.
+The same applies to event-waited runs resumed by a matching event.
 
 For an asynchronous run, the normal lifecycle is:
 
@@ -824,7 +795,6 @@ not by assuming conversational memory.
 | `logs` | `job_id`, optional `after`/`limit` | read append-only log chunks |
 | `steer` | `run_id`, `text` | queue text for a running agent step |
 | `cancel` | `run_id` | cancel a run |
-| `retry` | `run_id` | start a new run from a failed definition |
 | `delete` | `workflow_id` | remove definition; retain existing run history |
 
 `automation_schedule` supports `op="once"` with `at`, `yaml`, and optional
@@ -881,7 +851,7 @@ card change was observed, say that no delivery or mutation was claimed.
 ## 11. Webhooks, notify progress, logs, and recovery
 
 `webhook_url` receives a bounded completion/failure JSON summary with a
-10-second timeout. A webhook delivery failure becomes an automation event and
+300-second timeout. A webhook delivery failure becomes an automation event and
 does not block the run. Do not place bearer tokens or secrets in the URL.
 
 ### Host-side `notify:` progress (trusted workflows)
@@ -897,34 +867,17 @@ notify:
   chat_id: "${event.chat_id}"         # optional; empty/unresolved → skip delivery
 ```
 
-#### Agent observers
-
-Headless agent turns dispatch lifecycle events through a single **observer
-registry** on the agent service (`RegisterAgentObserver`). Observers are:
-
-- **per-event** — kinds `run`, `step`, `tool_call`, `reasoning`, `text` with
-  phases `pre` / `post` (reasoning and text are post-only);
-- **FIFO** — registration order is invocation order;
-- **side-effect only** — observers cannot veto or reshape the turn. Control /
-  middleware hooks (OpenClaw's second class) are a future, separate mechanism.
-
-`notify:` is one such observer: the host maps those events onto MCP progress
-calls. It does not run on the critical stream path (delivery is detached and
-best-effort).
+`notify:` is a host-side, best-effort progress forwarder: the host maps
+headless agent-step lifecycle onto MCP progress calls to the plugin — the
+agent never calls send tools itself, and delivery never blocks or fails the
+run.
 
 - Allowed only when `trust` is `trusted` or `privileged`.
-- The host calls `internal_send_progress` (fallback `admin.send_progress`) on
-  the plugin with `{chat_id, event_type, status, title, detail?, message_id?}`
-  and no payload caps: the step's final output is delivered in full (the
-  plugin splits long text into multiple messages); tool/reasoning progress
-  lines stay short previews.
-- `tool_call` **pre** opens a progress message and stores the returned
-  `message_id` keyed by tool CallID; **post** edits that same message (edit
-  failure opens a new message). Reasoning is at most one message per round;
-  `step` post clears the per-run message map.
-- Missing `chat_id` emits `automation.notify.skipped` and does not fail the run.
-- Observer / MCP errors emit `automation.notify.failed` and never block or fail
-  the workflow run.
+- The step's final output is delivered in full (the plugin splits long text
+  into multiple messages); tool/reasoning progress lines stay short previews.
+- Missing `chat_id` skips delivery (`automation.notify.skipped`) and does not
+  fail the run; delivery errors are recorded (`automation.notify.failed`)
+  without failing the run.
 - Unknown YAML keys under `notify:` are rejected. State a character budget in
   chat-reply prompts (e.g. "under 3000 characters") — models cannot count
   characters reliably, and the budget keeps one reply in one message.
@@ -939,38 +892,20 @@ When a run fails:
 5. choose a bounded retry, correction, cancellation, or manual recovery;
 6. record the observed result and any remaining risk.
 
-MCP push notifications are translated and handed off from the connection read
-goroutine before scheduler ingestion, so a long-running event workflow does not
-block that connection. The handoff uses the application's recovered background
-goroutine boundary; an ingestion panic is logged and does not crash the host.
-Async workflow runs and webhook callbacks use the same application-owned
-background boundary in the production composition root. Package-level fallback
-wiring remains panic-contained for tests and partial integrations. Scheduler
-state is persisted before completion/failure lifecycle events, and failures to
-write schedules, waits, locks, debounce state, or run snapshots are returned to
-the caller instead of being silently discarded.
-
-The scheduler also contains panics raised after a job has started, including
-panics from a shell/executor adapter, capability provider, headless agent
-step, or a toolbox/MCP call executed by the agent's parallel tool worker. It
-attempts to mark that job as `failed`, emits the normal job-failure event, and
-returns a diagnostic containing `panicked` instead of letting the job goroutine
-crash the process. Each tool worker similarly returns a failed tool result so
-one bad adapter does not crash the turn. Fire-and-forget webhook callbacks also
-convert notifier panics into a best-effort failure event. The headless turn API
-applies the same conversion for direct callers. This is containment, not
-compensation: if an external send happened before the panic, inspect the
-provider result and do not blindly retry it. Panics before a job exists, such
-as a broken composition root or an operating-system crypto failure while
-generating an ID, remain separate startup/infrastructure failures and must be
-fixed at their source.
+A long-running event workflow does not block its plugin's connection, and a
+crashing step (shell, capability, agent, or tool call) is marked `failed`
+with a `panicked` diagnostic instead of taking down the run or the host.
+This is containment, not compensation: an external send that happened before
+the crash is not rolled back — inspect the provider result and verify side
+effects before re-running. Failures to persist schedules, waits, locks, or
+run snapshots are returned to the caller, not silently discarded.
 
 `continue_on_error` is for diagnostics where later reporting is still useful.
 It is unsafe for a prerequisite of a destructive action. There is no
 first-class `approval`, `signal`, loop, saga, or compensation YAML step. Use a
 plugin's explicit approval tool or a separate manual workflow. Keep
-Temporal-style compensation and human correction in the runbook, not in
-fictional YAML fields.
+compensation and human correction in the runbook, not in fictional YAML
+fields.
 
 ## 12. Security boundary
 
@@ -1030,61 +965,28 @@ external tool result confirms it.
 | job `retry` | partial | parsed policy, no automatic executor retry loop yet |
 | `allow`, `skip`, `replace` concurrency | supported with stated semantics | key may be `${event.*}`; choose based on duplicate effect behavior |
 | `queue` concurrency | supported (process-local FIFO) | bounded waiters per rendered key; not durable across restart |
-| artifacts/cache | partial | models/ports exist, current storage/execution incomplete |
+| artifacts/cache | not usable | do not rely on them for correctness |
 | `runs_on`/remote runner | partial | do not infer remote capacity from the field |
 | webhook summary, logs/status/wait/steer | supported | inspect evidence with bounded calls |
 | Telegram bridge | integration-dependent | live only when configured/logged in/running |
-| GitHub events/MCP | integration-dependent, absent in audit | install publisher/provider first |
-| Kanban provider | integration-dependent, stopped in audit | enable and discover before use |
+| GitHub events/MCP | integration-dependent | install publisher/provider first |
+| Kanban provider | integration-dependent | enable and discover before use |
 | first-class approval/signal/saga | not a YAML primitive | use plugin/manual workflow/runbook |
 
 See the skill's `references/capability-matrix.md` for the same boundary in a
 compact authoring form. A valid YAML parse is not the same as a runnable,
 safe, or externally successful integration.
 
-## 14. Research-derived patterns
-
-The template catalog adopts the common patterns below:
-
-- GitHub Actions: event-specific filters, least-privilege permissions,
-  resource-scoped concurrency, explicit job dependencies and human review;
-- GitHub webhooks and Telegram: stable delivery/update identity and careful
-  duplicate handling;
-- Trello/Jira: trigger → conditions → actions, scheduled/manual buttons, logs,
-  and branch/failure semantics;
-- systemd timers: timezone, missed-run policy, bounded schedule behavior, and
-  no overlapping work;
-- n8n: split/merge, wait, sub-workflow thinking, and dedicated error handling;
-- Temporal: durable state, transient versus permanent failures, human
-  correction, resume semantics, and compensation as a deliberate runbook.
-
-These sources inform the design but do not add syntax to NusaShell. Full links
-and the adoption map are in
-[the skill research basis](../skills/automation-authoring/references/research-basis.md)
-when read from the repository tree, or the equivalent seeded skill directory.
-
-## 15. Storage and repository verification
+## 14. Storage
 
 Definitions discovered from files live under
 `<data-dir>/automation/pipelines/<name>.yaml`; saved definitions and run state
-live in `<data-dir>/automation/workflows.db`. Restart after editing a pipeline
-file so it is discovered again. Do not edit generated runtime state as a
-substitute for dispatcher operations.
+live in `<data-dir>/automation/workflows.db` (see `docs(op="read",
+id="data-locations")`). Restart after editing a pipeline file so it is
+discovered again. Do not edit generated runtime state as a substitute for
+dispatcher operations.
 
-For NusaShell source changes, run the narrowest relevant tests first, then the
-repository gate:
-
-```text
-python3 resources/agent/skills/skill-import/scripts/lint_skill.py resources/agent/skills/automation-authoring
-
-go test ./infrastructure/automation ./application/automation ./domain
-make verify-local
-```
-
-Do not claim the full gate passed unless it was actually run. Do not commit or
-push as part of authoring a workflow guide.
-
-## 16. Final authoring report
+## 15. Final authoring report
 
 Every completed authoring task should state:
 

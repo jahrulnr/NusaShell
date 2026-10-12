@@ -124,7 +124,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			}
 			// Vision model: keep the image pixels visible AND surface the
 			// absolute file path so the model can reference it for image-to-
-			// image editing via generate_image. Unlike the non-vision branch
+			// image editing via generate_media. Unlike the non-vision branch
 			// above, the attachment is not stripped — this only appends a path
 			// note with distinct wording so the model does not mistake it for
 			// a missing/omitted image.

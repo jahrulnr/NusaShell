@@ -194,9 +194,11 @@ failure, and choose a bounded action:
 - cancel a harmful run;
 - use a manual recovery workflow for a remote mutation.
 
-`automation(op="retry")` starts a new run from the previous definition. It is
-not the same as YAML job retry and does not prove that the failed side effect
-was absent.
+There is no retry op: diagnose the failed job first with
+`automation(op="logs")`, then start a new run of the same workflow with
+`automation(op="run")` after confirming whether a side effect already
+happened. It is not the same as YAML job retry and does not prove that the
+failed side effect was absent.
 
 ## Good and bad dispatcher calls
 

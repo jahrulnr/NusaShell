@@ -20,27 +20,57 @@ Range selector (15m / 30m / 1h / 3h default / 1d / 2d / 1w / 1mo / 1y / All) and
 
 ## Summary metrics
 
-Four metric cards: Total spend (USD), Requests, Total tokens, Cache hit percent.
+Five metric cards: Total spend (USD), Requests, Token volume, Cache hit percent, and Blended $/1M (average cost per million tokens). Each card also carries a small sub-label under the value.
 
 - **Total spend metric** (`#tm-spend`):
   - Section: Telemetry summary
   - Type: text
   - Notes: Aggregate USD spend for the selected period.
 
+- **tm-spend sub-label** (`#tm-spend-sub`):
+  - Section: Telemetry summary
+  - Type: text
+  - Notes: Sub-text under metric card.
+
 - **Total requests metric** (`#tm-requests`):
   - Section: Telemetry summary
   - Type: text
   - Notes: Total assistant turns with usage data.
 
-- **Total tokens metric** (`#tm-tokens`):
+- **tm-requests sub-label** (`#tm-requests-sub`):
   - Section: Telemetry summary
   - Type: text
-  - Notes: Sum of input + output + cache tokens.
+  - Notes: Sub-text under metric card.
+
+- **Token volume metric** (`#tm-tokens`):
+  - Section: Telemetry summary
+  - Type: text
+  - Notes: Sum of input + output + cache read + cache write tokens.
+
+- **tm-tokens sub-label** (`#tm-tokens-sub`):
+  - Section: Telemetry summary
+  - Type: text
+  - Notes: Sub-text under metric card.
 
 - **Cache hit percent** (`#tm-cache`):
   - Section: Telemetry summary
   - Type: text
-  - Notes: Cache read tokens / (input + cache read) * 100.
+  - Notes: Share of prompt-side tokens (input + cache write + cache read) served from cache.
+
+- **tm-cache sub-label** (`#tm-cache-sub`):
+  - Section: Telemetry summary
+  - Type: text
+  - Notes: Sub-text under metric card.
+
+- **Blended $/1M metric** (`#tm-blended`):
+  - Section: Telemetry summary
+  - Type: text
+  - Notes: Average cost per 1M tokens = total spend / (total tokens / 1M).
+
+- **Blended cost sub-label** (`#tm-blended-sub`):
+  - Section: Telemetry summary
+  - Type: text
+  - Notes: Sub-text under blended cost metric.
 
 ## Usage by model
 

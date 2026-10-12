@@ -80,7 +80,7 @@ export async function initSettings() {
       search: true,
     });
     imageSelect = createSelect(document.getElementById('settings-image-model'), {
-      placeholder: 'Disabled — generate_image is not available',
+      placeholder: 'Disabled — image generation is not available',
       search: true,
     });
     audioSelect = createSelect(document.getElementById('settings-audio-model'), {
@@ -92,11 +92,11 @@ export async function initSettings() {
       search: true,
     });
     videoGenSelect = createSelect(document.getElementById('settings-video-gen-model'), {
-      placeholder: 'Disabled — generate_video is not available',
+      placeholder: 'Disabled — video generation is not available',
       search: true,
     });
     ttsSelect = createSelect(document.getElementById('settings-tts-model'), {
-      placeholder: 'Disabled — generate_speech needs the offline piper engine',
+      placeholder: 'Disabled — speech generation needs the offline piper engine',
       search: true,
     });
     compactionSelect = createSelect(document.getElementById('settings-compaction-model'), {
@@ -398,7 +398,7 @@ function renderVisionModelOptions(models) {
 function renderImageModelOptions(models) {
   const imageModels = models.filter(isImageGeneratorModel);
   const data = [
-    { text: 'Disabled — generate_image is not available', value: '', placeholder: true },
+    { text: 'Disabled — image generation is not available', value: '', placeholder: true },
     ...imageModels.map((m) => {
       const label = m.id;
       const provider = m.provider_name ? ` · ${m.provider_name}` : '';
@@ -479,7 +479,7 @@ function renderVideoModelOptions(models) {
 function renderVideoGenModelOptions(models) {
   const videoGenModels = models.filter(isVideoGeneratorModel);
   const data = [
-    { text: 'Disabled — generate_video is not available', value: '', placeholder: true },
+    { text: 'Disabled — video generation is not available', value: '', placeholder: true },
     ...videoGenModels.map((m) => {
       const label = m.id;
       const provider = m.provider_name ? ` · ${m.provider_name}` : '';
@@ -507,7 +507,7 @@ export function isVideoGeneratorModel(model) {
 function renderTTSModelOptions(models) {
   const ttsModels = models.filter((m) => m.tts === true);
   const data = [
-    { text: 'Disabled — generate_speech needs the offline piper engine', value: '', placeholder: true },
+    { text: 'Disabled — speech generation needs the offline piper engine', value: '', placeholder: true },
     ...ttsModels.map((m) => {
       const label = m.id;
       return {
@@ -615,7 +615,7 @@ function optionalNumber(id) {
 // Flow: button opens the dialog (voice picker fed by
 // settings.tts_install_status), Install starts settings.tts_install_start,
 // live progress arrives over WS via tts.install.* events. When the done
-// event lands the dialog closes, the view refreshes, and generate_speech
+// event lands the dialog closes, the view refreshes, and speech generation
 // is immediately usable — no offline-mode checkbox involved.
 
 const ttsInstallState = { voiceSelect: null, running: false, returnFocus: null };
@@ -701,7 +701,7 @@ function renderTTSMatchState(status) {
   const voiceCount = (status?.voices ?? []).filter((v) => v.installed).length;
   if (status?.ready) {
     label.textContent = `Offline speech ready${voiceCount ? ` · ${voiceCount} voice${voiceCount > 1 ? 's' : ''} installed` : ''}`;
-    label.title = 'generate_speech will use the local piper engine automatically.';
+    label.title = 'Speech generation will use the local piper engine automatically.';
   } else if (status?.binary_installed) {
     label.textContent = 'Engine installed — pick a voice above and install it.';
     label.title = '';

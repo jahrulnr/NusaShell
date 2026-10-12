@@ -26,10 +26,10 @@ func OmittedPlaceholderFor(kind, toolName string, atts []Attachment) string {
 	i2iHint := ""
 	// Images only: even though a non-vision model cannot see the pixels, it
 	// can still drive image-to-image generation as a prompt enhancer —
-	// generate_image reads reference bytes from disk, so only the path is
+	// generate_media reads reference bytes from disk, so only the path is
 	// needed.
 	if kind == "image" {
-		i2iHint = " To edit it or use it as a reference, pass its absolute path in referenced_image_paths when calling generate_image."
+		i2iHint = " To edit it or use it as a reference, pass its absolute path in referenced_image_paths when calling generate_media with media_type=\"image\"."
 	}
 	return "[" + kind + " content omitted — this model does not support " + kind + " input. " +
 		capKind + " file(s): " + list + ". " +
@@ -41,7 +41,7 @@ func OmittedPlaceholderFor(kind, toolName string, atts []Attachment) string {
 // stripped and must be loaded via read_media — this note keeps the image
 // pixels visible in the message and only surfaces the absolute file path(s)
 // so the model can reference them for image-to-image editing via
-// generate_image's referenced_image_paths. The wording is deliberately
+// generate_media's referenced_image_paths. The wording is deliberately
 // distinct ("attached and visible", not "content omitted") so the model does
 // not mistake the note for a missing image. Returns "" when no image
 // attachment carries a file path.
@@ -58,7 +58,7 @@ func VisionImagePathNote(atts []Attachment) string {
 	list := strings.Join(paths, ", ")
 	return "[Image attached and visible in this message: " + list + ". " +
 		"To edit it or use it as a reference, pass its absolute path in " +
-		"referenced_image_paths when calling generate_image.]"
+		"referenced_image_paths when calling generate_media with media_type=\"image\".]"
 }
 
 // ContainsVisionImageNote reports whether content already carries the vision

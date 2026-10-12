@@ -20,6 +20,20 @@ const (
 	requestTokenMaxImage  = int64(2000)
 )
 
+// RequestTokenBreakdown is a preflight request estimate split into the three
+// provider-visible input categories surfaced by ContextEstimateEvent. System
+// covers the converted system-role message, Tools covers advertised tool
+// definitions, and Messages covers the remaining conversation input —
+// including opaque provider compaction items on the wires that replay them.
+// Category values are apportioned from the same buffered estimate
+// EstimateRequestTokens returns, so they always sum to Total exactly.
+type RequestTokenBreakdown struct {
+	Total    int64
+	System   int64
+	Messages int64
+	Tools    int64
+}
+
 // EstimateRequestTokens returns a conservative preflight estimate for one
 // provider request. It first converts the application request through the
 // same provider boundary used for transmission, then estimates the resulting
@@ -31,23 +45,63 @@ const (
 // ToCoreRequest keeps this number aligned with what each adapter can actually
 // serialize and prevents application-only fields from inflating the count.
 func EstimateRequestTokens(req ChatRequest, kind domain.ProviderKind, openRouter bool) int64 {
+	return EstimateRequestTokenBreakdown(req, kind, openRouter).Total
+}
+
+// EstimateRequestTokenBreakdown is the category-splitting form of
+// EstimateRequestTokens. Both share a single conversion and counting pass;
+// Total is byte-for-byte the value EstimateRequestTokens has always returned.
+func EstimateRequestTokenBreakdown(req ChatRequest, kind domain.ProviderKind, openRouter bool) RequestTokenBreakdown {
 	coreReq := ToCoreRequest(req, kind, openRouter)
-	var tokens int64
+	var system, messages, tools int64
 	for _, message := range coreReq.Messages {
-		tokens += estimateCoreMessageTokens(message)
+		if message.Role == core.RoleSystem {
+			system += estimateCoreMessageTokens(message)
+		} else {
+			messages += estimateCoreMessageTokens(message)
+		}
 	}
 	for _, tool := range coreReq.Tools {
-		tokens += estimateCoreToolTokens(tool)
+		tools += estimateCoreToolTokens(tool)
 	}
-	// Compaction items are opaque provider-visible input for Responses and
-	// Codex. Other wire kinds intentionally ignore the option in ToCoreRequest.
+	// Compaction items are opaque provider-visible conversation input for
+	// Responses and Codex. Other wire kinds intentionally ignore the option
+	// in ToCoreRequest.
 	if req.CompactionBlob != "" && domain.ReplaysCompactionBlob(kind) {
-		tokens += estimateOpaqueJSONTokens([]byte(req.CompactionBlob))
+		messages += estimateOpaqueJSONTokens([]byte(req.CompactionBlob))
 	}
-	if tokens <= 0 {
-		return 0
+	raw := system + messages + tools
+	if raw <= 0 {
+		return RequestTokenBreakdown{}
 	}
-	return applyRequestTokenSafetyBuffer(tokens)
+	breakdown := RequestTokenBreakdown{Total: applyRequestTokenSafetyBuffer(raw)}
+	breakdown.System, breakdown.Messages, breakdown.Tools = apportionRequestTokens(breakdown.Total, system, messages, tools)
+	return breakdown
+}
+
+// apportionRequestTokens splits the buffered total across the raw category
+// counts proportionally. Each category takes the floor of its scaled share
+// and the leftover units go to the largest fractional remainders, so the
+// parts sum to total exactly and an empty category stays empty.
+func apportionRequestTokens(total, rawSystem, rawMessages, rawTools int64) (int64, int64, int64) {
+	var fracs [3]float64
+	var whole [3]int64
+	for i, raw := range [3]int64{rawSystem, rawMessages, rawTools} {
+		scaled := math.Min(float64(raw)*domain.RequestTokenSafetyBuffer, float64(total))
+		whole[i] = int64(scaled)
+		fracs[i] = scaled - float64(whole[i])
+	}
+	for remainder := total - whole[0] - whole[1] - whole[2]; remainder > 0; remainder-- {
+		best := 0
+		for i := range fracs {
+			if fracs[i] > fracs[best] {
+				best = i
+			}
+		}
+		whole[best]++
+		fracs[best] = 0
+	}
+	return whole[0], whole[1], whole[2]
 }
 
 func estimateCoreMessageTokens(message core.Message) int64 {

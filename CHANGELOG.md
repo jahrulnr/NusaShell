@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-10-13
+
 ### Fixed
+
+- **Experimental conversation deletion updates the sidebar immediately.** A
+  successful delete no longer leaves a room visible when the follow-up list
+  fails. Stale list responses cannot restore the room, and failure loading
+  the next conversation is reported separately from the successful delete.
+
+- **Experimental room actions collapse into one menu.** Each conversation row
+  keeps a single ellipsis affordance — and the same menu opens on right-click —
+  with Rename and Delete items. The menu roves focus with the arrow keys,
+  clamps inside the viewport, closes on Escape or an outside press, and
+  restores focus to the opener, so Tab and Shift+Tab continue native
+  traversal from the trigger instead of restarting at the page body.
+
+- **Experimental widgets keep their styles across the PiP mini window.**
+  Browsers drop every `adoptedStyleSheets` entry when a shadow host moves to
+  the picture-in-picture document, and source-document sheets cannot be
+  adopted there anyway. The widget style helper now rebuilds sheets with the
+  current owner document's realm constructor from cached text (no refetch)
+  and re-adopts them on PiP entry and restore, including nested shadow roots.
+
+- **Experimental narrow viewports no longer trap the room drawer or dock.**
+  A shared backdrop, Escape, and explicit close buttons dismiss the single
+  overlay panel, `aria-expanded` stays in sync, and the toggles remain
+  reachable below the titlebar. Icon buttons are themed instead of showing
+  browser defaults, and the room-info cluster sits inside the stream toolbar
+  flow so it no longer covers the Latest button.
+
+- **The context estimate event reports a per-category breakdown.** The
+  emitted event now fills its existing system, conversation, and
+  tool-definition token fields using the canonical request estimator, so the
+  same estimate that produces the total is attributed per category — as a
+  preflight estimate, not provider-measured attribution.
 
 - **ACP subagent spawns rejected before the session opens now leave a visible
   failed run.** An unreachable agent or an initialize/session/mode rejection
@@ -16,6 +50,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own run ID, lands in the run list and the `acp/` store, and completes
   the tool call with `status: failed` plus the rejection error — the `subagent`
   result keeps the run `id`, `title`, and `workspace` next to the error.
+
+- **Agent docs corpus aligned to operational guidance.** The embedded
+  `resources/agent/docs/` pages dropped claims that broke tool calls —
+  `automation(op="retry")` which does not exist, `list_dir`/`read_file`,
+  `clip_<timestamp>` naming, `subagent_*` verb names, `generate_image`/
+  `generate_speech`/`generate_video` (the advertised tool is
+  `generate_media`), and a `memory_project` admit example with wrong
+  arguments — and shed provider/compaction/hydration internals the agent
+  cannot act on. Subagent wait/steer/stop documentation now uses the `op=`
+  form, and plugin management ops (`mcp_install`, `mcp_register`,
+  `mcp_disable`, `mcp_unregister`, `contract_read`) are documented.
+- **UI docs drift gate hardened.** `scan-ui-docs -check` now fails when a
+  section references a control missing from the map and when a map entry is
+  never referenced by any section, prints an advisory coverage report for
+  unmapped interactive elements, and trims redundant section labels and
+  action-less structural bullets from generated pages. Settings media pickers
+  describe image/video/speech generation instead of legacy tool names.
 
 ## [0.9.12] - 2026-10-10
 

@@ -15,19 +15,16 @@ Default files live under `{dataDir}/memory_project/{key}/`. Settings →
 Project memory (`project_memory_base`, under Memory & search) can point
 at `~/.memory` to share the same on-disk layout with other agents.
 
-Ops that exist as automation-learning scripts (`memory-query.sh`,
-`memory-list.sh`, `memory-lint.sh`, `memory-audit.sh`, `memory-gate.sh`,
-`memory-pattern-track.sh`, `memory-path.sh`, `memory-script-path.sh`)
-return that script's stdout (and fail when the script would exit non-zero).
-`admit` / `skip` / `archive` / `read` are NusaShell write/read helpers on
-top of the same files.
+All ops act on the same on-disk store. `admit` / `skip` / `archive` /
+`read` write and read the files directly; the remaining ops run the store's
+checks (query, list, lint, audit, gate, pattern tracking) and return their
+report, failing when the check fails.
 
 ## Admission, not mandatory writing
 
 Make an admission decision before finishing a repository task. Writing
 nothing is normal. Use `op=skip` with a concise reason when nothing
-passes, then `op=gate` (with the same reason as `--no-update`) so lint
-still runs:
+passes, then `op=gate` (with the same reason) so lint still runs:
 
 1. it will help a later, different task;
 2. it should remain true beyond this task;
@@ -40,20 +37,20 @@ or profile facts here — those belong in `memory/user.md` or structured memory 
 
 ## Ops
 
-| op | Args | Script / notes |
+| op | Args | Behavior |
 | --- | --- | --- |
-| `query` | `topic?`, `kind?`, `related?`, `id?`, `archive?`, `full?`, `limit?` | `memory-query.sh`. AND selectors; at least one required. Compact TSV `id\tkind\tfile\tscope`; `full=true` returns anchored bodies. `--related` is inbound **or** outbound. |
-| `list` | | `memory-list.sh`. Absolute paths, guardrails first, then other live `*.md`, then `archive/`. |
+| `query` | `topic?`, `kind?`, `related?`, `id?`, `archive?`, `full?`, `limit?` | AND selectors; at least one required. Compact TSV `id\tkind\tfile\tscope`; `full=true` returns anchored bodies. `related` matches inbound **or** outbound links. |
+| `list` | | Absolute paths in read priority: guardrails first, then other live `*.md`, then `archive/`. |
 | `read` | `kind` or `id` | Full entry or whole kind file. |
-| `admit` | `kind`, `content`, `id?` | Upsert by ID, wrap `BEGIN_ENTRY`/`END_ENTRY`, lint, roll back on lint failure. Failure text is `memory-lint.sh` stdout (`LINT FAIL [...]` lines, then `memory-lint: N issue(s) found.`). Debug admits also pattern-track. Admitting an existing ID is a true upsert: every block carrying that ID is collapsed into one fresh entry, so legacy duplicate pairs (same ID + same SCOPE) heal on the next admit instead of rolling back; the duplicate-SCOPE lint counts distinct unresolved IDs, not raw rows. |
+| `admit` | `kind`, `content`, `id?` | Upsert by ID wrapped in `BEGIN_ENTRY`/`END_ENTRY`, then lint; rolls back on lint failure (`LINT FAIL [...]` lines in the error). Debug admits also pattern-track. Re-admitting an existing ID collapses every block carrying it into one fresh entry, so duplicate pairs heal on the next admit instead of rolling back. |
 | `skip` | `reason` | Negative admission. No disk write. |
 | `archive` | `id` | Move a live entry to `archive/{kind}.md`. |
-| `lint` | `kind?` | `memory-lint.sh [kind]`. Clean: `memory-lint: clean`. Issues: same stdout as the script (error). |
-| `audit` | | `memory-audit.sh` health report. |
-| `gate` | `reason?` | `memory-gate.sh [--no-update reason]`. Pattern-tracks debug/deploy, lints, then the worktree heuristic. `reason` is `--no-update`. |
-| `pattern_track` | `kind` | `memory-pattern-track.sh <kind>`. |
-| `path` | `kind`, `create?` | `memory-path.sh [--create]`. Prints `{base}/{key}/{kind}.md`. |
-| `script_path` | `name`, `create?` | `memory-script-path.sh [--create]`. Prints `{base}/{key}/scripts/{name}`. |
+| `lint` | `kind?` | Lint report. Clean: `memory-lint: clean`; any issue fails the op with the report. |
+| `audit` | | Store health report. |
+| `gate` | `reason?` | Admission gate: pattern-tracks debug/deploy, lints, then checks whether working-tree changes required a memory update. Prints a `memory-gate: pass` or `memory-gate: FAIL` verdict; `reason` records why no update was needed. |
+| `pattern_track` | `kind` | Recurrence analysis for one kind; suggests promoting stable procedures. |
+| `path` | `kind`, `create?` | Prints `{base}/{key}/{kind}.md`; `create` also creates the file. |
+| `script_path` | `name`, `create?` | Prints `{base}/{key}/scripts/{name}` — the store's shared-scripts location; `create` makes the directory. |
 
 Canonical writable kinds: `index`, `guardrails`, `roadmap`, `playbook`,
 `dev-access`, `decisions`, `debug`, `validation`, `touch-map`,

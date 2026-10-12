@@ -8,55 +8,89 @@ Manage durable once/every/when automation workflows, inspect DAG runs, and see w
 
 Counts of runnable, blocked, and waiting automation workflows so provider outages are visible without opening a run. On small screens the stats wrap below the header copy.
 
-- **`#automation-stat-runnable`** (missing map entry)
+- **Runnable count** (`#automation-stat-runnable`):
+  - Type: text
+  - Notes: Header stat: workflows whose availability is runnable.
 
-- **`#automation-stat-blocked`** (missing map entry)
+- **Blocked count** (`#automation-stat-blocked`):
+  - Type: text
+  - Notes: Header stat: workflows blocked because a required capability provider is disabled.
 
-- **`#automation-stat-waiting`** (missing map entry)
+- **Waiting count** (`#automation-stat-waiting`):
+  - Type: text
+  - Notes: Header stat: runs waiting for a wake time or event without occupying a runner.
 
 ## Toolbar
 
 Tabs switch between Workflows, Runs, Schedules, and Events in the same compact segmented control used by Learning. New workflow opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automation workflows in the Workflows tab. On phones the tabs can scroll horizontally without widening the page.
 
-- **`#automation-tabs`** (missing map entry)
+- **Automation tabs** (`#automation-tabs`):
+  - Type: tablist
+  - Notes: Compact segmented control switching the workspace between Workflows, Runs, Schedules, and Events.
 
-- **`#automation-tab-workflows`** (missing map entry)
+- **Workflows tab** (`#automation-tab-workflows`):
+  - Type: tab
+  - Notes: Saved automation workflows plus pipeline files discovered in the data directory.
 
-- **`#automation-tab-runs`** (missing map entry)
+- **Runs tab** (`#automation-tab-runs`):
+  - Type: tab
+  - Notes: Automation run history with status pills and wake times.
 
-- **`#automation-tab-schedules`** (missing map entry)
+- **Schedules tab** (`#automation-tab-schedules`):
+  - Type: tab
+  - Notes: Trigger schedules with kind, status, and next fire time.
 
-- **`#automation-tab-events`** (missing map entry)
+- **Events tab** (`#automation-tab-events`):
+  - Type: tab
+  - Notes: Recorded automation events.
 
-- **`#automation-new-btn`** (missing map entry)
+- **New workflow** (`#automation-new-btn`):
+  - Type: button
+  - Action: Opens the new-automation wizard dialog: name, trigger family (Once/Every/When/Manual), a time-or-event field, and the Jobs YAML; validates then saves enabled.
 
 ## Blocked provider
 
 When a saved automation workflow depends on a disabled MCP provider it stays BLOCKED rather than FAILED. Enable provider restores the binding without rewriting the workflow.
 
-- **`#automation-blocked-banner`** (missing map entry)
+- **Blocked provider banner** (`#automation-blocked-banner`):
+  - Type: banner
+  - Notes: Shown while at least one workflow is BLOCKED by a disabled capability provider; hidden otherwise.
 
-- **`#automation-blocked-text`** (missing map entry)
+- **Blocked reason** (`#automation-blocked-text`):
+  - Type: text
+  - Notes: The first blocked workflow's blocked reason, or a generated '<name> is blocked.' message.
 
-- **`#automation-enable-provider-btn`** (missing map entry)
+- **Enable provider** (`#automation-enable-provider-btn`):
+  - Type: button
+  - Action: Re-enables the disabled capability provider so blocked workflows become runnable again.
 
 ## List and detail
 
 The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions. Invalid YAML stays listed with an invalid pill; Run and Enable are disabled until the file is fixed.
 
-- **`#automation-list`** (missing map entry)
+- **Automation list** (`#automation-list`):
+  - Type: list
+  - Action: Lists rows for the active tab (title, status pill, meta); clicking a row opens its detail.
+  - Notes: Invalid YAML files stay listed with an 'invalid' pill.
 
-- **`#automation-list-title`** (missing map entry)
+- **List pane title** (`#automation-list-title`):
+  - Type: text
+  - Notes: Mirrors the active tab name (Workflows / Runs / Schedules / Events).
 
-- **`#automation-list-count`** (missing map entry)
+- **List row count** (`#automation-list-count`):
+  - Type: text
 
 - **Automation tab panel** (`#automation-workspace`):
-  - Section: Automation
   - Type: tabpanel
   - Notes: Shared list and detail panel; its accessible label follows the active Workflows, Runs, Schedules, or Events tab.
 
-- **`#automation-detail`** (missing map entry)
+- **Automation detail pane** (`#automation-detail`):
+  - Type: container
+  - Notes: Renders the selection: a workflow DAG with job needs and steps, run job status with step output, waiting wake times, the blocked reason, or raw JSON for events.
 
-- **`#automation-detail-title`** (missing map entry)
+- **Detail title** (`#automation-detail-title`):
+  - Type: text
 
-- **`#automation-detail-actions`** (missing map entry)
+- **Detail actions** (`#automation-detail-actions`):
+  - Type: container
+  - Notes: Per-selection buttons: workflows expose Run, Enable/Disable, and Delete (Run is disabled for invalid files; Enable is also disabled while an invalid file is already disabled); running, queued, or waiting runs expose Cancel plus Steer while an agent step is in-flight; failed runs expose Retry.

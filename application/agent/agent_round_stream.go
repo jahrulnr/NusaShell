@@ -182,11 +182,15 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 		a.log("warn", "ai", "stripping effort %q for non-reasoning model %s", effort, model)
 	}
 	request := a.buildTurnRequest(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, partial, maxTokens, promptCache, caps)
-	requestTokens := provider.EstimateRequestTokens(request, adapter.Kind, adapter.OpenRouter)
+	estimate := provider.EstimateRequestTokenBreakdown(request, adapter.Kind, adapter.OpenRouter)
+	requestTokens := estimate.Total
 	if a.Bus != nil {
 		a.emitBus(contracts.EventContextEstimate, contracts.ContextEstimateEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID,
 			EstimatedTokens: requestTokens,
+			SystemTokens:    estimate.System,
+			MessagesTokens:  estimate.Messages,
+			ToolsTokens:     estimate.Tools,
 		})
 		if conversation.EstimatedTokens != requestTokens {
 			conversation.EstimatedTokens = requestTokens

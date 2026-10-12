@@ -17,10 +17,10 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `config/providers.json` | provider configs (no keys) | JSON |
 | `config/acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
 | `config/mcp-servers.json` | manual MCP server registry | JSON |
-| `conversations/<conv_id>/index.jsonl` | the live (un-compacted) transcript epoch of one conversation, including job transcripts, as JSON Lines: the first line is the conversation metadata (the record without its transcript), every following line is one message. Each metadata record carries a `type`: `conversation` (an interactive Agent room), `background` (a learning job's LLM run), or `automation` (a pipeline `agent:` step). Only `conversation` appears in `agent.conversations.list` and the Agent Rooms pane; the other two stay addressable by id through `agent.conversations.get` and the automation steer operation. Records written before `type` existed carry `Origin: pipeline`, which reads as `automation`. On load, a leftover `status: running` (process crash mid-turn) is converted to idle and in-flight assistant messages are marked interrupted. A turn that exits without a terminal state (panic recovered in-process) is also healed immediately: the `runTurn` defer resets the conversation to idle and emits a turn-error event, and `agent.turns.start` heals an orphaned running conversation with no active run before starting a new turn instead of returning 409. A torn message line (crash mid-write) is skipped on load instead of dropping the conversation. Between flushes, the newest messages can live only in `pending.jsonl`, so `index.jsonl` alone may lag the live tail. | JSONL |
+| `conversations/<conv_id>/index.jsonl` | the live (un-compacted) transcript epoch of one conversation, including job transcripts, as JSON Lines: the first line is the conversation metadata (the record without its transcript), every following line is one message. Each metadata record carries a `type`: `conversation` (an interactive Agent room), `background` (a learning job's LLM run), or `automation` (a pipeline `agent:` step). Only `conversation` appears in `agent.conversations.list` and the Agent Rooms pane; the other two stay addressable by id through `agent.conversations.get` and the automation steer operation. Between flushes, the newest messages can live only in `pending.jsonl`, so `index.jsonl` alone may lag the live tail. | JSONL |
 | `conversations/<conv_id>/meta.json` | latest conversation metadata record (same shape as the `index.jsonl` header line — the record without its transcript), rewritten on every save so it stays current even while `index.jsonl` awaits its next flush | JSON |
-| `conversations/<conv_id>/pending.jsonl` | message-upsert log between `index.jsonl` flushes: each line is one message, replayed by ID on load (a known ID updates that message in place at its first-seen position, a new ID appends at the tail). The file is folded back into `index.jsonl` once it grows past ~512KB or ~2048 lines, and removed entirely when the transcript epoch is rewritten (compaction, reorder). Torn tail lines are skipped on load. | JSONL |
-| `conversations/<conv_id>/chunk/` | archived conversation chunks (compaction), `chunk-<n>.json`. Hydration checkpoints (synthetic runtime snapshots) are stripped before archive; the dedicated compaction workflow also strips them before summarization, while the reuse workflow summarizes the exact live request prefix, hydration included, so the prompt cache still applies; a fresh checkpoint is written in the same compaction Save (`ResetTranscript` then `Add`), including emergency overflow retries. The recent messages kept in the live transcript stay verbatim (tool calls with outputs, reasoning, and steps); only the older messages are summarized and moved into this chunk directory, so every message lives in exactly one place. The conversation ID stays the same so todos, attachments, chunks, and the open room stay attached. Text-summary compaction parks its checkpoint immediately after the epoch's first user message (never before it) so OpenAI and Claude see `system → user → hydration`. Codex remote-v2 compaction keeps its opaque server checkpoint and persisted prefix boundary in the conversation record, retains a chronological transcript suffix in the active epoch, filters that prefix to real user turns for the provider request, preserves later user/assistant/tool turns after it, and moves only replaced transcript items into this chunk directory. The new epoch may hold no user message at all; the opaque checkpoint then anchors it (persistable, listed, and reachable for peer/announcement delivery), and requests on provider kinds that cannot replay the checkpoint carry a request-only synthetic user nudge instead. | JSON |
+| `conversations/<conv_id>/pending.jsonl` | message-upsert log between `index.jsonl` flushes: each line is one message. The file is folded back into `index.jsonl` once it grows past ~512KB or ~2048 lines, and removed when the transcript epoch is rewritten (compaction, reorder). | JSONL |
+| `conversations/<conv_id>/chunk/` | archived conversation chunks (compaction), `chunk-<n>.json`. Compaction summarizes older messages into this directory while the live transcript keeps recent turns verbatim (tool calls with outputs, reasoning, and steps), so every message lives in exactly one place. The conversation ID stays the same so todos, attachments, chunks, and the open room stay attached. | JSON |
 | `conversations/todos.json` | per-conversation TODO checklists + planning briefs. Each non-empty brief is also mirrored to `conversations/<conv_id>/plan.md` (below) so the agent and ACP subagents can `file_read` it. | JSON |
 | `conversations/<conv_id>/operation/` | per-turn net unified diff of the committed `file_*` mutations, one git-appliable patch per turn (`<run_id>.patch`, written when the turn finishes or is interrupted). Turns without file mutations leave no file. | patch |
 | `conversations/<conv_id>/plan.md` | mirrored todo brief (generated runtime artifact under the data directory, never the user workspace). Deleting it does not lose data: the JSON store is the source of truth and the next brief update rewrites it. The `todo` result returns this path as `plan_path`. | Markdown |
@@ -33,16 +33,16 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `skills/.provenance.json` | skill authorship log (createdBy, createdAt) | JSON |
 | `skills/.deleted-builtin.json` | builtin skills the user deleted (so they are not re-seeded) | JSON |
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
-| `memory/user.md` | always-injected user profile (~4k token cap; first boot copies `resources/templates/user.md` when missing; agents write via `file_*`; Learning → About You) | Markdown |
-| `memory/soul.md` | always-injected agent document (~1k token cap; first boot copies `resources/templates/soul.md` when missing; agents write via `file_*`; Learning → About Agent) | Markdown |
-| `growth/experiences.jsonl` | experience events recorded at finishTurn; unreferenced entries are retained 180 days (active-job sources are preserved) | JSONL |
+| `memory/user.md` | always-injected user profile (~4k token cap; seeded on first boot when missing; agents write via `file_*`; Learning → About You) | Markdown |
+| `memory/soul.md` | always-injected agent document (~1k token cap; seeded on first boot when missing; agents write via `file_*`; Learning → About Agent) | Markdown |
+| `growth/experiences.jsonl` | experience events recorded after each turn completes; unreferenced entries are retained 180 days (active-job sources are preserved) | JSONL |
 | `growth/memories.jsonl` | structured MemoryRecord catalog (learner writes; humans retire); live records are capped at 500, retired/superseded audit rows are retained 30 days | JSONL |
-| `growth/jobs.jsonl` | learning jobs (`learner`, plus legacy `consolidate` / `evolve_skill` / `evaluate` / `retire_stale`). Finished jobs carry `llm_conversation_id`; terminal rows and their background transcripts are retained 90 days | JSONL |
+| `growth/jobs.jsonl` | learning jobs. Finished jobs link to their background transcript conversation; terminal rows and their transcripts are retained 90 days | JSONL |
 | `growth/operations.jsonl` | typed learning-operation audit; terminal operations are retained 90 days | JSONL |
 | `memory_project/{key}/` | per-workspace project memory (`index.md`, `guardrails.md`, … plus `archive/` and `scripts/`). Default base; override with Settings → Project memory (`project_memory_base`, for example `~/.memory`) | Markdown |
 | `learning/edges.jsonl` | learning edges: content/embedding and metadata `related` links, plus `used_with` links for nodes observed together in one agent turn; stale endpoints are pruned during graph rebuild | JSONL |
 | `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |
-| `learning/trajectory.jsonl` | learning trajectory log (one event per line), read by the UI in cursor-based 50-event pages and retained 90 days. Job entries carry `job_id`, `status`, the applied `mutations`, and `llm_conversation_id` | JSONL |
+| `learning/trajectory.jsonl` | learning-job activity feed shown in the Learning log (one event per line), retained 90 days. Job entries carry `job_id`, `status`, and the applied `mutations` | JSONL |
 | `learning/provider_params.json` | auto-learned provider/model params (context caps, disabled modalities, and request-shape constraints from 400 errors) | JSON |
 | `learning/model_overrides.json` | manual model-metadata overrides (win over catalog + learned) | JSON |
 | `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |
@@ -50,13 +50,13 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `piper/<goos>-<goarch>/` | managed piper engine installed by the one-click Settings installer (binary, `espeak-ng-data/`, shared libs); `PIPER_BIN`/PATH binaries still take precedence at runtime | files |
 | `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
-| `conversations/<conv_id>/acp/` | terminal ACP subagent and internal delegate run snapshots (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
+| `conversations/<conv_id>/acp/` | terminal ACP subagent and internal delegate run snapshots (one JSON file per run, linked to the parent conversation) | JSON |
 | `credentials.db` | API keys per provider | SQLite |
-| `pairing.db` | device pairing state: challenge/session SHA-256 hashes (plaintext codes/tokens are never persisted), device labels, expiry/revocation. Created on startup only when Settings → Remote access is enabled; loopback binds can still use it behind a trusted proxy/tunnel | SQLite |
+| `pairing.db` | device pairing state (device labels, expiry/revocation; plaintext codes/tokens are never persisted). Created only when Settings → Remote access is enabled; loopback binds can still use it behind a trusted proxy/tunnel | SQLite |
 | `automation/workflows.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `automation/pipelines/` | pipeline definition YAML files (one per workflow, auto-discovered on boot) | YAML |
 | `automation/runs/` | local executor scratch directories | files |
-| platform temp `/nusashell/` | runtime scratch only: oversized tool results spilled when in-band output exceeds the tool cap (`exec` 20k head+tail sample; `grep` / `web_fetch` / `web_search` / `docs` / `tool_list` / `mcp_search` / `tool_schema` ~32KiB prefix), plus TTS/STT/plugin installer staging and whisper work dirs. Path is `filepath.Join(os.TempDir(), "nusashell")` — `%TEMP%\nusashell` on Windows. Callers go through `infrastructure/nusatemp` — never dump files at the temp root. A background sweeper deletes files and directories aged 24h+; OS reboot may empty the parent temp dir earlier. | files |
+| platform temp `/nusashell/` | runtime scratch only: oversized tool results spilled when in-band output exceeds the tool cap (`exec` 20k head+tail sample; `grep` / `web_fetch` / `web_search` / `docs` / `tool_list` / `mcp_search` / `tool_schema` ~32KiB prefix), plus TTS/STT/plugin installer staging and whisper work dirs. `<temp>/nusashell` under the OS temp dir (`%TEMP%\nusashell` on Windows); a background sweeper deletes files and directories aged 24h+, and OS reboot may empty the parent temp dir earlier. | files |
 
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.
@@ -72,14 +72,9 @@ runs for the conversation are stopped first. Workspace files
 are kept; growth experiences, learning jobs, and memory records are also
 unaffected by conversation delete.
 
-Installations from before the folder layout kept the same data as flat
-siblings: `conversations/<id>.json`, `conversations/<id>.chunks/`, and
-`conversations/<id>.acp/`. The first boot of this layout converts them in
-place (transcript → `index.jsonl`, sidecar directories moved under the
-conversation folder). The conversion is idempotent and never deletes data it
-cannot place: a legacy file whose folder record already exists, whose record
-id disagrees with its name, or a sidecar file that collides with an
-already-migrated file, is left in place and reported in the logs.
+Installations from the older flat layout (`conversations/<id>.json` plus
+sidecar directories) are converted in place on first boot into this folder
+layout.
 
 The optional login service writes its platform definition outside the data
 directory: a systemd user unit at `~/.config/systemd/user/nusashell.service`

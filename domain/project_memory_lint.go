@@ -130,7 +130,7 @@ func LintProjectMemory(files []ProjectMemoryFileBlob, threshold int, kinds ...st
 					problems = append(problems, ProjectMemoryLintProblem{
 						File:    f.Rel,
 						Message: fmt.Sprintf("%s has OCCURRENCES=%s (threshold %d).", e.ID, occ, threshold),
-						Hint:    "do not store singleton observations; let memory-pattern-track.sh promote keyed recurrences.",
+						Hint:    "do not store singleton observations; let the pattern_track op promote keyed recurrences.",
 					})
 				}
 			}

@@ -34,9 +34,9 @@ and be running. `Blocked` means the current installation cannot run it now.
 | Cross-job artifacts | Partial | Prefer explicit shared files and test the executor | Artifact ports/models exist; current store/executor wiring is incomplete |
 | Cache | Partial | Never make correctness depend on it | Cache model/ports exist; list/clear/execute paths are incomplete |
 | Remote runners / `runs_on` | Partial | Treat execution as local unless a runner is proven live | Runner model exists; default local executor is the reliable path |
-| GitHub event ingestion | Integration-dependent / blocked in current audit | Use generic event template only after a publisher + MCP is installed | No GitHub MCP was live during audit |
-| Kanban event/action integration | Integration-dependent / blocked in current audit | Enable Kanban plugin and discover live tools before use | `nusashell.kanban` was registered but stopped during audit |
-| Telegram bridge | Supported when logged in/running | Verify exact chat/message IDs and observed tool result | `nusashell.telegram` was running during audit |
+| GitHub event ingestion | Integration-dependent | Use generic event template only after a publisher + MCP is installed | Requires an installed/enabled GitHub publisher plugin and provider — verify with `mcp_list`/`mcp_search` |
+| Kanban event/action integration | Integration-dependent | Enable Kanban plugin and discover live tools before use | Requires an installed/enabled board provider plugin — verify with `mcp_list`/`mcp_search` |
+| Telegram bridge | Supported when logged in/running | Verify exact chat/message IDs and observed tool result | Requires the messaging plugin connected and logged in — verify with `mcp_list` |
 | First-class human approval/wait-for-signal | Not a YAML primitive | Keep approval in plugin/tool or split mutation into a manual workflow | Do not invent `approval`/`signal` step syntax |
 | Durable search/resume by business key | Not a YAML primitive | Use run IDs, logs, and external runbook | Full Temporal-style query/signal semantics are not present |
 

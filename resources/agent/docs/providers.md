@@ -6,59 +6,45 @@ defined by its **API wire format**, not by a vendor: **Messages**,
 
 ## Drivers
 
-The provider driver selects the implementation package while the provider kind
+The provider driver selects the wire implementation while the provider kind
 selects the wire format:
 
-- The persistent **Anthropic** card uses
-  `infrastructure/ai/anthropic` with `messages`.
-- The persistent **OpenAI** card uses `infrastructure/ai/openai` with
-  `responses`.
-- The persistent **OpenRouter** card uses
-  `infrastructure/ai/openrouter`; its editor supports `responses`, `chat`, and
-  `messages`.
-- The persistent **Gemini** card uses
-  `infrastructure/ai/gemini` with `gemini`: Google AI Studio's
-  `generateContent` / `streamGenerateContent` wire
-  (`https://generativelanguage.googleapis.com`, `x-goog-api-key` auth). It
-  requires an AI Studio API key and lists models through `GET /v1beta/models`.
+- The persistent **Anthropic** card uses the `anthropic` driver (`messages`).
+- The persistent **OpenAI** card uses the `openai` driver (`responses`).
+- The persistent **OpenRouter** card uses the `openrouter` driver; its editor
+  supports `responses`, `chat`, and `messages`.
+- The persistent **Gemini** card uses the `gemini` driver with `gemini`:
+  Google AI Studio's `generateContent` / `streamGenerateContent` wire
+  (`https://generativelanguage.googleapis.com`, `x-goog-api-key` auth).
 - A **Codex** provider uses the ChatGPT Codex Responses endpoint with the
-  `codex` driver. Prefer **Sign in with ChatGPT** (OAuth PKCE) or **Import
-  from Codex CLI** on the Providers → Codex detail page. Pasting an OAuth
-  access token in the edit dialog is an optional fallback only. Tokens are
-  stored in the SQLite credential store under the provider ID and under
-  `{providerID}:account:{accountID}` for multi-account failover. The Codex
-  transport owns its required headers, Responses stream decoding, and remote
-  v2 compaction. That compaction stores the opaque checkpoint separately,
-  retains real user turns for the next request, and archives the replaced
-  assistant/tool transcript locally for room scroll-back.
-- Custom `messages`, `responses`, and `chat` providers default to
-  `infrastructure/ai/openrouter`; custom `codex` entries use the Codex
-  transport and custom `gemini` entries use the Gemini wire. The editor
-  supports all five kinds. There is no custom-provider
-  count limit. The OpenRouter implementation is used as the
-  compatibility/profile parent against the custom Base URL, including when
-  that URL is not hosted at `openrouter.ai`. This keeps the endpoint-specific
-  OpenRouter mappings available to unpredictable gateways (for example,
-  `video_url` on Chat, `input_video` on delegated Responses, and an explicit
-  rejection for video on delegated Messages). A custom record with an
-  explicit direct driver still opts into that driver's wire behavior.
+  `codex` driver and ChatGPT OAuth (see API keys). Tokens are stored in the
+  local credential store. Codex also owns its remote v2 compaction: the
+  compacted checkpoint is kept separately, real user turns are retained for
+  the next request, and the replaced transcript stays visible for room
+  scroll-back.
+- Custom `messages`, `responses`, and `chat` providers default to the
+  `openrouter` compatibility/profile driver; custom `codex` and `gemini`
+  entries use their dedicated wire adapters. The editor supports all five
+  kinds and there is no custom-provider count limit. The OpenRouter profile
+  is applied against the custom Base URL even when that URL is not hosted at
+  `openrouter.ai`, so the endpoint-specific OpenRouter mappings stay
+  available to unpredictable gateways (`video_url` on Chat, `input_video` on
+  delegated Responses, video rejected on delegated Messages). A custom
+  record with an explicit direct driver still opts into that driver's wire
+  behavior.
 
 The built-in cards remain visible before they are configured. Configure a
 card with its base URL and credential, then import models when the provider
-supports model listing. The built-in Anthropic, OpenAI, OpenRouter, Gemini,
-and Codex cards keep their existing direct/native adapter paths; custom
-providers use the OpenRouter compatibility/profile parent by default.
+supports model listing. Built-in cards keep their dedicated wire adapters;
+custom providers use the OpenRouter compatibility/profile parent by default.
 OpenRouter, Gemini, and custom providers can each use a different API kind
 and base URL.
 
-**Chat routing:** a genuine OpenRouter host (`*.openrouter.ai`) is detected
-for legacy/automatic Chat routing. A provider whose selected driver is
-`openrouter` uses the OpenRouter compatibility/profile implementation even
-when its Base URL is a custom gateway such as TokenRouter, 9Router, OpenCode,
-one-api, LiteLLM, LM Studio, or vLLM. The custom Base URL remains the target,
-so the gateway must accept the selected OpenRouter-compatible request shape.
-Unsupported fields or response shapes surface as provider errors. NusaShell
-does not silently retry the same request through vanilla Chat, Responses, or
+**Chat routing:** a provider whose driver is `openrouter` uses the
+OpenRouter compatibility/profile even when its Base URL is a custom gateway
+such as TokenRouter, 9Router, OpenCode, one-api, LiteLLM, LM Studio, or
+vLLM. The gateway must accept the selected request shape — NusaShell does
+not silently retry the same request through vanilla Chat, Responses, or
 Messages.
 
 ## Kinds
@@ -67,12 +53,11 @@ Messages.
   prompt caching via `cache_control`.
 - `responses` — the OpenAI Responses wire format (`/v1/responses`); supports
   function calling and reports cached input tokens.
-- `chat` — the Chat Completions wire format (`/chat/completions`), using
-  the OpenRouter compatibility/profile implementation for the built-in
-  OpenRouter card and custom providers with the `openrouter` driver. The
-  custom Base URL remains the destination, and the gateway must accept that
-  profile. Direct/automatic Chat providers can still use the vanilla OpenAI
-  Chat wire (`reasoning_effort`, `reasoning_content`, `max_tokens`).
+- `chat` — the Chat Completions wire format (`/chat/completions`). Built-in
+  OpenRouter and `openrouter`-driver customs use the OpenRouter
+  compatibility/profile against the configured Base URL (the gateway must
+  accept that profile). Direct/automatic Chat providers use the vanilla
+  OpenAI Chat wire (`reasoning_effort`, `reasoning_content`, `max_tokens`).
 - `gemini` — Google's `generateContent` wire format
   (`POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent`
   with `alt=sse`). Messages become `contents` parts with an optional
@@ -81,39 +66,31 @@ Messages.
   `responseSchema`; thinking uses `thinkingConfig` (`thinkingBudget` on
   Gemini 2.x, `thinkingLevel` on Gemini 3). Function calls carry a
   `thoughtSignature` that must be replayed with the call on the next turn.
-  Prompt caching is implicit server-side (reported as
-  `cachedContentTokenCount`), so there is no cache TTL chip.
 - `codex` — the ChatGPT Codex Responses wire format
   (`/backend-api/codex/responses`); it uses OAuth access tokens (Sign in /
   Import from CLI; optional paste fallback), Codex session headers, multi-
   account failover with circuit breakers, and the remote v2 compaction flow.
   **Import models** discovers the account-aware catalog via the Codex CLI
-  app-server `model/list` JSON-RPC method using the OAuth account selected in
-  NusaShell—not whichever account happens to be active in `~/.codex/auth.json`
-  (NusaShell downloads the managed Codex runtime binary when needed).
-  Explicitly switching accounts also clears existing sticky conversation
-  bindings, so Retry and later turns use the selected account. ChatGPT plan
-  image models (`gpt-image-2`,
-  `gpt-image-1.5`) are seeded after import because `model/list` omits them.
-  The same OAuth token and base URL also drive the Codex image backend used
-  by `generate_image` (`/images/generations` | `/images/edits`). Image
-  generation shares the multi-account router: the sticky account for the
-  conversation is picked per call, and a usage-limit 429 (with its
-  `resets_at`) or a 403 entitlement rejection opens that account's circuit
-  and fails over to the next available account (one attempt per account —
-  image calls are billable, so there is no blind retry). A 403 is reported
-  as a likely missing image entitlement (e.g. ChatGPT Free). The router
-  persists the last-used account per provider, so after a backend restart it
-  resumes from that account instead of blindly defaulting to the first
-  registered one. When the active chat provider is Codex, `web_search`
-  tries the Codex standalone `/alpha/search` backend first and falls back to
-  searchwire when the Codex search is unavailable or fails. Results are
-  normalized to the normal `web_search` shape; access to the standalone
-  endpoint remains dependent on the authenticated Codex backend/account.
-  Tool results that carry media (e.g. `generate_image` or `read_media` outputs) are split on the Codex wire: the
-  `function_call_output` stays text-only and the media is reinjected as the
-  next user message with `input_image` items — `core.ImageBlock` is never
-  serialized into a text-only tool output.
+  app-server `model/list` using the OAuth account selected in NusaShell —
+  not whichever account happens to be active in `~/.codex/auth.json`.
+  Explicitly switching accounts also clears sticky conversation bindings,
+  so Retry and later turns use the selected account. ChatGPT plan image
+  models (`gpt-image-2`, `gpt-image-1.5`) are seeded after import because
+  `model/list` omits them. The same OAuth token and base URL also drive the
+  Codex image backend used by `generate_media(media_type=image)`
+  (`/images/generations` | `/images/edits`). Image calls fail over across
+  accounts on a usage-limit 429 or a 403 entitlement rejection — one attempt
+  per account, since image
+  calls are billable and there is no blind retry; a 403 is reported as a
+  likely missing image entitlement (e.g. ChatGPT Free). When the active chat
+  provider is Codex, `web_search` tries the Codex `/alpha/search` backend
+  first and falls back to searchwire when it fails; results keep the normal
+  `web_search` shape.
+  Tool results that carry media (e.g. `generate_media` or `read_media`
+  outputs) are split on the Codex wire: the `function_call_output` stays
+  text-only and the media is reinjected as the next user message with
+  `input_image` items — media is never serialized into a text-only tool
+  output.
 
 ## Streaming completion and request-shape recovery
 
@@ -121,18 +98,16 @@ OpenAI-compatible SSE providers do not all emit the `[DONE]` sentinel, and
 some hold the connection open after the last chunk. NusaShell treats
 `finish_reason` as the completion signal, not the sentinel:
 
-- A final choice with `finish_reason` completes the stream. The `[DONE]`
-  trailer is optional; a clean EOF after it is a normal end of stream.
-- After `finish_reason`, the trailing usage-only chunk (requested via
-  `stream_options.include_usage`) is read as accounting before the stream
-  completes, but it is never required: token accounting is best-effort and
-  is not a condition for the turn to succeed.
-- A provider that holds the connection open without ending the response is
-  disconnected after a bounded drain window (one second) instead of waiting
-  for the idle watchdog, so a completed turn never stalls or retries.
-- Connection errors and resets after `finish_reason` are still completions;
-  only a cut before any `finish_reason` is an incomplete stream and goes
-  through the shared retry policy.
+- A final choice with `finish_reason` completes the stream; the `[DONE]`
+  trailer is optional and a clean EOF after it is a normal end.
+- A trailing usage-only chunk after `finish_reason` is read as accounting
+  but never required — token accounting is best-effort, not a success
+  condition.
+- A provider that holds the connection open after the last chunk is dropped
+  after a one-second drain, so a completed turn never stalls or retries.
+- Errors and resets after `finish_reason` are still completions; a cut
+  before any `finish_reason` is an incomplete stream and goes through the
+  shared retry policy.
 - `finish_reason: "error"` and provider error payloads inside the SSE body
   are failures, not empty successful responses.
 
@@ -159,10 +134,10 @@ bad:  assistant(tool_calls: read_media, memory) → tool(read_media) → user(im
 The second shape is rejected by providers such as DeepSeek because every
 tool_call_id must be answered before another role appears.
 
-Do not classify this 400 as a transient outage: resending the same assistant-
-ended request cannot succeed. A 429 without a usable `Retry-After` is likewise
-hard-failed; a retry is only automatic when the shared domain policy says the
-provider supplied a safe retry window.
+Do not classify this 400 as a transient outage — resending the same
+assistant-ended request cannot succeed. A 429 without a usable `Retry-After`
+is likewise hard-failed; retries are automatic only when the provider
+supplied a safe retry window.
 
 ## Prompt cache TTL
 
@@ -172,11 +147,12 @@ off for that provider only:
 
 - `messages` (Anthropic `cache_control`): `5m` or `1h`. Default `5m`.
 - `responses` (OpenAI `prompt_cache_options.ttl`): `30m`.
+- `codex`: `30m` or `off`. The Codex wire only sends `prompt_cache_key` — no
+  TTL value is transmitted, so `30m` simply enables the cache key and `off`
+  disables prompt caching for the provider.
 - `chat` using the OpenRouter profile, including custom gateways with the
-  `openrouter` driver (`cache_control`): `5m` or `1h`. Default `5m`.
-  OpenRouter's profile does not accept `30m` as a `cache_control` TTL. Custom
-  gateways may still reject the profile, in which case the provider error is
-  returned without a silent vanilla-wire retry.
+  `openrouter` driver (`cache_control`): `5m` or `1h`. Default `5m`;
+  OpenRouter's profile does not accept `30m` as a `cache_control` TTL.
 - direct/automatic vanilla `chat` hosts (`prompt_cache_key` plus
   `prompt_cache_options`): `30m`. Putting 5m/1h on a Chat system breakpoint
   is rejected locally.
@@ -186,25 +162,14 @@ off for that provider only:
   cache key, block, or TTL on the wire. Cached tokens still appear in usage
   (`cachedContentTokenCount` → cache read).
 
-Empty stored `cache_ttl` still means the first duration above. `off` is
-stored explicitly and applied on the next turn. Registry cards show the
-selected value, including `off`.
-
 ## Codex thinking summary
 
 The **Thinking summary** chips on a Codex provider's detail pane control the
-`reasoning.summary` value sent on later Codex turns. The choice is stored per
-provider:
-
-- `auto` lets Codex choose the appropriate summary detail and is the default.
-- `concise` requests a shorter visible summary.
-- `detailed` requests a more verbose visible summary.
-- `none` suppresses the visible summary. It does not disable model reasoning
-  or encrypted reasoning replay.
-
-This option is available only for the `codex` kind. It controls how much
-thinking Codex exposes in the transcript; it does not guarantee that every
-turn produces a summary.
+`reasoning.summary` value sent on later Codex turns, stored per provider:
+`auto` (default — Codex picks the detail), `concise`, `detailed`, or `none`.
+`none` suppresses the visible summary; it does not disable model reasoning
+or encrypted reasoning replay. This option exists only for the `codex` kind
+and does not guarantee every turn produces a summary.
 
 ## Prompt-cache keys and sessions
 
@@ -212,49 +177,30 @@ When prompt caching is enabled and the provider Cache TTL is not `off`,
 NusaShell creates one stable 32-character ASCII key per unchanged
 provider/model/conversation request contract. The digest includes the current
 system prompt and top-level `tools[]`; a new binary, user instruction, or
-runtime tool enable/disable therefore gets a fresh cache/session shard. These
-values are built from Go runtime state at the turn boundary, not persisted in
-conversation JSON. The visible prefix separates agent workloads without
-increasing the key length:
-
-- `nusashell_cv_` + 19 hexadecimal characters — normal conversation turns.
-- `nusashell_bg_` + 19 hexadecimal characters — headless/background and
-  learning-job turns.
+runtime tool enable/disable therefore gets a fresh cache/session shard. The
+key prefix marks the workload: `nusashell_cv_` for normal conversation
+turns, `nusashell_bg_` for headless/background turns.
 
 The key is sent through the wire only where the selected adapter has a useful
 path:
 
 - OpenAI Responses and direct/automatic vanilla OpenAI Chat:
-  `prompt_cache_key` in the request body, as documented by OpenAI.
-- Anthropic Messages: no synthetic `prompt_cache_key`; caching remains native
-  `cache_control` breakpoints because the Messages API does not document a
-  caller-supplied cache-key field.
-- OpenRouter-profile Chat, including custom Chat gateways: both
-  `prompt_cache_key` and `session_id` are sent in the body. Reusing the key as
-  `session_id` enables OpenRouter-style sticky routing and session grouping
-  where the gateway implements it. OpenCode also receives the documented
-  `x-opencode-session` header.
-- OpenRouter-profile Messages and Responses: the same session value is sent as
-  the documented `x-session-id` header; Responses also retains
-  `prompt_cache_key` in the body through its OpenAI-compatible adapter.
+  `prompt_cache_key` in the request body.
+- Anthropic Messages: none — caching stays native `cache_control`
+  breakpoints; the Messages API has no caller-supplied cache-key field.
+- OpenRouter-profile Chat, including custom Chat gateways: `prompt_cache_key`
+  and `session_id` in the body — reusing the key as `session_id` gives
+  OpenRouter-style sticky routing and session grouping where the gateway
+  supports it. OpenCode also gets the documented `x-opencode-session` header.
+- OpenRouter-profile Messages and Responses: the same session value as the
+  `x-session-id` header; Responses also keeps `prompt_cache_key` in the body.
 
-An unknown HTTP header is normally ignored by an HTTP server, but that is not
-a cross-gateway contract and it does not make an unknown JSON body field safe.
-Strict gateways can reject unsupported body parameters: LiteLLM documents that
-unsupported OpenAI parameters raise by default, while provider-specific
-parameters are forwarded to the upstream body. Therefore NusaShell sends the
-stable key only on the selected adapter's documented/known path, uses the
-OpenRouter-profile `x-session-id` header for OpenRouter-profile providers, and
-uses OpenCode's documented `x-opencode-session` header for OpenCode hosts. It
-does not inject an arbitrary `X-NusaShell-*` header or an undocumented
-cache-key field into Anthropic or unrelated gateways.
+Strict gateways can reject unknown body parameters, so NusaShell sends the
+stable key only on each adapter's documented path — no undocumented
+cache-key field or extra header is injected into Anthropic or unrelated
+gateways.
 
-OpenRouter's current prompt-caching guide documents `prompt_cache_key`,
-`session_id`/`x-session-id`, the 256-character session limit, and Sessions-view
-grouping. OpenAI documents `prompt_cache_key` as a routing/cache hint (not a
-guaranteed cache hit). Anthropic documents `cache_control` TTLs and breakpoint
-rules. OpenCode Go documents `x-opencode-session` as the prompt-cache
-affinity header. See [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching),
+See [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching),
 [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching),
 [Claude prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
 [OpenCode Go](https://opencode.ai/docs/go/),
@@ -278,13 +224,11 @@ Model lists: `GET https://opencode.ai/zen/go/v1/models` (Go) and
 `GET https://opencode.ai/zen/v1/models` (Zen). There is no
 `/models/{id}/endpoints` route picker.
 
-Custom OpenCode entries use the OpenRouter compatibility/profile path. Chat
-requests therefore use the OpenRouter-style `reasoning` and provider-option
-shape rather than an automatic downgrade to `reasoning_content`. This is an
-intentional compatibility choice for an undocumented/unpredictable gateway:
-if a particular OpenCode deployment accepts only the vanilla Chat shape, its
-provider error is surfaced and NusaShell does not retry through another API
-kind or wire profile. The OpenCode-specific `x-opencode-session` header is
+Custom OpenCode entries use the OpenRouter compatibility/profile path, so
+Chat requests use the OpenRouter-style `reasoning` and provider-option shape
+rather than a downgrade to `reasoning_content`. A deployment that accepts
+only the vanilla Chat shape surfaces a provider error — there is no retry
+through another API kind or wire profile. The `x-opencode-session` header is
 still attached from the conversation prompt-cache key. Cache TTL chips are
 `5m`, `1h`, or `off`; Console Go rejects `prompt_cache_options.ttl=30m`, but
 the selected OpenRouter profile may also send cache fields that the gateway
@@ -368,14 +312,12 @@ reasoning stream in the transcript. Reasoning tokens are billed through
 `usageMetadata.thoughtsTokenCount`.
 
 **Thought signatures.** Gemini signs tool calls (and sometimes text parts) and
-returns `thoughtSignature`. NusaShell persists a tool call's signature with
-that call (`ToolCall.Opaque`) and replays it on the next turn; a text part's
-signature is replayed as opaque reasoning state. Gemini 3 rejects a replayed
-`functionCall` part without a signature, so `gemini-3*` history that has none
-for a batch (for example a conversation migrated from another provider) is
-backfilled with Google's documented placeholder sentinel. Dropping signatures
-degrades or breaks multi-turn reasoning, so do not strip them when editing the
-conversation backend.
+returns `thoughtSignature`. Signatures replay automatically with the call on
+the next turn; dropping them degrades or breaks multi-turn reasoning. Gemini
+3 rejects a replayed `functionCall` part without a signature, so `gemini-3*`
+history that has none for a batch (for example a conversation migrated from
+another provider) is backfilled with Google's documented placeholder
+sentinel.
 
 **Tools and structured output.** Tool schemas are converted to the OpenAPI
 subset Gemini accepts: upper-case types, `items` forced on arrays,
@@ -397,7 +339,7 @@ through as `fileData`. Audio input uses `inlineData` with the normalized
 legacy `gemini-2.5-flash-image`, and the preview alias
 `nano-banana-pro-preview`) generate images through `generateContent` with
 `responseModalities: ["TEXT", "IMAGE"]` — not an OpenAI `/images` endpoint.
-`generate_image` and `generate_media(media_type=image)` route to this surface
+`generate_media(media_type=image)` routes to this surface
 when the configured image model belongs to a `gemini` kind provider. Image
 bytes are decoded from `candidates[].content.parts[].inlineData` (base64
 `data` + `mimeType`).
@@ -427,24 +369,22 @@ POST {base}/v1beta2/models/gemini-3-pro-image:generateContent   (404)
 ```
 
 The Nano Banana family accepts reference images for editing
-(image-to-image): pass `referenced_image_paths` to `generate_image` and the
+(image-to-image): pass `referenced_image_paths` to `generate_media` and the
 images are sent as `inlineData` parts in the same user turn. These models are
 tagged `Vision: true` at import and read time so the image-to-image media
 gate does not block edits. `imagen-*` is text-to-image only and is not
 tagged i2i.
 
-The `size` option from `generate_image` (`1024x1024`, `1536x1024`,
+The `size` option from `generate_media` (`1024x1024`, `1536x1024`,
 `1024x1536`) is mapped to `generationConfig.imageConfig.aspectRatio`
 (`1:1`, `3:2`, `2:3` respectively); `auto` omits the field so the model
 picks the default. Explicit pixel size (`1K`/`2K`), `quality`, and
 `background` are not supported on this `generateContent` surface — they are
 accepted by the tool but ignored by the Gemini backend.
 
-`gemini-*-image-preview`-style ids (e.g. `gemini-3.0-pro-image-preview`) are
-not classified as image models by the name allowlist — the canonical ids are
-`gemini-3-pro-image` etc. and the AI Studio alias `nano-banana-pro-preview`.
-If a future key lists a `-image-preview` id it will surface as a chat model
-until the pattern is widened.
+`-image-preview`-style ids (e.g. `gemini-3.0-pro-image-preview`) are not
+classified as image models — only the canonical ids above and the AI Studio
+alias `nano-banana-pro-preview` are; such an id surfaces as a chat model.
 
 The `gemini` kind has **no** chat TTL chip or embedding endpoint. It does
 have an image endpoint (the generateContent surface above), a video endpoint
@@ -457,8 +397,8 @@ lists `GET /v1beta/models`, so the probe costs nothing.
 `veo-3.1-lite-generate-preview`, `veo-3.0-generate-001`,
 `veo-3.0-fast-generate-001`) generate videos through the
 `:predictLongRunning` long-running operation surface — not an OpenAI
-`/videos` endpoint and not the Interactions API. `generate_video` and
-`generate_media(media_type=video)` route to this surface when the
+`/videos` endpoint and not the Interactions API.
+`generate_media(media_type=video)` routes to this surface when the
 configured video model belongs to a `gemini` kind provider.
 
 ```text
@@ -500,17 +440,15 @@ watermark. EU/UK/CH/MENA regions force `personGeneration: allow_adult`
 assuming success.
 
 `gemini-omni-*` ids appear in the Gemini model list but are **not**
-classified as video models: the `:predictLongRunning` surface is
-documented for `veo-*` only, and the omni family is not confirmed to be
-served by that endpoint. They surface as chat models until the wire
-contract is verified.
+classified as video models — the `:predictLongRunning` surface is documented
+for `veo-*` only, so omni ids surface as chat models.
 
 **Speech generation (TTS).** Gemini TTS models (`gemini-3.1-flash-tts-preview`,
 `gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts`) synthesize
 speech through `generateContent` with `responseModalities: ["AUDIO"]` +
 `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName` (single-speaker) —
-not an OpenAI `/audio/speech` endpoint. `generate_speech` and
-`generate_media(media_type=speech)` route to this surface when the
+not an OpenAI `/audio/speech` endpoint.
+`generate_media(media_type=speech)` routes to this surface when the
 configured TTS model belongs to a `gemini` kind provider. Audio is decoded
 from `candidates[].content.parts[].inlineData` (base64 `data` + `mimeType`).
 
@@ -544,59 +482,50 @@ default). The raw PCM is wrapped into a WAV container so the persisted
 artifact is playable. The tool's `mp3` and `opus` formats are **not**
 produced by this surface — the artifact is always WAV regardless of the
 requested format (documented deviation; never label PCM as mp3). `speed`
-has no Gemini TTS equivalent and is ignored on this surface (mirroring how
-the image run documented size limitations).
+has no Gemini TTS equivalent and is ignored on this surface.
 
 The default voice when none is specified is **`Kore`** (the documented
 runtime default). Gemini TTS exposes 30 prebuilt voices; the full table is
 in the bundled skill reference (`resources/agent/skills/llm-integration/references/gemini/tts.md`).
 
-Multi-speaker (a `speechConfig` voice array, up to 2 speakers) is not wired
-in this run — only single-speaker `prebuiltVoiceConfig` is supported.
+Multi-speaker (`speechConfig` voice arrays, up to 2 speakers) is not
+supported — only single-speaker `prebuiltVoiceConfig`.
 
-Streaming TTS (3.1+) requires `"stream": true` + the
-`Api-Revision: 2026-05-20` header; this surface uses the non-streaming
+Streaming TTS (3.1+) is not used — this surface is the non-streaming
 `generateContent` path. TTS may be billable, so 429 responses are surfaced
 as hard failures (not retried); 5xx stay retriable for the caller's policy.
 
 ## API keys
 
 API keys are optional for `messages`, `responses`, and `chat`; the `gemini`
-kind requires a Google AI Studio key (there is no anonymous keyless tier on
-the Generative Language API). The Codex kind
-authenticates with ChatGPT OAuth: use **Sign in with ChatGPT** or **Import
-from Codex CLI** on the Providers → Codex detail page (primary paths). Pasting
-an OAuth access token in the provider edit dialog is an optional fallback
-only. For optional-key kinds, a blank key is stored as no credential and
-NusaShell still lists, tests, imports, and chats. Wire adapters skip
-`Authorization` / `x-api-key` when no key is present; the upstream decides
-(e.g. OpenCode, LM Studio, Ollama, Zen free tier). When a key is present it
-is sent normally. Credentials are stored in the SQLite credential store
-(`credentials.db`) inside the data directory, never in the JSON files.
+kind requires a Google AI Studio key (the Generative Language API has no
+anonymous tier). The Codex kind authenticates with ChatGPT OAuth: use
+**Sign in with ChatGPT** or **Import from Codex CLI** on the Providers →
+Codex detail page; pasting an OAuth access token in the edit dialog is a
+fallback only. For optional-key kinds, a blank key is stored as no
+credential and NusaShell still lists, tests, imports, and chats — the
+`Authorization` / `x-api-key` header is skipped and the upstream decides
+(e.g. OpenCode, LM Studio, Ollama, Zen free tier). Credentials are stored
+in the local credential store inside the data directory, never in the JSON
+files.
 
 ### Codex accounts, usage, and runtime
 
 On the Codex provider detail page:
 
 - **ChatGPT Accounts** lists signed-in accounts with plan and session/weekly
-  usage bars. **Sign in with ChatGPT** runs OAuth PKCE (`ai.codex.login`).
-  **Import from Codex CLI** reads `~/.codex/auth.json` (`ai.codex.import`).
-  **Refresh** polls circuits (`ai.codex.refresh-circuits`) then reloads usage
-  (`ai.codex.usage`). Switch / Remove call `ai.codex.accounts.switch` and
-  `ai.codex.logout`. When usage is unavailable, the UI falls back to
-  `ai.codex.accounts.list` for identity-only rows.
-- **Codex Runtime** shows the managed official Codex CLI binary via
-  `ai.codex.runtime.status` / `ai.codex.runtime.download` (ACP and tooling;
-  chat compaction uses the remote v2 path, not a subprocess compact UI).
+  usage bars. **Sign in with ChatGPT** runs OAuth PKCE. **Import from Codex
+  CLI** reads `~/.codex/auth.json`. **Refresh** reloads usage and account
+  availability; **Switch** and **Remove** manage accounts.
+- **Codex Runtime** shows/downloads the managed official Codex CLI binary
+  used for account-aware model listing and tooling.
 - In the Agent composer, the routing control becomes an account picker for a
-  Codex model. **Auto** keeps the existing sticky quota/cooldown rotation.
-  Selecting an account strictly pins that room to the chosen credential; it
-  does not fail over to a different plan behind the user's choice. The
-  selection is persisted in the conversation backend, so room switches and
-  reloads cannot inherit another room's account. The provider detail page's
-  **Switch** action remains the default preference used by Auto. Completion
-  turns triggered after delegated work finishes reuse the conversation's
-  qualified model and account pin, so they stay on the same Codex credential.
+  Codex model. **Auto** keeps the sticky quota/cooldown rotation; selecting
+  an account strictly pins that room to the chosen credential with no
+  failover behind the user's choice. The pin is stored per room (room
+  switches and reloads cannot inherit another room's account), the detail
+  page's **Switch** sets the account Auto prefers, and follow-up turns after
+  delegated work reuse the room's pinned account.
 
 ```text
 # GOOD — primary auth paths on the Codex detail card
@@ -611,21 +540,19 @@ Edit → paste OAuth access token → Save  (fallback only)
 
 Keys normally come from the UI form. For headless or containerized setups,
 the binary also offers an **explicit, opt-in** subcommand that copies keys
-from environment variables into `credentials.db`:
+from environment variables into the credential store:
 
 ```bash
 nusashell seed-providers
 ```
 
-This runs **only when you invoke it** — the server never reads these
-variables on its own during normal startup, so there is no hidden behavior.
-It respects `NUSASHELL_DATA_DIR`, prints a line per action, and then exits.
-It is idempotent and non-destructive: it creates the provider (enabled) on
-first run and, on later invocations, only rewrites the stored key when the
-variable's value changed (secret rotation). A provider's name, base URL, and
-enabled state that you edited in the UI are never overwritten, and the
-variable is never re-read into the wire config. After seeding, use **Import
-models** (or wait for the periodic auto-import) to populate the model list.
+It runs **only when invoked** — the server never reads these variables on
+its own during normal startup. It is idempotent and non-destructive: it
+creates the provider (enabled) on first run and later only rewrites the
+stored key when the variable's value changed (secret rotation); name, base
+URL, and enabled state edited in the UI are never overwritten. It respects
+`NUSASHELL_DATA_DIR`. After seeding, use **Import models** (or the periodic
+auto-import) to populate the model list.
 
 | Env variable | Provider | Kind | Base URL |
 | --- | --- | --- | --- |
@@ -634,9 +561,9 @@ models** (or wait for the periodic auto-import) to populate the model list.
 ## Models
 
 After saving a provider, use **Import models** to fetch its model list
-(`GET /models`; the `gemini` kind reads `GET /v1beta/models`). OpenRouter also
-exposes `GET /images/models`; those ids
-are merged and tagged `kind: image`. The agent only offers imported models.
+(`GET /models`; the `gemini` kind reads `GET /v1beta/models`). OpenRouter
+also exposes `GET /images/models`; those ids are merged and tagged
+`kind: image`. The agent only offers imported models.
 Messages providers bundle Claude model metadata (context window, pricing);
 imported models keep the provider's own ids. Catalog lookup identity is
 **gateway/model**, not vendor/model: an OpenCode model imported as
@@ -654,35 +581,25 @@ that and disables the modality for the provider+model. Future turns apply
 these learned overrides at model resolution time, so requests are built with
 the real capabilities instead of waiting for another 400.
 
-The same learned registry can record request-shape constraints, such as a
+NusaShell can also learn request-shape constraints, such as a
 gateway requiring a user message at the end of the request. These rules are
 scoped to provider+model and applied only on a retry after the matching 400;
 they do not change the persisted conversation transcript.
 
 Learned overrides are inferred from errors and can be wrong (a false
-positive). A second, **manual override** layer exists for corrections with
-direct evidence. The unified background learning agent can record one via
-its local `model_override` tool when a transcript shows the catalog metadata
-is wrong
-for a specific provider+model (e.g. a model marked text-only that actually
-served images). Manual overrides are stored per provider+model in
-`learning/model_overrides.json`, survive catalog re-imports and process
-restarts, and are applied at model resolution time **after** learned
-overrides — so a manual correction always wins over both the catalog and an
-auto-learned value. Precedence: catalog → learned → manual. For direct Codex
-chat, the public catalog context window supersedes the app-server discovery
-value; discovery is retained only when the catalog is unavailable, and
-learned/manual overrides still apply afterward. Models tagged as
-embedding-capable appear in the
-Embedding model setting for skill and memory search. Embedding requests use
-the same OpenRouter app attribution as chat when the selected provider points
-at `*.openrouter.ai`: `HTTP-Referer`, `X-OpenRouter-Title`, and the app
-categories are sent on `POST /v1/embeddings`, so embedding usage is attributed
-to NusaShell instead of appearing as an unknown app. Those router-specific
-headers are not sent to other OpenAI-compatible hosts. Models tagged as image
-generators (`kind: image`, including `gpt-image-*` and `dall-e-*` even when
-`/models` omits a kind) appear in Settings → Image generation and back the
-`generate_image` tool. Image generation uses the
+positive). A **manual override** can be recorded when catalog metadata is
+proven wrong for a specific provider+model (e.g. a model marked text-only
+that actually served images). Manual overrides survive catalog re-imports
+and are applied **after** learned overrides — a manual correction always
+wins over both the catalog and an auto-learned value. Precedence: catalog →
+learned → manual. For Codex, catalog data wins over CLI discovery.
+Embedding-capable models appear in the Embedding model setting (skill and
+memory search); embedding requests on `*.openrouter.ai` carry the same
+app-attribution headers as chat, other OpenAI-compatible hosts get none.
+Models tagged as image generators (`kind: image`, including `gpt-image-*`
+and `dall-e-*` even when `/models` omits a kind) appear in Settings →
+Image generation and back `generate_media(media_type=image)`. Image
+generation uses the
 dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints, the
 ChatGPT Codex images endpoints on the codex provider base URL
 (`.../codex/images/generations` and `.../codex/images/edits` — `gpt-image-2`
@@ -690,18 +607,20 @@ and `gpt-image-1.5` are seeded into the codex model list and tagged i2i), or
 OpenRouter `POST /images` (JSON body, including `images[].image_url` data
 URLs for edits — not OpenAI multipart). The Codex backend sends
 `background`/`quality`/`size` with `auto` defaults, always requests a single
-image (no `n`), sends the `x-codex-image-turn-id` turn-correlation header,
-and surfaces image-quota 429s (`error.type=usage_limit_reached`) as hard
-usage-limit failures instead of blind retries. Anthropic Messages is not an
-image backend; it can still orchestrate `generate_image` when a supported
+image (no `n`), and surfaces image-quota 429s
+(`error.type=usage_limit_reached`) as hard usage-limit failures instead of
+blind retries. Anthropic Messages is not an
+image backend; it can still orchestrate `generate_media` when a supported
 image provider is configured.
 
 ## Test connection
 
 **Test connection** probes connectivity only: it lists models with
-`GET /models` (responses/chat), `GET /v1/models` (messages), or
-`GET /v1beta/models` (gemini) and
-reports latency and the model count. No completion is sent, so the probe
+`GET /models` (responses/chat), `GET /v1/models` (messages),
+`GET /v1beta/models` (gemini), or the Codex CLI app-server `model/list`
+(codex — the first probe may download the managed Codex binary, so allow up
+to ~90s), and reports latency and model count. No completion is sent, so
+the probe
 never costs tokens, works before importing models, and does not trip
 model-routing failures on the upstream — a broken model only surfaces when
 you actually chat with it.
@@ -719,12 +638,10 @@ URL and Args/Env are ignored.
 - Probe runs `initialize` and caches advertised auth methods.
 - Authenticate uses a method id the agent advertised — nothing is hardcoded
   per vendor.
-- Refresh catalog opens a throwaway `session/new` to import modes and models.
-  Agents in the OpenCode generation return v1 `configOptions` instead of
-  legacy `modes`/`models`: select-type mode/model options fold into the same
-  catalogs, and mode/model switching still goes through the legacy
-  `session/set_mode` / `session/set_model` methods those agents keep serving.
-- Mode IDs stay vendor-specific; NusaShell maps them onto internal risk
+- Refresh catalog imports modes and models. OpenCode-generation agents
+  return v1 `configOptions` instead of legacy `modes`/`models`; select-type
+  mode/model options fold into the same catalogs.
+- Mode IDs stay vendor-specific; NusaShell maps them onto risk
   tiers (`read_only`, `edit_confirmed`, `bypass`). Unknown modes are
   read-only. New sessions start on the strictest advertised mode. Bypass is
   never the default — promote it from the live subagent UI.
@@ -732,16 +649,15 @@ URL and Args/Env are ignored.
   paths are absolute (even on Windows) and prompt instead of auto-allow.
   `bypass` on a live local-stdio run may read/write absolute host paths via
   FS callbacks; remote ACP cannot use that escape at any tier.
-- Env values stay in `config/acp-agents.json`. List/get RPC returns **keys only**.
+- Env values stay in `config/acp-agents.json`; read-backs show **keys only**.
 
-The parent agent spawns these binaries with `subagent` (optional `count` for
-parallel sessions). You can peek, steer, stop, change mode, and answer
-permission prompts from the Agent dock, drawer, or popup.
+Spawn these binaries with the `subagent` tool (optional `count` for parallel
+sessions). You can peek, steer, stop, change mode, and answer permission
+prompts from the Agent dock, drawer, or popup.
 
 Stdio is newline-delimited JSON-RPC (`\n` between messages, no embedded
-newlines). NusaShell does **not** send LSP `Content-Length` headers — the
-ACP spec parses each line with `JSON.parse`.
-Logs from the agent belong on stderr.
+newlines, **no** LSP `Content-Length` headers). Logs from the agent belong
+on stderr.
 
 ### Common CLIs (install + auth)
 
@@ -750,18 +666,17 @@ Logs from the agent belong on stderr.
 | Cursor | `curl https://cursor.com/install \| bash` then `agent acp` | `cursor_login` | `initialize` succeeds; `session/new` returns `Authentication required`. Run `agent login` locally, then **Authenticate** with `cursor_login` in Providers. |
 | OpenCode | install per [opencode.ai/docs](https://opencode.ai/docs/acp/) → `opencode acp` | `opencode-login` | `initialize` works. Real login is CLI-side (`opencode auth login`) — **Authenticate** with `opencode-login` only validates the method id, it does not log in. Missing provider keys surface as JSON-RPC `-32000` on `session/new` or the first prompt. |
 
-If you register a CLI without logging in, **Probe** still works (it only runs
-`initialize`). **Refresh catalog** and `subagent` spawn call `session/new` and
-fail until you complete **Authenticate** with one of the advertised method ids.
-NusaShell surfaces a clear error naming those ids instead of a bare JSON-RPC
+If you register a CLI without logging in, **Probe** still works (it only
+runs `initialize`), but **Refresh catalog** and `subagent` spawns fail until
+you complete **Authenticate** with one of the advertised method ids —
+NusaShell names those ids in the error instead of a bare JSON-RPC
 `Authentication required`.
 
 **One login only (lazy auth):** After you **Authenticate** once, NusaShell
 does not re-call `authenticate` on subsequent probes, catalog refreshes, or
-subagent spawns. It tries `session/new` first and only calls `authenticate`
-when the agent reports an auth-required error. Agents that persist their own
-auth (e.g. Devin storing tokens in `~/.devin/auth.json`) will not
-re-trigger the browser login flow on every new connection.
+subagent spawns — it tries `session/new` first and only authenticates when
+the agent reports an auth-required error. Agents that persist their own auth
+will not re-trigger the browser login flow on every new connection.
 
 ## Rate limits and emergency compaction
 
@@ -779,210 +694,109 @@ differently:
   every window.
 - **Dominant TPM request** — one request needs more than half the
   per-minute budget (`Limit 500000, ... Requested 355391`). It "fits" the
-  raw limit, but any partially consumed window blocks it and backoff drains
-  far slower than the window, so retries spin uselessly.
+  raw limit, but any partially consumed window blocks it, so retries spin
+  uselessly.
 
-Structural and dominant rejections are handled identically: the agent does
-**not** burn provider attempts on them — it bails to an **emergency
-compaction** (the transcript is summarized down to the compaction budget)
-and retries the round with the smaller context, the same safety net that
-fires on a context-window overflow returned as HTTP 400 or a Codex SSE
-error event. The live context badge uses a
-provider-visible preflight estimate: text is approximated by character
-density, provider replay items are adjusted for opaque encrypted content, and
-image, audio, and video data URLs are charged as modality units rather than
-as base64 text. It remains a heuristic until provider usage arrives, so the
-provider's own `Limit`/`Used`/`Requested` numbers are trusted as proof of
-overflow.
+Structural and dominant rejections are handled identically: a structural TPM
+overflow triggers an **emergency compaction** (the transcript is summarized
+down to the compaction budget) and the round retries with the smaller
+context — the same safety net that fires on a context-window overflow
+returned as HTTP 400 or a Codex SSE error event. The live context badge is a
+heuristic estimate until provider usage arrives, so the provider's own
+`Limit`/`Used`/`Requested` numbers are trusted as proof of overflow.
 
-A dominant rejection also teaches a durable rule: NusaShell derives a
-context-window cap from the provider's per-minute budget (half the budget
-minus the completion budget, floored at a quarter) and records it in the
-learned-param registry for that provider+model. Every conversation on that
-provider+model then compacts against the smaller window, so requests stay
-within the per-minute budget instead of colliding with it every round (the
-`learning` log stream shows the recorded cap, e.g. `learned TPM context cap
-for openai/gpt-5.6-luna`). This applies to OpenAI official accounts that
-report `Limit`/`Requested` numbers; other gateways' rate-limit text never
-parses and behavior is unchanged.
+A dominant rejection also teaches a durable rule: a learned per-model
+context cap prevents repeats — every conversation on that provider+model
+then compacts against a smaller window sized to the per-minute budget. This
+applies to OpenAI official accounts that report `Limit`/`Requested` numbers;
+other gateways' rate-limit text does not parse and behavior is unchanged.
 
-On the Responses API, TPM rejections arrive mid-stream as an SSE
-`event: error` (the request is accepted with HTTP 200 first), so the
-provider classifies them as rate-limit errors with an assumed 1-minute
-window instead of generic provider errors. On Chat Completions they arrive
-as HTTP 429. Both paths surface a message naming the token numbers (limit,
-already-used, requested) instead of the requests-per-minute one.
+On Responses these rejections arrive mid-stream as an SSE `event: error`
+(after HTTP 200), classified as rate-limit errors with an assumed 1-minute
+window; on Chat Completions they arrive as HTTP 429. Both surface a message
+naming the token numbers (limit, already-used, requested).
 
 ## Encrypted reasoning replay (Responses / Codex)
 
 OpenAI Responses, Codex, and some OpenRouter/compat OpenAI routes return
 opaque reasoning state (often `encrypted_content` inside a reasoning item)
-alongside the visible thinking summary. Wire adapters already request
-`include: ["reasoning.encrypted_content"]` and keep that JSON on
-`ReasoningBlock.Extra` for in-memory replay.
+alongside the visible thinking summary. NusaShell persists that payload and
+reattaches it on the next turn so multi-turn ChatGPT/Codex/OpenRouter
+Responses-style models keep reasoning continuity; the UI continues to show
+only plaintext thinking.
 
-NusaShell also persists that opaque payload on the assistant message as
-`ReasoningExtra` (omitted when empty) and reattaches it on the next turn so
-multi-turn ChatGPT/Codex/OpenRouter Responses-style models do not lose
-reasoning continuity. The UI continues to show only plaintext `Reasoning`.
-This is distinct from conversation-level `CompactionBlob`, which stores
-server-side compaction items, not per-message reasoning Extra.
+Encrypted reasoning replays on Responses/Codex; other kinds get plaintext
+thinking only:
 
-When the active provider kind cannot replay that opaque state, NusaShell
-strips `ReasoningExtra` from the assembled request and keeps plaintext
-`Reasoning` only:
-
-- **Chat direct/vanilla OpenAI:** never forwards Extra — Chat Completions
-  reject signed, redacted, or provider-extra reasoning blocks.
-- **Chat OpenRouter profile (including custom gateways):** keeps Extra only
+- **Chat direct/vanilla OpenAI:** never forwards the opaque state — Chat
+  Completions reject signed, redacted, or provider-extra reasoning blocks.
+- **Chat OpenRouter profile (including custom gateways):** keeps it only
   when it is a JSON array (`reasoning_details`); Codex encrypted objects are
   stripped.
-- **Messages (Anthropic):** never forwards Extra (Anthropic uses
-  signature / redacted thinking, not Responses-style Extra).
-- **Responses / Codex:** forwards Extra unchanged for continuity.
+- **Messages (Anthropic):** never forwards it (Anthropic uses signature /
+  redacted thinking, not Responses-style extras).
+- **Responses / Codex:** forwards it unchanged for continuity.
 
-`CompactionBlob` is already kind-gated the same way (Responses/Codex only).
-A Codex room continued on DeepSeek Chat therefore replays the post-
-compaction transcript with plaintext thinking and does not send the
-encrypted checkpoint or per-message Extra. When that retained suffix holds
-no user message, the checkpoint is replaced by a synthetic user nudge
-message so the request still carries a user anchor.
+The server-side compaction checkpoint is kind-gated the same way
+(Responses/Codex only): a Codex room continued on DeepSeek Chat replays the
+post-compaction transcript with plaintext thinking — no encrypted
+checkpoint or per-message opaque state — and when the retained suffix holds
+no user message a synthetic user nudge keeps a user anchor in the request.
 
 ## Server-side compaction (OpenAI Responses)
 
-For eligible OpenAI Responses models, NusaShell uses server-side compaction
-via the `context_management` parameter in `POST /responses`. When the
-rendered token count crosses the configured `compact_threshold`, the server
-triggers a compaction pass in-stream, emits an encrypted compaction item in
-the response output, and prunes context before continuing inference. No
-separate `/responses/compact` call is required.
-
-Eligible models (context window >= 200k):
-
-- `gpt-5.x` family (gpt-5, 5.1, 5.2, 5.3-codex, 5.4, 5.5, 5.6-sol/terra/luna,
-  mini, nano, pro, codex) — 400k–1M context
-- `gpt-4.1` family (gpt-4.1, 4.1-mini, 4.1-nano) — 1M context
-- `o-series` (o1, o3, o3-mini, o4-mini, o1-pro, o3-pro, codex-mini-latest) —
-  200k context
-
-Models below the 200k floor (gpt-4o at 128k, gpt-*-chat-latest at 128k) and
-non-OpenAI models (Anthropic, OpenRouter) use the client-side multi-pass
-summarization path.
-
-Key behaviors:
-
-- **Threshold:** `max(context_window * 0.9, 120_000)` — the server compacts
-  when the rendered token count crosses this threshold. The floor ensures
-  the server does not wait longer than the client-side path would have.
-- **Compaction item capture:** when the server emits a compaction item in
-  the response stream, NusaShell captures it and stores it on the
-  conversation as `CompactionBlob`. The next turn replays it as a prefix
-  of the request's `input` array via the `compaction_items` provider
-  option. The server then truncates context before the last compaction
-  item automatically.
-- **Epoch anchor:** a natively compacted epoch can legitimately hold no
-  user message, so `CompactionBlob` is also its persistence anchor: the
-  transcript still saves, stays in the Agent room list, and keeps accepting
-  peer messages/announcements. When the room continues on a provider kind
-  that cannot replay the checkpoint (Chat/Messages/Gemini), the request
-  replaces the blob with a synthetic user nudge (`.`) instead. The nudge is
-  request-only and is never persisted.
-- **No fallback:** server-side compaction runs in-stream; there is no
-  separate endpoint call that can fail. If the server does not trigger
-  compaction (context stays under threshold), the conversation continues
-  normally. The client-side summarization path is only used for models
-  that are not server-side eligible.
-- **Compaction model override:** when the chat model is server-side
-  eligible, the `settings.compaction_model` override is skipped. The
-  compaction item is encrypted for the chat model and only that model can
-  read it, so switching to a different model for compaction would
-  invalidate it.
-- **Token estimation:** the backend preflight estimator includes the
-  provider-visible `CompactionBlob` items, with encrypted reasoning sized by
-  their model-visible approximation rather than their encoded byte length.
-  The context badge marks this value as provisional until provider usage is
-  returned.
+Large-context OpenAI Responses models (context window >= 200k — the gpt-5.x,
+gpt-4.1, and o-series families) compact **server-side and in-stream**: past
+the context threshold the server emits an encrypted checkpoint that later
+turns replay, continuing the conversation with pruned context. Automatic;
+no configuration. A compacted conversation still saves and stays in the
+Agent room list even when the retained suffix holds no user message. Models
+below the 200k floor and non-OpenAI providers use the client-side
+multi-pass summarization path, and the compaction-model setting is skipped
+for server-side-eligible chat models — only that model can read its own
+encrypted checkpoint.
 
 ## Codex remote v2 compaction
 
-Codex compaction is a separate pre-turn streaming request, selected by
-provider kind. It is not OpenAI `context_management`.
-
-- **Request:** NusaShell sends a normal streaming `POST /responses` request
-  whose final input item is `{"type":"compaction_trigger"}`. The resulting
-  history records an explicit checkpoint boundary: retained user context is
-  before the opaque `CompactionBlob`, while later user, assistant, reasoning,
-  tool-call, and tool-result items remain after it in causal order.
-- **Result:** the stream must contain exactly one `compaction` output item.
-  Its encrypted content is stored unchanged in `CompactionBlob`, and the
-  conversation starts a new transcript epoch without losing the boundary
-  needed by later turns, tool rounds, reloads, or another compaction. The
-  new epoch keeps only the retained suffix, so it may hold no user message;
-  the checkpoint then anchors the epoch for persistence and room surfaces.
-- **Model:** Codex compaction uses the same provider and model as the active
-  turn. `settings.compaction_model` is not used for this path.
-- **Failure and account routing:** remote compaction has no fallback to the text
-  `summary()` path. Before this separate request, NusaShell reselects the
-  conversation's non-circuit-open Codex account and rebuilds its adapter when
-  needed. A usage-limit 429 opens the failed account's circuit and retries
-  once on another available account. Transport failures use at most two
-  remote-v2 stream retries; a Codex remote-compaction stream may remain idle
-  for five minutes between SSE events, matching Codex upstream rather than the
-  one-minute interactive-stream watchdog.
-- **Wire boundary:** Codex sends its own authentication and session headers
-  and does not receive OpenAI `context_management`.
+Codex compacts through its own backend flow — a separate pre-turn request,
+not the OpenAI in-stream compaction above. It is automatic and uses the same model as
+the active turn, producing the same encrypted-checkpoint replay described
+above; a usage-limit 429 during it fails over to another available Codex
+account.
 
 ## Upstream provider routing (OpenRouter)
 
-Aggregator gateways (OpenRouter) may serve one model from several upstream
-providers, and by default load-balance across them per request. That causes
-silent provider switching between turns and prompt-cache misses. NusaShell
-lets the user pin one upstream per model (fail-closed) or leave routing to
-the gateway (Auto).
+Aggregator gateways (OpenRouter) may serve one model from several upstreams
+and load-balance across them per request — silent provider switching and
+prompt-cache misses between turns. The user can pin one upstream per model
+(fail-closed) or leave routing to the gateway (Auto).
 
-- **Data source:** `GET /models/{slug}/endpoints` (one request per model;
-  there is no bulk endpoint). The lookup slug is the imported
-  `canonical_slug` (falling back to the model ID) plus any request
-  variant on the model ID (`:free`, `:batch`, …). OpenRouter's
-  `canonical_slug` is the undated identity shared by paid and free
-  siblings, so listing endpoints without the variant returns the paid
-  route list. Response `tag` fields are the routing slugs used in
-  `provider.order`.
-- **RPC:** `ai.models.endpoints {provider_id, model_id}` returns
-  `{routes:[{slug,name,quantization,status,latency,throughput,input_cost,
-  output_cost}], cached, fetched_at}`. `input_cost` and `output_cost` are
-  USD per 1M input/output tokens from the endpoint's
-  `pricing.prompt`/`pricing.completion`; omitted values mean the gateway did
-  not provide usable pricing, while zero is an explicit free price. Routes
-  are cached on disk under the data dir (`endpoints_cache.json`, TTL 24h),
-  keyed per provider+model because each gateway serves models with its own
-  upstream set. The cache schema version changes when route fields change so
-  stale entries are refetched. `latency` is the rolling 30m **p50 in
-  milliseconds** and `throughput` the p50 tokens/sec (the gateway serves
-  these as percentile objects `{"p50":...}` when authenticated, or plain
-  numbers/null; the parser accepts both shapes).
+- **Data source:** `GET /models/{slug}/endpoints` on the gateway (one
+  request per model; no bulk endpoint). The lookup slug is the imported
+  `canonical_slug` plus any request variant on the model ID (`:free`,
+  `:batch`, …); without the variant the paid route list is returned.
+- **Route fields:** slug, name, quantization, status, p50 latency (ms), p50
+  throughput (tokens/sec), and USD per-1M-token input/output costs — an
+  omitted cost means no usable pricing, zero is an explicit free price.
+  Route lists are cached on disk per provider+model (each gateway serves its
+  own upstream set).
 - **Direct providers** (Anthropic, OpenAI, local chat) have no route
-  concept: the handler returns an empty list without fetching, and the
-  frontend shows a non-interactive home icon next to the model picker.
+  concept — the UI shows a non-interactive home icon next to the model
+  picker.
 - **Hosts without an endpoints API** (OpenCode, some aggregators) may still
-  advertise `route_support` when their driver is OpenRouter. Listing then
-  returns HTTP 4xx HTML; NusaShell skips that body and shows an empty list
-  titled "No provider in this model". HTTP 5xx is also skipped without
-  caching so a later refresh can recover. Non-HTTP fetch errors still
-  surface as `PROVIDER_ERROR`.
-- **Pinning wire:** when a conversation has a non-empty `provider_route`
-  and the provider is a chat-kind OpenRouter gateway, the adapter sends
+  show a route picker; listing then fails quietly and the picker shows an
+  empty "No provider in this model" list, while transient fetch failures
+  surface as provider errors.
+- **Pinning:** a pinned route on a chat-kind OpenRouter gateway is sent as
   `provider: {order: [route], allow_fallbacks: false}` — a hard pin: if
   the upstream is unavailable or blocked at the account level, the request
   fails (404 "No endpoints found") instead of silently falling back to
-  another provider. Auto (empty route) sends no provider object, so
-  OpenRouter's load balancing applies.
-- **Persistence:** `provider_route` is stored on the conversation (like
-  `effort`) and sent in `agent.turns.start` / `agent.turns.retry`. For Codex
-  it contains the selected account ID; for OpenRouter it contains the
-  upstream slug. The frontend keeps this state per room, never as a global
-  browser preference. Switching models resets it to Auto because both route
-  slugs and account applicability are model/provider-specific.
+  another provider. Auto sends no provider object, so OpenRouter's load
+  balancing applies.
+- **Per room:** the pin is stored per room, never as a global preference —
+  for OpenRouter it holds the upstream slug, for Codex the account ID.
+  Switching models resets it to Auto because both route slugs and account
+  applicability are model/provider-specific.
 - **Blocked upstreams:** account-level ignored providers still appear in
   the route list (the endpoints API is unaware of account privacy
   settings); pinning one yields a 404 the UI surfaces as a fetch hint.

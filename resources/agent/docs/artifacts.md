@@ -27,7 +27,7 @@ diagram is cheaper and renders inline.
 1. `file_write(path="/abs/path/game.html", content="<!DOCTYPE html>...")` —
    write the full HTML document to disk. Inline `<style>` and `<script>`
    tags, or link CDNs.
-2. `show(op="html", path="/abs/path/game.html", width=640, height=480)` —
+2. `show(op="html", path="/abs/path/game.html", height=480)` —
    render it in a sandboxed iframe in the UI.
 3. To edit: `file_read(path=...)` to inspect, then `file_patch(path=...,
    old_string="...", new_string="...")` for targeted edits, then `show`
@@ -35,26 +35,26 @@ diagram is cheaper and renders inline.
 4. To inspect: `file_read(path=...)`.
 5. To delete: `file_delete(path=...)`.
 
-`show` returns `{ "artifact": { html, width, height, title } }` — the same
-shape the frontend expects, so the iframe renders immediately.
+`show` returns `{ "artifact": { path, width, height, title } }` — metadata
+only, never the HTML body. The card mounts the iframe lazily on user click;
+the frontend fetches the file from disk at that point.
 
 ## Sizing guide
 
-`width` and `height` control the iframe viewport (html only, default
-720x400). The iframe fills the thread width (CSS `width: 100%`), so
-`width` controls the max rendering width and `height` controls the
-visible viewport. Pick the smallest size that comfortably fits the
-content.
+`height` controls the iframe viewport height (html only, default 400).
+`width` is accepted but visually inert — the card CSS always renders the
+iframe at `width: 100%`, filling the thread width. Pick the smallest height
+that comfortably fits the content.
 
-| Content type | width | height | Notes |
-|---|---|---|---|
-| Prototype / minigame | 640 | 480 | Classic 4:3, fits most game loops |
-| Dashboard / charts | 720 | 400 | Wider for side-by-side panels |
-| Widget / calculator | 360 | 480 | Narrow, phone-like |
-| Timeline / list | 640 | 600 | Tall scrollable content |
-| Full-page demo | 800 | 600 | When the artifact is the main output |
+| Content type | height | Notes |
+|---|---|---|
+| Prototype / minigame | 480 | Classic 4:3 feel, fits most game loops |
+| Dashboard / charts | 400 | Side-by-side panels |
+| Widget / calculator | 480 | Phone-like height |
+| Timeline / list | 600 | Tall scrollable content |
+| Full-page demo | 600 | When the artifact is the main output |
 
-When in doubt, use 640x480.
+When in doubt, use `height=480`.
 
 ## Token budget
 
@@ -72,23 +72,24 @@ available at `/vendor/...` paths inside the iframe.
       path="/tmp/pong.html",
       content="<!DOCTYPE html><html><body><canvas id='c'></canvas><script>/* minigame loop */</script></body></html>",
     )
-    show(op="html", path="/tmp/pong.html", width=640, height=480)
+    show(op="html", path="/tmp/pong.html", height=480)
 
     file_write(
       path="/tmp/dashboard.html",
       content="<!DOCTYPE html><html><body><div id='chart'></div><script src='https://cdn.jsdelivr.net/npm/chart.js'></script><script>/* render */</script></body></html>",
     )
-    show(op="html", path="/tmp/dashboard.html", width=720, height=400)
+    show(op="html", path="/tmp/dashboard.html", height=400)
 
     # Targeted edit after reading the file:
     file_patch(path="/tmp/pong.html", old_string="ballSpeed=2", new_string="ballSpeed=3")
-    show(op="html", path="/tmp/pong.html", width=640, height=480)
+    show(op="html", path="/tmp/pong.html", height=480)
 
 ## Images
 
 For static images (PNG, JPEG, WebP, GIF), use `show(op="image",
-path="/abs/path/image.png")`. The image is read from disk and rendered
-inline as a data URL. No width/height needed — the image renders at its
+path="/abs/path/image.png")`. The image stays on disk — the tool result is
+metadata only and the frontend renders it inline.
+No width/height needed — the image renders at its
 natural size.
 
 ## What not to do

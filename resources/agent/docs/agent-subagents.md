@@ -7,44 +7,29 @@ tool returns immediately with YAML frontmatter listing the spawned runs
 and the tool call is marked `running` in the conversation. The parent
 agent is free to continue other work — it does not block on the
 subagent. A spawn rejected before the session opens (unreachable agent,
-initialize/session/mode rejection, cancelled context) still returns its
+unsupported mode, or a cancelled call) still returns its
 `runs:` entry — `status: failed` with `id`, `title`, `workspace`, and
 `error` — and follows the same async completion flow below, so the
 attempt stays visible in the run list and the tool call never stalls.
 
 ## Internal delegate target
 
-`subagent(agent_id="internal")` runs the task on a local NusaShell background
-agent. It uses the same AgentEngine and standard toolbox in a hidden pipeline
-conversation, but it is not an ACP subprocess and it cannot spawn another
-subagent. It receives only the self-contained prompt and workspace supplied
-by the parent.
+`subagent(agent_id="internal")` runs the task on a local background agent
+with the standard toolbox; it cannot spawn another subagent, and it
+receives only the self-contained prompt and workspace supplied by the
+parent.
 
 The delegate model is configured in Settings → Agent → Internal delegate
 model. An empty setting inherits the active model of the parent conversation;
 an explicit value uses the provider:model selection from Settings. The
-delegate has its own system prompt in
-resources/agent/prompts/delegate-agent.md because its role is to execute to
-completion, not to behave like the interactive parent or an Automation step.
+delegate works to completion and resumes open checklists automatically.
 
-The delegate prompt instructs it to use the `todo` tool for multi-step work:
-mark an item in-progress before working on it, complete it only after the
-work is verified, keep statuses current, and do not return a final response
-while assigned work remains incomplete. When a continuation notice appears
-(the harness is resuming the chain after an open checklist), the delegate
-resumes the open TODO items, reconciles them with verified prior work, and
-verifies before finishing.
+Both targets appear identically in the run UI and support the `steer`,
+`stop`, and `wait` ops.
 
-Internal delegate runs use the same ACP-shaped run events and DTOs as ACP
-runs. Therefore the Agent dock, run card, drawer, popup, transcript
-hydration, recent-run behavior, and scroll-follow behavior are identical for
-both targets. The backend only differs in how the run is executed, and the
-`subagent` ops `steer` / `stop` / `wait` work on both.
-
-The delegate result must be the terminal assistant message from the hidden
-conversation, after all tool rounds have completed. An intermediate
-acknowledgement such as “I will inspect the file” is transcript content only;
-it must never become the subagent_result output returned to the parent.
+The delegate result is the final assistant answer after all its work is
+done; an intermediate acknowledgement such as “I will inspect the file”
+is never delivered as the `subagent_result` output.
 
 Good example:
 
@@ -80,7 +65,7 @@ prompt focused on the delegated slice; the plan file carries the shared
 context.
 
 For an internal delegate (`agent_id="internal"`), the plan file lives
-outside the child's hidden conversation workspace, so NusaShell inlines
+outside the child's workspace, so NusaShell inlines
 only the compact Objective + Done when summary into the spawn prompt and
 never advertises a plan file path the delegate cannot read. The explicit
 parent prompt stays authoritative; the inline summary carries the
@@ -107,51 +92,17 @@ and drawer show that label instead of the bare worker agent name so the
 user can tell what each run is for. With `count` > 1, titles are auto-suffixed
 `(1)`, `(2)`, ….
 
-A dock appears above the composer: chips for every live run (and recent
-finishes in this room), newest first — live delta updates never
-reshuffle chips under the cursor. Live chips show the phase (`thinking`,
-`tool`, or `finalizing`) and elapsed time; when no transcript delta arrives,
-the last-event age makes a stalled connection distinguishable from normal
-provider work. Click a chip for the right-hand drawer
-(all parallel spawns), or peek one run in a popup. Both surfaces stream
-the transcript live, patched in place like the conversation thread
-(auto-follows the bottom while you're at the bottom; your scroll
-position is never reset by incoming updates). After reconnect, a current run
-snapshot restores the dock before live updates resume. A run list response
-that was requested before a reconnect or room switch, or that predates a newer
-live update for the same run, is ignored; a terminal status is never reverted
-to running by a stale response, and a run waiting for permission still counts
-as live. A missed live update is repaired by the next snapshot. Completed runs stay
-reopenable from their delegation card or the drawer for as long as the
-conversation exists — the drawer lists every run of the room, settled
-included. The user is an observer: steer, stop, mode change, and risk
-promotion are handled by the orchestrator (parent agent), not the user.
-Permissions are auto-allowed — the orchestrator delegates authority
+The user is an observer of subagent runs: steer, stop, mode change, and
+risk promotion are handled by the parent agent, not the user.
+Permissions are auto-allowed — the parent delegates authority
 when it spawns a subagent.
-
-The drawer and peek transcript use the same Agent conversation structure as
-the parent room. The initial delegation brief is shown as a user bubble, and
-each steering prompt that reaches the ACP session (after an interrupt cancel)
-is recorded as another user bubble before the assistant rounds that follow it.
-Steering text is persisted with the terminal run, so it remains visible when
-the room is reopened after a backend restart.
-
-Tool rows carry the input and output the ACP agent reports. The action line
-shows the primary `rawInput` argument (path, command, query); the result box
-shows `rawOutput`, or the structured `content` blocks flattened to text
-(diffs render as `-`/`+` lines). Agents that never send these fields keep the
-earlier title/status-only row, and the raw fold still carries the
-unprocessed payloads.
 
 ## Async completion (tool injection)
 
 When a subagent finishes (completed, failed, or cancelled):
 
-1. The full transcript is persisted to
-   `conversations/<conversation_id>/acp/<run_id>.json` under the data
-   directory — one JSON file per run, linked to the parent conversation.
-   Writes are atomic and per-run, so parallel spawns finishing at the
-   same time never contend on a shared file.
+1. The run's full transcript is written to disk; its path is reported
+   back to the parent as `output_path`.
 2. The original `subagent` tool call is updated from `running` to
    `ok`/`fail` with a brief terminal status (the full output travels in
    the synthetic `subagent_result` tool call below — old history is
@@ -159,55 +110,27 @@ When a subagent finishes (completed, failed, or cancelled):
 3. A synthetic `subagent_result` tool call carrying the full result
    (YAML frontmatter with `status` / `id` / `workspace` / `output_path`
    plus the subagent's last-turn text summary) is injected into the
-   conversation, announcement-style. It is persisted as a normal
-   assistant tool call so the model sees it in fresh context and in
-   later turns (auto-continue) too. If the parent is still in a turn,
-   completion is queued and injected at the next tool-round boundary,
-   before a queued user steer. The steer is appended last so the next
-   provider request ends with the user's newest instruction. Auto-continue
-   stays paused (`awaiting-background-jobs`) until that injection lands.
+   conversation, announcement-style, so the model sees it in fresh
+   context and in later turns (auto-continue) too. Finished results are
+   applied before a queued user steer, and the steer is appended last so
+   it stays the newest user instruction.
 4. If the parent is idle, a new parent-agent turn is triggered so the
    parent processes the `subagent_result` without a user message. The
    parent sees that tool call in history and acts on the summary as if
    it had just completed the tool.
 
-Runtime state (delegation config, continuation instructions, subagent
-results) is never appended to the system prompt — it travels as tool
-descriptions or tool hydration so the system prefix keeps its
-prompt-cache hits.
-
-Background/async runs are hydration-aware: the `runtime_context` hydration
-slot lists every active subagent run (ID + spawning tool + worker
-detail), so after a compaction the continuation agent still knows which
-background agents were spawned and are pending — and can correlate each
-`subagent_result` by run ID. Spawn calls and synthetic
-result calls in the recent messages kept after compaction retain their full
-arguments and outputs, like every other kept tool round; older ones are
-covered by the compaction summary.
-
-While any subagent is running, the parent agent's auto-continue chain
-pauses with reason `awaiting-background-jobs` instead of ending the
-turn. When all subagents complete, the chain resumes.
+While any subagent is running, auto-continue pauses instead of ending
+the turn, and it resumes when all runs finish. Spawn calls and their
+result calls survive compaction with full arguments and outputs; older
+history is covered by the compaction summary.
 
 ## Auto-continue TODO rehydration
 
 When the auto-continue chain starts the next turn (open TODOs remain and
-the chain budget is not exhausted), the harness appends a visible
-`announcement` tool card carrying the continuation guidance, then a
-hidden pure-hydration `todo_list` checkpoint with the current open TODO
-items + brief, then the fresh assistant placeholder. The next provider
-request sees: previous assistant output → visible announcement → hidden
-`todo_list` → new assistant placeholder.
-
-The hidden `todo_list` checkpoint uses the `hydrate-` call-ID namespace,
-so the UI, compaction summaries, and experience extraction treat it as
-hidden context (no visible tool card, stripped from compaction). It is a
-separate message from the announcement so a hidden tool card never leaks
-into the visible announcement. When the conversation has no open todos
-(or no todo store), the boundary keeps the old shape: announcement →
-assistant placeholder, with no hidden hydration in between. This applies
-to any conversation chain (interactive parent or internal delegate); the
-delegate's checklist is keyed by its own hidden conversation ID.
+the chain budget is not exhausted), the current open TODO items and the
+continuation guidance are carried into the new turn. On continuation,
+reconcile open todos first: verify what prior work already completed
+before resuming the remaining items.
 
 ## Steering priority and timing
 
@@ -217,7 +140,7 @@ applied at the next safe boundary. `subagent(op="wait")` is intentionally blocki
 so a composer steer can wait for that call to return; this delay does not mean
 the message was dropped.
 
-At a boundary, the parent applies finished background results and harness
+At a boundary, the parent applies finished background results and
 announcements first, then appends the queued composer steer, then starts one
 fresh assistant round. This ordering keeps the steer as the newest user
 instruction. After a steer is applied, re-evaluate the user's request before
@@ -227,10 +150,8 @@ action.
 
 `subagent(op="steer")` is different: it redirects a **child run** by
 cancelling the in-flight work and sending the new text as the next prompt.
-On an ACP session this is interrupt-and-replace (`session/cancel` then
-`session/prompt`); on an internal delegate the text is queued and applied at
-the next tool-round boundary. Prefer the `steer` op when the parent needs
-to change direction mid-work; use the `stop` op only to abandon the run.
+Prefer the `steer` op when the parent needs to change direction
+mid-work; use the `stop` op only to abandon the run.
 
 Good example, steer a child run when the user changes its direction:
 
@@ -246,28 +167,23 @@ latest user steer, then wait only if that revised plan still needs a result.
 
 ## Waiting for results
 
-`subagent` is always async. The harness injects `subagent_result` when
+`subagent` is always async. NusaShell injects `subagent_result` when
 the run finishes. Call `subagent(op="wait")` only when the next action in
 this round cannot proceed without the result; to adjust a live run use the
 `steer` op, and to cancel it use the `stop` op.
 
-When the `wait` op reaches a terminal result, it persists the full run
-before returning. Its tool result contains only `status`, `id`, `workspace`,
-`output_path`, and the last meaningful text turn (or a compact
-failure/cancellation fallback). If no text was produced, the last thought may
-be used as that bounded fallback. A timeout can return a still-running status
-without `output_path`. Read the path only when the full thought/tool
-transcript is needed. The Agent dock and drawer resynchronize from a current
-run snapshot after reconnect, then continue live transcript updates; the tool
-result never carries the full DTO.
+When the `wait` op reaches a terminal result, its tool result contains
+`status`, `id`, `workspace`, `output_path`, and the last meaningful text
+turn (or a compact failure/cancellation fallback; if no text was
+produced, the last thought may be used). A timeout can return a
+still-running status without `output_path`. Read the path only when the
+full thought/tool transcript is needed.
 
-The `steer` and `stop` ops persist compact tool results, not the
-full run DTO. Steer returns `status` / `id` / `workspace` plus
-`Steer accepted.` and does not include last-turn text. Stop returns the
-same bounded completion shape as `wait` (last meaningful turn,
-plus `output_path` when the cancelled run is persisted). The Agent drawer
-resynchronizes from a current run snapshot after reconnect; read `output_path`
-only when the full thought/tool transcript is needed.
+Steer returns `status` / `id` / `workspace` plus `Steer accepted.` and
+does not include last-turn text. Stop returns the same bounded
+completion shape as `wait` (last meaningful turn, plus `output_path`
+when the cancelled run has been persisted). Read `output_path` only
+when the full thought/tool transcript is needed.
 
 Good example — wait with a bounded timeout:
 
@@ -280,35 +196,26 @@ Bad example — polling in a sleep loop:
 
 ## Workspace and permissions
 
-`edit_confirmed` auto-allows edit/delete/move only when every path stays
-inside the bound workspace; slash-rooted paths (`/etc/passwd`, `\Windows\…`)
+Edit/delete/move is auto-allowed only when every path stays inside the
+bound workspace; slash-rooted paths (`/etc/passwd`, `\Windows\…`)
 are treated as absolute even on Windows and never join onto the workspace.
-Local stdio workspaces and tool paths are checked after resolving symlink
+Workspace and tool paths are checked after resolving symlink
 aliases, so a bind through `/home/...` and a target under `/media/...` can
 refer to the same physical workspace. A symlink that escapes the workspace
-is rejected. Existing runs keep the canonical workspace they bound at spawn;
+is rejected. Existing runs keep the workspace they bound at spawn;
 new spawns follow the current conversation workspace unless the tool
 overrides it.
 
-`bypass` (yolo) is never the default — promote it from the live subagent UI.
-For a live `bypass` session on a **local stdio** ACP run only, FS callbacks
-(`fs/read_text_file`, `fs/write_text_file`) may resolve absolute host paths
-outside the workspace, matching the explicit full-filesystem grant. The
-escape is attributed to the matching live run only: session attribution is
-required, so an unknown `SessionID` (or a session on a different pooled
-connection) resolves as contained and fails closed. Lower tiers
-(`read_only`, `edit_confirmed`) always use the contained resolver and reject
-outside paths. Remote (cloud) ACP transports cannot use the host callback
-escape at any tier — their filesystem is their own, and absolute paths stay
-contained on the NusaShell side.
+Full-filesystem bypass is never the default — the user promotes it from
+the live subagent UI. Only a promoted local run may resolve host paths
+outside its workspace; every other run keeps the contained resolver and
+rejects outside paths, and remote (cloud) subagents keep their own
+filesystem at every tier.
 
-The configured preferred ACP mode is applied before the first prompt. If the
-ACP agent rejects that mode switch, spawning fails explicitly; the runtime
+The configured preferred mode is applied before the first prompt. If the
+subagent rejects that mode switch, spawning fails explicitly; the runtime
 does not silently continue with a different, potentially more restrictive
 mode.
 
-Stdio framing is newline-delimited JSON-RPC. Do not expect LSP
-`Content-Length` headers; the ACP spec rejects them as invalid JSON.
-
-Pipeline `agent:` steps never advertise `subagent`. The tool requires an
-interactive context; unattended FireDue must not wait on it.
+Pipeline `agent:` steps never offer `subagent`; unattended runs cannot
+spawn or wait on subagents.

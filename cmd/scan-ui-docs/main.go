@@ -16,12 +16,20 @@
 //   - a <section data-view="..."> in the HTML has no entry in ui-map.json
 //   - a ui-map.json view (without chrome:true) has no matching data-view
 //   - a mapped control ID is not found in the frontend source (HTML or JS)
+//   - a section's controls array references an ID with no controls map
+//     entry (generation mode still emits a stub and warns on stderr)
+//   - a controls map entry is never referenced by any section (orphan;
+//     generation mode warns on stderr)
+//
+// It also prints advisory coverage warnings for element IDs inside
+// data-view sections that are not in the map; warnings never fail.
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -67,7 +75,23 @@ var (
 	// Matches $("#id"), document.getElementById("id"),
 	// document.querySelector("#id"), document.querySelectorAll("#id").
 	jsIDRegex = regexp.MustCompile(`(?:\$|querySelector(?:All)?)\s*\(\s*["']#([^"']+)["']\s*\)|getElementById\s*\(\s*["']([^"']+)["']\s*\)`)
+	// Tokenizer for the coverage scan: section open/close tags and any
+	// element tag carrying an id attribute, in document order.
+	htmlTokenRegex = regexp.MustCompile(`<section\b[^>]*>|</section\s*>|<([a-zA-Z0-9]+)\b[^>]*\bid="([^"]+)"[^>]*>`)
+	dataViewRegex  = regexp.MustCompile(`\bdata-view="([^"]+)"`)
+	roleRegex      = regexp.MustCompile(`\brole="([^"]+)"`)
 )
+
+// structuralTypes are control types that only group or frame other controls;
+// a bullet is skipped when such a control has neither an action nor notes
+// because it carries no agent-usable information.
+var structuralTypes = map[string]bool{
+	"container": true,
+	"panel":     true,
+	"dialog":    true,
+	"heading":   true,
+	"tab":       true,
+}
 
 func main() {
 	repoRoot := flag.String("repo-root", ".", "repository root (defaults to cwd)")
@@ -75,29 +99,42 @@ func main() {
 	outDir := flag.String("out-dir", "", "output directory for ui-*.md (defaults to <repo-root>/resources/agent/docs)")
 	flag.Parse()
 
-	root, err := filepath.Abs(*repoRoot)
+	os.Exit(run(*repoRoot, *outDir, *check, os.Stdout, os.Stderr))
+}
+
+// run executes the generator and returns the process exit code. In check
+// mode it compares committed ui-*.md against generated content instead of
+// writing files. Map-hygiene defects (missing section control references,
+// orphaned controls entries) fail -check; in generation mode they only
+// warn so docs still render. Coverage warnings never fail.
+func run(repoRoot, outDir string, check bool, stdout, stderr io.Writer) int {
+	root, err := filepath.Abs(repoRoot)
 	if err != nil {
-		fail("resolve repo root: %v", err)
+		fmt.Fprintf(stderr, "scan-ui-docs: resolve repo root: %v\n", err)
+		return 1
 	}
 	uiMapPath := filepath.Join(root, "resources", "agent", "docs", "ui-source", "ui-map.json")
 	htmlPath := filepath.Join(root, "frontend", "index.html")
 	jsDir := filepath.Join(root, "frontend", "js")
-	dest := *outDir
+	dest := outDir
 	if dest == "" {
 		dest = filepath.Join(root, "resources", "agent", "docs")
 	}
 
 	b, err := os.ReadFile(uiMapPath)
 	if err != nil {
-		fail("load ui-map: %v", err)
+		fmt.Fprintf(stderr, "scan-ui-docs: load ui-map: %v\n", err)
+		return 1
 	}
 	var m uiMap
 	if err := json.Unmarshal(b, &m); err != nil {
-		fail("parse ui-map: %v", err)
+		fmt.Fprintf(stderr, "scan-ui-docs: parse ui-map: %v\n", err)
+		return 1
 	}
 	html, err := os.ReadFile(htmlPath)
 	if err != nil {
-		fail("read html: %v", err)
+		fmt.Fprintf(stderr, "scan-ui-docs: read html: %v\n", err)
+		return 1
 	}
 	var jsFiles []string
 	err = filepath.WalkDir(jsDir, func(path string, d os.DirEntry, err error) error {
@@ -110,7 +147,8 @@ func main() {
 		return nil
 	})
 	if err != nil {
-		fail("walk js: %v", err)
+		fmt.Fprintf(stderr, "scan-ui-docs: walk js: %v\n", err)
+		return 1
 	}
 	sort.Strings(jsFiles)
 	jsSources := make([]string, 0, len(jsFiles))
@@ -152,7 +190,7 @@ func main() {
 		sourceIDs[k] = true
 	}
 
-	var errors []string
+	var errors, warnings []string
 
 	for v := range htmlViews {
 		if _, ok := m.Views[v]; !ok {
@@ -185,13 +223,44 @@ func main() {
 		}
 	}
 
+	// Map hygiene: section control references with no dict entry, and dict
+	// entries no section references. Both are map defects: -check fails so
+	// they cannot regress; generation keeps rendering (missing refs emit
+	// stubs) and reports them as warnings instead.
+	for _, r := range missingControlRefs(m) {
+		msg := fmt.Sprintf(`ui-map.json view %q section %q references control %q which has no entry in the controls map.`, r.view, r.heading, r.id)
+		if check {
+			errors = append(errors, msg)
+		} else {
+			warnings = append(warnings, "warning: "+msg)
+		}
+	}
+	for _, id := range orphanedControls(m) {
+		msg := fmt.Sprintf(`ui-map.json control %q is never referenced by any view section (orphaned entry).`, id)
+		if check {
+			errors = append(errors, msg)
+		} else {
+			warnings = append(warnings, "warning: "+msg)
+		}
+	}
+
+	// Advisory-only coverage heuristic: interactive element IDs inside
+	// data-view sections that are absent from the controls map may indicate
+	// undocumented controls. The heuristic may produce false positives (and
+	// misses non-interactive surfaces); it never fails the gate.
+	unmapped := unmappedElementIDs(string(html), m.Controls)
+	for _, v := range sortedKeys(unmapped) {
+		ids := unmapped[v]
+		warnings = append(warnings, fmt.Sprintf("coverage warning: %d unmapped element ids in %s (%s)", len(ids), v, strings.Join(ids, ", ")))
+	}
+
 	// Render and either write or compare each view.
 	viewIDs := sortedKeys(m.Views)
 	generated := 0
 	for _, id := range viewIDs {
 		content := renderView(id, m.Views[id], m.Controls)
 		target := filepath.Join(dest, "ui-"+id+".md")
-		if *check {
+		if check {
 			existing, err := os.ReadFile(target)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("check: %s: %v", target, err))
@@ -203,28 +272,157 @@ func main() {
 			generated++
 		} else {
 			if err := os.MkdirAll(dest, 0o755); err != nil {
-				fail("mkdir %s: %v", dest, err)
+				fmt.Fprintf(stderr, "scan-ui-docs: mkdir %s: %v\n", dest, err)
+				return 1
 			}
 			if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
-				fail("write %s: %v", target, err)
+				fmt.Fprintf(stderr, "scan-ui-docs: write %s: %v\n", target, err)
+				return 1
 			}
 			generated++
 		}
 	}
 
+	for _, w := range warnings {
+		fmt.Fprintln(stderr, w)
+	}
 	if len(errors) > 0 {
-		fmt.Fprintln(os.Stderr, "UI docs validation failed:")
+		fmt.Fprintln(stderr, "UI docs validation failed:")
 		for _, e := range errors {
-			fmt.Fprintf(os.Stderr, "  - %s\n", e)
+			fmt.Fprintf(stderr, "  - %s\n", e)
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	mode := "generated"
-	if *check {
+	if check {
 		mode = "checked"
 	}
-	fmt.Printf("UI docs %s: %d views (scanned %d JS files in %s)\n", mode, generated, len(jsFiles), filepath.Join("frontend", "js"))
+	fmt.Fprintf(stdout, "UI docs %s: %d views (scanned %d JS files in %s)\n", mode, generated, len(jsFiles), filepath.Join("frontend", "js"))
+	return 0
+}
+
+// controlRef identifies one "view/heading/id" triple where a section's
+// controls array references a controls map key that does not exist.
+type controlRefIssue struct {
+	view, heading, id string
+}
+
+// missingControlRefs returns every section-referenced control ID that has
+// no entry in the controls map, in deterministic order.
+func missingControlRefs(m uiMap) []controlRefIssue {
+	var out []controlRefIssue
+	for _, vid := range sortedKeys(m.Views) {
+		for _, s := range m.Views[vid].Sections {
+			for _, cid := range s.Controls {
+				if _, ok := m.Controls[cid]; !ok {
+					out = append(out, controlRefIssue{view: vid, heading: s.Heading, id: cid})
+				}
+			}
+		}
+	}
+	return out
+}
+
+// orphanedControls returns controls map entries never referenced by any
+// section's controls array — they render nowhere, so their documentation
+// is invisible.
+func orphanedControls(m uiMap) []string {
+	referenced := map[string]bool{}
+	for _, v := range m.Views {
+		for _, s := range v.Sections {
+			for _, cid := range s.Controls {
+				referenced[cid] = true
+			}
+		}
+	}
+	var out []string
+	for id := range m.Controls {
+		if !referenced[id] {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// unmappedElementIDs scans the HTML for element IDs located inside
+// <section data-view="..."> regions (tracked with a nesting-aware stack)
+// that are absent from the controls map. Only elements a user can interact
+// with — buttons, inputs, selects, textareas, links, and interactive ARIA
+// roles — are reported; container/label/heading elements are treated as
+// obvious structural markup and skipped.
+//
+// This is an advisory heuristic only: it may produce false positives and
+// false negatives, so callers must surface it as a warning, never an error.
+func unmappedElementIDs(html string, controls map[string]uiControl) map[string][]string {
+	var stack []string // innermost-first irrelevant; "" marks non-data-view sections
+	enclosing := func() string {
+		for i := len(stack) - 1; i >= 0; i-- {
+			if stack[i] != "" {
+				return stack[i]
+			}
+		}
+		return ""
+	}
+	out := map[string][]string{}
+	seen := map[string]map[string]bool{}
+	record := func(view, tag, id, attrs string) {
+		if view == "" || id == "" || !interactiveElement(tag, attrs) {
+			return
+		}
+		if _, ok := controls[id]; ok {
+			return
+		}
+		if seen[view] == nil {
+			seen[view] = map[string]bool{}
+		}
+		if seen[view][id] {
+			return
+		}
+		seen[view][id] = true
+		out[view] = append(out[view], id)
+	}
+	for _, tm := range htmlTokenRegex.FindAllStringSubmatch(html, -1) {
+		tok := tm[0]
+		switch {
+		case strings.HasPrefix(tok, "</section"):
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case strings.HasPrefix(tok, "<section"):
+			// A section's own id belongs to the enclosing view, not itself.
+			if im := htmlIDRegex.FindStringSubmatch(tok); len(im) > 1 {
+				record(enclosing(), "section", im[1], tok)
+			}
+			if dv := dataViewRegex.FindStringSubmatch(tok); len(dv) > 1 {
+				stack = append(stack, dv[1])
+			} else {
+				stack = append(stack, "")
+			}
+		default:
+			record(enclosing(), tm[1], tm[2], tok)
+		}
+	}
+	return out
+}
+
+// interactiveElement reports whether an element is one a user can act on —
+// either an interactive tag or an element with an interactive ARIA role.
+// Everything else (divs, spans, headings, panel containers...) is treated
+// as structural markup for coverage purposes.
+func interactiveElement(tag, attrs string) bool {
+	switch strings.ToLower(tag) {
+	case "button", "input", "select", "textarea", "a", "summary":
+		return true
+	}
+	if rm := roleRegex.FindStringSubmatch(attrs); len(rm) > 1 {
+		switch rm[1] {
+		case "button", "link", "tab", "switch", "checkbox", "radio", "menuitem", "option", "combobox", "slider", "spinbutton", "textbox", "searchbox", "treeitem":
+			return true
+		}
+	}
+	return false
 }
 
 // containsSelector reports whether any JS source mentions the CSS selector
@@ -284,13 +482,22 @@ func renderView(id string, v uiView, controls map[string]uiControl) string {
 				lines = append(lines, fmt.Sprintf("- **`#%s`** (missing map entry)", cid), "")
 				continue
 			}
+			// Skip purely structural controls that carry no action and no
+			// notes — the bullet only repeats the map ID. Any action or
+			// notes make a control worth documenting regardless of type.
+			if c.Action == "" && c.Notes == "" && structuralTypes[c.Type] {
+				continue
+			}
 			label := c.Label
 			if label == "" {
 				label = cid
 			}
 			var cl []string
 			cl = append(cl, fmt.Sprintf("- **%s** (%s):", label, controlRef(cid, c)))
-			if c.Section != "" {
+			// Drop the Section field when it merely repeats an ancestor
+			// heading in this document (the view title or the enclosing
+			// section heading); keep it when it names a distinct region.
+			if c.Section != "" && c.Section != title && c.Section != s.Heading {
 				cl = append(cl, "  - Section: "+c.Section)
 			}
 			if c.Type != "" {
@@ -321,9 +528,4 @@ func renderView(id string, v uiView, controls map[string]uiControl) string {
 		}
 	}
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
-}
-
-func fail(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "scan-ui-docs: "+format+"\n", args...)
-	os.Exit(1)
 }

@@ -29,17 +29,13 @@ Example (agent tool):
                    headers={"Authorization": "Bearer <token>"})
 
 stdio servers require `command`; SSE/HTTP servers require an
-`http(s)` URL; other values are rejected at save time. When editing an
-existing server via `plugin.save` without a `transport` field, its
-current transport is kept — remote servers are never silently degraded
-back to stdio.
+`http(s)` URL; other values are rejected at save time.
 
-It is stored as `plugins/<id>/manifest.json` exactly like a catalog
-installed plugin. Plugins with `mcp.autostart` (the Plugins drawer toggle)
-are connected when the Go process starts, so automation workflows and the agent
-toolbox can use those tools immediately. Other plugins stay lazy: the first
-tool listing or **Start** (`plugin.test`) opens the connection. **Stop**
-(`plugin.stop`) drops the cached connection and **Restart** stops then starts.
+Manual servers are stored like installed plugins (see Storage below). The
+Plugins drawer's **Auto start** toggle connects them at startup, so
+automation workflows and the agent toolbox can use those tools immediately.
+Other plugins stay lazy: the first tool listing or **Start** opens the
+connection; **Stop** drops it and **Restart** stops then starts.
 
 ## Tool exposure
 
@@ -134,13 +130,12 @@ params: {type: "github.pull_request", action: "opened"}
 ```
 
 `notifications/message` is the MCP logging notification method, not a generic
-business-event envelope. NusaShell still accepts its old message-shaped payload
-as a deprecated compatibility bridge for older messaging plugins only. That
-bridge requires a matching connected server/plugin ID, nonempty `chat_id` and
-`message_id`, and an explicit `from_me: false`; it must not be used for trading,
-GitHub, or new publishers. Logging-shaped `notifications/message` payloads are
-ignored. The Telegram bridge can be overhauled separately; new integrations
-should target `notifications/nusashell/event` now.
+business-event envelope. NusaShell accepts its message-shaped payload only as
+a legacy messaging bridge for older messaging plugins: it requires a matching
+connected server/plugin ID, nonempty `chat_id` and `message_id`, and an
+explicit `from_me: false`, and it must not be used for trading, GitHub, or new
+publishers. Logging-shaped `notifications/message` payloads are ignored. New
+integrations target `notifications/nusashell/event`.
 
 See Automation → Event-driven workflows for trigger and side-effect guidance.
 As an agent you do not act on notifications directly — the automation engine
@@ -160,11 +155,11 @@ Good example:
     mcp_call(ref="nusashell.files:read", arguments_json={"path": "/home/user/a.txt"})  # executes the tool
 
 `arguments_json` is a JSON **object** matching the tool's parameters schema
-(canonical form). Omit it for parameterless tools; the legacy escaped-string
-form from older versions is still accepted for compatibility. If a tool
-declares required fields and the call arrives with empty arguments, the
-runtime rejects it with `MISSING_ARGS: <ref> requires [<fields>]; load
-tool_schema and retry with arguments_json as a JSON object`.
+(canonical form). Omit it for parameterless tools; a JSON-encoded string
+form is also accepted. If a tool declares required fields and the call
+arrives with empty arguments, the runtime rejects it with `MISSING_ARGS:
+<ref> requires [<fields>]; load tool_schema and retry with arguments_json
+as a JSON object`.
 
 Each `mcp_call` is bounded by `timeout_ms` — default **30000** (30s),
 max **3600000** (1h). A stdio server that hangs holds the call only up to
@@ -218,18 +213,16 @@ Bad example — writing the tool call as text instead of using `mcp_call`:
 The Plugins view is the single catalog for all plugins: manual MCP
 servers, MCP-only plugins, and MCP + UI plugins. Select an entry to test,
 stop, restart, edit/delete (manual MCP entries), uninstall, or open the UI
-for an MCP + UI plugin. RPC methods are `plugin.list`, `plugin.save`,
-`plugin.test`, `plugin.stop`, `plugin.delete`, `plugin.uninstall`,
-`plugin.catalog`, `plugin.install`.
+for an MCP + UI plugin.
 
 ## Installing plugins
 
 The Plugins view has an **Install plugin** dialog with three sources:
 
-- **Catalog** — official first-party plugins from the NusaShell catalog
-  (`plugin.catalog`). Each entry shows name, version, icon and description;
-  search filters the list as you type. Installing replaces an existing
-  install of the same plugin.
+- **Catalog** — official first-party plugins from the NusaShell catalog.
+  Each entry shows name, version, icon and description; search filters the
+  list as you type. Installing replaces an existing install of the same
+  plugin.
 - **GitHub** — install from a repository URL or `owner/repo` shorthand.
   Optional *subdirectory* targets a plugin inside a monorepo; optional *ref*
   pins a branch or tag (defaults to the repository default branch).
@@ -237,17 +230,46 @@ The Plugins view has an **Install plugin** dialog with three sources:
   the plugin in a single top-level directory or place `manifest.json` at the
   root; it must contain exactly one `manifest.json`.
 
-Installing downloads to a temporary staging directory, validates the
-manifest, and copies the plugin into `plugins/<id>/` under the data
-directory. The existing plugin with the same id is replaced. The mail plugin
-is not available for install in the Go port. Plugins whose archive includes
-`node_modules/` keep it; `.git` directories and symlinks are skipped during
-the copy.
+Installing validates the archive's manifest and replaces an existing plugin
+with the same id. The mail plugin cannot be installed.
+
+## Agent plugin management
+
+The agent-side management tools complement the Plugins view:
+
+- `mcp_install(source="catalog", id="<catalog-id>")` installs a catalog
+  plugin; `mcp_install(source="github", url="owner/repo")` installs from
+  GitHub (optional `subdir` and `ref`). After install, call `mcp_enable`
+  with the returned plugin id.
+- `mcp_register(source)` registers a plugin from an absolute local folder
+  containing `manifest.json` and replaces an existing id — check `mcp_list`
+  and ask the user before replacing. For a generic MCP server with no
+  manifest, use `mcp_server_add` instead.
+- `mcp_disable(id)` stops the plugin's connection; the definition stays
+  installed. `mcp_unregister(id)` removes the plugin and deletes its
+  installed folder — ask the user for confirmation first, and prefer
+  `mcp_disable` when the plugin only needs to stop.
+
+Good example — install then enable:
+
+    mcp_install(source="catalog", id="nusashell.terminal")   # → {"status":"installed","id":"nusashell.terminal"}
+    mcp_enable(id="nusashell.terminal")                    # → {"status":"enabled","tools":3}
+    mcp_search(query="run command")                        # discover the new tools
+
+### Usage contracts
+
+A plugin may declare a usage contract — best-practice rules plus a state &
+side-effect disclosure. `mcp_list` marks these `contract: true`. Read one
+with `contract_read(id="<plugin-id>")` (`id="all"` reads every declaring
+plugin). Enforcement follows Settings → **Plugin usage contracts**
+(`plugin_contract_mode`): `off` never nudges, `hint` (default) appends an
+advisory note to `mcp_call` results until the contract is read, and
+`require` blocks `mcp_call` with `CONTRACT_REQUIRED` until `contract_read`
+has run in the conversation — read it, then retry the call.
 
 ## Plugin icons
 
-Manifest icons accept three forms, resolved the same way as the Electron
-shell:
+Manifest icons accept three forms:
 
 - **Text / emoji** (e.g. `"📝"`, `"N"`) — displayed as-is.
 - **HTTP(S) URL** — loaded directly by the browser.
@@ -260,8 +282,6 @@ shell:
 
 ## Storage
 
-All plugin definitions live under `plugins/<id>/manifest.json` in the data
-directory (JSON, non-credential). There is no separate MCP server store —
-a manual MCP server is just a plugin manifest with an `mcp` block and no
-`ui` block. Environment values may contain secrets by design of the
-personal shell; keep the data directory private.
+Plugin definitions live under `plugins/<id>/` in the data directory — see
+Data locations. Environment values may contain secrets; keep the data
+directory private.

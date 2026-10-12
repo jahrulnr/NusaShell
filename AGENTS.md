@@ -157,8 +157,11 @@ When changing launcher or view UI:
 
 - Update `resources/agent/docs/ui-source/ui-map.json` and regenerate `resources/agent/docs/ui-*.md` by running `make scan-ui-docs` whenever a `data-view`, view control, button, modal, or interaction in `frontend/` is added, renamed, removed, or changed.
 - The CI `test-backend` job runs `go run ./cmd/scan-ui-docs -check` and fails
-if any view is undocumented or a mapped control ID is missing from source,
-or if committed `ui-*.md` differ from generated content (drift gate).
+if any view is undocumented, a mapped control ID is missing from source, a
+section references a control ID with no `controls` map entry, a `controls`
+entry is never referenced by any section (orphan), or if committed `ui-*.md`
+differ from generated content (drift gate). Coverage warnings about unmapped
+element IDs are advisory and never fail.
 - The CI `build` job regenerates `ui-*.md` before `go build` so the embedded corpus is always fresh.
 - Do **not** edit `resources/agent/docs/ui-*.md` files manually; they are generated from the UI map.
 

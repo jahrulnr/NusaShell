@@ -10,29 +10,29 @@ then passed to the child shell on Linux, macOS, and Windows. If a tool cannot
 find a user-managed binary after shell configuration changes, reinstall the
 service from the intended user shell to refresh that snapshot. NusaShell does
 not source `.bashrc`, `.zshrc`, Git Bash startup files, or PowerShell profiles
-automatically because their login/interactive semantics differ and they may
-execute arbitrary side effects.
+automatically.
 
 | Tool | Purpose |
 | --- | --- |
-| `exec` | run a shell command as a child process (`op=run`, default); combined stdout/stderr streamed live to the tool terminal as it is produced plus an optional per-call Stop button while running; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout (Stop button or composer Stop); on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`). In-band stdout/stderr is capped at 20000 characters as a 50/50 head+tail sample with `... (output truncated) ...` in the middle (the middle is dropped, not rejected). When the full log is larger, YAML includes `overflow_path` (absolute file under the platform temp dir `nusashell/`) with the complete stdout/stderr — `file_read` it from offset 0. **Background mode**: `op=run` with `background=true` detaches the process — returns `exec_id`, `pid`, and `log_path` immediately while output streams live to `log_path` under `nusashell/terminal/` (`file_read` it for the log). Manage it with `op=status` / `op=wait` (blocks until exit or `timeout_ms`) / `op=kill` (SIGTERM then SIGKILL to the whole tree) / `op=list`, all scoped to this conversation; max 8 running per conversation, a killed/exited process frees its slot. Background procs have no idle watchdog (a quiet server stays up), still honor `timeout_ms`, survive across tool calls, and die with the app — always clean up with `op=kill` when done. The async surface is conversation-agent only (subagents/delegates get sync exec) — for a subagent that needs a server, have it report the command and run it yourself |
+| `exec` | run a shell command as a child process (`op=run`, default); combined stdout/stderr is streamed live to the tool terminal as it is produced; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout; on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`). In-band stdout/stderr is capped at 20000 characters as a 50/50 head+tail sample with `... (output truncated) ...` in the middle (the middle is dropped, not rejected). When the full log is larger, the result includes `overflow_path` (absolute file under the platform temp dir `nusashell/`) with the complete stdout/stderr — `file_read` it from offset 0 |
+| `exec` (background) | `op=run` with `background=true` detaches the process — returns `exec_id`, `pid`, and `log_path` immediately while output streams live to `log_path` under `nusashell/terminal/` (`file_read` it for the log). Manage it with `op=status` / `op=wait` (blocks until exit or `timeout_ms`) / `op=kill` (SIGTERM then SIGKILL to the whole tree) / `op=list`, all scoped to this conversation; max 8 running per conversation, a killed/exited process frees its slot. Background procs have no idle watchdog (a quiet server stays up), still honor `timeout_ms`, survive across tool calls, and die with the app — always clean up with `op=kill` when done. Subagents and delegates get sync exec only — for a subagent that needs a server, have it report the command and run it yourself |
 | `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; byte mode: continue with `offset_bytes` when truncated — the result echoes `offset_bytes`/`next_offset_bytes`, always byte counts, never line numbers; line mode: pass `start_line`/`end_line` (1-based, inclusive; either one switches to line mode and `offset_bytes` is ignored) to read by line numbers as grep reports them — the result echoes `start_line`/`end_line` and continues with `next_start_line` when truncated; `total_lines` always reports the complete file's line count so grep line numbers map directly; `sha256` is the version of the complete file, including bytes outside the returned page; metadata also reports `line_ending`, `tabs`, `carriage_returns`, and `trailing_whitespace_lines`, plus `file_bytes` (the complete file size — `bytes` is only what this call returned) and a `hint` when the read was graded; use `show_whitespace=true` to render invisible whitespace as visible markers; binary files are reported, not dumped; blind whole-file reads are graded by size — ≤256KiB returns the 32KiB default head, >256KiB returns a 4KiB head, >10MiB returns metadata only (`bytes: 0` + `hint`), so pass `max_bytes` or `start_line`/`end_line` (or grep) to read a specific region instead of paging; a truncated body is only a prefix of the file and must never be generalized from) |
 | `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` is utf8, escaped visible-whitespace text, or base64; escaped text understands `\t`, `\r`, `\n`, and `\\` and preserves the resulting bytes; transient Windows file-lock errors during the rename are retried briefly; the result includes the written file's `sha256` and whitespace metadata |
 | `file_patch` | exact substring replace; after an exact miss, safely auto-heals one unique whitespace-equivalent match by default and reports `healed: true`; set `auto_heal=false` for exact-only behavior; repeated exact matches still require 1-based `occurrence`, while ambiguous whitespace matches never write and report the current version plus candidate line numbers (`candidate_lines=[...]`); use `encoding=escaped` when copying markers from `file_read(show_whitespace=true)`; same-path file operations (write, patch, delete, move, copy) are serialized in-process so each reads the latest content (incremental apply — disjoint hunks compose; overlapping `old_string` still fails); success returns the new `sha256` and whitespace metadata; a no-match context failure returns the current version, whitespace statistics, and a nearby excerpt with invisible characters rendered visibly; `preview=true` returns the result without writing |
 | `file_list` | list directory entries with name, type, size, modified time |
 | `file_mkdir` | create a directory including any missing parents |
-| `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible; serialized in-process with other same-path file ops (write/patch/move/copy) so a concurrent patch cannot resurrect a deleted file |
-| `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems (transient Windows rename locks are retried briefly first); source and destination are locked in-process against concurrent same-path file ops (acquired in sorted order, so swapped src/dst cannot deadlock) |
-| `file_copy` | copy a file or directory recursively; source and destination are locked in-process against concurrent same-path file ops (acquired in sorted order) |
+| `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible; serialized in-process with other same-path file ops |
+| `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems (transient Windows rename locks are retried briefly first); source and destination serialize with other same-path file ops |
+| `file_copy` | copy a file or directory recursively; source and destination serialize with other same-path file ops |
 | `file_info` | metadata for a path: `exists`, size, mode, type, modified time. Does NOT error on missing paths — returns `exists: false` (use it for existence checks too) |
 | `grep` | search file contents with regex (RE2 syntax); filters by `glob_pattern`, returns matching lines with optional `context_lines`; `output_mode`: content (default), files_with_matches, count; case-insensitive via `case_insensitive=true`; set `show_whitespace=true` in content mode to render tabs and carriage returns visibly; content rows are `path:LINE:text` where LINE is a 1-based line number (context rows use `path-LINE-text`), and the header tallies them as `line_matches` (when `max_results` caps the result, the header also reports `total_line_matches` from the search totals; count mode: `file:N` = match count, `total_line_matches`); skips `.git`, `node_modules`, `vendor`, and `*.min.js`/`*.min.css`/`*.map`; each content line is clipped at 200 bytes; in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes` so `file_read` can page the rest from the platform temp dir; prefer this over exec+shell grep — structured output, no process spawn, works without rg installed |
 | `find_file` | find files by glob pattern with `**` recursive matching (e.g. `**/*.go`) and brace expansion (e.g. `*.{go,ts}`); skips .git/node_modules/vendor; returns matching paths sorted alphabetically |
-| `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `op=pdf` validates a PDF by its `%PDF-` magic bytes and displays it in the browser's native PDF viewer. `width`/`height` control the iframe viewport (html only, default 720x400). The tool result to the model is metadata only (path, name, media_type, size_bytes for media/PDF; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file via `/local-file?path=` on demand. Use `read_media` instead when the model needs to see image/audio/video/PDF content. Replaces the former `artifact_*` tools — file_* handles CRUD, `show` only handles display |
+| `show` | render a file from disk in the UI. `op=html` reads an HTML file and displays it in a sandboxed iframe (write the file first with `file_write`, then `show` it — use `file_patch` for edits, `file_read` to inspect). `op=image` reads an image file and displays it inline. `op=audio` reads an audio file (mp3, wav, ogg, m4a) and displays an inline player. `op=video` reads a video file (mp4, webm, mov, avi) and displays an inline player. `op=pdf` validates a PDF by its `%PDF-` magic bytes and displays it in the browser's native PDF viewer. `height` controls the iframe viewport height (html only, default 400; `width` is accepted but visually inert — the card always fills the thread width). The tool result to the model is metadata only (path, name, media_type, size_bytes for media/PDF; path, width, height, title for html) — no file content or base64 payload is ever embedded in the tool output, so it does not bloat the conversation JSON or enter the provider request. The frontend loads the file from disk on demand. Use `read_media` instead when the model needs to see image/audio/video/PDF content. `file_*` handles CRUD, `show` only handles display |
 | `skill` | skill library dispatcher; `op` selects: `list`, `search`, `save`, `delete`. Discovery combines managed skills with read-only `<workspace>/skills/` and `~/.agents/skills/` packages; collisions resolve `builtin > workspace > global`. `search` is discovery metadata only (`id`, `name`, `description`, `owned_by`); it never loads `SKILL.md`. After selecting a skill, read its absolute `SKILL.md` with `file_read` before applying it. Workspace/global skills are read-only. `save` create: `{name,content,description?}` — omit `id` and omit `path`. `save` update SKILL.md: `{id,name,content,description?}` — omit `path` (`id` is the folder id, which may be `learned-<name>`). `save` support file: `{name or id, path, content}` where `path` is relative (`references/` / `templates/` / `scripts/` / `assets/`); the skill must already exist. Never pass an absolute `SKILL.md` path. Support files also use `file_read`; list a skill folder with `file_list`; `delete {id,owned_by?}` removes a user/agent-owned skill (plugin-owned skills cannot be deleted directly) (see `docs(op="read", id="skills")` for the path layout) |
 | `memory` | long-term memory dispatcher; `op` selects: `search`, `get`, `list` (retrievable records only; profile docs are `file_*` on `{dataDir}/memory/user.md` and `soul.md`) |
-| `memory_project` | per-workspace project memory dispatcher (advertised whenever the store is configured; until a folder is picked the active workspace defaults to the host home directory); `op` selects: `query` (AND selectors; TSV/`--full` bodies), `list` (absolute paths), `read`, `admit` (upsert + lint; lint failures print `LINT FAIL` lines), `skip` (negative admission, no write), `archive`, `lint`/`audit`/`gate`/`pattern_track`/`path`/`script_path` matching the automation-learning scripts. User prefs stay in `memory`. See `docs(op="read", id="memory-project")` |
-| `docs` | product documentation dispatcher; `op` selects: `list {limit?}` (page ids/titles for vocabulary discovery), `search {query,limit?}` (BM25-ranked page ids/titles/snippets; multi-word terms need not be contiguous), and `read {id}` (full authoritative page). Use `list` when terminology is uncertain or search returns zero; after any search hit, `read` the relevant page before relying on its facts. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
-| `todo` | manage the conversation task checklist. Modes: `new` (default) full-replaces the list (empty items clears it; every item needs `content`); `add` appends new items (`content` required; existing ids are rejected); `replace` updates status/content of existing items only (omit `content` to keep the stored description; unknown ids are rejected — use `add`); `delete` removes items by id (`status`/`content` ignored). Prefer add/replace/delete after the list exists. Item IDs are shown in the hydrated checklist so statuses can be replaced after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint immediately after the compacted handover user (the epoch anchor), before retained assistant rounds. The brief is mirrored to a plan file under the data directory (`conversations/<conv_id>/plan.md`); the result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
+| `memory_project` | per-workspace project memory dispatcher (advertised whenever the store is configured; until a folder is picked the active workspace defaults to the host home directory); `op` selects: `query` (AND selectors; compact TSV or `full=true` bodies), `list` (absolute paths), `read`, `admit` (upsert + lint; lint failures return `LINT FAIL` lines), `skip` (negative admission, no write), `archive`, `lint`/`audit`/`gate`/`pattern_track`/`path`/`script_path`. User prefs stay in `memory`. See `docs(op="read", id="memory-project")` |
+| `docs` | product documentation dispatcher; `op` selects: `list {limit?}` (page ids/titles for vocabulary discovery), `search {query,limit?}` (ranked page ids/titles/snippets; multi-word terms need not be contiguous), and `read {id}` (full authoritative page). Use `list` when terminology is uncertain or search returns zero; after any search hit, `read` the relevant page before relying on its facts. Long `read` pages are truncated in-band (~32KiB) with `overflow_path` — continue via `file_read` |
+| `todo` | manage the conversation task checklist. Modes: `new` (default) full-replaces the list (empty items clears it; every item needs `content`); `add` appends new items (`content` required; existing ids are rejected); `replace` updates status/content of existing items only (omit `content` to keep the stored description; unknown ids are rejected — use `add`); `delete` removes items by id (`status`/`content` ignored). Prefer add/replace/delete after the list exists. Item IDs are shown in the hydrated checklist so statuses can be replaced after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and survives compaction. The result returns `plan_path` (absolute) — `file_read` it to re-read the latest brief, and hand it to ACP subagents. Set `clear_brief: true` to delete the brief and its plan file (items untouched); an empty `brief` string alone never clears. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval. This is the only way to pause the todo-driven auto-continue chain for a user answer — a plain-text question in the reply does not pause it. Set `multi_select=true` whenever more than one option could fit (preferences, scope, priorities) so the user can pick several; the user can also add free text as a note/suggestion alongside the chosen options (when `allow_free_text=true`) |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
 | `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns compact entries (ref, name, server, description) without parameter schemas — load the full schema with `tool_schema` when needed; call after `mcp_enable` to discover tools; oversized catalogs truncate in-band (~32KiB) with `overflow_path` (full JSONL) — continue with `file_read` |
@@ -48,7 +48,7 @@ execute arbitrary side effects.
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_media` | load any media file (image, audio, video, or PDF document) from disk by absolute path into the model's context — the media kind is auto-detected from binary magic bytes, no need to specify image/audio/video/pdf. Any path works, not just conversation attachments. Vision/audio/video-capable models see/hear it directly; document-capable models receive the PDF natively (Anthropic `document`, OpenAI `input_file`); non-capable models get a text description/transcript via the configured fallback (vision fallback, cloud STT + offline whisper for audio, video fallback) or a placeholder note with the file path (document) |
 | `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables image-to-image editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech, Gemini generateContent AUDIO surface, or offline piper), or video (async submit/poll/download — OpenRouter `/videos` API or Gemini Veo `:predictLongRunning`; duration/resolution minimums reported verbatim on rejection; referenced_image_paths enables image-to-video — first image becomes the first frame, additional images are style references). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance. Speech routing: an explicitly picked offline piper voice (Settings → Speech generation, provider "piper", appears once installed via one-click install under `<data>/models/tts/`) wins, then the configured online model, then offline piper as automatic fallback — the fallback is live as soon as the engine is installed, no enable/disable flag involved. Gemini TTS returns raw PCM wrapped into WAV; mp3/opus are not produced by that surface (artifact is always WAV) and speed is ignored |
-| `web_search` | search the web; with an active Codex chat provider, Codex search is tried first and searchwire is the fallback; other providers use searchwire across Brave, Serper, Tavily, Startpage, Wikipedia, and GitHub. Returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
+| `web_search` | search the web; with an active Codex chat provider, Codex search is tried first and the built-in multi-source search is the fallback; other providers use the built-in search. Returns ranked results with title, URL, and snippet. Oversized JSONL is truncated in-band (~32KiB) with `overflow_path` |
 | `web_fetch` | fetch a public URL and return readable text; resolves hostnames through Cloudflare/Google public DNS (A+AAAA), rejects private/loopback/link-local destinations including redirect targets, supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes` (extract cap, default 2MB); in-band body caps at ~32KiB with `overflow_path` / `next_offset_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
 | `conversation` | conversation rooms + transcripts dispatcher; `op` selects: `list` (visible rooms, newest first), `search` (rooms by id/title/summary/message, or in-room message snippets when `id` is set), `info` (metadata: turn_count, chunk_count, summary_preview), `read` (user/assistant/tool messages by inclusive turn index; optional archived `chunk`), `send` (peer message to another room) |
@@ -56,13 +56,13 @@ execute arbitrary side effects.
 | `automation_schedule` | durable schedule dispatcher; pass `op="once"` for an RFC3339 one-shot or `op="every"` for a cron/interval schedule |
 | `wait_until` | durable wait; the runner is not occupied |
 | `sleep` | pause 1–300 seconds; use for retry backoff or between polls of an async `automation` run |
-| `subagent` | one tool for the whole subagent family (only listed when an ACP agent is enabled in Providers or internal delegation is available; never listed for pipeline `agent:` steps). `op` selects the action: `spawn` (default) starts 1–6 async subagent runs and returns run ids immediately; the tool call stays `running` until the run finishes, then a synthetic `subagent_result` call carries only the terminal assistant output after all tool rounds. `steer` redirects a live run (ACP: interrupt-and-replace on the same session; internal delegate: queued for the next tool-round boundary). `stop` cancels a live run (pending permissions fail closed). `wait` blocks this round until a run is terminal. For `spawn`, `agent_id` selects the target: an ACP agent id from Providers, or `internal` to run the task on NusaShell's own engine headless in a hidden pipeline room with the standard toolbox (no permission prompts; the model comes from Settings → Agent → Internal delegate model, empty inherits the parent conversation's active model). Omit `agent_id` to use the default enabled ACP agent, or the internal delegate when none is enabled. Optional `title` is the short label shown in the Agent dock/drawer so the user can tell what each run is for (falls back to the worker agent name). The same ACP-shaped dock/drawer/transcript UI is used for every run. Never listed for the delegate agent itself (no recursion) |
+| `subagent` | one tool for the whole subagent family (only listed when an ACP agent is enabled in Providers or internal delegation is available; never listed for pipeline `agent:` steps). `op` selects the action: `spawn` (default) starts 1–6 async subagent runs and returns run ids immediately; the tool call stays `running` until the run finishes, then a synthetic `subagent_result` call carries only the terminal assistant output after all tool rounds. `steer` redirects a live run. `stop` cancels a live run (pending permissions fail closed). `wait` blocks this round until a run is terminal. For `spawn`, `agent_id` selects the target: an ACP agent id from Providers, or `internal` to run the task on NusaShell's own engine headless in a hidden pipeline room with the standard toolbox (no permission prompts; the model comes from Settings → Agent → Internal delegate model, empty inherits the parent conversation's active model). Omit `agent_id` to use the default enabled ACP agent, or the internal delegate when none is enabled. Optional `title` is the short label shown in the Agent dock/drawer so the user can tell what each run is for (falls back to the worker agent name). Never listed for the delegate agent itself (no recursion) |
 
 ### Context checkpoint `summary()`
 
 When Settings → Compaction workflow is "Reuse agent prompt + full toolbox",
 every turn advertises `summary(text=...)` so the compaction request keeps the
-same tool list (and prompt-cache prefix) as the live turn. It is valid only
+same tool list as the live turn. It is valid only
 after the system asks for a context checkpoint; a call at any other time fails
 and the task continues.
 
@@ -74,31 +74,15 @@ Bad example (mid-task, no checkpoint requested — rejected):
 
     summary(text="done so far: ...")
 
-### Learner `learn()` (background agent only)
+### Background learner
 
-The conversation agent never sees this tool. The periodic background learner
-advertises a pruned toolbox (no `memory_project`, subagent, or MCP family)
-plus `conversation(op=list|search|read|info)` for cross-room inspection, and
-commits memory records with `learn()` the same way compaction commits a
-handoff with `summary()`. Its `skill` dispatcher is read-only (`list` and
-`search`); `save` and `delete` are rejected because this learner does not
-change skills.
-
-Good examples:
-
-    learn(consolidate={"action":"no_op","reason_for_no_op":"nothing durable in this periodic range"})
-    learn(consolidate={"action":"write","entry":{"type":"preference","content":"Prefers Go over Python for CLI tools because of static binaries","evidence":"pakai Go aja untuk CLI","scope":"user"}})
-
-Bad examples:
-
-    {"consolidate":{"action":"no_op"}}  # assistant text, not a tool call
-    memory(op="save", body="prefers Go")  # memory is read-only; catalog writes go through learn()
-    learn()  # missing consolidate
+A background learner periodically consolidates durable memories on its own;
+the conversation agent never sees that tool.
 
 ### Documentation discovery and search
 
 Use `docs(op="search", query="...")` when you already know likely product
-vocabulary. It uses BM25 over the documentation corpus, and multi-word terms
+vocabulary. It ranks over the documentation corpus, and multi-word terms
 do not need to appear as one contiguous phrase. Use
 `docs(op="list", limit=...)` when terminology is uncertain, when search
 returns zero, or when discovering page ids. List and search are discovery
@@ -144,15 +128,10 @@ numbers are for orientation, content is the only anchor all three tools
 share.
 
 Same-path file operations — `file_write`, `file_patch`, `file_delete`,
-`file_move`, and `file_copy` — are serialized in-process: each re-reads under
-a per-path lock (move/copy lock both source and destination, acquired in
-sorted order so swapped src/dst cannot deadlock), so disjoint patches compose
-instead of last-writer-wins and a concurrent patch cannot resurrect a deleted
-file. Overlapping `old_string` still fails after the earlier patch lands —
-re-read and retry. Prefer one patch per file when hunks share context. This
-is in-process only: it does not coordinate with external processes, and
-distinct strings that resolve to the same inode (symlinks, relative vs
-absolute) do not share a lock.
+`file_move`, and `file_copy` — serialize in-process, so disjoint patches
+compose instead of last-writer-wins. Overlapping `old_string` still fails
+after the earlier patch lands — re-read and retry. Prefer one patch per file
+when hunks share context.
 
 ```text
 # GOOD — grep locates, content anchors the edit
@@ -261,9 +240,10 @@ statistics, and a nearby excerpt with `\t`/`\r` visible. Re-read that
 version before retrying; do not convert grep line numbers into file-read byte
 offsets.
 
-The provider receives the current `Toolbox.ListTools` roster. `web_answer` is
-listed only when configured, `generate_image` is listed only when an image
-generation model is set in Settings, while `subagent` is listed when an ACP
+The provider receives the tool list for this turn. `web_answer` is
+listed only when configured, `generate_media` is listed only when at least one
+generation mode (image, speech, or video) is configured in Settings, while
+`subagent` is listed when an ACP
 agent is enabled or internal delegation is available, and is filtered out of
 the delegate agent's own roster (no recursion).
 
@@ -272,10 +252,13 @@ the delegate agent's own roster (no recursion).
 `skill`, `memory`, `docs`, `memory_project`, `conversation`, and `subagent`
 are **dispatcher tools**: one advertised tool per family whose `op` field
 selects the action (subagent defaults to `spawn`).
-Root+op is the SINGLE naming layer — the roster, execution routing, persisted
-history, hydration checkpoints, and internal callers all use exactly this
-form. There are no per-verb aliases: a call named like an old verb
-(`memory_save`, `docs_read`, `subagent_steer`, …) is simply an unknown tool.
+Root+op is the SINGLE naming layer — every call, history entry, and
+checkpoint uses exactly this
+form. Old per-verb names are not advertised aliases: the retired subagent
+names (`subagent_steer`, `subagent_stop`, `subagent_wait`) still execute for
+persisted history but are never advertised — always call
+`subagent(op="steer"|"stop"|"wait", id=…)`. Other retired verb names
+(`memory_save`, `docs_read`, …) are simply unknown tools.
 
 Ops per family:
 
@@ -300,10 +283,11 @@ Ops per family:
   `search {query,limit?}` for known vocabulary (terms need not be a
   contiguous phrase; results include a selection snippet); then MUST `read
   {id}` before relying on the page.
-- `memory_project` (only when a workspace is set): `query` (AND `topic` /
-  `kind` / `related` / `id`; `archive` / `full` / `limit` optional; compact
+- `memory_project` (bound to the active workspace — the default is the
+  host home directory): `query` (AND `topic` / `kind` / `related` / `id`;
+  `archive` / `full` / `limit` optional; compact
   TSV), `list` (absolute paths), `read {kind|id}`, `admit {kind,content,id?}`
-  (lint failures return `memory-lint.sh` stdout), `skip {reason}`,
+  (upsert + lint; lint failures roll back with `LINT FAIL` lines), `skip {reason}`,
   `archive {id}`, `lint {kind?}`, `audit`, `gate {reason?}`,
   `pattern_track {kind}`, `path {kind,create?}`, `script_path {name,create?}`.
   See `docs(op="read", id="memory-project")`.
@@ -369,12 +353,9 @@ Bad examples:
 
 Use the skill catalog before repeating a `skill(op="list")` call. If the
 user says skills or plugin state changed, refresh with `skill(op="search")` or
-`mcp_list`. The built-in tool catalog always comes from the current turn's
-`tools[]`, which NusaShell rebuilds from the running Go binary and runtime
-configuration; conversation persistence is not the source of truth for that
-list. Internal delegate transcript chunks are projected through the same
-ACP-shaped run events as external ACP session updates, including live tool
-rows and terminal status; the MCP schemas and refs come from `mcp_search`.
+`mcp_list`. The advertised tool list for the current turn is authoritative —
+do not rely on remembered rosters; the MCP schemas and refs come from
+`mcp_search`.
 
 ## Todo modes
 
@@ -438,11 +419,11 @@ plan file).
 
 ## Output format
 
-All built-in tools return output in **YAML frontmatter + JSONL body** format:
-a YAML front matter block delimited by `---` lines (structured metadata like
-`count`, `status`, `query`) followed by zero or more JSONL lines — one JSON
-object per line. Each JSONL line is a self-contained record the agent can
-parse independently. This is consistent across all built-in tools. MCP tools
+Dispatcher-family tools return output in **YAML frontmatter + JSONL body**
+format: a YAML front matter block delimited by `---` lines (structured
+metadata like `count`, `status`, `query`) followed by zero or more JSONL
+lines — one JSON object per line. Each JSONL line is a self-contained record
+the agent can parse independently. MCP tools
 called via `mcp_call` return whatever the MCP server produces (format depends
 on the server).
 
@@ -456,11 +437,8 @@ status: ok
 {"id":"frag_1","category":"user","content":"prefers Indonesian"}
 {"id":"frag_2","category":"project","content":"Go + Clean Architecture"}
 ```
-MCP plugin tools are NOT advertised in the top-level tool list — the built-in
-list stays stable with respect to plugin-specific tools so provider prompt
-cache prefixes are not invalidated by every plugin schema. The agent discovers
-and calls MCP tools
-via the universal `mcp_search` + `mcp_call` pair, which works on every
+MCP plugin tools are not advertised in the top-level tool list. Discover them
+via `mcp_search` and execute via `mcp_call`, which works on every
 provider; `mcp__<server>__<tool>` names are not callable:
 
 1. `mcp_search(query="read file")` → returns `{"ref":"nusashell.files:read","name":"read","server":"nusashell.files","description":"Read a text file..."}` — compact, no inline schema
@@ -476,17 +454,15 @@ required fields as a JSON object.
 
 ### Host-internal MCP tools
 
-MCP has no hidden-tool concept. NusaShell applies a host-side policy: plugin
-tools whose name starts with `internal_` or `admin.` are host-internal. They
-are omitted from every agent's advertised lists (`tool_list`, `mcp_search`,
-factory `Get` for conversation/automation/delegate/learner) and cannot be
-executed by agents. The host may still call them via the MCPToolCaller path
-(for example automation `notify:` progress forwarding).
+Plugin tools whose name starts with `internal_` or `admin.` are host-internal:
+they are omitted from agent tool lists (`tool_list`, `mcp_search`) and cannot
+be executed by agents.
 
-When at least one ACP agent is enabled, the interactive toolbox also advertises
-`subagent`, `subagent_steer`, `subagent_stop`, and `subagent_wait`. ACP agents
+When at least one ACP agent is enabled or internal delegation is available,
+the interactive toolbox also advertises `subagent` (the retired per-verb names
+are never advertised). ACP agents
 do not receive this conversation, NusaShell MCP plugins, or shell meta-tools.
-Pipeline `agent:` steps hide those four tools entirely so a fail-closed
+Pipeline `agent:` steps hide it entirely so a fail-closed
 permission prompt cannot stall an unattended run.
 
 ## Harness announcements
@@ -526,35 +502,22 @@ differentiated by their args `type` and result text:
 - `type: "peer_message"`: a message received from another conversation room via `conversation(op="send")`.
   Args carry `from` (sender conversation ID). Result text carries the quoted message and reply instructions.
 - `type: "task_memory"`: structured records relevant to this conversation are
-  new or updated. Selection runs at turn start via a BM25 searcher
-  (embedding off, no graph expansion); trivial prompts (greetings, ≤2
-  effective words) are skipped. Hits are filtered to a 72-hour recency
-  window, capped at 3 hits @1000 runes each. A record is re-announced when
-  it is re-confirmed (its `last_confirmed` advances past the stored
-  marker), not once-per-conversation. An async semantic lane (post-turn,
-  when an embedder is configured) runs a paraphrase-aware embedding search
-  with a content-addressed cache and a circuit breaker that skips after 3
-  consecutive failures; recall-intent in the user prompt deepens the
-  search even when BM25 already found hits. Args carry `hits` with
-  snippet contents. Use them for the current task; retrieve full records
-  with `memory(op="search")` or `memory(op="get")`. Do not acknowledge
-  the card.
+  new or updated. Args carry `hits` with snippet contents — use them for the
+  current task and retrieve full records with `memory(op="search")` or
+  `memory(op="get")`. Do not acknowledge the card.
 
-Notices published while a conversation has no active turn queue on disk (the
-same queue later carries room-to-room peer messages). The queue deduplicates
-exact duplicates — same `type`, `args`, and text — and keeps every distinct
-notice in arrival order; a notice never replaces an earlier one. At the next
-safe boundary (turn start or tool-round drain) ALL queued notices are
+Notices published while a conversation has no active turn are queued. The
+queue deduplicates exact duplicates — same `type`, `args`, and text — and
+keeps every distinct notice in arrival order; a notice never replaces an
+earlier one. At the next safe boundary ALL queued notices are
 delivered in ONE `announcement` tool call: a single notice arrives with its
 own args and result text unchanged, several arrive with args
 `{"items":[{notice args}, ...]}` and a result text joining the notices on
 `---` lines. Read every notice in a merged card — each item is a separate
 runtime fact, never a replacement of the others.
 
-For `peer_message`, the harness wakes an idle room after the queue write when
-the room already has a real user turn. The first request receives the merged
-announcement as runtime context; no user placeholder is added. A room already
-in a turn keeps the message queued until its next safe boundary.
+For `peer_message`, an idle room with a real user turn is woken; a room
+already in a turn keeps the message queued until its next safe boundary.
 
 Good: on an `auto_continue` announcement, reconcile the latest task checklist,
 mark the next item in-progress, and continue working without acknowledging the
@@ -602,24 +565,16 @@ Bad:
 (process-wide cap 8 live runs). Pass absolute paths. Optional `title` is a
 short user-facing label (max 80 chars) shown on dock chips and the drawer —
 prefer a task name over leaving the UI as the bare ACP agent name; with
-`count` > 1 the harness suffixes `(1)`, `(2)`, …. `workspace` overrides the
+`count` > 1 the runs are numbered `(1)`, `(2)`, …. `workspace` overrides the
 conversation workspace for new spawns only — an already-running session keeps
 the directory it started with. The tool is always async: it returns run ids
 with `status: "starting"` immediately and the parent agent is free to
 continue other work. When a subagent finishes, the original tool call
 transitions to `ok`/`fail` with a brief terminal status and a synthetic
-`subagent_result` tool call carrying the full result is injected at the
-next steer-style tool-round boundary (or a new parent turn if idle)
-so the parent processes the result without a user message. On a live parent
-turn, finished results and harness announcements are injected before a queued
-user steer; the steer is last so the next provider request ends with the
-newest user instruction. While any subagent is running, the
-parent's auto-continue chain pauses with reason
-`awaiting-background-jobs`. Completed run transcripts are persisted per
-conversation under `conversations/<conversation_id>/acp/`. Permissions are auto-allowed
-(orchestrator delegates authority). The user can peek the transcript
-from the Agent dock / drawer / popup. Unattended pipeline agents never
-see these tools.
+`subagent_result` tool call carries the full result so the parent processes
+it without a user message. Permissions are auto-allowed. The user can peek
+the transcript from the Agent dock / drawer / popup. Unattended pipeline
+agents never see these tools.
 
 Good:
 
@@ -633,7 +588,7 @@ The configured preferred ACP mode is applied before the first prompt. If the
 ACP agent rejects that mode switch, spawning fails explicitly instead of
 silently continuing with another mode.
 
-`subagent_wait` blocks until a run reaches a terminal state (completed,
+`subagent(op="wait")` blocks until a run reaches a terminal state (completed,
 failed, cancelled) or the timeout elapses. For a terminal result, it persists
 the full run before returning. The result contains `status`, run id, workspace,
 `output_path`, and only the last meaningful text turn (or a compact
@@ -643,46 +598,39 @@ without `output_path`. Intermediate progress and other thought, tool, plan,
 status, and usage chunks stay in the terminal JSON; use `file_read` only when that detail
 is necessary. The Agent drawer receives live transcript events separately.
 
-If the user steers while `subagent_wait` is in flight, wait for the current
+If the user steers while `subagent(op="wait")` is in flight, wait for the current
 tool call to reach its safe boundary, then handle the steer before continuing
 the old wait plan. A steer is not a request to append another wait blindly.
 
 Good:
 
-    subagent_steer(id="acp_run_123", text="Use the existing workspace and inspect the current implementation now.")
+    subagent(op="steer", id="acp_run_123", text="Use the existing workspace and inspect the current implementation now.")
 
 Bad:
 
-    subagent_wait(id="acp_run_123", timeout_ms=120000)  # repeat this after a steer without re-evaluating the request
+    subagent(op="wait", id="acp_run_123", timeout_ms=120000)  # repeat this after a steer without re-evaluating the request
 
-`subagent_steer` cancels the in-flight ACP `session/prompt` and immediately
+`subagent(op="steer")` cancels the in-flight ACP `session/prompt` and immediately
 sends `text` as the next prompt on the **same** session (the run stays open).
-It does not wait for the current turn to finish idle. Use `subagent_stop` to
-end the run entirely. `subagent_steer` and `subagent_stop` acknowledge the
+It does not wait for the current turn to finish idle. Use `subagent(op="stop")` to
+end the run entirely. `subagent(op="steer")` and `subagent(op="stop")` acknowledge the
 current run status; their provider-facing results are bounded and omit
 intermediate transcript noise.
 
 ## Native web research
 
 NusaShell ships with built-in web research tools. These are native tools, not
-MCP plugins — they work with zero configuration and no installed plugin. The
-Codex chat provider tries its standalone search backend first and falls back to
-searchwire; other providers use searchwire directly.
+MCP plugins — they work with zero configuration and no installed plugin.
 
 - **`web_search`**: searches the web through the active backend. With an
-  active Codex chat provider, Codex standalone search is tried first and
-  searchwire is used automatically when Codex search is unavailable or
-  fails. Other providers use searchwire across Brave, Serper, Tavily,
-  Startpage, Wikipedia, and GitHub. No API key is required for searchwire's
-  default path (HTML scraping + public APIs); Serper/Tavily register when
-  their API key is set (Settings → Web Search, or the
-  `SERPER_API_KEY`/`TAVILY_API_KEY` env vars). Settings → Web Search still
-  controls searchwire routing when that fallback is used. Results are normalized
-  to ranked title, URL, and snippet records. Each upstream search has an
-  independent bounded 60-second deadline.
+  active Codex chat provider, Codex search is tried first and the built-in
+  multi-source search is the fallback; other providers use the built-in
+  search directly. The default path needs no API key; keyed sources activate
+  when their key is set in Settings → Web Search. Results are normalized
+  to ranked title, URL, and snippet records.
 - **`web_fetch`**: fetches a public URL and returns readable text. Hostname
-  resolution uses Cloudflare/Google public DNS over IPv4 and requests both A
-  and AAAA records, so it does not depend on the host's local DNS stub. The
+  resolution uses public DNS over IPv4 and IPv6, so it does not depend on the
+  host's local DNS stub. The
   connection refuses private, loopback, link-local, ULA, multicast, and
   unspecified destinations; the same check applies after redirects. Supports HTML
   (nav/footer/aside/form stripped, `<pre>`/`<code>` preserved, links
@@ -697,10 +645,9 @@ searchwire; other providers use searchwire directly.
   `Retry-After` (seconds) and parsed JSON error envelope when present.
 - **`web_answer`**: web-grounded LLM answer (optional). Only
   registered when a vendor and API key are configured in Settings → Web Answer.
-  This is a separate config from the chat providers — pick a searchwire-supported
-  vendor (Brave, OpenRouter, OpenAI, Perplexity, Anthropic, xAI) and enter its
-  API key manually. The key is stored in the credential store, not in settings
-  JSON. An optional model/preset override can be set per vendor.
+  This is a separate config from the chat providers — pick a supported vendor
+  and enter its API key manually. The key is stored in the credential store,
+  not in settings JSON. An optional model/preset override can be set per vendor.
 
 Use web research for material factual claims that are current, disputed,
 consequential, unfamiliar, or likely to have changed. Prefer official or primary
@@ -727,7 +674,8 @@ observed or sourced facts from assumptions and inferences.
 
 ## Image generation
 
-`generate_image` is a client-side function tool. The active chat model
+`generate_media` with `media_type="image"` is the client-side function tool
+for images. The active chat model
 orchestrates; the image backend is the auxiliary model from Settings →
 Image generation (OpenAI Images, the Codex ChatGPT image API, or OpenRouter
 Image API). It is not listed until that setting is configured.
@@ -737,24 +685,24 @@ image again as Markdown, a data URL, or a file link.
 
 Good examples:
 
-    generate_image(prompt="a wooden fishing boat in a night harbor, sea-glass water")
+    generate_media(media_type="image", prompt="a wooden fishing boat in a night harbor, sea-glass water")
 
-    generate_image(prompt="same boat at dawn, watercolor", referenced_image_paths=["/home/user/.config/nusashell/attachments/conv_1/gen-tc_abc.png"])
+    generate_media(media_type="image", prompt="same boat at dawn, watercolor", referenced_image_paths=["/home/user/.config/nusashell/attachments/conv_1/gen-tc_abc.png"])
 
 Bad examples:
 
-    generate_image(prompt="a cat")
+    generate_media(media_type="image", prompt="a cat")
     # then rendering `![cat](data:image/png;base64,...)` in the assistant text
 
-    generate_image(prompt="edit the last image")  # missing referenced_image_paths
+    generate_media(media_type="image", prompt="edit the last image")  # missing referenced_image_paths
 
-    generate_image(prompt="logo", referenced_image_paths=["logo.png"])  # relative path is rejected
+    generate_media(media_type="image", prompt="logo", referenced_image_paths=["logo.png"])  # relative path is rejected
 
-Pass absolute `file_path` values from earlier `generate_image` YAML output
+Pass absolute `file_path` values from earlier `generate_media` output
 or from user attachments. `n` is clamped to 1–4; the Codex backend always
 requests a single image and surfaces image-quota 429s as usage-limit
 failures (never auto-retried). At most two
-`generate_image` calls run at once per process.
+`generate_media` image calls run at once per process.
 
 ## MCP tools
 

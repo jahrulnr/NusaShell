@@ -6,12 +6,12 @@ Global chrome surrounding every NusaShell view: the vertical sidebar owns identi
 
 ## Sidebar identity and utilities
 
-The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation. The desktop pet launcher sits above the Settings icon: it surfaces install/launch status via a coloured dot (green when installed, pulsing amber while an install is active, neutral on macOS/Windows where the pet is not supported) and opens a one-click install dialog when the binary is missing.
+The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation. The desktop pet launcher sits above the Settings icon and is hidden entirely on macOS/Windows where the pet is unsupported (Linux only). A click launches or stops the installed pet, is ignored while an install is active, and opens a one-click install dialog when the binary is missing; its tooltip reports the current state, and the Settings Desktop pet card mirrors the same status on a coloured dot (green installed, pulsing amber installing, cyan running, red error).
 
 - **Connection status text** (`#conn-status`):
   - Section: Sidebar
   - Type: text
-  - Notes: Reflects backend WebSocket/RPC reachability.
+  - Notes: Reflects backend reachability.
 
 - **Connection orb** (`#conn-fill`):
   - Section: Sidebar
@@ -21,13 +21,18 @@ The vertical sidebar identifies NusaShell with its brand mark and wordmark, show
 - **Install NusaShell** (`#pwa-install-btn`):
   - Section: Sidebar
   - Type: button
-  - Notes: Visible only while an eligible browser offers installation (beforeinstallprompt); hidden in standalone/PWA and Electron runtimes; triggers the native install flow and hides after install/dismissal.
+  - Notes: Visible only while an eligible browser offers installation; hidden in standalone/PWA and Electron runtimes; triggers the native install flow and hides after install/dismissal.
 
 - **Desktop pet** (`#pet-btn`):
   - Section: Sidebar
   - Type: button
-  - Action: Single click when installed toggles the desktop pet overlay (settings.pets_launch spawns if idle, stops if running). When not installed, opens a one-click install dialog backed by settings.pets_install_start.
-  - Notes: Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in .sidebar-actions.
+  - Action: Single click when installed launches the desktop pet overlay if idle, or stops it if running. When not installed, opens a one-click install dialog.
+  - Notes: Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in the sidebar actions row. Launch failures mark an error state; the Settings Desktop pet card mirrors the status on a coloured dot (green installed, pulsing amber installing, cyan running, red error).
+
+- **Pet install dialog** (`#pet-install-overlay`):
+  - Section: Sidebar
+  - Type: modal
+  - Notes: Shown when the user clicks the pet launcher with no binary on disk. Mirrors the offline TTS/STT install layout: description, bullet list, phase + indeterminate progress bar, error banner, Install/Cancel actions.
 
 - **Settings shortcut** (`#nav-settings-btn`):
   - Section: Sidebar
@@ -39,7 +44,6 @@ The vertical sidebar identifies NusaShell with its brand mark and wordmark, show
 Desktop has no separate titlebar. Below 680px, a compact bar remains only as the reliable home for the drawer toggle while the sidebar itself is off-canvas. While a modal detail drawer (plugin details, ACP subagents) is open, the hamburger hides so it cannot collide with the drawer's close button in the same corner; the drawer's own X is the only exit control until it closes.
 
 - **Open navigation menu** (`#mobile-nav-toggle`):
-  - Section: Mobile navigation bar
   - Type: button
   - Action: Opens or closes the off-canvas navigation drawer below 680px.
 
@@ -50,18 +54,16 @@ Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automati
 Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view. Escape dismisses dialogs, toasts stay on hover, and Ctrl/Cmd+N starts a new agent conversation when the Agent view is open.
 
 - **Sidebar** (`#sidebar`):
-  - Section: Sidebar
   - Type: container
   - Notes: Holds navigation items and storage indicator.
 
 - **Collapse sidebar** (`#sidebar-mode-toggle`):
-  - Section: Sidebar
   - Type: button
   - Action: Toggles icon-only sidebar mode (persisted locally).
 
 ## Offline screen
 
-Full-window overlay shown whenever the backend is unreachable. It covers every view so no half-broken UI stays interactive: an explicit offline verdict shows it immediately, while closed/error/reconnecting states only cover after a short persistence window so quick reconnects never flicker. Recovery hides it instantly and Try again reloads the shell (service worker serves the cached shell while the server is down).
+Full-window overlay shown whenever the backend is unreachable. It covers every view so no half-broken UI stays interactive: an explicit offline verdict shows it immediately, while closed/error/reconnecting states only cover after a short persistence window so quick reconnects never flicker. Recovery hides it instantly and Try again reloads the shell (the cached app stays available while the server is down).
 
 - **Offline screen** (`#offline-screen`):
   - Section: Navigation
@@ -71,7 +73,7 @@ Full-window overlay shown whenever the backend is unreachable. It covers every v
 - **Try again** (`#offline-retry-btn`):
   - Section: Navigation
   - Type: button
-  - Notes: Reloads the shell; the service worker serves the cached app while the server is down.
+  - Notes: Reloads the shell; the cached app stays available while the server is down.
 
 ## Device pairing gate
 
@@ -80,7 +82,7 @@ Full-window dialog shown when the backend requires device pairing (an unpaired n
 - **Device pairing gate** (`#pairing-gate`):
   - Section: Navigation — Overlays
   - Type: dialog
-  - Notes: Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED.
+  - Notes: Full-window dialog shown when the backend requires device pairing; owns the screen while pairing is required.
 
 - **Pairing gate title** (`#pairing-gate-title`):
   - Section: Navigation — Overlays

@@ -1,6 +1,6 @@
 # Settings
 
-Control how this local NusaShell instance runs agent turns, manages context, stores memory, picks models, and presents the workspace. Cards are grouped by boundary: Agent, Context, Memory & search, Media understanding, Media generation, Web, and Workspace. Browser-only preferences stay in local storage; the rest save with the instance.
+Control how this local NusaShell instance runs agent turns, manages context, stores memory, picks models, and presents the workspace. Cards are grouped by boundary: Agent, Context, Memory & search, Media understanding, Media generation, Web, Workspace, and Remote access. Browser-only preferences stay in local storage; the rest save with the instance.
 
 **How to open:** Click Settings in the sidebar, or press the Settings shortcut.
 
@@ -9,94 +9,77 @@ Control how this local NusaShell instance runs agent turns, manages context, sto
 View title and a Save settings button with a live status indicator.
 
 - **Save settings** (`#settings-save-btn`):
-  - Section: Settings
   - Type: button
   - Action: Persists runtime settings.
 
 - **Save status** (`#settings-save-status`):
-  - Section: Settings
   - Type: status
 
 ## Card groups
 
-A sticky Jump to rail moves directly between the eight settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.
+A sticky Jump to rail moves directly between the eight settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, desktop pet, system.
 
 Remote access: an opt-in toggle, persisted multi-address QR/link generation, challenge approve/reject, paired-session list, and revoke actions that remove devices from the list. Enabling or disabling remote access restarts the backend automatically.
 
 - **Settings section navigation** (`#settings-section-nav`):
-  - Section: Settings
   - Type: navigation
-  - Notes: Sticky horizontal rail for jumping between the seven long-form settings groups.
+  - Notes: Sticky horizontal rail for jumping between the eight settings groups.
 
 - **Jump to Agent settings** (`#settings-jump-agent`):
-  - Section: Settings
   - Type: button
   - Action: Scrolls to and focuses the Agent group heading.
 
 - **Jump to Context settings** (`#settings-jump-context`):
-  - Section: Settings
   - Type: button
   - Action: Scrolls to and focuses the Context group heading.
 
 - **Jump to Memory & search settings** (`#settings-jump-memory`):
-  - Section: Settings
   - Type: button
   - Action: Scrolls to and focuses the Memory & search group heading.
 
 - **Jump to Media understanding settings** (`#settings-jump-understand`):
-  - Section: Settings
   - Type: button
   - Action: Scrolls to and focuses the Media understanding group heading.
 
 - **Jump to Media generation settings** (`#settings-jump-generate`):
-  - Section: Settings
   - Type: button
   - Action: Scrolls to and focuses the Media generation group heading.
 
 - **Jump to Web settings** (`#settings-jump-web`):
-  - Section: Settings
   - Type: button
   - Action: Scrolls to and focuses the Web group heading.
 
 - **Jump to Workspace settings** (`#settings-jump-workspace`):
-  - Section: Settings
   - Type: button
   - Action: Scrolls to and focuses the Workspace group heading.
 
 - **Agent group** (`#settings-group-agent`):
-  - Section: Settings
   - Type: heading
   - Notes: Card group for runtime, instructions, and plugin contracts.
 
 - **Context group** (`#settings-group-context`):
-  - Section: Settings
   - Type: heading
   - Notes: Card group for compaction and prompt caching.
 
 - **Memory & search group** (`#settings-group-memory`):
-  - Section: Settings
   - Type: heading
   - Notes: Card group for learning jobs, project memory, and embeddings.
 
 - **Media understanding group** (`#settings-group-understand`):
-  - Section: Settings
   - Type: heading
   - Notes: Card group for vision/audio/video fallback and offline STT.
 
 - **Media generation group** (`#settings-group-generate`):
-  - Section: Settings
   - Type: heading
   - Notes: Card group for image, video, and speech generation.
 
 - **Web group** (`#settings-group-web`):
-  - Section: Settings
   - Type: heading
   - Notes: Card group for Web Answer.
 
 - **Workspace group** (`#settings-group-workspace`):
-  - Section: Settings
   - Type: heading
-  - Notes: Card group for appearance, connection, and system diagnostics.
+  - Notes: Card group for appearance, desktop pet, and system diagnostics.
 
 - **Jump to Remote access** (`#settings-jump-remote`):
   - Section: Settings — Card groups
@@ -104,7 +87,6 @@ Remote access: an opt-in toggle, persisted multi-address QR/link generation, cha
   - Action: Moves focus to the Remote access group heading.
 
 - **Remote access** (`#settings-group-remote`):
-  - Section: Settings
   - Type: group
   - Notes: Groups device-pairing controls.
 
@@ -118,82 +100,66 @@ Remote access: an opt-in toggle, persisted multi-address QR/link generation, cha
 Default model for new conversations, the model used by the internal delegate agent, tool-round guards (max rounds, repeated-call limit, max parallel tools), max auto-continues after a successful turn with open todos, an optional per-round slow-down pacing delay, max output tokens, and optional sampling parameters. Existing conversations keep their selected model. The delegate model defaults to the active conversation model.
 
 - **Agent runtime title** (`#settings-runtime-title`):
-  - Section: Settings
   - Type: text
 
 - **Default model** (`#settings-preferred-model`):
-  - Section: Settings
   - Type: select
   - Notes: Used by new conversations.
 
 - **Internal delegate model** (`#settings-delegate-model`):
-  - Section: Settings
   - Type: select
   - Notes: Model for the internal headless delegate agent; empty inherits the active conversation model.
 
 - **Maximum tool rounds** (`#settings-max-tool-rounds`):
-  - Section: Settings
   - Type: number
   - Notes: 1–10000, default 8.
 
 - **Repeated tool call limit** (`#settings-repeated-tool-limit`):
-  - Section: Settings
   - Type: number
   - Notes: Breaks identical tool loops; default 3, 0 disables.
 
 - **Max parallel tools** (`#settings-max-parallel-tools`):
-  - Section: Settings
   - Type: number
   - Notes: 1–64, default 6. Bounds concurrent tool calls per assistant round; calls above the limit wait in a queue and are not dropped.
 
 - **Max auto-continues** (`#settings-auto-continues`):
-  - Section: Settings
   - Type: number
   - Notes: Auto-starts the next turn while todos remain; default 10, 0 unlimited.
 
 - **Slow Down per round (seconds)** (`#settings-slow-down`):
-  - Section: Settings
   - Type: number
   - Notes: Artificial per-round delay before every agent round in every conversation; default 0 (off), range 0-60. Saved values apply instantly to running conversations - an in-flight delay shrinks or cancels without stopping the turn.
 
 - **Max output tokens** (`#settings-max-output-tokens`):
-  - Section: Settings
   - Type: number
   - Notes: Default 65536.
 
 - **Temperature** (`#settings-temperature`):
-  - Section: Settings
   - Type: number
 
 - **Top P** (`#settings-top-p`):
-  - Section: Settings
   - Type: number
 
 - **Top K** (`#settings-top-k`):
-  - Section: Settings
   - Type: number
   - Notes: Anthropic only.
 
 - **Frequency penalty** (`#settings-frequency-penalty`):
-  - Section: Settings
   - Type: number
   - Notes: OpenAI only.
 
 - **Presence penalty** (`#settings-presence-penalty`):
-  - Section: Settings
   - Type: number
   - Notes: OpenAI only.
 
 ## Instructions
 
-Custom instructions injected into every agent turn inside user_instructions tags. This is agent identity, not compaction or search. Editing it busts the prompt cache until a new shard stabilizes.
+Custom instructions injected into every agent turn. This is agent identity, not compaction or search. Editing it temporarily reduces prompt-cache hits until the new prefix stabilizes.
 
 - **Instructions title** (`#settings-instructions-title`):
-  - Section: Settings
   - Type: text
 
 - **User prompt** (`#settings-user-prompt`):
-  - Section: Settings
   - Type: textarea
   - Notes: Custom instructions injected into every agent turn.
 
@@ -202,11 +168,9 @@ Custom instructions injected into every agent turn inside user_instructions tags
 How agents treat MCP plugin usage contracts. Install and enable plugins on the Plugins view. Empty = factory default (hint, advisory); off never notifies; hint attaches an advisory note until the contract is read; require blocks MCP calls until the contract is read.
 
 - **Plugins title** (`#settings-plugins-title`):
-  - Section: Settings
   - Type: text
 
 - **Plugin usage contracts** (`#settings-plugin-contract-mode`):
-  - Section: Settings
   - Type: select
   - Notes: How agents are nudged toward a plugin's usage contract (read via contract_read). Empty = factory default (hint, advisory); off never notifies; hint attaches an advisory note until the contract is read; require blocks MCP calls until the contract is read.
 
@@ -215,59 +179,48 @@ How agents treat MCP plugin usage contracts. Install and enable plugins on the P
 Compaction is always active. Choose the dedicated summary-only or reuse agent-prompt workflow, set max input tokens (fallback context window, default 200000), compaction threshold and summary quality knobs, pick an optional compaction model, and enable provider prompt caching. Reuse keeps the conversation's active model and prompt-cache prefix. Cache TTL (including off) is chosen per provider on the Providers detail pane. Completion limits and sampling are under Agent runtime.
 
 - **Context compaction title** (`#settings-context-title`):
-  - Section: Settings
   - Type: text
 
 - **Compaction workflow** (`#settings-compaction-workflow`):
-  - Section: Settings
   - Type: select
   - Notes: Dedicated uses a summary-only request. Reuse sends the normal agent prompt and full toolbox so the provider prompt-cache prefix can be reused, and always uses the conversation's active model.
 
 - **Max input tokens** (`#settings-max-input-tokens`):
-  - Section: Settings
   - Type: number
   - Notes: Fallback context window, default 200000.
 
 - **Compaction threshold** (`#settings-compaction-threshold`):
-  - Section: Settings
   - Type: number
   - Notes: Token count that triggers compaction. 0 = auto (80% of context window).
 
 - **Compaction summary max tokens** (`#settings-compaction-summary-max-tokens`):
-  - Section: Settings
   - Type: number
   - Notes: Max output tokens for the compaction summarization call. 0 = default 64000.
 
 - **Compaction summary min chars** (`#settings-compaction-summary-min-chars`):
-  - Section: Settings
   - Type: number
   - Notes: Minimum summary length for the compaction quality guard. 0 = default 200.
 
 - **Compaction model** (`#settings-compaction-model`):
-  - Section: Settings
   - Type: select
   - Notes: Route compaction summarization to a cheaper or faster model. Default uses the conversation's active model.
 
 - **Prompt caching** (`#settings-prompt-caching`):
-  - Section: Settings
   - Type: checkbox
   - Notes: Master switch for provider-side prompt caching. Per-provider Cache TTL chips on the Providers detail pane pick the duration or off.
 
 ## Learning
 
-Background jobs run a single periodic learner that consolidates recorded experience into memory records. It does not change skills. The review model routes those jobs to a cheaper or faster model (default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables).
+Background jobs run a single periodic learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. The review model routes those jobs to a cheaper or faster model (default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables).
 
 - **Learning title** (`#settings-learning-title`):
-  - Section: Settings
   - Type: text
 
 - **Review model** (`#settings-review-model`):
-  - Section: Settings
   - Type: select
   - Notes: Routes background learning jobs to a dedicated model; empty follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model.
 
 - **Periodic review interval** (`#settings-learner-nudge-interval`):
-  - Section: Settings
   - Type: number
   - Notes: Unreviewed user turns or tool-loop iterations before the periodic learner runs; default 10, 0 disables periodic review.
 
@@ -276,11 +229,9 @@ Background jobs run a single periodic learner that consolidates recorded experie
 Per-workspace durable notes (index.md, guardrails.md, and the rest of the skill-compatible layout). Separate from user memory on the Learning view and from the embedding model. Empty uses {dataDir}/memory_project/{key}/. An absolute path such as ~/.memory shares the layout with other agents.
 
 - **Project memory title** (`#settings-project-memory-title`):
-  - Section: Settings
   - Type: text
 
 - **Project memory directory** (`#settings-project-memory-base`):
-  - Section: Settings
   - Type: text
   - Notes: Absolute directory for {key}/{kind}.md project memory. Empty uses {dataDir}/memory_project. ~/.memory shares the skill-compatible layout.
 
@@ -289,11 +240,9 @@ Per-workspace durable notes (index.md, guardrails.md, and the rest of the skill-
 Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import.
 
 - **Embeddings title** (`#settings-embedding-title`):
-  - Section: Settings
   - Type: text
 
 - **Embedding model** (`#settings-embedding-model`):
-  - Section: Settings
   - Type: select
 
 ## Vision fallback
@@ -301,11 +250,9 @@ Embedding model used by skill and memory search. Models tagged as embedding-capa
 When the active chat model cannot see images, NusaShell can describe attached images using a separate vision-capable model so the conversation continues without errors. Pick any model that supports image input. Leave disabled if you always use vision-capable chat models.
 
 - **Vision fallback title** (`#settings-vision-title`):
-  - Section: Settings
   - Type: text
 
 - **Vision fallback model** (`#settings-vision-model`):
-  - Section: Settings
   - Type: select
 
 ## Audio fallback
@@ -313,11 +260,9 @@ When the active chat model cannot see images, NusaShell can describe attached im
 When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input. Leave disabled if you always use audio-capable chat models.
 
 - **Audio fallback title** (`#settings-audio-title`):
-  - Section: Settings
   - Type: text
 
 - **Audio fallback model** (`#settings-audio-model`):
-  - Section: Settings
   - Type: select
 
 ## Video fallback
@@ -325,257 +270,179 @@ When the active chat model cannot hear audio, NusaShell can transcribe or descri
 When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input. Leave disabled if you always use video-capable chat models.
 
 - **Video fallback title** (`#settings-video-title`):
-  - Section: Settings
   - Type: text
 
 - **Video fallback model** (`#settings-video-model`):
-  - Section: Settings
   - Type: select
 
 ## Offline speech-to-text
 
-Lets read_media transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under models/stt/ in the data directory. The install button opens a requirements dialog: a checklist (platform support, whisper.cpp engine, GGML model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew install whisper-cpp), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_media uses it automatically.
+Lets read_media transcribe audio locally with the bundled offline engine — no API key, no network. The engine binary is downloaded once during install; models are stored in the data directory. The install button opens a requirements dialog: a checklist (platform support, engine, model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_media uses it automatically.
 
 - **Offline speech-to-text title** (`#settings-stt-title`):
-  - Section: Settings
   - Type: text
 
 - **Offline STT model** (`#settings-stt-model`):
-  - Section: Settings
   - Type: select
 
 - **Audio language** (`#settings-stt-language`):
-  - Section: Settings
   - Type: select
   - Notes: Offline STT language: auto-detect, Bahasa Indonesia, or English.
 
 - **Install offline speech-to-text** (`#settings-stt-install-btn`):
-  - Section: Settings
   - Type: button
-  - Action: Opens the whisper.cpp install dialog.
+  - Action: Opens the offline speech-to-text install dialog.
 
 - **STT install status** (`#settings-stt-install-status`):
-  - Section: Settings
   - Type: status
 
-- **STT install dialog** (`#stt-requirements-overlay`):
-  - Section: Settings
-  - Type: dialog
-
-- **STT install title** (`#stt-requirements-title`):
-  - Section: Settings
-  - Type: heading
-
 - **Close STT install** (`#stt-requirements-close`):
-  - Section: Settings
   - Type: button
 
 - **STT install error** (`#stt-requirements-error`):
-  - Section: Settings
   - Type: status
 
 - **STT requirements checklist** (`#stt-req-checklist`):
-  - Section: Settings
   - Type: list
 
-- **STT install guide** (`#stt-guide`):
-  - Section: Settings
-  - Type: panel
-
-- **STT Linux guide tab** (`#stt-guide-tab-linux`):
-  - Section: Settings
-  - Type: tab
-
-- **STT Windows guide tab** (`#stt-guide-tab-windows`):
-  - Section: Settings
-  - Type: tab
-
-- **STT macOS guide tab** (`#stt-guide-tab-macos`):
-  - Section: Settings
-  - Type: tab
-
 - **STT model picker** (`#stt-install-model`):
-  - Section: Settings
   - Type: select
 
 - **STT install progress** (`#stt-install-progress`):
-  - Section: Settings
   - Type: status
 
 - **STT install phase** (`#stt-install-phase`):
-  - Section: Settings
   - Type: text
 
 - **STT install bar track** (`#stt-install-bar-track`):
-  - Section: Settings
   - Type: progress
 
 - **STT install bar** (`#stt-install-bar`):
-  - Section: Settings
   - Type: progress
 
 - **STT install bytes** (`#stt-install-bytes`):
-  - Section: Settings
   - Type: text
 
 - **Stop STT install** (`#stt-install-stop`):
-  - Section: Settings
   - Type: button
 
 - **Cancel STT install** (`#stt-requirements-cancel`):
-  - Section: Settings
   - Type: button
 
 - **Confirm STT install** (`#stt-install-confirm`):
-  - Section: Settings
   - Type: button
-  - Action: Starts the whisper.cpp download.
+  - Action: Starts the engine download.
 
 ## Image generation
 
-Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images.
+Pick the model used for image generation. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images.
 
 - **Image generation title** (`#settings-image-title`):
-  - Section: Settings
   - Type: text
 
 - **Image generation model** (`#settings-image-model`):
-  - Section: Settings
   - Type: select
 
 ## Video generation
 
-Pick the model used by the generate_video tool. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async /videos API is supported. Leave disabled until you want the agent to be able to generate videos.
+Pick the model used for video generation. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async /videos API is supported. Leave disabled until you want the agent to be able to generate videos.
 
 - **Video generation title** (`#settings-video-gen-title`):
-  - Section: Settings
   - Type: text
 
 - **Video generation model** (`#settings-video-gen-model`):
-  - Section: Settings
   - Type: select
-  - Notes: Auxiliary model for generate_video. Empty disables the tool.
+  - Notes: Auxiliary model for video generation. Empty disables it.
 
 ## Speech generation
 
-Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes.
+Pick the model used for speech generation (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes.
 
 - **Speech generation title** (`#settings-tts-title`):
-  - Section: Settings
   - Type: text
 
 - **Speech generation model** (`#settings-tts-model`):
-  - Section: Settings
   - Type: select
 
 - **Install offline text-to-speech** (`#settings-tts-install-btn`):
-  - Section: Settings
   - Type: button
   - Action: Opens the piper install dialog.
 
 - **TTS install status** (`#settings-tts-install-status`):
-  - Section: Settings
   - Type: status
 
-- **TTS install dialog** (`#tts-install-overlay`):
-  - Section: Settings
-  - Type: dialog
-
-- **TTS install title** (`#tts-install-title`):
-  - Section: Settings
-  - Type: heading
-
 - **Close TTS install** (`#tts-install-close`):
-  - Section: Settings
   - Type: button
   - Action: Closes the TTS installer.
 
 - **TTS install error** (`#tts-install-error`):
-  - Section: Settings
   - Type: status
 
 - **TTS voice picker** (`#tts-install-voice`):
-  - Section: Settings
   - Type: select
 
 - **TTS install progress** (`#tts-install-progress`):
-  - Section: Settings
   - Type: status
 
 - **TTS install phase** (`#tts-install-phase`):
-  - Section: Settings
   - Type: text
 
 - **TTS install bar track** (`#tts-install-bar-track`):
-  - Section: Settings
   - Type: progress
 
 - **TTS install bar** (`#tts-install-bar`):
-  - Section: Settings
   - Type: progress
 
 - **TTS install bytes** (`#tts-install-bytes`):
-  - Section: Settings
   - Type: text
 
 - **Cancel TTS install** (`#tts-install-cancel`):
-  - Section: Settings
   - Type: button
 
 - **Confirm TTS install** (`#tts-install-confirm`):
-  - Section: Settings
   - Type: button
   - Action: Starts the piper download.
 
 ## Web Search
 
-Provider strategy for the web_search tool: with an active Codex chat provider, Codex search is tried first and searchwire is the fallback; otherwise auto merges all searchwire sources (default), round robin rotates one API-keyed provider (Brave, Serper, Tavily) per query, random picks one at random, and a bare source name pins every query to that source. Per-provider API keys are write-only, stored in the credential store; each input falls back to its standard environment variable (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) when left blank.
+Provider strategy for the web_search tool: with an active Codex chat provider, Codex search is tried first and the built-in sources are the fallback; otherwise auto merges all sources (default), round robin rotates one API-keyed provider (Brave, Serper, Tavily) per query, random picks one at random, and a bare source name pins every query to that source. Per-provider API keys are write-only, stored in the credential store; each input falls back to its standard environment variable (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) when left blank.
 
 - **Web Search title** (`#settings-web-search-title`):
-  - Section: Settings
   - Type: heading
   - Notes: Web Search card heading.
 
 - **Provider strategy** (`#settings-web-search-strategy`):
-  - Section: Settings
   - Type: select
   - Notes: web_search routing: auto, round_robin, random, or a bare source name (brave, serper, tavily, startpage, wikipedia, github).
 
 - **Brave API key** (`#settings-web-search-brave-api-key`):
-  - Section: Settings
   - Type: password
-  - Notes: Stored in the credential store (web_search_brave). Empty falls back to BRAVE_SEARCH_API_KEY; without a key Brave uses public HTML results.
+  - Notes: Stored in the credential store. Empty falls back to BRAVE_SEARCH_API_KEY; without a key Brave uses public HTML results.
 
 - **Serper API key** (`#settings-web-search-serper-api-key`):
-  - Section: Settings
   - Type: password
-  - Notes: Stored in the credential store (web_search_serper). Empty falls back to SERPER_API_KEY; required to register the Serper source.
+  - Notes: Stored in the credential store. Empty falls back to SERPER_API_KEY; required to register the Serper source.
 
 - **Tavily API key** (`#settings-web-search-tavily-api-key`):
-  - Section: Settings
   - Type: password
-  - Notes: Stored in the credential store (web_search_tavily). Empty falls back to TAVILY_API_KEY; required to register the Tavily source.
+  - Notes: Stored in the credential store. Empty falls back to TAVILY_API_KEY; required to register the Tavily source.
 
 ## Web Answer
 
 Configure a web-grounded answer provider for the web_answer tool. This is separate from chat providers — pick a supported vendor and enter its API key. The key is stored in the credential store, not in settings JSON.
 
 - **Web Answer title** (`#settings-web-answer-title`):
-  - Section: Settings
   - Type: text
 
 - **Answer provider** (`#settings-web-answer-provider`):
-  - Section: Settings
   - Type: select
   - Notes: Vendor for web_answer. Empty disables the tool.
 
 - **Web Answer API key** (`#settings-web-answer-api-key`):
-  - Section: Settings
   - Type: password
   - Notes: Stored in the credential store. Leave blank while saving to keep the existing key.
 
 - **Web Answer model** (`#settings-web-answer-model`):
-  - Section: Settings
   - Type: text
   - Notes: Optional model or preset; blank uses the vendor default.
 
@@ -584,64 +451,74 @@ Configure a web-grounded answer provider for the web_answer tool. This is separa
 Choose a bundled interface font for this browser; the font applies immediately and is stored locally. Symbol and emoji coverage uses local fallbacks. Sidebar layout is also stored in this browser. Sound notifications save with the NusaShell instance and play when an Agent room completes or fails.
 
 - **Appearance title** (`#settings-appearance-title`):
-  - Section: Settings
   - Type: text
 
 - **Interface font** (`#settings-font-family`):
-  - Section: Settings
   - Type: select
   - Notes: Browser-only preference. Selects one of the bundled UI families; Noto Sans Symbols 2 and Noto Color Emoji remain fallback coverage faces.
 
 - **Font preview** (`#settings-font-preview`):
-  - Section: Settings
   - Type: text
   - Notes: Shows letters, numbers, symbols, and emoji using the active interface font stack.
 
 - **Use icon-only sidebar** (`#settings-sidebar-compact`):
-  - Section: Settings
   - Type: checkbox
   - Notes: Browser-only preference.
 
 - **Sound notifications** (`#settings-sound-notifications`):
-  - Section: Settings
   - Type: checkbox
   - Notes: Play a sound when a listed Agent room completes, fails, or awaits an ask_question answer. Background learning jobs stay silent. Default on.
 
-## Connection
+## Desktop pet
 
-Backend status, automatic reconnect toggle, and a Check connection button. The Go shell uses HTTP RPC for commands and WebSocket for live events.
+Controls the optional desktop pet overlay (Linux only; the sidebar launcher button is hidden on unsupported platforms). The card mirrors the sidebar pet launcher: a status dot and label (Not installed / Install in progress… / Installed / Running / Unavailable on this platform), the installed release version, an Auto-start at boot toggle that starts the pet when NusaShell starts (off by default), and one action button routed through the same launcher — 'Install desktop pet' opens the one-click install dialog, 'Launch pet' spawns the overlay, 'Stop pet' kills it, and 'Unavailable' disables the button on macOS/Windows.
 
-- **`#settings-connection-title`** (missing map entry)
+- **Desktop pet title** (`#settings-pet-title`):
+  - Type: text
 
-- **`#settings-conn-fill`** (missing map entry)
+- **Pet status dot** (`#settings-pet-dot`):
+  - Type: indicator
+  - Notes: Coloured dot mirroring the pet launcher state: green installed, pulsing amber installing, cyan running, red on launch error, neutral when not installed or unsupported.
 
-- **`#settings-conn-label`** (missing map entry)
+- **Pet status label** (`#settings-pet-label`):
+  - Type: text
+  - Notes: Reflects the pet status — Not installed / Installed / Running / Install in progress… / Unavailable.
 
-- **`#settings-auto-reconnect`** (missing map entry)
+- **Pet version row** (`#settings-pet-version-row`):
+  - Type: row
+  - Notes: Hidden when the pet is not installed; surfaces the installed release version otherwise.
 
-- **`#settings-check-connection-btn`** (missing map entry)
+- **Pet version** (`#settings-pet-version`):
+  - Type: text
 
-- **`#settings-connection-status`** (missing map entry)
+- **Auto-start pet at boot** (`#settings-pets-auto-start`):
+  - Type: checkbox
+  - Action: On, the pet starts automatically when NusaShell starts (Linux only). Off (default), the pet is only launched when the user clicks the sidebar icon or the card's action button.
+  - Notes: Linux only. The toggle stays editable on macOS/Windows but has no effect at boot.
+
+- **Pet action button** (`#settings-pet-action-btn`):
+  - Type: button
+  - Action: Routes through the sidebar pet launcher: 'Install desktop pet' opens the install dialog, 'Launch pet' spawns the binary, 'Stop pet' kills the running overlay, 'Unavailable' disables when the platform does not support the pet.
+
+- **Pet save status** (`#settings-pet-status`):
+  - Type: status
 
 ## System
 
 Local diagnostics: version and data directory. This browser version does not manage desktop tray or login startup.
 
 - **System title** (`#settings-system-title`):
-  - Section: Settings
   - Type: text
 
 - **Version** (`#settings-version`):
-  - Section: Settings
   - Type: text
 
 - **Data directory** (`#settings-data-dir`):
-  - Section: Settings
   - Type: text
 
 ## Remote access
 
-Remote access is off by default. The host can enable it, save one HTTP(S) address per line, and let the backend restart automatically. The host then generates a one-time challenge, which opens the pairing dialog: the QR code, pairing link, and manual code render inside that dialog (it covers the panel, so the scannable QR belongs there) together with the device label and the Approve/Reject decision. Closing the dialog leaves the challenge pending and the panel shows a state summary plus Show pairing QR to bring the same QR back without creating a new code. A remote device scans or opens a link, waits for host approval, then exchanges the challenge for a session cookie. Addresses only change the URL encoded in the QR/link — they do not change where the core listens — and warn when a resolved address is loopback or mismatched with listen_addr; a generated QR carries that caveat too. Paired devices are listed while active; revoking a device removes its session from storage and the list. Pairing management is host-only: on a paired remote client the whole Remote access section and its nav jump link are hidden.
+Remote access is off by default. The host can enable it, save one HTTP(S) address per line, and let the backend restart automatically. The host then generates a one-time challenge, which opens the pairing dialog: the QR code, pairing link, and manual code render inside that dialog (it covers the panel, so the scannable QR belongs there) together with the device label and the Approve/Reject decision. Closing the dialog leaves the challenge pending and the panel shows a state summary plus Show pairing QR to bring the same QR back without creating a new code. A remote device scans or opens a link, waits for host approval, then exchanges the challenge for a session. Addresses only change the URL encoded in the QR/link — they do not change where the core listens — and warn when a resolved address is loopback or mismatched with the configured listen address; a generated QR carries that caveat too. Paired devices are listed while active; revoking a device removes its session and its list row. Pairing management is host-only: on a paired remote client the whole Remote access section and its nav jump link are hidden.
 
 - **Remote access section** (`#settings-remote-group`):
   - Section: Settings — Remote access
@@ -661,7 +538,7 @@ Remote access is off by default. The host can enable it, save one HTTP(S) addres
 - **Pairing summary** (`#pairing-panel-status`):
   - Section: Settings — Remote access
   - Type: status
-  - Notes: Persistent state summary of the active challenge (waiting, approved, rejected, expired, paired). It is the live region while the dialog is closed and goes quiet (aria-live=off) while the dialog's own status announces.
+  - Notes: Persistent state summary of the active challenge (waiting, approved, rejected, expired, paired). It is the live region while the dialog is closed and goes quiet while the dialog's own status announces.
 
 - **Show pairing QR** (`#pairing-show-qr-btn`):
   - Section: Settings — Remote access
@@ -677,10 +554,6 @@ Remote access is off by default. The host can enable it, save one HTTP(S) addres
   - Section: Settings — Remote access
   - Type: button
   - Action: Rejects the pending pairing challenge.
-
-- **Pairing actions** (`#pairing-host-actions`):
-  - Section: Settings — Remote access
-  - Type: container
 
 - **Device label** (`#pairing-device-label`):
   - Section: Settings — Remote access
@@ -700,7 +573,7 @@ Remote access is off by default. The host can enable it, save one HTTP(S) addres
 - **Pairing QR image** (`#pairing-qr-img`):
   - Section: Settings — Remote access
   - Type: image
-  - Notes: Client-side rendered data-URL QR; its alt text names the encoded pairing URL. Reopening the dialog reuses the identical QR for the same challenge.
+  - Notes: Client-rendered QR image; its alt text names the encoded pairing URL. Reopening the dialog reuses the identical QR for the same challenge.
 
 - **QR status** (`#pairing-qr-status`):
   - Section: Settings — Remote access
@@ -720,7 +593,7 @@ Remote access is off by default. The host can enable it, save one HTTP(S) addres
 - **Remote address error** (`#pairing-address-error`):
   - Section: Settings — Remote access
   - Type: alert
-  - Notes: Inline address feedback: a malformed URL is a blocking error, while a link that cannot be reachable (loopback address, or a non-loopback link while the core listens on loopback only, port/host mismatch vs listen_addr) is a non-blocking warning.
+  - Notes: Inline address feedback: a malformed URL is a blocking error, while a link that cannot be reachable (loopback address, or a non-loopback link while the core listens on loopback only, port/host mismatch vs the configured listen address) is a non-blocking warning.
 
 - **Pairing link** (`#pairing-link-display`):
   - Section: Settings — Remote access
@@ -756,18 +629,10 @@ Remote access is off by default. The host can enable it, save one HTTP(S) addres
   - Type: button
   - Action: Revokes every paired device session and removes them from the list.
 
-- **Session actions** (`#pairing-session-actions`):
-  - Section: Settings — Remote access
-  - Type: container
-
 - **Pairing dialog** (`#pairing-approval-overlay`):
   - Section: Settings — Remote access
   - Type: dialog
   - Notes: Body-level host dialog that opens when a challenge is created. It owns the scan surface: QR, pairing link, manual code, the extra-address QR cards, the challenge status, the device label, and the Approve/Reject decision. Closing it leaves the challenge pending and returns the QR to the panel summary's Show pairing QR control.
-
-- **Pairing dialog title** (`#pairing-approval-title`):
-  - Section: Settings — Remote access
-  - Type: heading
 
 - **Pairing dialog message** (`#pairing-approval-message`):
   - Section: Settings — Remote access

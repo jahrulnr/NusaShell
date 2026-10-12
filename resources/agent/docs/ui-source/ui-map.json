@@ -9,13 +9,14 @@
         {
           "heading": "Sidebar identity and utilities",
           "paragraphs": [
-            "The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation. The desktop pet launcher sits above the Settings icon: it surfaces install/launch status via a coloured dot (green when installed, pulsing amber while an install is active, neutral on macOS/Windows where the pet is not supported) and opens a one-click install dialog when the binary is missing."
+            "The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation. The desktop pet launcher sits above the Settings icon and is hidden entirely on macOS/Windows where the pet is unsupported (Linux only). A click launches or stops the installed pet, is ignored while an install is active, and opens a one-click install dialog when the binary is missing; its tooltip reports the current state, and the Settings Desktop pet card mirrors the same status on a coloured dot (green installed, pulsing amber installing, cyan running, red error)."
           ],
           "controls": [
             "conn-status",
             "conn-fill",
             "pwa-install-btn",
             "pet-btn",
+            "pet-install-overlay",
             "nav-settings-btn"
           ]
         },
@@ -42,7 +43,7 @@
         {
           "heading": "Offline screen",
           "paragraphs": [
-            "Full-window overlay shown whenever the backend is unreachable. It covers every view so no half-broken UI stays interactive: an explicit offline verdict shows it immediately, while closed/error/reconnecting states only cover after a short persistence window so quick reconnects never flicker. Recovery hides it instantly and Try again reloads the shell (service worker serves the cached shell while the server is down)."
+            "Full-window overlay shown whenever the backend is unreachable. It covers every view so no half-broken UI stays interactive: an explicit offline verdict shows it immediately, while closed/error/reconnecting states only cover after a short persistence window so quick reconnects never flicker. Recovery hides it instantly and Try again reloads the shell (the cached app stays available while the server is down)."
           ],
           "controls": [
             "offline-screen",
@@ -74,7 +75,7 @@
     },
     "home": {
       "title": "Home",
-      "purpose": "The launcher view: a grid of installed plugin apps. Each tile opens the plugin UI in a separate browser window. Searchable by name, id, or description and filterable by category.",
+      "purpose": "The launcher view: a grid of installed plugin apps. Each tile opens (or focuses, when it is already open) the plugin UI in a separate browser window. Searchable by name, id, or description and filterable by category.",
       "howToOpen": "Open NusaShell, or click the Home item in the left sidebar.",
       "sections": [
         {
@@ -91,23 +92,25 @@
         {
           "heading": "App grid",
           "paragraphs": [
-            "A responsive grid of plugin tiles. Each tile shows the plugin icon (including local manifest icons resolved for the browser), name, and a runtime status when active. Artwork is contained inside the instrument-style icon plate even when a manifest image has an unusual aspect ratio. Clicking a tile opens the plugin UI in a new browser window sized from the plugin manifest."
+            "A responsive grid of plugin tiles. Each tile shows the plugin icon (including local manifest icons resolved for the browser), name, and a runtime status when active. Artwork is contained inside the instrument-style icon plate even when a manifest image has an unusual aspect ratio. Clicking a tile opens (or focuses, when already open) the plugin UI in a separate browser window sized from the plugin manifest. If the plugin list fails to load, an error banner offers a Retry button that refetches it."
           ],
           "controls": [
-            "app-grid"
+            "app-grid",
+            "plugin-load-error",
+            "plugin-load-retry"
           ]
         }
       ]
     },
     "agent": {
       "title": "Agent",
-      "purpose": "The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, plugin-provided MCP tools, and spawned ACP subagents or internal delegates.",
-      "howToOpen": "Open NusaShell, or click the Agent item in the left sidebar.",
+      "purpose": "The chat workspace view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, plugin-provided MCP tools, and spawned ACP subagents or internal delegates.",
+      "howToOpen": "Click the Agent item in the left sidebar.",
       "sections": [
         {
           "heading": "Conversations pane",
           "paragraphs": [
-            "Lists conversations with a search filter and a New conversation button. The count reflects Agent rooms only; pipeline agent-step conversations are omitted. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread."
+            "Lists conversations with a search filter and a New conversation button. The count reflects Agent rooms only; pipeline agent-step conversations are omitted. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread. In the experimental widget shell, a confirmed successful delete immediately removes its row even if the following list refresh fails; the deleted room cannot reappear. Failure to load the next room is reported separately from the successful deletion. Room actions live in one local menu there: each row's ellipsis button opens it anchored to the trigger, and right-click on the row opens the same menu at the pointer with Rename and Delete items. Arrow keys rove focus, Escape or an outside press closes it, and closing restores focus to the opener so Tab continues native traversal from the trigger."
           ],
           "controls": [
             "agent-conversations",
@@ -121,12 +124,30 @@
           ]
         },
         {
+          "heading": "Room info and mini window",
+          "paragraphs": [
+            "A small floating control cluster at the top of the conversation area, hidden until a conversation is active. The Room info trigger opens a diagnostics popover titled with the conversation name: a Tools metric (tool calls in the loaded history, bookkeeping calls excluded), a Compactions metric (archived pre-compaction chunks), and the conversation ID with a copy-to-clipboard button. The popover closes on its X button, an outside click, or Escape. The mini window button opens a picture-in-picture mini window: on Chromium the live thread and composer move into an always-on-top picture-in-picture window; elsewhere a small popup window loads the app in mini mode. In the experimental widget shell the move also re-adopts every widget's constructed stylesheets: they are rebuilt with the PiP document's own CSSStyleSheet constructor from cached text (no refetch) on entry and again on return, so widgets stay styled across repeated open/close cycles."
+          ],
+          "controls": [
+            "agent-room-info",
+            "agent-room-info-trigger",
+            "agent-room-info-popover",
+            "agent-room-info-title",
+            "agent-room-info-close",
+            "agent-room-tool-count",
+            "agent-room-compaction-count",
+            "agent-room-id-copy",
+            "agent-room-id",
+            "mini-window-btn"
+          ]
+        },
+        {
           "heading": "Thread",
           "paragraphs": [
             "Renders the active conversation. An empty thread offers starter prompt chips that fill the composer.",
-            "Long conversations open showing only the most recent history, scrolled to the bottom. The complete trailing assistant run remains visible even when it contains dozens of tool or reasoning messages, so a finished answer is not hidden behind the history control. A 'Load older messages' button at the top reveals older in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. User messages and isolated ACP prompt events preserve Markdown as friendly HTML: inline backticks become code pills and fenced code becomes a bounded, horizontally scrollable code card. Thinking and compaction handover markdown are parsed only when their expandable disclosures are opened. While the backend compacts, the active room receives a room-scoped WebSocket status and shows an animated 'Context automatically compacting' row; the generic Thinking loading dots are suppressed so only one loading status is visible, and the row is removed when compaction completes or fails. When the provider is actively constructing a tool call before its arguments are valid, the room shows a transient animated activity row and cycles short status copy every five seconds; it contains no partial tool arguments and disappears when the tool card or answer is available. show(op=pdf) results render as a styled native PDF preview with a download link; DOCX/PPTX and other office previews are not enabled without a reliable renderer. Live streaming auto-follows only while the view is pinned to the bottom. Wheel, touch, keyboard, and scrollbar movement upward explicitly detaches follow; returning to the bottom re-enables it. Follow requests are frame-coalesced and retry across layout settling, while a refresh preserves a detached reader's position and does not force a scroll during live-to-complete transition.",
-            "Local file links open a type-aware bounded preview. Classification is header-first: the backend's magic-derived Content-Type (set from magic bytes) and Content-Length drive the preview kind and size badge without downloading the body for media (image/audio/video/PDF). Markdown and text still read the full body; an uninformative header falls back to a bounded 4 KiB sample for the magic/binary heuristic, and the filename extension is the final fallback. Markdown renders to HTML (including lazy Mermaid with a readable inline baseline); text opens in a read-only Dracula code editor backed by the vendored CodeMirror 5 library (lazy-loaded from /vendor/codemirror/, with a <pre><code> highlight.js fallback when the editor assets are unavailable); image/audio/video/PDF use their native preview; and unrecognised binary data stays download-first. Closing the popup aborts any in-flight fetch. GFM tables retain intrinsic width inside a horizontal scroller; images and Mermaid diagrams offer a Zoom action. Mermaid zoom resizes its SVG vector canvas rather than enlarging a raster layer. Closing any zoom, artifact, audio, video, or text-preview overlay returns keyboard focus to the element that opened it, so keyboard navigation resumes from the trigger instead of the page body.",
-            "Live completion refreshes authoritative state without replacing a connected live node. Delta rendering stays dirty across transient DOM detaches; SSE sequence gaps, duplicate frames, malformed frames, and premature EOFs are recovered from the last contiguous cursor, with a bounded snapshot fallback when replay is no longer available."
+            "Long conversations open showing only the most recent history, scrolled to the bottom. The complete trailing assistant run remains visible even when it contains dozens of tool or reasoning messages, so a finished answer is not hidden behind the history control. A 'Load older messages' button at the top reveals older in-memory messages, then archived pre-compaction chunks, one batch at a time. Chunks are never auto-loaded after a turn finishes or mid-turn compaction. User messages and isolated ACP prompt events preserve Markdown as friendly HTML: inline backticks become code pills and fenced code becomes a bounded, horizontally scrollable code card. Thinking and compaction handover markdown are parsed only when their expandable disclosures are opened. While the backend compacts, the active room shows an animated 'Context automatically compacting' row; the generic Thinking loading dots are suppressed so only one loading status is visible, and the row is removed when compaction completes or fails. When the provider is actively constructing a tool call before its arguments are valid, the room shows a transient animated activity row and cycles short status copy every five seconds; it contains no partial tool arguments and disappears when the tool card or answer is available. show(op=pdf) results render as a styled native PDF preview with a download link; DOCX/PPTX and other office previews are not enabled without a reliable renderer. Live streaming auto-follows only while the view is pinned to the bottom. Wheel, touch, keyboard, and scrollbar movement upward explicitly detaches follow; returning to the bottom re-enables it. Follow retries across layout settling, and a refresh preserves a detached reader's position without forcing a scroll during live-to-complete transition.",
+            "Local file links open a type-aware bounded preview. The preview kind and size badge are decided from the file header without downloading the body for media (image/audio/video/PDF); Markdown and text read the full body, and the filename extension is the final fallback. Markdown renders to HTML (including Mermaid diagrams with a readable inline baseline); text opens in a read-only syntax-highlighted code editor; image/audio/video/PDF use their native preview; and unrecognised binary data stays download-first. Closing the popup aborts the load. Tables retain intrinsic width inside a horizontal scroller; images and Mermaid diagrams offer a Zoom action that keeps vector diagrams sharp. Closing any zoom, artifact, audio, video, or text-preview overlay returns keyboard focus to the element that opened it, so keyboard navigation resumes from the trigger instead of the page body.",
+            "Live completion refreshes the thread's authoritative state without disturbing what is on screen. Interrupted live streams recover without losing or duplicating content; when a live stream cannot be replayed, the thread reloads instead of applying out-of-order updates."
           ],
           "controls": [
             "agent-shell",
@@ -139,15 +160,16 @@
         {
           "heading": "Tool call strip",
           "paragraphs": [
-            "Shows in-flight MCP or built-in tool calls for the current turn. Built-in tools render as compact execution events, open by default: the head row (status node, action title, elapsed) collapses the card to a single line, and the body leads with the primary argument as a path line followed by the result without any nested toggle; the raw request and output stay folded inside a show-request-and-raw-output details. Tool markers are independent rather than joined by a continuous rail, so a long tool round stays visually calm. Ocean marks inspection and connectivity, volcanic soil marks local authored work, sand marks scheduled work, and reef marks direct agent collaboration; mangrove remains reserved for success state. A card keeps the disclosure state chosen by the user when it settles, so completion does not collapse an expanded result or remove a reader's vertical context. Every tool card keeps its elapsed indicator in the card chrome; standalone Ask Question cards place it in their header. Before a valid card exists, provider-side tool construction is represented by a transient animated activity row that cycles status copy every five seconds without exposing partial arguments. exec streams its command output live into a terminal output panel inside the same timeline event paths (with a per-call Stop button while running), and MCP calls render the same event with a MCP badge and the tool ref as the path line. ACP delegation and internal delegate runs are represented by one clickable subagent card per run and share the same dock, drawer, popup, and transcript hydration; subagent steer/stop/wait calls (`op=steer|stop|wait`), delegate_result, and synthetic subagent_result bookkeeping stay out of the transcript so they do not duplicate that card. Ask Question cards render their question, option descriptions, and submitted answer as Markdown while keeping the interaction controls native and accessible. Completed show(op=pdf) calls become a native PDF preview card instead of a terminal row. Tool cards keep chronological order inside their owning assistant round: terminal cards group into stacks, and a standalone card (subagent, media, artifact, ask) splits the stack so later terminals follow it. Live rounds and reloaded transcripts use the same placement. A late completion for a tool that already appears in history updates that card where it sits, even after a later round or a steer, and never adds a copy at the live tail. A card that has already settled is not revived by a late start event or a stream frame, and its disclosure state is kept.",
-            "Streaming tools (exec) display their live output as it is produced and offer a per-call Stop button while running; the button cancels only that tool call via agent.tools.stop, persists interrupted by user, and lets the enclosing agent turn continue. The composer Stop remains the separate whole-turn cancellation control."
+            "Shows in-flight MCP or built-in tool calls for the current turn. Built-in tools render as compact execution events, open by default: the head row (status node, action title, elapsed) collapses the card to a single line, and the body leads with the primary argument as a path line followed by the result without any nested toggle; the raw request and output stay folded inside a show-request-and-raw-output details. Tool markers are independent rather than joined by a continuous rail, so a long tool round stays visually calm. Colour coding marks the kind of work: blue for inspection and connectivity, brown for local authored work, amber for scheduled work, and cyan for direct agent collaboration; green is reserved for success. A card keeps the disclosure state chosen by the user when it settles, so completion does not collapse an expanded result or remove a reader's vertical context. Every tool card keeps its elapsed indicator in the card chrome; standalone Ask Question cards place it in their header. Before a valid card exists, provider-side tool construction is represented by a transient animated activity row that cycles status copy every five seconds without exposing partial arguments. exec streams its command output live into a terminal output panel inside the same timeline event paths (with a per-call Stop button while running), and MCP calls render the same event with a MCP badge and the tool ref as the path line. ACP delegation and internal delegate runs are represented by one clickable subagent card per run and share the same dock, drawer, popup, and transcript; subagent steer/stop/wait and result bookkeeping calls stay out of the transcript so they do not duplicate that card. Ask Question cards render their question, option descriptions, and submitted answer as Markdown while keeping the interaction controls native and accessible. Completed show(op=pdf) calls become a native PDF preview card instead of a terminal row. Tool cards keep chronological order inside their owning assistant round: terminal cards group into stacks, and a standalone card (subagent, media, artifact, ask) splits the stack so later terminals follow it. Live rounds and reloaded transcripts use the same placement. A late completion for a tool that already appears in history updates that card where it sits, even after a later round or a steer, and never adds a copy at the live tail. A card that has already settled is not revived by a late start event or stream update, and its disclosure state is kept.",
+            "Streaming tools (exec) display their live output as it is produced and offer a per-call Stop button while running; the button cancels only that tool call, marks it interrupted by user, and lets the enclosing agent turn continue. The composer Stop remains the separate whole-turn cancellation control."
           ],
           "controls": [
             "agent-composer-stack",
             "tool-job-strip",
             "tool-job-strip-toggle",
             "tool-job-strip-title",
-            "tool-job-strip-meta"
+            "tool-job-strip-meta",
+            "tool-terminal-stop"
           ]
         },
         {
@@ -167,7 +189,7 @@
         {
           "heading": "ACP live views",
           "paragraphs": [
-            "The drawer reuses the conversation-pane layout: subagent runs are listed newest first in a left sidebar and the selected transcript fills the right pane. The delegation prompt and each persisted steering prompt appear as isolated Markdown-rendered prompt events, not main-conversation user bubbles, and long prompts scroll inside a bounded panel. Assistant text, reasoning, and tools reuse the normal Agent conversation structure. External ACP session updates and internal AgentEngine stream chunks feed the same incremental transcript projection, so thinking, text, tool starts, tool output, and terminal status update in place. ACP terminal rows stay compact and expose their full command through an accessible `Show full tool input` disclosure, with a scrollable monospace expanded state and a quieter raw-output fold below. Switching the parent Agent room while the drawer is open rebinds the sidebar to that room; its empty marker appears only when the new room has no runs. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. Completed cards retain their run ID and fetch the persisted transcript when the backend cache is empty or has restarted. On phones, the run picker becomes a compact horizontal strip and the transcript owns the vertical scroll, so the selected run gets most of the drawer. Live output sticks to the transcript tail only while that run's scroll pin is armed; scrolling up by wheel, touch, keyboard, or scrollbar releases it and returning to the bottom re-arms it. The peek popup focuses one run. Run state recovers from missed live events: a sequence gap in the run stream drops that connection and reloads a fresh snapshot instead of applying the out-of-order frame. A list or get response that was requested before a reconnect, a room switch, or a newer live update for the same run is ignored, so a stale response cannot revert a terminal run to running or overwrite newer streamed content. A run that is waiting for permission counts as live in the dock and drawer. While the selected run's transcript is loading the drawer shows Loading transcript; if the request is superseded by a newer stream state it is reissued for the current connection without a click. A genuine failure shows the retry message, and the drawer does not retry it automatically; clicking the card again retries."
+            "The drawer reuses the conversation-pane layout: subagent runs are listed newest first in a left sidebar and the selected transcript fills the right pane. The delegation prompt and each persisted steering prompt appear as isolated Markdown-rendered prompt events, not main-conversation user bubbles, and long prompts scroll inside a bounded panel. Assistant text, reasoning, and tools reuse the normal Agent conversation structure. ACP subagents and internal delegates stream into the same transcript, so thinking, text, tool starts, tool output, and terminal status update in place. ACP terminal rows stay compact and expose their full command through an accessible `Show full tool input` disclosure, with a scrollable monospace expanded state and a quieter raw-output fold below. Switching the parent Agent room while the drawer is open rebinds the sidebar to that room; its empty marker appears only when the new room has no runs. Growing text and reasoning chunks update in place, tool updates stay on one row, and token usage appears as run metadata instead of transcript noise. Completed cards retain their run ID and fetch the persisted transcript when the backend cache is empty or has restarted. On phones, the run picker becomes a compact horizontal strip and the transcript owns the vertical scroll, so the selected run gets most of the drawer. Live output sticks to the transcript tail only while that run's scroll pin is armed; scrolling up by wheel, touch, keyboard, or scrollbar releases it and returning to the bottom re-arms it. The peek popup focuses one run. Run state recovers from missed live events: a gap in the live stream reloads fresh state instead of applying out-of-order content. A list or get response that was requested before a reconnect, a room switch, or a newer live update for the same run is ignored, so a stale response cannot revert a terminal run to running or overwrite newer streamed content. A run that is waiting for permission counts as live in the dock and drawer. While the selected run's transcript is loading the drawer shows Loading transcript; if the request is superseded by a newer stream state it is reissued for the current connection without a click. A genuine failure shows the retry message, and the drawer does not retry it automatically; clicking the card again retries."
           ],
           "controls": [
             "acp-drawer-overlay",
@@ -199,7 +221,7 @@
         {
           "heading": "Steer queue",
           "paragraphs": [
-            "When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary. Finished background results and harness announcements are inserted before the steer, then the steer becomes the newest user instruction for the next provider request. Once applied, the user bubble anchors the next assistant round: stale waiting dots from the completed round are removed and exactly one new waiting round appears after the user bubble. The seal removes only a round that has no reasoning, text, or tool card; a round that holds a settled subagent or media card, or a terminal stack after an earlier empty stack, is kept in its position before the steer."
+            "When a user sends a steer message mid-turn, it is queued here and applied at the next safe tool-round boundary. Finished background results and harness announcements are inserted before the steer, then the steer becomes the newest user instruction for the next provider request. Once applied, the user bubble anchors the next assistant round: stale waiting dots from the completed round are removed and exactly one new waiting round appears after the user bubble. An empty leftover round is removed only when it has no reasoning, text, or tool card; a round that holds a settled subagent or media card, or a terminal stack after an earlier empty stack, is kept in its position before the steer."
           ],
           "controls": [
             "agent-steer-queue",
@@ -213,7 +235,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Provider status shows server-authoritative used/window context tokens and remains visible as a compact status on narrow screens. Ctrl+Enter (⌘↩ on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
+            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Provider status shows used/window context tokens and remains visible as a compact status on narrow screens. In the experimental widget shell the preflight estimate also carries a per-category breakdown — system, conversation, and tool-definition tokens — from the same canonical request estimator, as an estimate rather than provider-measured attribution. Ctrl+Enter (⌘↩ on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
           ],
           "controls": [
             "agent-form",
@@ -237,7 +259,7 @@
     },
     "skills": {
       "title": "Skills",
-      "purpose": "Browse and read installed skill packages (SKILL.md + support files). Skills come from three owners: user, builtin, and plugin:<id>. Lower-priority owners (plugin) are shadowed when a higher-priority owner (user/builtin) defines the same skill ID.",
+      "purpose": "Browse and read installed skill packages (SKILL.md + support files). Skills come from four owners: user, builtin, learned (saved by the agent or background learner), and plugin:<id>. Lower-priority owners are shadowed when a higher-priority owner defines the same skill ID (user > builtin > plugin > learned).",
       "howToOpen": "Click the Skills item in the left sidebar.",
       "sections": [
         {
@@ -246,13 +268,14 @@
             "View title and an Install skill button for .skill or .zip archives."
           ],
           "controls": [
-            "install-skill-btn"
+            "install-skill-btn",
+            "skill-file-input"
           ]
         },
         {
           "heading": "Catalog",
           "paragraphs": [
-            "Searchable list of installed skills. Each row shows the skill name, a status badge (experimental/validated/trusted/…), an owner badge (user/builtin/plugin:<id>), version, and last-updated time. Shadowed skills are dimmed. The count reflects persisted skills."
+            "Searchable list of installed skills. Each row shows the skill name, a status badge (experimental/validated/trusted/…), an owner badge shown only for non-user owners (builtin, learned, or the plugin name for plugin:<id> rows; user-owned rows render no owner badge), version, and last-updated time. Shadowed skills are dimmed. The count reflects persisted skills."
           ],
           "controls": [
             "skills-count",
@@ -263,7 +286,7 @@
         {
           "heading": "Detail",
           "paragraphs": [
-            "Read-only file viewer for the selected skill plus lifecycle controls. Shows the skill name, description, owner, status badge, and Version/ActiveVersion. Experimental and validated skills can be promoted (skills.promote). Rollback picks a version from the custom select and calls skills.rollback. Learned and user-owned skills can be deleted (skills.delete) after a confirm dialog; builtin and plugin-owned skills stay hidden from Delete. User-owned trusted skills can still be saved with skills.save; learned experimental skills are not overwritten in place from this viewer. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable."
+            "Read-only file viewer for the selected skill plus lifecycle controls. Shows the skill name, description, owner, status badge, and Version/ActiveVersion. Experimental and validated skills can be promoted. Rollback picks a version from the custom select. Learned and user-owned skills can be deleted after a confirm dialog; builtin and plugin-owned skills stay hidden from Delete. The viewer never edits file content — changes come from the agent's skills tool, which creates learned skills and grows them as new versions rather than overwriting in place. Plugin-owned skills are read-only. On phones the catalog, file tree, and file viewer stack vertically inside one scrollable workspace so every file remains reachable."
           ],
           "controls": [
             "skill-editor-title",
@@ -275,8 +298,15 @@
             "skills-rollback-version",
             "skills-rollback",
             "skills-delete",
-            "skill-file-viewer",
+            "skills-workspace",
+            "skills-splitter-1",
+            "skills-splitter-2",
+            "skill-tree-meta",
             "skill-files-tree",
+            "skill-tree-empty",
+            "skill-file-viewer",
+            "skill-file-path",
+            "skill-file-size",
             "skill-file-content"
           ]
         }
@@ -327,7 +357,7 @@
         {
           "heading": "Plugin window",
           "paragraphs": [
-            "Plugin UIs open in a separate browser window served same-origin at /plugins/<id>/ (the server injects the window.shell shim). Opening happens from Home tiles and the Plugins drawer Open UI button. The window is sized from the manifest ui.window (panel/widget request defaultSize with a 700x700 / 380x280 fallback; fullscreen opens a normal browser window). This keeps the plugin from covering or replacing the NusaShell UI. If the browser blocks the pop-up, a toast prompts the user to allow pop-ups."
+            "Plugin UIs open in a separate browser window served same-origin at /plugins/<id>/. Opening happens from Home tiles and the Plugins drawer Open UI button; a stable per-plugin window target means a second click focuses the existing window instead of stacking a duplicate. The window is sized from the plugin manifest (a panel with no declared size falls back to a screen-scaled min(1100px, 80% of width) by min(820px, 85% of height), a widget falls back to 380x280, and fullscreen covers the available screen). This keeps the plugin from covering or replacing the NusaShell UI. If the browser blocks the pop-up, a toast prompts the user to allow pop-ups."
           ],
           "controls": []
         },
@@ -343,7 +373,7 @@
         {
           "heading": "Detail drawer",
           "paragraphs": [
-            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, preferences, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. When a catalog plugin has a newer release, an Update button appears that updates it in place (plugin.update). Close with the X button, overlay, or Escape. The manifest summary shows transport plus URL for SSE/HTTP servers, or command plus arguments for stdio servers. The same editor (opened via Add MCP or Edit) switches its fields per transport: command/args/env for stdio, URL/headers for SSE/HTTP.",
+            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, preferences, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. When a catalog plugin has a newer release, an Update button appears that updates it in place. Close with the X button, overlay, or Escape. The manifest summary shows transport plus URL for SSE/HTTP servers, or command plus arguments for stdio servers. The same editor (opened via Add MCP or Edit) switches its fields per transport: command/args/env for stdio, URL/headers for SSE/HTTP.",
             "The Preferences area has an Auto start switch (shown for every entry) that launches the MCP server when NusaShell starts, and an Auto update switch (shown only for catalog-managed plugins) that updates the plugin automatically when a new version is released."
           ],
           "controls": [
@@ -372,7 +402,7 @@
     },
     "providers": {
       "title": "Providers",
-      "purpose": "Configure persistent Anthropic, OpenAI, OpenRouter, and Codex cards, add unlimited custom providers by wire format (Messages, Responses, Chat, Codex), and manage spawn-only ACP subagent binaries. Codex prefers Sign in with ChatGPT or Import from Codex CLI (optional token paste fallback); other provider keys are optional and live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
+      "purpose": "Configure persistent Anthropic, OpenAI, OpenRouter, Codex, and Gemini cards, add unlimited custom providers by wire format (Messages, Responses, Chat, Gemini, Codex), and manage spawn-only ACP subagent binaries. Codex prefers Sign in with ChatGPT or Import from Codex CLI (optional token paste fallback); other provider keys are optional and live in the local credential store. ACP env values are stored server-side; the UI shows only env keys.",
       "howToOpen": "Click the Providers item in the left sidebar.",
       "sections": [
         {
@@ -389,7 +419,7 @@
         {
           "heading": "Chat providers",
           "paragraphs": [
-            "The registry always shows persistent Anthropic, OpenAI, OpenRouter, and Codex cards, even before configuration. Anthropic uses the Anthropic Messages driver; OpenAI uses the OpenAI Responses driver; OpenRouter uses the OpenRouter driver; Codex uses the Codex driver with OAuth Sign in / Import from CLI as the primary auth paths. Custom forms expose Messages, Responses, Chat, and Codex API kinds. Selecting a card opens the detail pane for editing its base URL, credential, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer."
+            "The registry always shows persistent Anthropic, OpenAI, OpenRouter, Codex, and Gemini cards, even before configuration. Codex offers OAuth Sign in / Import from CLI as the primary auth paths. Custom forms expose Messages, Responses, Chat, Gemini, and Codex API kinds. Selecting a card opens the detail pane for editing its base URL, credential, enabled state, prompt-cache TTL, importing models, and testing connectivity. These models appear in the Agent composer."
           ],
           "controls": [
             "provider-llm-section",
@@ -416,7 +446,7 @@
         {
           "heading": "ACP subagents",
           "paragraphs": [
-            "A separate registry for Agent Client Protocol binaries. Register a generic command + args + env. Probe discovers auth methods, modes, and models at runtime. ACP agents never appear in the composer; the parent agent spawns them with the subagent tool. Command is immutable after save."
+            "A separate registry for Agent Client Protocol binaries. Register a generic command + args + env. Probe contacts the binary and caches the advertised auth methods; Refresh catalog imports the advertised modes and models. ACP agents never appear in the composer; the parent agent spawns them with the subagent tool. Command is immutable after save."
           ],
           "controls": [
             "provider-acp-section",
@@ -434,7 +464,7 @@
         {
           "heading": "Header stats",
           "paragraphs": [
-            "Live counts of memory records and learning edges. The record count refreshes in real time when a learner job, a human retire, or an About You/About Agent save emits `memory.updated`."
+            "Live counts of memory records and learning edges. The record count refreshes in real time when a learner job, a human retire, or an About You/About Agent save changes memory."
           ],
           "controls": [
             "learning-stat-memory",
@@ -457,7 +487,7 @@
         {
           "heading": "About You",
           "paragraphs": [
-            "The editable user memory document. Reload reads the persisted value again; Save changes replaces the complete user memory document through memory.user.update. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile."
+            "The editable user memory document. Reload reads the persisted value again; Save changes replaces the complete persisted user memory document. The editor shows the 4000-character cap and allows an intentional empty document. The card expands across the available desktop canvas while keeping a compact inset and full-width editor on mobile."
           ],
           "controls": [
             "learning-user-status",
@@ -470,7 +500,7 @@
         {
           "heading": "Soul.md",
           "paragraphs": [
-            "The editable agent-tier memory document. Reload reads the persisted value again; Save changes replaces the complete soul.md document through memory.agent.update. The editor shows the 4000-character cap and allows an intentional empty document. Changes remain separate from user.md and memory records."
+            "The editable agent-tier memory document. Reload reads the persisted value again; Save changes replaces the complete persisted soul.md document. The editor shows the 4000-character cap and allows an intentional empty document. Changes remain separate from user.md and memory records."
           ],
           "controls": [
             "learning-agent-status",
@@ -483,7 +513,7 @@
         {
           "heading": "Experience",
           "paragraphs": [
-            "Paginated list of recorded episodes from experience.list (newest first, 25 per page, Prev/Next controls). Each row shows the goal, outcome status, signals, and timestamp, with a per-row delete control that calls experience.delete after a styled confirm. Clicking a row loads experience.get and expands detail. Structured memory records from memory.list sit beside it; a selected record can be deleted with memory.delete after a styled confirm. The lists refresh on experience.recorded, experience.deleted, learning.job.started/done/error, and memory.updated."
+            "Paginated list of recorded episodes (newest first, 25 per page, Prev/Next controls). Each row shows the goal, outcome status, signals, and timestamp, with a per-row delete control behind a styled confirm. Clicking a row expands detail. Structured memory records sit beside it; a selected record can be deleted behind a styled confirm. The lists refresh automatically when experience, memory, or learning jobs change."
           ],
           "controls": [
             "learning-experience-list",
@@ -505,7 +535,7 @@
         {
           "heading": "Results",
           "paragraphs": [
-            "Ranked search results with a count. With an empty query the pane lists all skills and records so content is visible immediately. Memory hits show a tier badge (user, agent, or record) next to the kind label. Records are retired from the Experience tab, not deleted here. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms)."
+            "Ranked search results with a count. With an empty query the pane lists all skills and records so content is visible immediately. Memory hits show a tier badge (user, agent, or record) next to the kind label. Records are retired from the Experience tab, not deleted here. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change."
           ],
           "controls": [
             "learning-results",
@@ -515,7 +545,7 @@
         {
           "heading": "Splitter",
           "paragraphs": [
-            "Draggable splitter between the results pane and the graph pane. Drag to resize the results pane width; the width persists to localStorage."
+            "Draggable splitter between the results pane and the graph pane. Drag to resize the results pane width; the width persists in this browser."
           ],
           "controls": [
             "learning-splitter"
@@ -524,18 +554,19 @@
         {
           "heading": "Knowledge graph",
           "paragraphs": [
-            "Force-directed graph (vis-network) of skills, memory records, and their edges. Related edges are rebuilt from content similarity plus record metadata; stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent or learning-job turn. The backend coalesces unchanged graph rebuilds and emits a refresh event when newly derived edges are ready. Dense edge lines stay thin. Node size scales with the number of unique neighbouring nodes, making the most-connected hubs largest; hover text includes the relation count. Zooming out preserves most of that size contrast so nearby relation counts remain visually distinct instead of collapsing to the same rasterized radius. After its bounded physics pass, a full layout keeps the force-directed angular grouping but places highly connected hubs toward the center and low-degree or isolated nodes toward a compact perimeter ring without detaching them from the main cluster, then resolves residual collisions before freezing. The restrained archipelago palette maps skills to ocean blue, records to earth brown, user memory to leaf green, and edges to deeper ocean, mangrove, or sand tones. Reload fetches the graph and performs this full relayout; Fit fits it to view. When the backend has more than 2,000 edges, the browser renders the strongest 2,000 and shows the rendered/total count; the complete edge set remains available to the backend. Legend distinguishes Skill, Record, Related, and Used-with edges. The graph refreshes automatically when memory or skills change, a learning job finishes, or the background graph build completes (via `memory.updated` / `skill.updated` / `learning.job.done` / `learning.graph.updated` events, coalesced with a 300ms debounce); automatic refreshes keep existing node positions and the current zoom/pan, laying out only additions, so the graph and the user's viewport stay still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list."
+            "Force-directed graph of skills, memory records, and their edges. Related edges are rebuilt from content similarity plus record metadata; stale edges to deleted nodes are removed. Used-with edges connect learning nodes observed together during one successful agent or learning-job turn. The backend coalesces unchanged graph rebuilds and emits a refresh event when newly derived edges are ready. Dense edge lines stay thin. Node size scales with the number of unique neighbouring nodes, making the most-connected hubs largest; hover text includes the relation count. Zooming out preserves most of that size contrast so nearby relation counts remain visually distinct instead of collapsing to the same rasterized radius. After its bounded physics pass, a full layout keeps the force-directed angular grouping but places highly connected hubs toward the center and low-degree or isolated nodes toward a compact perimeter ring without detaching them from the main cluster, then resolves residual collisions before freezing. The palette maps skills to blue, records to earth brown, user memory to leaf green, and edges to deeper blue, green, or sand tones. Reload fetches the graph and performs this full relayout; Fit fits it to view. When the backend has more than 2,000 edges, the browser renders the strongest 2,000 and shows the rendered/total count; the complete edge set remains available to the backend. Legend distinguishes Skill, Record, Related, and Used-with edges. The graph refreshes automatically when memory or skills change, a learning job finishes, or the background graph build completes; automatic refreshes keep existing node positions and the current zoom/pan, laying out only additions, so the graph and the user's viewport stay still while idle. On narrow screens results and graph stack into separate bounded panes with their own scrollable result list."
           ],
           "controls": [
             "learning-graph",
             "learning-graph-refresh",
-            "learning-graph-fit"
+            "learning-graph-fit",
+            "learning-graph-delete"
           ]
         },
         {
           "heading": "Learning log",
           "paragraphs": [
-            "Learning-job activity feed from the trajectory log (experience extraction, consolidation, skill jobs, edge building, decay, prune), newest first. The feed reads one bounded 50-event page at a time instead of loading the full history; Previous and Next use stable cursors, while Refresh returns to the newest page. Job entries show a status badge (done or error); failures use a concise automatic-processing message rather than exposing a verbose provider body. Each entry has a compact Source <title> line, saved outcomes (kind + snippet) or an explicit Nothing to save. line, and per-type extras. A running indicator appears at the top while a learning job is in-flight."
+            "Learning-job activity feed from the trajectory log (experience extraction, consolidation, skill jobs, edge building, decay, prune), newest first. The feed reads one bounded 50-event page at a time instead of loading the full history; Previous and Next stay stable while new events arrive, and Refresh returns to the newest page. Job entries show a status badge (done or error); failures use a concise automatic-processing message rather than exposing a verbose provider body. Each entry has a compact Source <title> line, saved outcomes (kind + snippet) or an explicit Nothing to save. line, and per-type extras. A running indicator appears at the top while a learning job is in-flight."
           ],
           "controls": [
             "learning-log-count",
@@ -608,7 +639,7 @@
     },
     "logs": {
       "title": "Logs",
-      "purpose": "Runtime events streamed live from the shell via WebSocket. The log file is a bounded ring (2000 entries) persisted as JSONL.",
+      "purpose": "Runtime events streamed live from the shell. The log file is a bounded ring (2000 entries).",
       "howToOpen": "Click the Logs item in the left sidebar.",
       "sections": [
         {
@@ -636,7 +667,7 @@
     },
     "settings": {
       "title": "Settings",
-      "purpose": "Control how this local NusaShell instance runs agent turns, manages context, stores memory, picks models, and presents the workspace. Cards are grouped by boundary: Agent, Context, Memory & search, Media understanding, Media generation, Web, and Workspace. Browser-only preferences stay in local storage; the rest save with the instance.",
+      "purpose": "Control how this local NusaShell instance runs agent turns, manages context, stores memory, picks models, and presents the workspace. Cards are grouped by boundary: Agent, Context, Memory & search, Media understanding, Media generation, Web, Workspace, and Remote access. Browser-only preferences stay in local storage; the rest save with the instance.",
       "howToOpen": "Click Settings in the sidebar, or press the Settings shortcut.",
       "sections": [
         {
@@ -652,7 +683,7 @@
         {
           "heading": "Card groups",
           "paragraphs": [
-            "A sticky Jump to rail moves directly between the eight settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, connection, system.",
+            "A sticky Jump to rail moves directly between the eight settings groups and transfers keyboard focus to the destination heading. Settings cards are clustered under labeled groups so unrelated controls are not mixed. Agent: runtime, instructions, plugins. Context: compaction and prompt caching. Memory & search: learning job model, periodic review interval, project memory directory, embeddings. Media understanding: vision/audio/video fallback and offline STT. Media generation: image, video, speech. Web: Web Search (provider strategy + per-provider API keys) and Web Answer. Workspace: appearance, desktop pet, system.",
             "Remote access: an opt-in toggle, persisted multi-address QR/link generation, challenge approve/reject, paired-session list, and revoke actions that remove devices from the list. Enabling or disabling remote access restarts the backend automatically."
           ],
           "controls": [
@@ -701,7 +732,7 @@
         {
           "heading": "Instructions",
           "paragraphs": [
-            "Custom instructions injected into every agent turn inside user_instructions tags. This is agent identity, not compaction or search. Editing it busts the prompt cache until a new shard stabilizes."
+            "Custom instructions injected into every agent turn. This is agent identity, not compaction or search. Editing it temporarily reduces prompt-cache hits until the new prefix stabilizes."
           ],
           "controls": [
             "settings-instructions-title",
@@ -737,7 +768,7 @@
         {
           "heading": "Learning",
           "paragraphs": [
-            "Background jobs run a single periodic learner that consolidates recorded experience into memory records. It does not change skills. The review model routes those jobs to a cheaper or faster model (default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables)."
+            "Background jobs run a single periodic learner that consolidates recorded experience into memory records and, for repeated procedures, may evaluate and evolve a skill. The review model routes those jobs to a cheaper or faster model (default follows the conversation being reviewed, then the newest conversation, then the first enabled provider with a credential and at least one model). The periodic review interval runs the learner after N unreviewed user turns or tool-loop iterations (default 10, 0 disables)."
           ],
           "controls": [
             "settings-learning-title",
@@ -798,7 +829,7 @@
         {
           "heading": "Offline speech-to-text",
           "paragraphs": [
-            "Lets read_media transcribe audio locally with whisper.cpp (whisper-cli) — no API key, no network. The engine binary is downloaded once during install; models land under models/stt/ in the data directory. The install button opens a requirements dialog: a checklist (platform support, whisper.cpp engine, GGML model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew install whisper-cpp), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_media uses it automatically."
+            "Lets read_media transcribe audio locally with the bundled offline engine — no API key, no network. The engine binary is downloaded once during install; models are stored in the data directory. The install button opens a requirements dialog: a checklist (platform support, engine, model, free disk), a per-OS guide (Linux/Windows auto-install from official releases, macOS via brew), a model picker over the multilingual catalog (tiny/base/small-q5_1/small default/large-v3-turbo variants; Indonesian and English supported; .en variants excluded), and live download progress with speed. After install the model appears in the Offline STT model select and read_media uses it automatically."
           ],
           "controls": [
             "settings-stt-title",
@@ -829,7 +860,7 @@
         {
           "heading": "Image generation",
           "paragraphs": [
-            "Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images."
+            "Pick the model used for image generation. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider. Leave disabled until you want the agent to be able to generate images."
           ],
           "controls": [
             "settings-image-title",
@@ -839,7 +870,7 @@
         {
           "heading": "Video generation",
           "paragraphs": [
-            "Pick the model used by the generate_video tool. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async /videos API is supported. Leave disabled until you want the agent to be able to generate videos."
+            "Pick the model used for video generation. This is separate from the chat model and the video fallback — any chat model can orchestrate, and the video backend is resolved here. OpenRouter's async /videos API is supported. Leave disabled until you want the agent to be able to generate videos."
           ],
           "controls": [
             "settings-video-gen-title",
@@ -849,7 +880,7 @@
         {
           "heading": "Speech generation",
           "paragraphs": [
-            "Pick the model used by the generate_speech tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes."
+            "Pick the model used for speech generation (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint. The offline piper engine can be installed with one click: the install button opens a dialog with a voice picker (Bahasa Indonesia news_tts medium, English US lessac high), downloads the piper binary plus the selected voice model into the data directory with live progress, and the installed voice then appears as an option in the model picker (provider “piper”) so it can be selected directly — the automatic fallback works as soon as install finishes."
           ],
           "controls": [
             "settings-tts-title",
@@ -873,7 +904,7 @@
         {
           "heading": "Web Search",
           "paragraphs": [
-            "Provider strategy for the web_search tool: with an active Codex chat provider, Codex search is tried first and searchwire is the fallback; otherwise auto merges all searchwire sources (default), round robin rotates one API-keyed provider (Brave, Serper, Tavily) per query, random picks one at random, and a bare source name pins every query to that source. Per-provider API keys are write-only, stored in the credential store; each input falls back to its standard environment variable (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) when left blank."
+            "Provider strategy for the web_search tool: with an active Codex chat provider, Codex search is tried first and the built-in sources are the fallback; otherwise auto merges all sources (default), round robin rotates one API-keyed provider (Brave, Serper, Tavily) per query, random picks one at random, and a bare source name pins every query to that source. Per-provider API keys are write-only, stored in the credential store; each input falls back to its standard environment variable (BRAVE_SEARCH_API_KEY, SERPER_API_KEY, TAVILY_API_KEY) when left blank."
           ],
           "controls": [
             "settings-web-search-title",
@@ -909,17 +940,19 @@
           ]
         },
         {
-          "heading": "Connection",
+          "heading": "Desktop pet",
           "paragraphs": [
-            "Backend status, automatic reconnect toggle, and a Check connection button. The Go shell uses HTTP RPC for commands and WebSocket for live events."
+            "Controls the optional desktop pet overlay (Linux only; the sidebar launcher button is hidden on unsupported platforms). The card mirrors the sidebar pet launcher: a status dot and label (Not installed / Install in progress… / Installed / Running / Unavailable on this platform), the installed release version, an Auto-start at boot toggle that starts the pet when NusaShell starts (off by default), and one action button routed through the same launcher — 'Install desktop pet' opens the one-click install dialog, 'Launch pet' spawns the overlay, 'Stop pet' kills it, and 'Unavailable' disables the button on macOS/Windows."
           ],
           "controls": [
-            "settings-connection-title",
-            "settings-conn-fill",
-            "settings-conn-label",
-            "settings-auto-reconnect",
-            "settings-check-connection-btn",
-            "settings-connection-status"
+            "settings-pet-title",
+            "settings-pet-dot",
+            "settings-pet-label",
+            "settings-pet-version-row",
+            "settings-pet-version",
+            "settings-pets-auto-start",
+            "settings-pet-action-btn",
+            "settings-pet-status"
           ]
         },
         {
@@ -936,7 +969,7 @@
         {
           "heading": "Remote access",
           "paragraphs": [
-            "Remote access is off by default. The host can enable it, save one HTTP(S) address per line, and let the backend restart automatically. The host then generates a one-time challenge, which opens the pairing dialog: the QR code, pairing link, and manual code render inside that dialog (it covers the panel, so the scannable QR belongs there) together with the device label and the Approve/Reject decision. Closing the dialog leaves the challenge pending and the panel shows a state summary plus Show pairing QR to bring the same QR back without creating a new code. A remote device scans or opens a link, waits for host approval, then exchanges the challenge for a session cookie. Addresses only change the URL encoded in the QR/link — they do not change where the core listens — and warn when a resolved address is loopback or mismatched with listen_addr; a generated QR carries that caveat too. Paired devices are listed while active; revoking a device removes its session from storage and the list. Pairing management is host-only: on a paired remote client the whole Remote access section and its nav jump link are hidden."
+            "Remote access is off by default. The host can enable it, save one HTTP(S) address per line, and let the backend restart automatically. The host then generates a one-time challenge, which opens the pairing dialog: the QR code, pairing link, and manual code render inside that dialog (it covers the panel, so the scannable QR belongs there) together with the device label and the Approve/Reject decision. Closing the dialog leaves the challenge pending and the panel shows a state summary plus Show pairing QR to bring the same QR back without creating a new code. A remote device scans or opens a link, waits for host approval, then exchanges the challenge for a session. Addresses only change the URL encoded in the QR/link — they do not change where the core listens — and warn when a resolved address is loopback or mismatched with the configured listen address; a generated QR carries that caveat too. Paired devices are listed while active; revoking a device removes its session and its list row. Pairing management is host-only: on a paired remote client the whole Remote access section and its nav jump link are hidden."
           ],
           "controls": [
             "settings-remote-group",
@@ -989,13 +1022,19 @@
         {
           "heading": "Summary metrics",
           "paragraphs": [
-            "Four metric cards: Total spend (USD), Requests, Total tokens, Cache hit percent."
+            "Five metric cards: Total spend (USD), Requests, Token volume, Cache hit percent, and Blended $/1M (average cost per million tokens). Each card also carries a small sub-label under the value."
           ],
           "controls": [
             "tm-spend",
+            "tm-spend-sub",
             "tm-requests",
+            "tm-requests-sub",
             "tm-tokens",
-            "tm-cache"
+            "tm-tokens-sub",
+            "tm-cache",
+            "tm-cache-sub",
+            "tm-blended",
+            "tm-blended-sub"
           ]
         },
         {
@@ -1060,7 +1099,7 @@
       "label": "Connection status text",
       "section": "Sidebar",
       "type": "text",
-      "notes": "Reflects backend WebSocket/RPC reachability."
+      "notes": "Reflects backend reachability."
     },
     "conn-fill": {
       "label": "Connection orb",
@@ -1115,7 +1154,19 @@
       "label": "App grid",
       "section": "Home",
       "type": "grid",
-      "action": "Click an app tile to open its plugin UI in a separate browser window."
+      "action": "Click an app tile to open its plugin UI in a separate browser window; clicking again focuses the already-open window rather than spawning a duplicate."
+    },
+    "plugin-load-error": {
+      "label": "Plugin load error",
+      "section": "Home",
+      "type": "status",
+      "notes": "Alert banner shown above the grid when the plugin list fails to load; includes the failure message and a Retry button."
+    },
+    "plugin-load-retry": {
+      "label": "Retry plugin load",
+      "section": "Home",
+      "type": "button",
+      "action": "Refetches the plugin list after a load failure."
     },
     "agent-conversations": {
       "label": "Conversations pane",
@@ -1165,6 +1216,60 @@
       "type": "overlay",
       "action": "Click to close the conversations drawer."
     },
+    "agent-room-info": {
+      "label": "Room info cluster",
+      "section": "Agent",
+      "type": "container",
+      "notes": "Floating control cluster at the top of the conversation area; hidden until a conversation is active."
+    },
+    "agent-room-info-trigger": {
+      "label": "Room info",
+      "section": "Agent",
+      "type": "button",
+      "action": "Toggles the conversation diagnostics popover."
+    },
+    "agent-room-info-popover": {
+      "label": "Room info popover",
+      "section": "Agent",
+      "type": "dialog",
+      "notes": "Conversation diagnostics: tool count, compaction count, and conversation ID. Closes on its X button, an outside click, or Escape."
+    },
+    "agent-room-info-title": {
+      "label": "Room info title",
+      "section": "Agent",
+      "type": "text",
+      "notes": "Shows the active conversation title."
+    },
+    "agent-room-info-close": {
+      "label": "Close room info",
+      "section": "Agent",
+      "type": "button",
+      "action": "Closes the diagnostics popover and returns focus to the trigger."
+    },
+    "agent-room-tool-count": {
+      "label": "Tool call count",
+      "section": "Agent",
+      "type": "text",
+      "notes": "Tool calls in the loaded conversation history; bookkeeping calls are excluded."
+    },
+    "agent-room-compaction-count": {
+      "label": "Compaction count",
+      "section": "Agent",
+      "type": "text",
+      "notes": "Number of archived pre-compaction chunks for the conversation."
+    },
+    "agent-room-id-copy": {
+      "label": "Copy conversation ID",
+      "section": "Agent",
+      "type": "button",
+      "action": "Copies the conversation ID to the clipboard."
+    },
+    "agent-room-id": {
+      "label": "Conversation ID",
+      "section": "Agent",
+      "type": "text",
+      "notes": "Shown inside the copy button of the room info popover."
+    },
     "agent-shell": {
       "label": "Agent shell",
       "section": "Agent",
@@ -1179,7 +1284,7 @@
       "label": "Thread log",
       "section": "Agent",
       "type": "log",
-      "notes": "Renders the active conversation messages. The Messages filter includes user/assistant bubbles and Thinking disclosures; Activity is reserved for tool, task, and artifact execution. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. User and isolated ACP prompt events render Markdown as HTML; inline backticks use code pills and fenced code uses a bounded horizontal-scroll card. Thinking and compaction handover markdown are parsed when expanded; the expanded Thinking body shows up to 20 rendered lines and scrolls internally beyond that without clipping list numbers behind the scrollbar. Live Thinking deltas follow the thread only while the invisible end marker is visible at the bottom; scrolling up pauses auto-follow until the user returns to the bottom. Completion/error events resync the actual scroll geometry before sound and refresh so a reader stays on the message being read. Refreshes also preserve which Thinking and tool disclosures the user opened. Markdown table cells are capped at 400px and wrap long content; multi-column tables remain inside a local horizontal scroller so the scrollbar stays available. Local Markdown file links open a bounded text preview with styled tables and lazy Mermaid rendering when the bundled renderer is available. Tool cards load the versioned backend catalog from agent.tools.contracts, carry an isolated contract-owned class plus request/result hooks, and render predictable list, status, code, document, and media output formats; tool output attachments use the tool result renderer. During backend compaction, a room-scoped WebSocket event drives an animated inline status until the matching completed or failed event arrives; the generic Thinking dots are mutually exclusive with that status. Before a valid tool card exists, provider-side tool construction shows a transient animated activity row with five-second copy rotation and no partial arguments. An empty thread shows starter prompt chips."
+      "notes": "Renders the active conversation messages. Long conversations are windowed: the last user bubble plus a short tail of a finished turn render on open (scrolled to bottom). A running turn keeps every persisted round of that turn mounted on reload. Older finished-turn rounds, earlier turns, and archived chunks load on demand via Load older or scroll-to-top. User and isolated ACP prompt events render Markdown as HTML; inline backticks use code pills and fenced code uses a bounded horizontal-scroll card. Thinking and compaction handover markdown are parsed when expanded; the expanded Thinking body shows up to 20 rendered lines and scrolls internally beyond that without clipping list numbers behind the scrollbar. Live Thinking updates follow the thread only while the view is at the bottom; scrolling up pauses auto-follow until the user returns to the bottom. Completion/error resyncs the scroll position before sound and refresh so a reader stays on the message being read. Refreshes also preserve which Thinking and tool disclosures the user opened. Markdown table cells are capped at 400px and wrap long content; multi-column tables remain inside a local horizontal scroller so the scrollbar stays available. Local Markdown file links open a bounded text preview with styled tables and Mermaid diagram rendering. Tool cards render predictable list, status, code, document, and media output formats; tool output attachments use the same media rendering as the thread. During backend compaction, an animated inline status shows until the completed or failed state arrives; the generic Thinking dots are mutually exclusive with that status. Before a valid tool card exists, provider-side tool construction shows a transient animated activity row with five-second copy rotation and no partial arguments. An empty thread shows starter prompt chips."
     },
     "agent-starter-prompts": {
       "label": "Starter prompts",
@@ -1334,7 +1439,7 @@
       "label": "Workspace selector",
       "section": "Agent",
       "type": "button",
-      "action": "Opens the in-app workspace folder browser (server-side directories via agent.workspace.list-dirs)."
+      "action": "Opens the in-app workspace folder browser (server-side directories)."
     },
     "agent-workspace-label": {
       "label": "Workspace label",
@@ -1345,7 +1450,7 @@
       "label": "Provider status / context usage",
       "section": "Agent",
       "type": "text",
-      "notes": "Shows backend context usage as used/window (e.g. 32k/1M), or 'Context automatically compacting' while the active room is compacting. A provider-measured fill from the last completed round is authoritative; before the provider responds, a provisional preflight estimate is marked with '~'. The preflight is calculated from provider-visible content and never counts inline media base64 as text. The frontend never sums message bubbles."
+      "notes": "Shows backend context usage as used/window (e.g. 32k/1M), or 'Context automatically compacting' while the active room is compacting. A provider-measured fill from the last completed round is authoritative; before the provider responds, a provisional preflight estimate is marked with '~'. The preflight is calculated from provider-visible content and never counts embedded media as text. The displayed number never sums message bubbles."
     },
     "stop-btn": {
       "label": "Stop",
@@ -1407,7 +1512,7 @@
       "label": "Promote skill",
       "section": "Skills",
       "type": "button",
-      "action": "Promotes an experimental or validated skill via skills.promote."
+      "action": "Promotes an experimental or validated skill."
     },
     "skills-rollback-version": {
       "label": "Rollback version",
@@ -1419,13 +1524,13 @@
       "label": "Rollback skill",
       "section": "Skills",
       "type": "button",
-      "action": "Rolls the selected skill back to the chosen version via skills.rollback."
+      "action": "Rolls the selected skill back to the chosen version."
     },
     "skills-delete": {
       "label": "Delete skill",
       "section": "Skills",
       "type": "button",
-      "action": "Deletes a learned or user-owned skill after confirmation via skills.delete. Hidden for builtin and plugin-owned skills."
+      "action": "Deletes a learned or user-owned skill after confirmation. Hidden for builtin and plugin-owned skills."
     },
     "plugins-add-mcp": {
       "label": "Add MCP",
@@ -1479,7 +1584,7 @@
       "label": "Stop",
       "section": "Plugins",
       "type": "button",
-      "action": "Drops the cached MCP connection (plugin.stop)."
+      "action": "Drops the cached MCP connection."
     },
     "plugin-btn-restart": {
       "label": "Restart",
@@ -1491,7 +1596,7 @@
       "label": "Update",
       "section": "Plugins",
       "type": "button",
-      "action": "Updates a catalog plugin in place to its latest release (plugin.update). Appears only when a newer catalog version is available; the label shows the target version."
+      "action": "Updates a catalog plugin in place to its latest release. Appears only when a newer catalog version is available; the label shows the target version."
     },
     "plugin-btn-edit": {
       "label": "Edit",
@@ -1503,13 +1608,13 @@
       "label": "Delete",
       "section": "Plugins",
       "type": "button",
-      "action": "Deletes the selected manual MCP-server plugin (plugin.delete). Hidden for installed plugins."
+      "action": "Deletes the selected manual MCP-server plugin. Hidden for installed plugins."
     },
     "plugin-btn-uninstall": {
       "label": "Uninstall",
       "section": "Plugins",
       "type": "button",
-      "action": "Uninstalls the selected plugin and drops its MCP connection (plugin.uninstall). Hidden for native MCP entries."
+      "action": "Uninstalls the selected plugin and drops its MCP connection. Hidden for native MCP entries."
     },
     "plugin-drawer-autostart": {
       "label": "Auto start section",
@@ -1521,7 +1626,7 @@
       "label": "Auto start",
       "section": "Plugins",
       "type": "toggle",
-      "action": "Launches this MCP server or plugin automatically when NusaShell starts (plugin.set_autostart)."
+      "action": "Launches this MCP server or plugin automatically when NusaShell starts."
     },
     "plugin-drawer-autoupdate": {
       "label": "Auto update section",
@@ -1533,7 +1638,7 @@
       "label": "Auto update",
       "section": "Plugins",
       "type": "toggle",
-      "action": "Updates this catalog plugin automatically when a new version is released (plugin.set_autoupdate). Shown only for catalog-managed plugins."
+      "action": "Updates this catalog plugin automatically when a new version is released. Shown only for catalog-managed plugins."
     },
     "plugin-tools-list": {
       "label": "Tools list",
@@ -1563,7 +1668,7 @@
       "label": "Provider registry",
       "section": "Providers",
       "type": "list",
-      "notes": "Always contains Anthropic, OpenAI, and OpenRouter cards, followed by any number of custom provider cards. OpenRouter and custom cards show their selected API kind."
+      "notes": "Always contains the five built-in cards (Anthropic, OpenAI, OpenRouter, Codex, Gemini), followed by any number of custom provider cards. OpenRouter and custom cards show their selected API kind."
     },
     "provider-detail": {
       "label": "Provider detail",
@@ -1576,7 +1681,7 @@
       "section": "Providers",
       "type": "chip-group",
       "action": "Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.",
-      "notes": "Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.",
+      "notes": "Buttons inside the provider detail pane. The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.",
       "selector": ".provider-cache-ttl-chip"
     },
     "provider-reasoning-summary": {
@@ -1591,37 +1696,37 @@
       "label": "Codex account list",
       "section": "Providers",
       "type": "list",
-      "notes": "Rows from ai.codex.usage (or ai.codex.accounts.list fallback) with Switch/Remove actions."
+      "notes": "Signed-in ChatGPT account rows with Switch/Remove actions."
     },
     "codex-import-cli-btn": {
       "label": "Import from Codex CLI",
       "section": "Providers",
       "type": "button",
-      "action": "Imports ChatGPT auth from the local Codex CLI auth.json via ai.codex.import."
+      "action": "Imports ChatGPT auth from the local Codex CLI."
     },
     "codex-refresh-circuits-btn": {
       "label": "Refresh Codex circuits",
       "section": "Providers",
       "type": "button",
-      "action": "Polls account usage circuits via ai.codex.refresh-circuits then reloads the accounts list."
+      "action": "Polls account usage circuits, then reloads the accounts list."
     },
     "codex-login-btn": {
       "label": "Sign in with ChatGPT",
       "section": "Providers",
       "type": "button",
-      "action": "Starts Codex OAuth PKCE login via ai.codex.login."
+      "action": "Starts Codex OAuth sign-in."
     },
     "codex-runtime-status": {
       "label": "Codex runtime status",
       "section": "Providers",
       "type": "text",
-      "notes": "Shows installed version/path, downloading, or not-installed from ai.codex.runtime.status."
+      "notes": "Shows installed version/path, downloading, or not installed."
     },
     "codex-runtime-download-btn": {
       "label": "Download Codex runtime",
       "section": "Providers",
       "type": "button",
-      "action": "Downloads the managed Codex CLI binary via ai.codex.runtime.download."
+      "action": "Downloads the managed Codex CLI binary."
     },
     "learning-stat-memory": {
       "label": "Memory count",
@@ -1664,7 +1769,7 @@
       "label": "Knowledge graph",
       "section": "Learning",
       "type": "visualization",
-      "notes": "vis-network force-directed graph."
+      "notes": "Force-directed graph."
     },
     "learning-graph-refresh": {
       "label": "Reload graph",
@@ -1706,25 +1811,25 @@
       "label": "Experience list",
       "section": "Learning",
       "type": "list",
-      "notes": "Read-only episodes from experience.list, newest first. Click a row to load experience.get."
+      "notes": "Read-only episodes, newest first. Click a row to expand detail."
     },
     "learning-records-list": {
       "label": "Memory records list",
       "section": "Learning",
       "type": "list",
-      "notes": "Structured MemoryRecord rows from memory.list (tier record). Select a row, then delete."
+      "notes": "Structured memory records (tier record). Select a row, then delete."
     },
     "learning-record-delete": {
       "label": "Delete memory record",
       "section": "Learning",
       "type": "button",
-      "action": "Calls memory.delete after a styled confirm. Removes the record, its graph edges, and its retrieval presence permanently. Disabled until a record is selected."
+      "action": "Deletes the record after a styled confirm. Removes the record, its graph edges, and its retrieval presence permanently. Disabled until a record is selected."
     },
     "learning-graph-delete": {
       "label": "Delete selected graph node",
       "section": "Learning",
       "type": "button",
-      "action": "Enabled when a memory record or learned skill node is selected. Calls memory.delete or skills.delete after a styled confirm, then reloads the graph and search results."
+      "action": "Enabled when a memory record or learned skill node is selected. Deletes the selected node after a styled confirm, then reloads the graph and search results."
     },
     "learning-tab-log": {
       "label": "Learning log tab",
@@ -1758,7 +1863,7 @@
       "label": "Next learning log page",
       "section": "Learning",
       "type": "button",
-      "action": "Loads the next older 50-event page with the trajectory cursor."
+      "action": "Loads the next older 50-event page."
     },
     "learning-user-status": {
       "label": "User memory status",
@@ -1824,6 +1929,120 @@
       "type": "list",
       "notes": "Bounded 50-event trajectory page; job entries may have done/error/skipped status badges. Failed entries show a concise automatic-processing message; raw provider diagnostics stay server-side."
     },
+    "learning-splitter": {
+      "label": "Results/graph splitter",
+      "section": "Learning",
+      "type": "dragger",
+      "action": "Drag horizontally to resize the search results pane; the graph pane takes the remaining width.",
+      "notes": "Persists the results-pane width in this browser; inert below 900px where results and graph stack vertically."
+    },
+    "automation-stat-runnable": {
+      "label": "Runnable count",
+      "section": "Automation",
+      "type": "text",
+      "notes": "Header stat: workflows whose availability is runnable."
+    },
+    "automation-stat-blocked": {
+      "label": "Blocked count",
+      "section": "Automation",
+      "type": "text",
+      "notes": "Header stat: workflows blocked because a required capability provider is disabled."
+    },
+    "automation-stat-waiting": {
+      "label": "Waiting count",
+      "section": "Automation",
+      "type": "text",
+      "notes": "Header stat: runs waiting for a wake time or event without occupying a runner."
+    },
+    "automation-tabs": {
+      "label": "Automation tabs",
+      "section": "Automation",
+      "type": "tablist",
+      "notes": "Compact segmented control switching the workspace between Workflows, Runs, Schedules, and Events."
+    },
+    "automation-tab-workflows": {
+      "label": "Workflows tab",
+      "section": "Automation",
+      "type": "tab",
+      "notes": "Saved automation workflows plus pipeline files discovered in the data directory."
+    },
+    "automation-tab-runs": {
+      "label": "Runs tab",
+      "section": "Automation",
+      "type": "tab",
+      "notes": "Automation run history with status pills and wake times."
+    },
+    "automation-tab-schedules": {
+      "label": "Schedules tab",
+      "section": "Automation",
+      "type": "tab",
+      "notes": "Trigger schedules with kind, status, and next fire time."
+    },
+    "automation-tab-events": {
+      "label": "Events tab",
+      "section": "Automation",
+      "type": "tab",
+      "notes": "Recorded automation events."
+    },
+    "automation-new-btn": {
+      "label": "New workflow",
+      "section": "Automation",
+      "type": "button",
+      "action": "Opens the new-automation wizard dialog: name, trigger family (Once/Every/When/Manual), a time-or-event field, and the Jobs YAML; validates then saves enabled."
+    },
+    "automation-blocked-banner": {
+      "label": "Blocked provider banner",
+      "section": "Automation",
+      "type": "banner",
+      "notes": "Shown while at least one workflow is BLOCKED by a disabled capability provider; hidden otherwise."
+    },
+    "automation-blocked-text": {
+      "label": "Blocked reason",
+      "section": "Automation",
+      "type": "text",
+      "notes": "The first blocked workflow's blocked reason, or a generated '<name> is blocked.' message."
+    },
+    "automation-enable-provider-btn": {
+      "label": "Enable provider",
+      "section": "Automation",
+      "type": "button",
+      "action": "Re-enables the disabled capability provider so blocked workflows become runnable again."
+    },
+    "automation-list": {
+      "label": "Automation list",
+      "section": "Automation",
+      "type": "list",
+      "action": "Lists rows for the active tab (title, status pill, meta); clicking a row opens its detail.",
+      "notes": "Invalid YAML files stay listed with an 'invalid' pill."
+    },
+    "automation-list-title": {
+      "label": "List pane title",
+      "section": "Automation",
+      "type": "text",
+      "notes": "Mirrors the active tab name (Workflows / Runs / Schedules / Events)."
+    },
+    "automation-list-count": {
+      "label": "List row count",
+      "section": "Automation",
+      "type": "text"
+    },
+    "automation-detail": {
+      "label": "Automation detail pane",
+      "section": "Automation",
+      "type": "container",
+      "notes": "Renders the selection: a workflow DAG with job needs and steps, run job status with step output, waiting wake times, the blocked reason, or raw JSON for events."
+    },
+    "automation-detail-title": {
+      "label": "Detail title",
+      "section": "Automation",
+      "type": "text"
+    },
+    "automation-detail-actions": {
+      "label": "Detail actions",
+      "section": "Automation",
+      "type": "container",
+      "notes": "Per-selection buttons: workflows expose Run, Enable/Disable, and Delete (Run is disabled for invalid files; Enable is also disabled while an invalid file is already disabled); running, queued, or waiting runs expose Cancel plus Steer while an agent step is in-flight; failed runs expose Retry."
+    },
     "automation-workspace": {
       "label": "Automation tab panel",
       "section": "Automation",
@@ -1851,7 +2070,7 @@
       "label": "Clear",
       "section": "Logs",
       "type": "button",
-      "action": "Clears the on-screen log tail."
+      "action": "Clears the persisted runtime log and the view."
     },
     "log-tail": {
       "label": "Log tail",
@@ -1862,7 +2081,7 @@
       "label": "Settings section navigation",
       "section": "Settings",
       "type": "navigation",
-      "notes": "Sticky horizontal rail for jumping between the seven long-form settings groups."
+      "notes": "Sticky horizontal rail for jumping between the eight settings groups."
     },
     "settings-jump-agent": {
       "label": "Jump to Agent settings",
@@ -2121,13 +2340,13 @@
       "label": "Pet status dot",
       "section": "Settings",
       "type": "indicator",
-      "notes": "Mirrors the sidebar pet-btn dot: green installed, pulsing amber installing, accent running, red error."
+      "notes": "Coloured dot mirroring the pet launcher state: green installed, pulsing amber installing, cyan running, red on launch error, neutral when not installed or unsupported."
     },
     "settings-pet-label": {
       "label": "Pet status label",
       "section": "Settings",
       "type": "text",
-      "notes": "Reflects settings.pets_status — Not installed / Installed / Running / Install in progress… / Unavailable."
+      "notes": "Reflects the pet status — Not installed / Installed / Running / Install in progress… / Unavailable."
     },
     "settings-pet-version-row": {
       "label": "Pet version row",
@@ -2144,14 +2363,14 @@
       "label": "Auto-start pet at boot",
       "section": "Settings",
       "type": "checkbox",
-      "action": "Persists settings.pets_auto_start. On, the backend spawns nusashell-pets during its own start (Linux only). Off (default), the pet is only launched when the user clicks the sidebar icon or the card's action button.",
+      "action": "On, the pet starts automatically when NusaShell starts (Linux only). Off (default), the pet is only launched when the user clicks the sidebar icon or the card's action button.",
       "notes": "Linux only. The toggle stays editable on macOS/Windows but has no effect at boot."
     },
     "settings-pet-action-btn": {
       "label": "Pet action button",
       "section": "Settings",
       "type": "button",
-      "action": "Routes through the sidebar pet-launcher module: 'Install desktop pet' opens the install dialog, 'Launch pet' spawns the binary, 'Stop pet' kills the running overlay, 'Unavailable' disables when the platform does not support the pet."
+      "action": "Routes through the sidebar pet launcher: 'Install desktop pet' opens the install dialog, 'Launch pet' spawns the binary, 'Stop pet' kills the running overlay, 'Unavailable' disables when the platform does not support the pet."
     },
     "settings-pet-status": {
       "label": "Pet save status",
@@ -2433,16 +2652,16 @@
       "notes": "Total assistant turns with usage data."
     },
     "tm-tokens": {
-      "label": "Total tokens metric",
+      "label": "Token volume metric",
       "section": "Telemetry summary",
       "type": "text",
-      "notes": "Sum of input + output + cache tokens."
+      "notes": "Sum of input + output + cache read + cache write tokens."
     },
     "tm-cache": {
       "label": "Cache hit percent",
       "section": "Telemetry summary",
       "type": "text",
-      "notes": "Cache read tokens / (input + cache read) * 100."
+      "notes": "Share of prompt-side tokens (input + cache write + cache read) served from cache."
     },
     "chart-usage-model": {
       "label": "Usage by model chart",
@@ -2484,7 +2703,7 @@
       "label": "Blended $/1M metric",
       "section": "Telemetry summary",
       "type": "text",
-      "notes": "Average cost per 1M tokens = total_spend / (total_tokens / 1M)."
+      "notes": "Average cost per 1M tokens = total spend / (total tokens / 1M)."
     },
     "tm-blended-sub": {
       "label": "Blended cost sub-label",
@@ -2528,6 +2747,13 @@
       "type": "panel",
       "notes": "Empty state shown when no skill is selected or skill has no files."
     },
+    "skill-files-tree": {
+      "label": "Skill files tree",
+      "section": "Skills tree pane",
+      "type": "tree",
+      "action": "Lists the files inside the selected skill package; clicking a file opens it in the read-only viewer.",
+      "notes": "Middle pane of the skills workspace, between the catalog and the editor."
+    },
     "skill-file-viewer": {
       "label": "Skill file viewer",
       "section": "Skills editor pane",
@@ -2556,19 +2782,19 @@
       "label": "Catalog/tree splitter",
       "section": "Skills workspace",
       "type": "dragger",
-      "notes": "Draggable divider between Catalog and Skill tree panes. Persists width to localStorage."
+      "notes": "Draggable divider between Catalog and Skill tree panes. Persists width in this browser."
     },
     "skills-splitter-2": {
       "label": "Tree/editor splitter",
       "section": "Skills workspace",
       "type": "dragger",
-      "notes": "Draggable divider between Skill tree and Editor panes. Persists width to localStorage."
+      "notes": "Draggable divider between Skill tree and Editor panes. Persists width in this browser."
     },
     "skills-workspace": {
       "label": "Skills workspace grid",
       "section": "Skills workspace",
       "type": "container",
-      "notes": "3-column grid with CSS variable widths for draggable splitters."
+      "notes": "3-column grid with draggable splitters."
     },
     "install-skill-btn": {
       "label": "Install skill button",
@@ -2598,26 +2824,26 @@
       "label": "Try again",
       "section": "Navigation",
       "type": "button",
-      "notes": "Reloads the shell; the service worker serves the cached app while the server is down."
+      "notes": "Reloads the shell; the cached app stays available while the server is down."
     },
     "mini-window-btn": {
       "label": "Mini window",
       "section": "Agent",
       "type": "button",
-      "notes": "Opens the picture-in-picture mini window (Document PiP on Chromium, popup fallback elsewhere) showing the live agent thread. Appears beside Room info for an active browser conversation; hidden in Electron until its mini-window flow is supported."
+      "notes": "Opens the picture-in-picture mini window (native PiP on Chromium, popup fallback elsewhere) showing the live agent thread. Appears beside Room info for an active browser conversation; hidden in Electron until its mini-window flow is supported."
     },
     "pwa-install-btn": {
       "label": "Install NusaShell",
       "section": "Sidebar",
       "type": "button",
-      "notes": "Visible only while an eligible browser offers installation (beforeinstallprompt); hidden in standalone/PWA and Electron runtimes; triggers the native install flow and hides after install/dismissal."
+      "notes": "Visible only while an eligible browser offers installation; hidden in standalone/PWA and Electron runtimes; triggers the native install flow and hides after install/dismissal."
     },
     "pet-btn": {
       "label": "Desktop pet",
       "section": "Sidebar",
       "type": "button",
-      "action": "Single click when installed toggles the desktop pet overlay (settings.pets_launch spawns if idle, stops if running). When not installed, opens a one-click install dialog backed by settings.pets_install_start.",
-      "notes": "Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in .sidebar-actions.",
+      "action": "Single click when installed launches the desktop pet overlay if idle, or stops it if running. When not installed, opens a one-click install dialog.",
+      "notes": "Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in the sidebar actions row. Launch failures mark an error state; the Settings Desktop pet card mirrors the status on a coloured dot (green installed, pulsing amber installing, cyan running, red error).",
       "selector": "#pet-btn"
     },
     "pet-install-overlay": {
@@ -2630,8 +2856,8 @@
       "label": "Tool terminal stop",
       "section": "Agent",
       "type": "button",
-      "action": "Cancels only this tool call (agent.tools.stop) and lets the enclosing turn continue. Shown only on streaming tools (exec) while the tool is running; the button hides once the tool settles.",
-      "notes": "Appears inside the tool terminal card's summary row (class agent-tool-stop), next to the elapsed timer.",
+      "action": "Cancels only this tool call and lets the enclosing turn continue. Shown only on streaming tools (exec) while the tool is running; the button hides once the tool settles.",
+      "notes": "Appears inside the tool terminal card's summary row, next to the elapsed timer.",
       "selector": ".agent-tool-stop"
     },
     "settings-group-agent": {
@@ -2674,7 +2900,7 @@
       "label": "Workspace group",
       "section": "Settings",
       "type": "heading",
-      "notes": "Card group for appearance, connection, and system diagnostics."
+      "notes": "Card group for appearance, desktop pet, and system diagnostics."
     },
     "settings-instructions-title": {
       "label": "Instructions title",
@@ -2747,7 +2973,7 @@
       "label": "Video generation model",
       "section": "Settings",
       "type": "select",
-      "notes": "Auxiliary model for generate_video. Empty disables the tool."
+      "notes": "Auxiliary model for video generation. Empty disables it."
     },
     "settings-web-answer-title": {
       "label": "Web Answer title",
@@ -2869,7 +3095,7 @@
       "label": "Install offline speech-to-text",
       "section": "Settings",
       "type": "button",
-      "action": "Opens the whisper.cpp install dialog."
+      "action": "Opens the offline speech-to-text install dialog."
     },
     "settings-stt-install-status": {
       "label": "STT install status",
@@ -2965,7 +3191,7 @@
       "label": "Confirm STT install",
       "section": "Settings",
       "type": "button",
-      "action": "Starts the whisper.cpp download."
+      "action": "Starts the engine download."
     },
     "settings-web-search-title": {
       "label": "Web Search title",
@@ -2983,19 +3209,19 @@
       "label": "Brave API key",
       "section": "Settings",
       "type": "password",
-      "notes": "Stored in the credential store (web_search_brave). Empty falls back to BRAVE_SEARCH_API_KEY; without a key Brave uses public HTML results."
+      "notes": "Stored in the credential store. Empty falls back to BRAVE_SEARCH_API_KEY; without a key Brave uses public HTML results."
     },
     "settings-web-search-serper-api-key": {
       "label": "Serper API key",
       "section": "Settings",
       "type": "password",
-      "notes": "Stored in the credential store (web_search_serper). Empty falls back to SERPER_API_KEY; required to register the Serper source."
+      "notes": "Stored in the credential store. Empty falls back to SERPER_API_KEY; required to register the Serper source."
     },
     "settings-web-search-tavily-api-key": {
       "label": "Tavily API key",
       "section": "Settings",
       "type": "password",
-      "notes": "Stored in the credential store (web_search_tavily). Empty falls back to TAVILY_API_KEY; required to register the Tavily source."
+      "notes": "Stored in the credential store. Empty falls back to TAVILY_API_KEY; required to register the Tavily source."
     },
     "route-trigger": {
       "label": "Provider route trigger",
@@ -3007,7 +3233,7 @@
       "label": "Provider route menu",
       "section": "Agent",
       "type": "dialog",
-      "notes": "Lists searchable upstream providers for the selected model with quantization, latency, throughput, and per-provider input/output pricing badges; Auto restores gateway load balancing and has no single fixed price. HTTP 4xx/5xx listing failures show 'No provider in this model' instead of the upstream HTML body."
+      "notes": "Lists searchable upstream providers for the selected model with quantization, latency, throughput, and per-provider input/output pricing badges; Auto restores gateway load balancing and has no single fixed price. Listing failures show 'No provider in this model' instead of a raw upstream error."
     },
     "settings-jump-remote": {
       "label": "Jump to Remote access",
@@ -3043,7 +3269,7 @@
       "label": "Pairing summary",
       "section": "Settings — Remote access",
       "type": "status",
-      "notes": "Persistent state summary of the active challenge (waiting, approved, rejected, expired, paired). It is the live region while the dialog is closed and goes quiet (aria-live=off) while the dialog's own status announces."
+      "notes": "Persistent state summary of the active challenge (waiting, approved, rejected, expired, paired). It is the live region while the dialog is closed and goes quiet while the dialog's own status announces."
     },
     "pairing-show-qr-btn": {
       "label": "Show pairing QR",
@@ -3084,7 +3310,7 @@
       "label": "Pairing QR image",
       "section": "Settings — Remote access",
       "type": "image",
-      "notes": "Client-side rendered data-URL QR; its alt text names the encoded pairing URL. Reopening the dialog reuses the identical QR for the same challenge."
+      "notes": "Client-rendered QR image; its alt text names the encoded pairing URL. Reopening the dialog reuses the identical QR for the same challenge."
     },
     "pairing-qr-status": {
       "label": "QR status",
@@ -3108,7 +3334,7 @@
       "label": "Remote address error",
       "section": "Settings — Remote access",
       "type": "alert",
-      "notes": "Inline address feedback: a malformed URL is a blocking error, while a link that cannot be reachable (loopback address, or a non-loopback link while the core listens on loopback only, port/host mismatch vs listen_addr) is a non-blocking warning."
+      "notes": "Inline address feedback: a malformed URL is a blocking error, while a link that cannot be reachable (loopback address, or a non-loopback link while the core listens on loopback only, port/host mismatch vs the configured listen address) is a non-blocking warning."
     },
     "pairing-link-display": {
       "label": "Pairing link",
@@ -3155,7 +3381,7 @@
       "label": "Device pairing gate",
       "section": "Navigation — Overlays",
       "type": "dialog",
-      "notes": "Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED."
+      "notes": "Full-window dialog shown when the backend requires device pairing; owns the screen while pairing is required."
     },
     "pairing-gate-title": {
       "label": "Pairing gate title",
