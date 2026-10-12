@@ -417,7 +417,7 @@ function renderImageModelOptions(models) {
   if (selected) imageSelect.setSelected([selected]);
 }
 
-function isImageGeneratorModel(model) {
+export function isImageGeneratorModel(model) {
   if (model?.kind === 'image') return true;
   const id = String(model?.id || '').toLowerCase();
   return /gpt-image|dall-e|stable-diffusion|seedream|ideogram|recraft|imagen-|riverflow|flash-image|gemini-.*-image$|nano-banana/.test(id);
@@ -498,7 +498,7 @@ function renderVideoGenModelOptions(models) {
   if (selected) videoGenSelect.setSelected([selected]);
 }
 
-function isVideoGeneratorModel(model) {
+export function isVideoGeneratorModel(model) {
   if (model?.kind === 'video') return true;
   const id = String(model?.id || '').toLowerCase();
   return /video|veo|wan-|grok-imagine|sora|kling|hailuo|minimax|pika|runway|luma|cogvideo|animate|vidu/.test(id);
