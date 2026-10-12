@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -347,6 +348,24 @@ func TestTranscriptSummaryBounded(t *testing.T) {
 			t.Fatalf("above-cap transcript must carry the omission marker")
 		}
 	})
+}
+
+// TestFormatSpawnResultFailedRunKeepsID proves a spawn that failed after a
+// run record was created still surfaces the run id, title, and workspace —
+// the delegation card links to that run instead of falling back to an
+// unrelated visible run.
+func TestFormatSpawnResultFailedRunKeepsID(t *testing.T) {
+	run := &AcpRun{
+		TaskState: TaskState[AcpRunStatus]{ID: "acprun_dead", Status: AcpRunFailed},
+		Title:     "probe-cursor",
+		Workspace: "/tmp/abench-cursor",
+	}
+	got := FormatSpawnResult([]AcpSpawned{{Run: run, Err: fmt.Errorf("acp Invalid params")}})
+	for _, want := range []string{"id: acprun_dead", "title: probe-cursor", "status: failed", "workspace: /tmp/abench-cursor", "acp Invalid params"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("spawn result missing %q:\n%s", want, got)
+		}
+	}
 }
 
 // TestFormatSpawnResultUsesBoundedSummary verifies FormatSpawnResult bounds

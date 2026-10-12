@@ -6,7 +6,11 @@ tool returns immediately with YAML frontmatter listing the spawned runs
 (`runs:` entries with `id` / `status` / `workspace`; `status: starting`)
 and the tool call is marked `running` in the conversation. The parent
 agent is free to continue other work — it does not block on the
-subagent.
+subagent. A spawn rejected before the session opens (unreachable agent,
+initialize/session/mode rejection, cancelled context) still returns its
+`runs:` entry — `status: failed` with `id`, `title`, `workspace`, and
+`error` — and follows the same async completion flow below, so the
+attempt stays visible in the run list and the tool call never stalls.
 
 ## Internal delegate target
 

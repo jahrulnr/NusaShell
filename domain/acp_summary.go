@@ -304,7 +304,16 @@ func FormatSpawnResult(results []AcpSpawned) string {
 	out := make([]item, 0, len(results))
 	for _, r := range results {
 		if r.Err != nil {
-			out = append(out, item{Status: "failed", Error: r.Err.Error(), Async: true})
+			it := item{Status: "failed", Error: r.Err.Error(), Async: true}
+			if r.Run != nil {
+				it.ID = r.Run.ID
+				it.Title = r.Run.Title
+				it.Workspace = r.Run.Workspace
+			}
+			out = append(out, it)
+			continue
+		}
+		if r.Run == nil {
 			continue
 		}
 		it := item{ID: r.Run.ID, Title: r.Run.Title, Status: string(r.Run.Status), Workspace: r.Run.Workspace, Async: true}

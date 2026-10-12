@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **ACP subagent spawns rejected before the session opens now leave a visible
+  failed run.** An unreachable agent or an initialize/session/mode rejection
+  used to vanish: no dock chip, no drawer entry, no persisted record, and the
+  parent `subagent` tool call stayed `running`. The rejected attempt now gets
+  its own run ID, lands in the run list and the `acp/` store, and completes
+  the tool call with `status: failed` plus the rejection error — the `subagent`
+  result keeps the run `id`, `title`, and `workspace` next to the error.
+
 ## [0.9.12] - 2026-10-10
 
 ### Fixed

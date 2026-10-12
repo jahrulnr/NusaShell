@@ -9,6 +9,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	clock "nusashell/pkg/time"
 )
 
 func (s *Service) acpReady(id string) (*domain.AcpAgent, Runtime, *contracts.RPCError) {
@@ -196,10 +197,35 @@ func (s *Service) SpawnSubagents(ctx context.Context, conversationID, toolCallID
 			ModeID:           args.ModeID,
 			ModelID:          args.ModelID,
 		})
+		synthesized := false
+		if err != nil && run == nil {
+			// A pre-session rejection (dial, initialize, NewSession,
+			// SetMode, or a cancelled context) returns no run at all.
+			// Materialize the terminal record so the failed delegation
+			// still lands in runs.list, the .acp store, the dock/drawer,
+			// and the parent tool call — like a delegate run that
+			// finished failed — instead of vanishing silently.
+			run = failedSpawnRun(agent, conversationID, toolCallID, prompt, runTitle, workspace, err)
+			synthesized = true
+		}
 		results[i] = domain.AcpSpawned{Run: run, Err: err}
-		if err == nil && run != nil {
+		switch {
+		case run == nil:
+			continue
+		case run.Live():
 			s.EmitRun(contracts.EventAcpRunStarted, run)
 			s.trackPending(run.ConversationID, run.ID, domain.SubagentToolName)
+		case synthesized:
+			// The fabricated run has no runtime-side done callback, so
+			// drive the standard completion path here.
+			s.trackPending(run.ConversationID, run.ID, domain.SubagentToolName)
+			s.EmitRun(contracts.EventAcpRunDone, run)
+			s.OnRunDone(run)
+		default:
+			// A terminal run the runtime returned is already completing
+			// through its own done callback (drivePrompt finished before
+			// the spawn snapshot). Driving OnRunDone or tracking pending
+			// here would double-deliver the result or leak a pending entry.
 		}
 	}
 	// Always async: the parent agent gets "starting" immediately and is
@@ -208,6 +234,34 @@ func (s *Service) SpawnSubagents(ctx context.Context, conversationID, toolCallID
 	// triggers a new turn (tool injection) so the parent agent processes
 	// the result without blocking.
 	return domain.FormatSpawnResult(results), nil
+}
+
+// failedSpawnRun materializes the terminal run record for a spawn rejected
+// before the ACP session existed (dial, initialize, NewSession, SetMode,
+// or a cancelled context). Without it the delegation attempt is
+// invisible: no dock chip, no drawer entry, no persisted record, and the
+// parent `subagent` tool call stays "running" forever.
+func failedSpawnRun(agent *domain.AcpAgent, conversationID, toolCallID, prompt, title, workspace string, err error) *domain.AcpRun {
+	now := clock.NewTime().Time()
+	run := &domain.AcpRun{
+		TaskState: domain.TaskState[domain.AcpRunStatus]{
+			ID:        domain.NewID(domain.IDPrefixAcpRun),
+			Status:    domain.AcpRunStarting,
+			StartedAt: now,
+		},
+		AgentID:          agent.ID,
+		AgentName:        agent.Name,
+		Title:            title,
+		ConversationID:   conversationID,
+		ParentToolCallID: toolCallID,
+		Workspace:        workspace,
+		Prompt:           prompt,
+		RiskTier:         domain.RiskReadOnly,
+		UpdatedAt:        now,
+	}
+	run.AppendTranscript(domain.AcpTranscriptChunk{Kind: "status", Text: "Spawn failed: " + err.Error(), At: now})
+	run.Finish(domain.AcpRunFailed, err.Error(), "spawn", now)
+	return run
 }
 
 // spawnInternal starts count internal delegate runs through the delegate
