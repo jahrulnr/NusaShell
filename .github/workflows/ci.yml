@@ -546,7 +546,7 @@ jobs:
           set -euo pipefail
           version="${{ steps.release.outputs.version }}"
           node scripts/release-manifest.mjs "$version" release-artifacts/electron release-artifacts/electron-latest.json electron
-          if ! node scripts/release-notes.mjs "$version" CHANGELOG.md > release-notes.md; then
+          if ! node scripts/release-notes.mjs "$version" apps/electron/CHANGELOG.md > release-notes.md; then
             printf 'NusaShell Electron wrapper %s\n\nBuilt from commit %s.\n' "$version" "$GITHUB_SHA" > release-notes.md
           fi
       - name: Create Electron GitHub release
@@ -613,7 +613,7 @@ jobs:
           set -euo pipefail
           version="${{ steps.release.outputs.version }}"
           node scripts/release-manifest.mjs "$version" release-artifacts/pets release-artifacts/pets-latest.json pets
-          if ! node scripts/release-notes.mjs "$version" CHANGELOG.md > release-notes.md; then
+          if ! node scripts/release-notes.mjs "$version" apps/pets/CHANGELOG.md > release-notes.md; then
             printf 'NusaShell pets %s\n\nBuilt from commit %s.\n' "$version" "$GITHUB_SHA" > release-notes.md
           fi
       - name: Create pets GitHub release
