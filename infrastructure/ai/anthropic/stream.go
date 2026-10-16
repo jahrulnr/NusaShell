@@ -182,9 +182,14 @@ func (s *stream) events(chunk streamChunk, raw json.RawMessage) ([]core.Event, e
 			if chunk.ContentBlock.Thinking == "" && chunk.ContentBlock.Signature == "" {
 				return nil, nil
 			}
+			// The signature is also encoded into Extra so the application
+			// layer can persist it as opaque replay state; a later
+			// signature_delta refreshes it when the signature streams
+			// separately from the thinking text.
 			return []core.Event{core.ReasoningDelta{
 				Text:      chunk.ContentBlock.Thinking,
 				Signature: chunk.ContentBlock.Signature,
+				Extra:     thinkingExtra(chunk.ContentBlock.Signature, ""),
 				Index:     core.IntPtr(chunk.Index),
 			}}, nil
 		case "redacted_thinking":
@@ -196,6 +201,7 @@ func (s *stream) events(chunk streamChunk, raw json.RawMessage) ([]core.Event, e
 			}
 			return []core.Event{core.ReasoningDelta{
 				Redacted: []byte(chunk.ContentBlock.Data),
+				Extra:    thinkingExtra("", chunk.ContentBlock.Data),
 				Index:    core.IntPtr(chunk.Index),
 			}}, nil
 		case "text":
@@ -219,7 +225,11 @@ func (s *stream) events(chunk streamChunk, raw json.RawMessage) ([]core.Event, e
 			if !s.includeReasoning {
 				return nil, nil
 			}
-			return []core.Event{core.ReasoningDelta{Signature: chunk.Delta.Signature, Index: core.IntPtr(chunk.Index)}}, nil
+			return []core.Event{core.ReasoningDelta{
+				Signature: chunk.Delta.Signature,
+				Extra:     thinkingExtra(chunk.Delta.Signature, ""),
+				Index:     core.IntPtr(chunk.Index),
+			}}, nil
 		case "input_json_delta":
 			return []core.Event{core.ToolUseDelta{
 				ID:             s.toolIDs[chunk.Index],

@@ -86,7 +86,7 @@ func (a *Service) StreamTurnRound(run *TurnRun, adapter ProviderContext, convers
 		// compacts earlier) and hand off to the emergency-compaction
 		// hook — the round retries with a smaller request instead of
 		// exhausting all attempts on futile backoff.
-		if isTPMDominatedRequest(err) {
+		if IsTPMDominatedRequest(err) {
 			a.LearnTPMContextCap(run, model, err, maxTokens)
 			return roundResult, err
 		}
@@ -112,11 +112,11 @@ func (a *Service) StreamTurnRound(run *TurnRun, adapter ProviderContext, convers
 // learning produced an adaptation that makes an otherwise non-retryable 400
 // worth retrying in the current round.
 func (a *Service) learnFromStreamError(run *TurnRun, model string, err error, caps *ModelCapabilities) bool {
-	if !isLearnable400(err) {
+	if !IsLearnable400(err) {
 		return false
 	}
 
-	body := extractErrBody(err)
+	body := ExtractErrBody(err)
 	action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
 	adapted := action != "" && param != "" && action != domain.LearnedActionCapContext
 	providerName := a.providerNameByID(run.ProviderID)
@@ -228,7 +228,7 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 		a.publishRoundDelta(run.ID, messageID, round, contracts.RoundDeltaText, "", "", delta)
 	}, func(delta string) {
 		reasoning.WriteString(delta)
-		if !reasoningDeltaVisible(reasoning.String()) {
+		if !ReasoningDeltaVisible(reasoning.String()) {
 			return
 		}
 		run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{Kind: "thought", Text: delta})
@@ -261,6 +261,6 @@ func (a *Service) StreamTurnRoundOnce(run *TurnRun, adapter ProviderContext, con
 	return StreamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response, ToolCallsStarted: len(announcedToolCalls) > 0, RequestTokens: requestTokens}, err
 }
 
-// reasoningDeltaVisible is true once accumulated reasoning has something the
+// ReasoningDeltaVisible is true once accumulated reasoning has something the
 // UI can show. Leading whitespace-only deltas must not open an empty
 // Thinking disclosure.

@@ -17,7 +17,7 @@ func TestPeerAnnouncementContentDoesNotChangeSystemPrompt(t *testing.T) {
 			}},
 		}},
 	}
-	prompt := buildSystemPrompt(conversation, "")
+	prompt := buildSystemPromptForRun(nil, conversation, "")
 	if strings.Contains(prompt, "peer secret that belongs in the announcement only") {
 		t.Fatal("peer announcement content must not be copied into the system prompt")
 	}

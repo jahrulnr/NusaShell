@@ -211,17 +211,12 @@ func (h *PluginHandler) handleStatic(w http.ResponseWriter, r *http.Request, plu
 
 // readFile is a helper that reads a file and returns its contents.
 func readFile(path string) ([]byte, error) {
-	f, err := openFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	return io.ReadAll(f)
-}
-
-// openFile opens a file for reading.
-func openFile(path string) (io.ReadCloser, error) {
-	return os.Open(path)
 }
 
 // injectShim inserts the window.shell shim into the <head> of an HTML

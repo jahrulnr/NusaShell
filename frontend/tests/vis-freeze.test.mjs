@@ -20,7 +20,7 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const dom = new JSDOM('<!doctype html><html><body><div id="graph" style="width:800px;height:600px"></div></body></html>', {
+const dom = new JSDOM('<!doctype html><html><body><div id="learning-graph" style="width:800px;height:600px"></div></body></html>', {
   url: 'http://localhost/',
   pretendToBeVisual: true,
 });
@@ -127,7 +127,7 @@ function minimumCenterDistance(positions) {
 test('bounded stabilize() fires stabilizationIterationsDone and freezes the graph', async () => {
   const nodes = new DataSet([]);
   const edges = new DataSet([]);
-  const network = new Network(document.getElementById('graph'), { nodes, edges }, options);
+  const network = new Network(document.getElementById('learning-graph'), { nodes, edges }, options);
   installFreezeHandler(network, nodes);
   let fired = 0;
   network.on('stabilizationIterationsDone', () => { fired += 1; });
@@ -153,7 +153,7 @@ test('bounded stabilize() fires stabilizationIterationsDone and freezes the grap
 test('bounded layout leaves visible space between every node', async () => {
   const nodes = new DataSet([]);
   const edges = new DataSet([]);
-  const network = new Network(document.getElementById('graph'), { nodes, edges }, options);
+  const network = new Network(document.getElementById('learning-graph'), { nodes, edges }, options);
   installFreezeHandler(network, nodes);
   let fired = false;
   network.on('stabilizationIterationsDone', () => { fired = true; });
@@ -178,7 +178,7 @@ test('bounded layout leaves visible space between every node', async () => {
 test('stabilize() does not emit fit while stabilization.fit is disabled', async () => {
   const nodes = new DataSet([]);
   const edges = new DataSet([]);
-  const network = new Network(document.getElementById('graph'), { nodes, edges }, options);
+  const network = new Network(document.getElementById('learning-graph'), { nodes, edges }, options);
   installFreezeHandler(network, nodes);
   let fits = 0;
   network.on('fit', () => { fits += 1; });
@@ -202,7 +202,7 @@ test('stabilization.fit:true still emits fit after stabilize (documents the flag
   const edges = new DataSet([]);
   const fitting = JSON.parse(JSON.stringify(options));
   fitting.physics.stabilization.fit = true;
-  const network = new Network(document.getElementById('graph'), { nodes, edges }, fitting);
+  const network = new Network(document.getElementById('learning-graph'), { nodes, edges }, fitting);
   let fits = 0;
   network.on('fit', () => { fits += 1; });
 
@@ -220,7 +220,7 @@ test('stabilization.fit:true still emits fit after stabilize (documents the flag
 test('old setOptions physics re-enable never fires stabilizationIterationsDone and keeps nodes moving', async () => {
   const nodes = new DataSet([]);
   const edges = new DataSet([]);
-  const network = new Network(document.getElementById('graph'), { nodes, edges }, options);
+  const network = new Network(document.getElementById('learning-graph'), { nodes, edges }, options);
   installFreezeHandler(network, nodes);
   let fired = 0;
   network.on('stabilizationIterationsDone', () => { fired += 1; });
@@ -248,7 +248,7 @@ test('old setOptions physics re-enable never fires stabilizationIterationsDone a
 test('refresh with kept positions + stabilize() keeps unchanged nodes still and freezes', async () => {
   const nodes = new DataSet([]);
   const edges = new DataSet([]);
-  const network = new Network(document.getElementById('graph'), { nodes, edges }, options);
+  const network = new Network(document.getElementById('learning-graph'), { nodes, edges }, options);
   installFreezeHandler(network, nodes);
 
   // Initial layout.

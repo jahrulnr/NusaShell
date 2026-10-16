@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,7 +16,7 @@ func TestGrepContentMode(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "a.go"), "package main\n\nfunc foo() {}\nfunc bar() {}\n")
 	writeFile(t, filepath.Join(dir, "b.go"), "package main\n\nfunc foo() {}\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "func foo",
 		"path":        dir,
 		"output_mode": "content",
@@ -39,7 +40,7 @@ func TestGrepCanShowInvisibleWhitespace(t *testing.T) {
 	path := filepath.Join(dir, "styles.css")
 	writeFile(t, path, "a {\r\n\tMATCH\t\r\n}\r\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":         "MATCH",
 		"path":            path,
 		"output_mode":     "content",
@@ -61,7 +62,7 @@ func TestGrepFilesWithMatchesMode(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "b.go"), "func foo() {}\n")
 	writeFile(t, filepath.Join(dir, "c.go"), "func bar() {}\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "func foo",
 		"path":        dir,
 		"output_mode": "files_with_matches",
@@ -85,7 +86,7 @@ func TestGrepCountMode(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "a.go"), "foo\nfoo\nbar\n")
 	writeFile(t, filepath.Join(dir, "b.go"), "foo\nbar\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "foo",
 		"path":        dir,
 		"output_mode": "count",
@@ -109,7 +110,7 @@ func TestGrepContentModeCappedReportsTotal(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(dir, "big.txt"), b.String())
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "needle line",
 		"path":        filepath.Join(dir, "big.txt"),
 		"output_mode": "content",
@@ -130,7 +131,7 @@ func TestGrepGlobFilter(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "a.go"), "target\n")
 	writeFile(t, filepath.Join(dir, "b.txt"), "target\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":      "target",
 		"path":         dir,
 		"glob_pattern": "*.go",
@@ -151,7 +152,7 @@ func TestGrepContextLines(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.go"), "line1\nline2\nMATCH\nline4\nline5\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":       "MATCH",
 		"path":          dir,
 		"context_lines": 1,
@@ -175,7 +176,7 @@ func TestGrepCaseInsensitive(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.go"), "FuncFoo\nfuncfoo\nFUNCFOO\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":          "funcfoo",
 		"path":             dir,
 		"case_insensitive": true,
@@ -193,7 +194,7 @@ func TestGrepRegexPattern(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.go"), "func handleAuth()\nfunc handleUser()\nfunc other()\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "func handle\\w+",
 		"path":        dir,
 		"output_mode": "content",
@@ -214,7 +215,7 @@ func TestGrepSingleFile(t *testing.T) {
 	path := filepath.Join(dir, "a.go")
 	writeFile(t, path, "foo\nbar\nfoo\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "foo",
 		"path":        path,
 		"output_mode": "content",
@@ -231,7 +232,7 @@ func TestGrepMaxResults(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.go"), "match\nmatch\nmatch\nmatch\nmatch\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "match",
 		"path":        dir,
 		"output_mode": "content",
@@ -263,7 +264,7 @@ func TestGrepClipsHugeLines(t *testing.T) {
 	hugeLine := "match " + strings.Repeat("a", 300_000) + " match"
 	writeFile(t, filepath.Join(dir, "big.txt"), hugeLine+"\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "match",
 		"path":        dir,
 		"output_mode": "content",
@@ -288,7 +289,7 @@ func TestGrepSkipsVendorAndMinified(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "vendor", "lib.js"), "onChange\n")
 	writeFile(t, filepath.Join(dir, "chart.umd.min.js"), "onChange\n")
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":      "onChange",
 		"path":         dir,
 		"glob_pattern": "**/*.js",
@@ -313,7 +314,7 @@ func TestGrepSpillWhenManyMatches(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(dir, "many.txt"), b.String())
 
-	ok, out, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern":     "needle",
 		"path":        dir,
 		"output_mode": "content",
@@ -340,7 +341,7 @@ func TestGrepSpillWhenManyMatches(t *testing.T) {
 }
 
 func TestGrepEmptyPattern(t *testing.T) {
-	_, _, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern": "",
 		"path":    "/tmp",
 	}))
@@ -350,7 +351,7 @@ func TestGrepEmptyPattern(t *testing.T) {
 }
 
 func TestGrepNonexistentPath(t *testing.T) {
-	_, _, err := executeFileTool("grep", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "grep", mustJSONArgs(t, map[string]any{
 		"pattern": "foo",
 		"path":    "/nonexistent/path/xyz",
 	}))

@@ -18,11 +18,11 @@ adding a component or state container. Start with:
   connection state.
 - `js/ui.js` for element creation, toast, styled selects, dialogs, focus
   handling, icons, and overlay cleanup.
-- `js/app.js` for routing, view initialization/refresh, global connection
+- `page/conversation/app.js` for routing, view initialization/refresh, global connection
   state, and cross-view lifecycle.
-- `js/views/` for the owning feature view and `js/views/agent/` for extracted
-  agent-view components.
-- `styles/global.css` and existing feature styles for design tokens and
+- `page/` for owning feature controllers, `widgets/` for thread instruments,
+  and the retained `js/views/agent/` modules for shared agent helpers.
+- `shell.css`, root feature styles, and `styles/global.css` for design tokens and
   responsive patterns.
 - `frontend/tests/` for jsdom fixtures, DOM helpers, regression patterns, and
   accessibility assertions.

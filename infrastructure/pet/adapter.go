@@ -65,9 +65,7 @@ func (a *Adapter) Install(ctx context.Context, version string, report func(contr
 	})
 }
 
-// Launch spawns the resolved pet binary in the background when none is
-// running. Stop kills that process. The path is returned to the caller
-// (the application layer passes it through to the UI).
-func (a *Adapter) Launch() (string, error) { return a.Installer.Launch() }
-
-func (a *Adapter) Stop() error { return a.Installer.Stop() }
+// Launch and Stop are promoted from the embedded *Installer: Launch spawns
+// the resolved pet binary in the background when none is running, Stop kills
+// that process. The path is returned to the caller (the application layer
+// passes it through to the UI).

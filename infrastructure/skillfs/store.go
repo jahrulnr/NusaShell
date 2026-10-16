@@ -776,12 +776,8 @@ func metaKey(id, ownedBy string) string {
 	return ownedBy + ":" + id
 }
 
-func skillMetaPath(skillDir string) string {
-	return filepath.Join(skillDir, "meta.json")
-}
-
 func readSkillMeta(skillDir string) (*skillMeta, bool) {
-	data, err := os.ReadFile(skillMetaPath(skillDir))
+	data, err := os.ReadFile(filepath.Join(skillDir, "meta.json"))
 	if err != nil {
 		return nil, false
 	}
@@ -814,7 +810,7 @@ func writeSkillMeta(skillDir string, s *domain.Skill) error {
 	if err != nil {
 		return err
 	}
-	return atomicfile.Write(skillMetaPath(skillDir), data, 0o644)
+	return atomicfile.Write(filepath.Join(skillDir, "meta.json"), data, 0o644)
 }
 
 func writeBuiltinMetaIfMissing(skillDir string) error {

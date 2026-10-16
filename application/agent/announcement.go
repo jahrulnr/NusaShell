@@ -31,7 +31,7 @@ type Announcement struct {
 
 // pendingAnnouncementsMessage rebuilds persisted pending announcements as
 // ONE synthetic assistant message carrying a single pre-completed
-// `announcement` tool call — the same shape as restartAnnouncement, so the
+// `announcement` tool call — the same shape as RestartAnnouncement, so the
 // model processes it as harness runtime state and the UI renders a normal
 // tool card. A single notice keeps its original args and result text
 // (backward compatible); multiple notices merge into one card whose args
@@ -286,8 +286,8 @@ func (a *Service) PublishAnnouncementToAll(ev Announcement, skipConvID string) {
 	}
 }
 
-// newAnnouncement builds a queue item for a harness notice.
-func newAnnouncement(typ, args, message string) Announcement {
+// NewAnnouncement builds a queue item for a harness notice.
+func NewAnnouncement(typ, args, message string) Announcement {
 	return Announcement{Type: typ, Args: args, Message: message}
 }
 

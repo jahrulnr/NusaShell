@@ -18,7 +18,7 @@ func (a *Service) PersistTurnRound(conversationID, messageID, model string, roun
 	conversation := repo.Conversation()
 
 	a.UpdateMessage(conversation, messageID, func(message *domain.Message) {
-		applyStreamRound(message, model, round)
+		ApplyStreamRound(message, model, round)
 		message.Status = domain.StatusDone
 	})
 
@@ -55,19 +55,28 @@ func (a *Service) PersistTurnRound(conversationID, messageID, model string, roun
 	return repo.Save()
 }
 
-func applyStreamRound(message *domain.Message, model string, round StreamedTurnRound) {
+func ApplyStreamRound(message *domain.Message, model string, round StreamedTurnRound) {
 	if round.Reasoning != "" {
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepReasoning, Content: round.Reasoning})
 		message.Reasoning = round.Reasoning
 	}
 	if len(round.Response.ReasoningExtra) > 0 {
 		message.ReasoningExtra = append(json.RawMessage(nil), round.Response.ReasoningExtra...)
+		message.ReasoningExtraFor = round.Response.ReasoningExtraFor
+		message.ReasoningExtraUpstream = round.Response.Upstream
 	}
 	if content := text.Persistable(round.Content); content != "" {
 		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepText, Content: content})
 		message.Content = content
 	}
 	message.Model = model
+	// Message.Model stays the requested alias (it is re-resolved for
+	// follow-up turns and pricing); the provider-reported served model is
+	// kept as provenance when it diverges — e.g. openrouter/auto serving
+	// "deepseek/deepseek-v4-flash-0731".
+	if round.Response.Model != "" && round.Response.Model != model {
+		message.ServedModel = round.Response.Model
+	}
 	message.Usage = toDomainUsage(round.Response.Usage)
 }
 
@@ -76,7 +85,7 @@ func applyStreamRound(message *domain.Message, model string, round StreamedTurnR
 // drop-tolerant: consumers re-open with after=<seq> to replay missed frames.
 func (a *Service) publishRoundDelta(runID, messageID string, round int, kind, toolCallID, name, text string) {
 	if a.RoundStreams != nil {
-		a.RoundStreams.Publish(runID, messageID, round, kind, toolCallID, name, text)
+		a.RoundStreams.PublishWithArgsAndPresentation(runID, messageID, round, kind, toolCallID, name, text, nil, nil)
 	}
 	// Reasoning/text observer events are emitted once per round at the
 	// AfterRound boundary (emitRoundContentObservers), not from live deltas.
@@ -96,12 +105,12 @@ func (a *Service) publishRoundToolStart(runID, messageID string, round int, tool
 
 // toolExecResult is one tool's outcome from the concurrent execution phase,
 // held until results are persisted in tool-call order.
-func (a *Service) AppendTurnAssistant(conversationID string) (*domain.Conversation, string, error) {
+func (a *Service) AppendTurnAssistant(conversationID, providerID string) (*domain.Conversation, string, error) {
 	repo, err := a.loadRepo(conversationID)
 	if err != nil {
 		return nil, "", err
 	}
-	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: clock.NewTime().Time()}
+	next := domain.Message{ID: domain.NewID(domain.IDPrefixMsg), Role: domain.RoleAssistant, CreatedAt: clock.NewTime().Time(), ProviderID: providerID}
 	if err := repo.Add(domain.RoleAssistant, next); err != nil {
 		return nil, "", err
 	}
@@ -180,7 +189,7 @@ func (a *Service) finishTurn(run *TurnRun, messageID, model string, usage ChatUs
 	return nil
 }
 
-// truncateToolError prevents oversized error messages from wasting tokens
+// TruncateToolError prevents oversized error messages from wasting tokens
 // when a provider returns an error that embeds base64 media data (e.g.
 // "Failed to load image from data:audio/mpeg;base64,//NkxAAAA..."). Such
 // errors can be 1.5MB+ and pollute the conversation history, causing every
@@ -188,6 +197,6 @@ func (a *Service) finishTurn(run *TurnRun, messageID, model string, usage ChatUs
 // reasonable length while preserving the diagnostic prefix.
 const maxToolErrorLen = 2000
 
-func truncateToolError(msg string) string {
+func TruncateToolError(msg string) string {
 	return text.TruncateWithNote(msg, maxToolErrorLen)
 }

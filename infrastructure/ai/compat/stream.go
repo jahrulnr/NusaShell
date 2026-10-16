@@ -29,6 +29,7 @@ type stream struct {
 	pending       []core.Event
 	done          bool
 	model         string
+	upstream      string
 	usage         core.Usage
 	finish        core.FinishReason
 	lastContent   string
@@ -180,7 +181,7 @@ func (s *stream) Next() (core.Event, error) {
 func (s *stream) complete() core.Event {
 	s.stopDrain()
 	s.done = true
-	return core.DoneEvent{FinishReason: s.finish, Provider: s.spec.providerName(), Model: s.model}
+	return core.DoneEvent{FinishReason: s.finish, Provider: s.spec.providerName(), Model: s.model, Upstream: s.upstream}
 }
 
 // armDrain starts the post-finish drain window: after semantic completion the
@@ -254,6 +255,9 @@ func (s *stream) events(chunk streamChunk) ([]core.Event, error) {
 	events := make([]core.Event, 0, 4)
 	if chunk.Model != "" {
 		s.model = chunk.Model
+	}
+	if s.spec.Response.UpstreamFromResponse && chunk.Provider != "" {
+		s.upstream = chunk.Provider
 	}
 	if len(chunk.Usage) > 0 {
 		var usage usage

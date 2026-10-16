@@ -84,16 +84,18 @@ func FetchUsage(ctx context.Context, tokenJSON string) (application.CodexUsageRe
 	}
 	if raw.RateLimit.PrimaryWindow != nil {
 		result.PrimaryWindow = &application.CodexUsageWindow{
-			UsedPercent:       raw.RateLimit.PrimaryWindow.UsedPercent,
-			ResetAt:           raw.RateLimit.PrimaryWindow.ResetAt,
-			ResetAfterSeconds: raw.RateLimit.PrimaryWindow.ResetAfterSeconds,
+			UsedPercent:        raw.RateLimit.PrimaryWindow.UsedPercent,
+			ResetAt:            raw.RateLimit.PrimaryWindow.ResetAt,
+			ResetAfterSeconds:  raw.RateLimit.PrimaryWindow.ResetAfterSeconds,
+			LimitWindowSeconds: raw.RateLimit.PrimaryWindow.LimitWindowSeconds,
 		}
 	}
 	if raw.RateLimit.SecondaryWindow != nil {
 		result.WeeklyWindow = &application.CodexUsageWindow{
-			UsedPercent:       raw.RateLimit.SecondaryWindow.UsedPercent,
-			ResetAt:           raw.RateLimit.SecondaryWindow.ResetAt,
-			ResetAfterSeconds: raw.RateLimit.SecondaryWindow.ResetAfterSeconds,
+			UsedPercent:        raw.RateLimit.SecondaryWindow.UsedPercent,
+			ResetAt:            raw.RateLimit.SecondaryWindow.ResetAt,
+			ResetAfterSeconds:  raw.RateLimit.SecondaryWindow.ResetAfterSeconds,
+			LimitWindowSeconds: raw.RateLimit.SecondaryWindow.LimitWindowSeconds,
 		}
 	}
 

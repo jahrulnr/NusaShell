@@ -47,9 +47,20 @@ func convertResponse(resp *anthropicResponse, fallbackModel string) (*core.Respo
 		case "text":
 			out.Blocks = append(out.Blocks, core.TextBlock{Text: content.Text})
 		case "thinking":
-			out.Blocks = append(out.Blocks, core.ReasoningBlock{Text: content.Thinking, Signature: content.Signature})
+			thinking := ""
+			if content.Thinking != nil {
+				thinking = *content.Thinking
+			}
+			out.Blocks = append(out.Blocks, core.ReasoningBlock{
+				Text:      thinking,
+				Signature: content.Signature,
+				Extra:     thinkingExtra(content.Signature, ""),
+			})
 		case "redacted_thinking":
-			out.Blocks = append(out.Blocks, core.ReasoningBlock{Redacted: append([]byte(nil), content.Data...)})
+			out.Blocks = append(out.Blocks, core.ReasoningBlock{
+				Redacted: append([]byte(nil), content.Data...),
+				Extra:    thinkingExtra("", content.Data),
+			})
 		case "tool_use":
 			args, err := json.Marshal(content.Input)
 			if err != nil {

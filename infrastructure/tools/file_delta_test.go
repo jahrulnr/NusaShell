@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"testing"
 
 	"nusashell/domain/turndiff"
@@ -26,7 +27,7 @@ func TestFileWriteRecordsAddDelta(t *testing.T) {
 func TestFileWriteOverExistingRecordsOverwrittenContent(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/dup.txt"
-	if _, _, err := executeFileTool("file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"before\n"}`)); err != nil {
+	if _, _, err := executeFileToolCtx(context.Background(), "file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"before\n"}`)); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cap := turndiff.WithCapture(t.Context())
@@ -45,7 +46,7 @@ func TestFileWriteOverExistingRecordsOverwrittenContent(t *testing.T) {
 func TestFilePatchRecordsUpdateDelta(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/log.txt"
-	if _, _, err := executeFileTool("file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"line1\n"}`)); err != nil {
+	if _, _, err := executeFileToolCtx(context.Background(), "file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"line1\n"}`)); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cap := turndiff.WithCapture(t.Context())
@@ -64,7 +65,7 @@ func TestFilePatchRecordsUpdateDelta(t *testing.T) {
 func TestFilePatchPreviewDoesNotRecordDelta(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/log.txt"
-	if _, _, err := executeFileTool("file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"line1\n"}`)); err != nil {
+	if _, _, err := executeFileToolCtx(context.Background(), "file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"line1\n"}`)); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cap := turndiff.WithCapture(t.Context())
@@ -79,7 +80,7 @@ func TestFilePatchPreviewDoesNotRecordDelta(t *testing.T) {
 func TestFileDeleteRecordsDeleteDelta(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/gone.txt"
-	if _, _, err := executeFileTool("file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"x\n"}`)); err != nil {
+	if _, _, err := executeFileToolCtx(context.Background(), "file_write", []byte(`{"path":"`+jsonPath(path)+`","content":"x\n"}`)); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cap := turndiff.WithCapture(t.Context())
@@ -108,7 +109,7 @@ func TestFileCopyRecordsAddAtDestination(t *testing.T) {
 	dir := t.TempDir()
 	src := dir + "/src.txt"
 	dst := dir + "/dst.txt"
-	if _, _, err := executeFileTool("file_write", []byte(`{"path":"`+jsonPath(src)+`","content":"copyme\n"}`)); err != nil {
+	if _, _, err := executeFileToolCtx(context.Background(), "file_write", []byte(`{"path":"`+jsonPath(src)+`","content":"copyme\n"}`)); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cap := turndiff.WithCapture(t.Context())
@@ -125,7 +126,7 @@ func TestFileMoveRecordsUpdateWithMovePath(t *testing.T) {
 	dir := t.TempDir()
 	src := dir + "/old.txt"
 	dst := dir + "/new.txt"
-	if _, _, err := executeFileTool("file_write", []byte(`{"path":"`+jsonPath(src)+`","content":"same\n"}`)); err != nil {
+	if _, _, err := executeFileToolCtx(context.Background(), "file_write", []byte(`{"path":"`+jsonPath(src)+`","content":"same\n"}`)); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cap := turndiff.WithCapture(t.Context())
@@ -141,7 +142,7 @@ func TestFileMoveRecordsUpdateWithMovePath(t *testing.T) {
 func TestDirectoryDeleteIsInexact(t *testing.T) {
 	dir := t.TempDir()
 	nested := dir + "/folder"
-	if _, _, err := executeFileTool("file_mkdir", []byte(`{"path":"`+jsonPath(nested)+`"}`)); err != nil {
+	if _, _, err := executeFileToolCtx(context.Background(), "file_mkdir", []byte(`{"path":"`+jsonPath(nested)+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cap := turndiff.WithCapture(t.Context())

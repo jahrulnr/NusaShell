@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/service"
 )
 
@@ -93,7 +94,7 @@ func resolveServiceOptions(binaryFlag string) (service.Options, error) {
 	}
 	return service.Options{
 		BinaryPath: binary,
-		DataDir:    envOr("NUSASHELL_DATA_DIR", defaultDataDir()),
+		DataDir:    envOr("NUSASHELL_DATA_DIR", config.DefaultDataDir()),
 		Path:       os.Getenv("PATH"),
 		Host:       os.Getenv("NUSASHELL_HOST"),
 		Port:       os.Getenv("NUSASHELL_PORT"),

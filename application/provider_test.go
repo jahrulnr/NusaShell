@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"nusashell/application/agent"
 	"nusashell/application/provider"
 	"nusashell/application/service/learnedparams"
 	"nusashell/application/service/modeloverrides"
@@ -1298,7 +1300,7 @@ func TestModelCapabilitiesManualOverrideWins(t *testing.T) {
 	}
 
 	provider := &domain.Provider{ID: "openrouter", Models: nil}
-	caps := modelCapabilitiesWithLearned(provider, "qwen3.8-max-free", learned, manual)
+	caps := agent.ModelCapabilitiesWithLearned(provider, "qwen3.8-max-free", learned, manual)
 	if !caps.Vision {
 		t.Error("manual Vision=true must win over learned text-only")
 	}
@@ -1324,7 +1326,7 @@ func TestResolveContextWindowManualOverrideWins(t *testing.T) {
 	}}}
 	app := &App{learnedParams: learned, modelOverrides: manual}
 	settings := domain.DefaultSettings()
-	if got := app.resolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 1000000 {
+	if got := app.agentService().ResolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 1000000 {
 		t.Errorf("manual context override must win: got %d, want 1000000", got)
 	}
 }
@@ -1734,27 +1736,27 @@ func TestIsRetryableProviderErrorRejectsPermanentFailure(t *testing.T) {
 // waiting for the window to drain is the right fix.
 func TestIsTPMDominatedRequestApp(t *testing.T) {
 	structural := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
-	if !isTPMDominatedRequest(structural) {
+	if !agent.IsTPMDominatedRequest(structural) {
 		t.Fatal("requested > limit must be dominated (structural subset)")
 	}
 	// Wrapping layers must not hide the signal.
-	if !isTPMDominatedRequest(fmt.Errorf("stream round failed: %w", structural)) {
+	if !agent.IsTPMDominatedRequest(fmt.Errorf("stream round failed: %w", structural)) {
 		t.Fatal("wrapped dominant TPM must still be detected")
 	}
 	dominant := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large for gpt-5.6-luna on tokens per min (TPM): Limit 500000, Used 271036, Requested 355391.")}
-	if !isTPMDominatedRequest(dominant) {
+	if !agent.IsTPMDominatedRequest(dominant) {
 		t.Fatal("requested > half the budget must be dominated")
 	}
 	modest := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 271036, Requested 40000.")}
-	if isTPMDominatedRequest(modest) {
+	if agent.IsTPMDominatedRequest(modest) {
 		t.Fatal("requested <= half the budget is congestion, not dominated")
 	}
-	if isTPMDominatedRequest(errors.New("boom")) {
+	if agent.IsTPMDominatedRequest(errors.New("boom")) {
 		t.Fatal("unrelated error must not match")
 	}
-	if isTPMDominatedRequest(nil) {
+	if agent.IsTPMDominatedRequest(nil) {
 		t.Fatal("nil error must not match")
 	}
 }
@@ -2096,13 +2098,15 @@ func TestAssistantBlockCombinations(t *testing.T) {
 // TestReasoningBlockAlwaysFirstForAnthropic proves the Anthropic ordering
 // requirement: if a ReasoningBlock is present, it must be the first block.
 // Anthropic rejects with 400: "If an assistant message contains any thinking
-// blocks, the first block must be `thinking` or `redacted_thinking`".
+// blocks, the first block must be `thinking` or `redacted_thinking`". The
+// message carries the Anthropic-shaped replay extra a signed thinking block
+// is emitted from.
 func TestReasoningBlockAlwaysFirstForAnthropic(t *testing.T) {
 	req := ChatRequest{
 		Model: "claude-sonnet-4-6",
 		Messages: []ChatMessage{
 			{Role: "user", Content: "What is 2+2?"},
-			{Role: "assistant", Content: "Four", Reasoning: "User asks 2+2. Answer is 4.", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "verify", Args: "{}"}}},
+			{Role: "assistant", Content: "Four", Reasoning: "User asks 2+2. Answer is 4.", ReasoningExtra: json.RawMessage(`{"signature":"sig-1"}`), ReasoningExtraFor: "anthropic", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "verify", Args: "{}"}}},
 			{Role: "user", Content: "Thanks!"},
 		},
 	}

@@ -284,21 +284,6 @@ func (r *RoundStreamRegistry) Exists(runID, messageID string) bool {
 	return ok
 }
 
-// Publish appends a delta to the round stream, creating the stream on first
-// use (rounds that produce no deltas are created by Seal instead).
-func (r *RoundStreamRegistry) Publish(runID, messageID string, round int, kind, toolCallID, name, text string) {
-	r.publish(runID, messageID, round, kind, toolCallID, name, text, nil)
-}
-
-// PublishWithPresentation is the legacy tool-delta variant of Publish. The
-// first tool delta may be the only live signal a reconnecting browser
-// receives, so it carries the same frontend presentation contract as the
-// WebSocket lifecycle event. New tool starts should use
-// PublishWithArgsAndPresentation so the frame is self-contained.
-func (r *RoundStreamRegistry) PublishWithPresentation(runID, messageID string, round int, kind, toolCallID, name, text string, presentation *contracts.ToolPresentationDTO) {
-	r.PublishWithArgsAndPresentation(runID, messageID, round, kind, toolCallID, name, text, nil, presentation)
-}
-
 // PublishWithArgsAndPresentation publishes a tool frame with the raw args
 // that started the call. Args are additive and normally present only on the
 // first tool frame, making a replayed start frame self-contained without
@@ -319,10 +304,6 @@ func (r *RoundStreamRegistry) PublishActivity(runID, messageID string, round int
 		Kind: contracts.RoundDeltaActivity, ToolCallID: toolCallID, Name: name, Activity: activity,
 	})
 	r.maybeGC()
-}
-
-func (r *RoundStreamRegistry) publish(runID, messageID string, round int, kind, toolCallID, name, text string, presentation *contracts.ToolPresentationDTO) {
-	r.PublishWithArgsAndPresentation(runID, messageID, round, kind, toolCallID, name, text, nil, presentation)
 }
 
 func (r *RoundStreamRegistry) streamFor(runID, messageID string, round int) *RoundStream {

@@ -12,6 +12,18 @@ import (
 // provider feature service.
 func (a *App) dispatchAI(method string, payload json.RawMessage) (any, *contracts.RPCError) {
 	switch method {
+	case contracts.MethodCodexDeviceStart:
+		var req contracts.CodexLoginRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexDeviceStart(req)
+	case contracts.MethodCodexDevicePoll:
+		var req contracts.CodexDevicePollRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexDevicePoll(req)
 	case contracts.MethodCodexLogin:
 		var req contracts.CodexLoginRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

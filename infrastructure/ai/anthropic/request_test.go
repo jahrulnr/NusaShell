@@ -608,6 +608,19 @@ func TestConvertResponsePreservesRedactedThinkingData(t *testing.T) {
 	if !ok || string(reasoning.Redacted) != "opaque" {
 		t.Fatalf("reasoning block = %#v", resp.Blocks[0])
 	}
+	// The data blob is also encoded into the opaque Extra payload the
+	// application layer persists; decoding it back must reproduce the
+	// redacted_thinking wire block.
+	if _, redacted := thinkingFromExtra(reasoning.Extra); redacted != "opaque" {
+		t.Fatalf("reasoning Extra = %s, want redacted opaque", reasoning.Extra)
+	}
+	wire, err := convertBlocks([]core.Block{core.ReasoningBlock{Extra: reasoning.Extra}})
+	if err != nil {
+		t.Fatalf("convertBlocks returned error: %v", err)
+	}
+	if len(wire) != 1 || wire[0].Type != "redacted_thinking" || wire[0].Data != "opaque" {
+		t.Fatalf("wire content = %#v, want redacted_thinking opaque", wire)
+	}
 }
 
 func TestConvertResponseMapsUsage(t *testing.T) {
@@ -659,7 +672,7 @@ func TestResponseBlocksRoundTripBackIntoAssistantMessage(t *testing.T) {
 	resp, err := convertResponse(&anthropicResponse{
 		Model: "claude",
 		Content: []anthropicContent{
-			{Type: "thinking", Thinking: "Need lookup.", Signature: "sig-thinking"},
+			{Type: "thinking", Thinking: core.StringPtr("Need lookup."), Signature: "sig-thinking"},
 			{Type: "tool_use", ID: "toolu_1", Name: "lookup", Input: &input},
 		},
 	}, "fallback")
@@ -720,6 +733,19 @@ func TestStreamPreservesRedactedThinkingData(t *testing.T) {
 	reasoning, ok := resp.Blocks[0].(core.ReasoningBlock)
 	if !ok || string(reasoning.Redacted) != "opaque" {
 		t.Fatalf("reasoning block = %#v", resp.Blocks[0])
+	}
+	// The streamed redacted data also lands on the opaque Extra payload the
+	// application layer persists; decoding it back must reproduce the
+	// redacted_thinking wire block.
+	if _, redacted := thinkingFromExtra(reasoning.Extra); redacted != "opaque" {
+		t.Fatalf("reasoning Extra = %s, want redacted opaque", reasoning.Extra)
+	}
+	wire, err := convertBlocks([]core.Block{core.ReasoningBlock{Extra: reasoning.Extra}})
+	if err != nil {
+		t.Fatalf("convertBlocks returned error: %v", err)
+	}
+	if len(wire) != 1 || wire[0].Type != "redacted_thinking" || wire[0].Data != "opaque" {
+		t.Fatalf("wire content = %#v, want redacted_thinking opaque", wire)
 	}
 }
 
@@ -1154,7 +1180,7 @@ func TestConvertBlocksAcceptsPlaceholderReasoningBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("placeholder reasoning must pass, got error: %v", err)
 	}
-	if len(out) != 1 || out[0].Type != "thinking" || out[0].Thinking != "Continue from the current context." {
+	if len(out) != 1 || out[0].Type != "thinking" || out[0].Thinking == nil || *out[0].Thinking != "Continue from the current context." {
 		t.Fatalf("output = %#v", out)
 	}
 }

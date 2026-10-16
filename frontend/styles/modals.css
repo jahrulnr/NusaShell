@@ -3,6 +3,26 @@
  * Layer: cross-cutting overlay — ui.js dialogs/toasts rendered above any
  * view, not tied to one [data-view].
  */
+
+/* Both mount points are direct <body> children — outside .shell — so the
+   production token aliases the rules below reference must be bridged here;
+   otherwise body-level toasts/dialogs resolve them to nothing and paint
+   transparent. Values map onto this prototype's :root palette. */
+#toast-container,
+.ui-dialog-overlay {
+  --panel: var(--surface);
+  --panel-alt: var(--surface-high);
+  --border: var(--line-strong);
+  --border-soft: var(--line);
+  --text: var(--foam);
+  --text-dim: var(--mist);
+  --text-faint: var(--muted);
+  --accent: var(--lagoon);
+  --accent-border: rgba(88, 209, 195, .35);
+  --accent-wash: rgba(88, 209, 195, .08);
+  --green: var(--mangrove);
+  --red: var(--danger);
+}
 .ui-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -47,13 +67,15 @@
 
 .toast-container {
   position: fixed;
-  bottom: 20px;
   right: 20px;
-  /* Above every overlay/dialog (max z-index 100) so error toasts are never
-     hidden behind a modal. */
-  z-index: 300;
+  bottom: 20px;
+  left: 20px;
+  /* Above every overlay/dialog and select portal (shell max z-index 1100) so
+     error toasts are never hidden behind a modal. */
+  z-index: 1200;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
   pointer-events: none;
 }
@@ -73,7 +95,7 @@
   opacity: 0;
   transform: translateY(10px);
   transition: opacity .3s, transform .3s;
-  max-width: 320px;
+  max-width: min(320px, 100%);
   word-break: break-word;
 }
 .toast-message { flex: 1 1 auto; min-width: 0; }
@@ -96,3 +118,10 @@
 .toast-success { border-left: 3px solid var(--green); }
 .toast-error { border-left: 3px solid var(--red); }
 .toast-info { border-left: 3px solid var(--accent); }
+
+/* Narrow viewports: dock the strip edge-to-edge so the message and dismiss
+   button keep their contrast/spacing instead of floating in the corner. */
+@media (max-width: 480px) {
+  .toast-container { right: 12px; bottom: 12px; left: 12px; }
+  .toast { width: 100%; max-width: none; }
+}

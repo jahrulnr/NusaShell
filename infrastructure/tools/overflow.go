@@ -9,16 +9,13 @@ import (
 	"unicode/utf8"
 
 	"nusashell/infrastructure/nusatemp"
+	"nusashell/pkg/yamlmd"
 )
 
 // toolInlineMaxBytes is the Cursor-like in-band budget for grep, exec,
 // web_fetch, web_search, and docs. Matches file_read's default so the
 // model continues with the same offset_bytes contract.
 const toolInlineMaxBytes = 32 << 10
-
-func toolOverflowDir() (string, error) {
-	return nusatemp.Dir()
-}
 
 func sanitizeToolFileBase(tool string) string {
 	var b strings.Builder
@@ -35,7 +32,7 @@ func sanitizeToolFileBase(tool string) string {
 }
 
 func writeToolOverflow(tool, body string) (string, error) {
-	dir, err := toolOverflowDir()
+	dir, err := nusatemp.Dir()
 	if err != nil {
 		return "", err
 	}
@@ -52,7 +49,7 @@ func writeToolOverflow(tool, body string) (string, error) {
 }
 
 func createToolOverflowFile(tool string) (*os.File, string, error) {
-	dir, err := toolOverflowDir()
+	dir, err := nusatemp.Dir()
 	if err != nil {
 		return nil, "", err
 	}
@@ -94,7 +91,7 @@ func capToolOutput(tool string, meta map[string]any, body string) string {
 		meta = map[string]any{}
 	}
 	if len(body) <= toolInlineMaxBytes {
-		return yamlMD(meta, body)
+		return yamlmd.MD(meta, body)
 	}
 	path, err := writeToolOverflow(tool, body)
 	if err != nil {
@@ -106,7 +103,7 @@ func capToolOutput(tool string, meta map[string]any, body string) string {
 	meta["truncated"] = true
 	meta["overflow_bytes"] = len(body)
 	meta["next_offset_bytes"] = len(head)
-	return yamlMD(meta, head)
+	return yamlmd.MD(meta, head)
 }
 
 func attachSpillMeta(meta map[string]any, path string, bytes int64, keep bool) {

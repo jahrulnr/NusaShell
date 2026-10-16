@@ -105,10 +105,10 @@ func (s *providerStream) Next() (core.Event, error) {
 	}
 	switch value := event.(type) {
 	case EventCreated:
-		return s.next()
+		return s.Next()
 	case EventOutputItemAdded:
 		if value.Item.Type != ItemTypeFunctionCall {
-			return s.next()
+			return s.Next()
 		}
 		id := responseItemToolID(value.Item)
 		s.toolIDs[value.Item.ID] = id
@@ -137,18 +137,14 @@ func (s *providerStream) Next() (core.Event, error) {
 			Model:        s.model,
 		})
 		s.pending = events
-		return s.next()
+		return s.Next()
 	case EventError:
 		return core.ErrorEvent{Err: value.Err}, nil
 	case EventOther:
 		return s.other(value)
 	default:
-		return s.next()
+		return s.Next()
 	}
-}
-
-func (s *providerStream) next() (core.Event, error) {
-	return s.Next()
 }
 
 func (s *providerStream) outputItemDone(item ResponseItem) (core.Event, error) {
@@ -205,7 +201,7 @@ func (s *providerStream) outputItemDone(item ResponseItem) (core.Event, error) {
 		}
 		return core.ToolUseDone{ID: id, ItemID: item.ID}, nil
 	default:
-		return s.next()
+		return s.Next()
 	}
 }
 
@@ -288,7 +284,7 @@ func (s *providerStream) other(event EventOther) (core.Event, error) {
 		"response.reasoning_summary_text.done", "response.in_progress",
 		"response.queued", "response.content_part.added",
 		"response.content_part.done":
-		return s.next()
+		return s.Next()
 	default:
 		return core.ProviderEvent{Name: event.Type, Raw: append(json.RawMessage(nil), event.Raw...)}, nil
 	}

@@ -21,7 +21,7 @@ func (s *Service) Dispatch(method string, payload json.RawMessage) (any, *contra
 		contracts.MethodPluginToolsList:     rpcdispatch.NoPayload(s.handleToolsList),
 		contracts.MethodPluginCatalog:       rpcdispatch.NoPayload(s.handleCatalog),
 		contracts.MethodPluginInstall:       rpcdispatch.DecodeReq(s.handleInstall),
-		contracts.MethodPluginUninstall:     rpcdispatch.DecodeReq(s.handleUninstall),
+		contracts.MethodPluginUninstall:     rpcdispatch.DecodeReq(s.handleDelete),
 		contracts.MethodPluginCheckUpdates:  rpcdispatch.NoPayload(s.handleCheckUpdates),
 		contracts.MethodPluginSetAutoUpdate: rpcdispatch.DecodeReq(s.handleSetAutoUpdate),
 		contracts.MethodPluginSetAutoStart:  rpcdispatch.DecodeReq(s.handleSetAutoStart),

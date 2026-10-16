@@ -94,7 +94,7 @@ func TestPetsStatusReturnsSnapshot(t *testing.T) {
 		Path:      "/opt/nusashell-pets/current/nusashell-pets",
 		Version:   "0.2.0",
 	}}
-	out, rpcErr := petsApp(inst).handlePetsStatus()
+	out, rpcErr := petsApp(inst).petsService().HandleStatus()
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
@@ -108,7 +108,7 @@ func TestPetsStatusReturnsSnapshot(t *testing.T) {
 }
 
 func TestPetsStatusWithoutInstallerReturnsRuntimePlatform(t *testing.T) {
-	out, rpcErr := (&App{Logs: &fakeLogStore{}}).handlePetsStatus()
+	out, rpcErr := (&App{Logs: &fakeLogStore{}}).petsService().HandleStatus()
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
@@ -123,7 +123,7 @@ func TestPetsStatusWithoutInstallerReturnsRuntimePlatform(t *testing.T) {
 
 func TestPetsInstallRequiresSupportedPlatform(t *testing.T) {
 	inst := &fakePetsInstaller{status: contracts.PetsStatusResult{Supported: false}}
-	_, rpcErr := petsApp(inst).handlePetsInstallStart(contracts.PetsInstallStartRequest{})
+	_, rpcErr := petsApp(inst).petsService().HandleInstallStart(contracts.PetsInstallStartRequest{})
 	if rpcErr == nil || !strings.Contains(rpcErr.Message, "Linux") {
 		t.Fatalf("expected Linux validation, got %v", rpcErr)
 	}
@@ -145,13 +145,13 @@ func TestPetsInstallSingleFlight(t *testing.T) {
 	}
 	app := petsApp(inst)
 
-	first, _ := app.handlePetsInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"})
+	first, _ := app.petsService().HandleInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"})
 	if !(first.(contracts.PetsInstallStartResult)).Started {
 		t.Fatal("first start must begin the install")
 	}
 	waitForCondition(t, func() bool { return inst.installCount() == 1 }, "first install never started")
 
-	second, _ := app.handlePetsInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"})
+	second, _ := app.petsService().HandleInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"})
 	res := second.(contracts.PetsInstallStartResult)
 	if res.Started || !res.Running {
 		t.Errorf("second concurrent start must report running=true started=false, got %+v", res)
@@ -165,7 +165,7 @@ func TestPetsInstallDoneEventEmitted(t *testing.T) {
 	app := petsApp(inst)
 	events := collectEvents(t, app)
 
-	if _, rpcErr := app.handlePetsInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"}); rpcErr != nil {
+	if _, rpcErr := app.petsService().HandleInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"}); rpcErr != nil {
 		t.Fatalf("start: %v", rpcErr)
 	}
 	waitForEvent(t, events, contracts.EventPetsInstallDone)
@@ -180,7 +180,7 @@ func TestPetsInstallErrorSurfacesOnBus(t *testing.T) {
 	app := petsApp(inst)
 	events := collectEvents(t, app)
 
-	if _, rpcErr := app.handlePetsInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"}); rpcErr != nil {
+	if _, rpcErr := app.petsService().HandleInstallStart(contracts.PetsInstallStartRequest{Version: "0.2.0"}); rpcErr != nil {
 		t.Fatalf("start: %v", rpcErr)
 	}
 	waitForEvent(t, events, contracts.EventPetsInstallError)
@@ -189,21 +189,21 @@ func TestPetsInstallErrorSurfacesOnBus(t *testing.T) {
 
 func TestPetsLaunchRequiresInstallerAndSupported(t *testing.T) {
 	t.Run("missing installer", func(t *testing.T) {
-		_, rpcErr := (&App{Logs: &fakeLogStore{}}).handlePetsLaunch()
+		_, rpcErr := (&App{Logs: &fakeLogStore{}}).petsService().HandleLaunch()
 		if rpcErr == nil || !strings.Contains(rpcErr.Message, "installer") {
 			t.Fatalf("expected installer-missing error, got %v", rpcErr)
 		}
 	})
 	t.Run("unsupported platform", func(t *testing.T) {
 		inst := &fakePetsInstaller{status: contracts.PetsStatusResult{Supported: false}}
-		_, rpcErr := petsApp(inst).handlePetsLaunch()
+		_, rpcErr := petsApp(inst).petsService().HandleLaunch()
 		if rpcErr == nil || !strings.Contains(rpcErr.Message, "Linux") {
 			t.Fatalf("expected Linux error, got %v", rpcErr)
 		}
 	})
 	t.Run("not installed", func(t *testing.T) {
 		inst := &fakePetsInstaller{status: contracts.PetsStatusResult{Supported: true}}
-		_, rpcErr := petsApp(inst).handlePetsLaunch()
+		_, rpcErr := petsApp(inst).petsService().HandleLaunch()
 		if rpcErr == nil || !strings.Contains(rpcErr.Message, "not installed") {
 			t.Fatalf("expected not-installed error, got %v", rpcErr)
 		}
@@ -215,7 +215,7 @@ func TestPetsLaunchSurfacesSpawnFailure(t *testing.T) {
 		status:     contracts.PetsStatusResult{Supported: true, Installed: true, Path: "/opt/pets"},
 		launchFail: true,
 	}
-	out, rpcErr := petsApp(inst).handlePetsLaunch()
+	out, rpcErr := petsApp(inst).petsService().HandleLaunch()
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
@@ -233,7 +233,7 @@ func TestPetsLaunchSuccess(t *testing.T) {
 		status:     contracts.PetsStatusResult{Supported: true, Installed: true, Path: "/opt/pets/nusashell-pets"},
 		launchPath: "/opt/pets/nusashell-pets",
 	}
-	out, rpcErr := petsApp(inst).handlePetsLaunch()
+	out, rpcErr := petsApp(inst).petsService().HandleLaunch()
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
@@ -248,7 +248,7 @@ func TestPetsLaunchStopsWhenAlreadyRunning(t *testing.T) {
 		status:     contracts.PetsStatusResult{Supported: true, Installed: true, Path: "/opt/pets/nusashell-pets", Running: true},
 		launchPath: "/opt/pets/nusashell-pets",
 	}
-	out, rpcErr := petsApp(inst).handlePetsLaunch()
+	out, rpcErr := petsApp(inst).petsService().HandleLaunch()
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %v", rpcErr)
 	}
@@ -273,14 +273,14 @@ func TestPetsLaunchTogglesSpawnThenStop(t *testing.T) {
 		launchPath: "/opt/pets/nusashell-pets",
 	}
 	app := petsApp(inst)
-	first, rpcErr := app.handlePetsLaunch()
+	first, rpcErr := app.petsService().HandleLaunch()
 	if rpcErr != nil {
 		t.Fatalf("first launch: %v", rpcErr)
 	}
 	if res := first.(contracts.PetsLaunchResult); !res.Launched || res.Stopped {
 		t.Fatalf("first click must spawn, got %+v", res)
 	}
-	second, rpcErr := app.handlePetsLaunch()
+	second, rpcErr := app.petsService().HandleLaunch()
 	if rpcErr != nil {
 		t.Fatalf("second launch: %v", rpcErr)
 	}

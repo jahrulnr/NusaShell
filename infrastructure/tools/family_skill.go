@@ -3,12 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"nusashell/application"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
+	"nusashell/pkg/yamlmd"
 )
 
 // executeSkillFamily runs the skill root's ops. It is reached only through
@@ -103,12 +105,12 @@ func (t *Toolbox) executeSkillFamily(ctx context.Context, op string, argsJSON []
 				return "", skillMutationError(existing, lookup)
 			}
 			if t.Skills == nil {
-				return "", depMissing("skill store not configured")
+				return "", errors.New("skill store not configured")
 			}
 			if err := t.Skills.WriteFile(lookup, "", rel, args.Content); err != nil {
 				return "", fmt.Errorf("skill save: %w", err)
 			}
-			return yamlBlock(map[string]any{"status": "saved"}), nil
+			return yamlmd.Block(map[string]any{"status": "saved"}), nil
 		}
 		var s *domain.Skill
 		if args.ID != "" {
@@ -139,12 +141,12 @@ func (t *Toolbox) executeSkillFamily(ctx context.Context, op string, argsJSON []
 		s.Content = args.Content
 		s.UpdatedAt = clock.NewTime().Time()
 		if t.Skills == nil {
-			return "", depMissing("skill store not configured")
+			return "", errors.New("skill store not configured")
 		}
 		if err := t.Skills.Save(s); err != nil {
 			return "", err
 		}
-		return yamlBlock(map[string]any{"status": "saved", "id": s.ID}), nil
+		return yamlmd.Block(map[string]any{"status": "saved", "id": s.ID}), nil
 
 	case "delete":
 		var args struct {
@@ -169,12 +171,12 @@ func (t *Toolbox) executeSkillFamily(ctx context.Context, op string, argsJSON []
 			return "", fmt.Errorf("only learned candidate/experimental skills can be deleted")
 		}
 		if t.Skills == nil {
-			return "", depMissing("skill store not configured")
+			return "", errors.New("skill store not configured")
 		}
 		if err := t.Skills.Delete(id, args.OwnedBy); err != nil {
 			return "", err
 		}
-		return yamlBlock(map[string]any{"status": "deleted", "id": id}), nil
+		return yamlmd.Block(map[string]any{"status": "deleted", "id": id}), nil
 
 	default:
 		return "", fmt.Errorf("unknown %s op %q", "skill_"+op, op)
@@ -196,7 +198,7 @@ func (t *Toolbox) skillForContext(ctx context.Context, id, ownedBy string) (*dom
 		return t.RuntimeSkills.Get(application.WorkspaceFromContext(ctx), id, ownedBy)
 	}
 	if t.Skills == nil {
-		return nil, depMissing("skill store not configured")
+		return nil, errors.New("skill store not configured")
 	}
 	return t.Skills.Get(id, ownedBy)
 }

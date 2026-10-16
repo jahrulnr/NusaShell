@@ -1719,20 +1719,16 @@ function toolEventPrimary(name, args) {
   return '';
 }
 
-function toolEventRequest(name, args, presentation) {
+// toolEventRequestLine exposes the human-scannable input line (path, command,
+// query) so callers that patch a mounted card — the ACP transcript — can
+// refresh it without rebuilding the event.
+export function toolEventRequestLine(name, args, presentation) {
   const primary = toolEventPrimary(name, args);
   if (primary) return primary;
   const request = String(presentation?.request || '').trim().replace(/\s+/g, ' ');
   if (request && request.length <= 180) return request;
   const parsed = parseToolArgs(args);
   return Object.keys(parsed).length ? (summarizeToolArgs(parsed) || `${name}()`) : `${name}()`;
-}
-
-// toolEventRequestLine exposes the human-scannable input line (path, command,
-// query) so callers that patch a mounted card — the ACP transcript — can
-// refresh it without rebuilding the event.
-export function toolEventRequestLine(name, args, presentation) {
-  return toolEventRequest(name, args, presentation);
 }
 
 function toolEventRawText(name, presentation, output) {
@@ -1859,7 +1855,7 @@ function renderToolEvent(toolCall, { terminalOutput = false, mcp = false } = {})
   );
 
   const body = el('div', { class: 'agent-tool-event-body' });
-  const primary = toolEventRequest(name, toolCall.args, presentation);
+  const primary = toolEventRequestLine(name, toolCall.args, presentation);
   if (primary) body.append(el('p', { class: `${toolPartClass(name, 'path')} agent-tool-request ${contractClass}-request`, text: primary }));
 
   if (terminalOutput) {

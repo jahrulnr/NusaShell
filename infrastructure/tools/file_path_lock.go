@@ -48,9 +48,3 @@ func lockFilePaths(paths ...string) (unlock func()) {
 		}
 	}
 }
-
-// lockFilePath is a thin wrapper over lockFilePaths for the single-path
-// call sites (file_write, file_patch). Existing callers and tests stay valid.
-func lockFilePath(path string) (unlock func()) {
-	return lockFilePaths(path)
-}

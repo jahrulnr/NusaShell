@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"strings"
 
+	"nusashell/application/conversation"
+	"nusashell/application/tools"
 	"nusashell/domain"
 	"nusashell/pkg/text"
 	clock "nusashell/pkg/time"
 )
 
-// headlessConversationType maps an agent kind to the persisted conversation
+// HeadlessConversationType maps an agent kind to the persisted conversation
 // type. Learning jobs are background transcripts; every other headless run
 // (pipeline agent steps, internal delegates) is an automation transcript.
 // Neither appears in agent.conversations.list.
-func headlessConversationType(kind AgentKind) domain.ConversationType {
+func HeadlessConversationType(kind AgentKind) domain.ConversationType {
 	switch kind {
 	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
 		return domain.ConversationTypeBackground
@@ -23,7 +25,7 @@ func headlessConversationType(kind AgentKind) domain.ConversationType {
 	}
 }
 
-// headlessWorkspace resolves the workspace a headless turn hydrates against.
+// HeadlessWorkspace resolves the workspace a headless turn hydrates against.
 // Background learning kinds operate on the NusaShell data directory itself
 // (profile documents, growth/learning stores, skills) and the learner prompt
 // expects its checkpoint to expose exactly those surfaces, so their turns
@@ -31,18 +33,18 @@ func headlessConversationType(kind AgentKind) domain.ConversationType {
 // user-project AGENTS.md/file_list leaking into every learning job).
 // Pipeline and delegate turns keep the context workspace. An empty dataDir
 // (tests, partial wiring) falls back to the context workspace unchanged.
-func headlessWorkspace(ctxWorkspace string, kind AgentKind, fallbackDataDir string) string {
-	if isLearnerKind(kind) && strings.TrimSpace(fallbackDataDir) != "" {
+func HeadlessWorkspace(ctxWorkspace string, kind AgentKind, fallbackDataDir string) string {
+	if tools.IsLearnerKind(kind) && strings.TrimSpace(fallbackDataDir) != "" {
 		return fallbackDataDir
 	}
 	return ctxWorkspace
 }
 
-// headlessTurnTitle names the persisted transcript. Learning jobs carry a
+// HeadlessTurnTitle names the persisted transcript. Learning jobs carry a
 // stable readable title so learning/trajectory.jsonl and the conversation
 // store stay auditable; other headless runs keep the historical
 // "[pipeline] " prefix.
-func headlessTurnTitle(kind AgentKind, prompt string) string {
+func HeadlessTurnTitle(kind AgentKind, prompt string) string {
 	switch kind {
 	case AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator:
 		return "[learning] learner"
@@ -60,18 +62,10 @@ func headlessTurnTitle(kind AgentKind, prompt string) string {
 // background learning kinds use a pruned toolbox (no project memory, ACP/
 // delegate, or MCP) plus learn() and conversation inspect ops.
 func (a *Service) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
-	return a.RunHeadlessTurnIn(ctx, prompt, model, trust, schema, "")
+	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, "", nil, nil)
 }
 
-// RunHeadlessTurnIn is RunHeadlessTurn with an optional conversation to
-// resume: when conversationID is non-empty, the prompt is appended to that
-// existing automation conversation instead of starting a fresh transcript,
-// so a reused agent step keeps the memory of its earlier runs.
-func (a *Service) RunHeadlessTurnIn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, conversationID string) (map[string]any, string, error) {
-	return a.RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentAutomation, conversationID, nil, nil)
-}
-
-// runHeadlessTurnKind is RunHeadlessTurn parameterized by the agent kind:
+// RunHeadlessTurnKind is RunHeadlessTurn parameterized by the agent kind:
 // pipeline steps use AgentAutomation, internal delegates use AgentDelegate
 // (which also removes the delegate tool itself to prevent recursion).
 func (a *Service) RunHeadlessTurnKind(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, kind AgentKind) (map[string]any, string, error) {
@@ -96,7 +90,7 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 		return nil, "", err
 	}
 
-	repo := NewConversation(a.Conversations, headlessTurnTitle(kind, prompt))
+	repo := conversation.NewConversation(a.Conversations, HeadlessTurnTitle(kind, prompt))
 	if conversationID != "" {
 		existing, getErr := a.Conversations.Get(conversationID)
 		if getErr != nil || existing == nil {
@@ -112,9 +106,9 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	}
 	conv := repo.Conversation()
 	if conversationID == "" {
-		conv.Type = headlessConversationType(kind)
+		conv.Type = HeadlessConversationType(kind)
 	}
-	conv.Workspace = headlessWorkspace(WorkspaceFromContext(ctx), kind, a.DataDir)
+	conv.Workspace = HeadlessWorkspace(WorkspaceFromContext(ctx), kind, a.DataDir)
 	conv.Model = provider.ID + ":" + bareModel
 	conv.Status = "running"
 	now := clock.NewTime().Time()
@@ -166,7 +160,7 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 
 	a.emitRunStepPre(run)
 	a.log("info", "agent", "headless turn started: run=%s conv=%s model=%s", run.ID, convID, provider.ID+":"+bareModel)
-	a.RunTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
+	a.RunTurn(run, provider, apiKey, bareModel, "", asstMsgID, false, ModelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 	a.log("info", "agent", "headless turn finished: run=%s conv=%s", run.ID, convID)
 
 	finalMessageID := run.CurrentMessageID()
@@ -175,7 +169,7 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 		a.emitRunStepPost(run, AgentStatusError, "read conversation failed", "")
 		return nil, "", fmt.Errorf("headless turn: read conversation: %w", err)
 	}
-	final, found := finalHeadlessAssistantMessage(saved.Messages, finalMessageID)
+	final, found := FinalHeadlessAssistantMessage(saved.Messages, finalMessageID)
 	if !found {
 		a.emitRunStepPost(run, AgentStatusError, "final assistant message not found", "")
 		return nil, "", fmt.Errorf("headless turn: final assistant message %s not found", finalMessageID)
@@ -200,13 +194,13 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 	return map[string]any{"output": final.Content}, convID, nil
 }
 
-// finalHeadlessAssistantMessage returns the assistant message that ended the
+// FinalHeadlessAssistantMessage returns the assistant message that ended the
 // headless run. A tool round may leave an intermediate assistant message with
 // an acknowledgement or partial text, followed by a fresh assistant message
 // containing the actual final answer. Prefer the run's current message ID so
 // an intentionally empty final round is not replaced by stale earlier text;
 // the reverse scan is a compatibility fallback for callers with no ID.
-func finalHeadlessAssistantMessage(messages []domain.Message, finalMessageID string) (domain.Message, bool) {
+func FinalHeadlessAssistantMessage(messages []domain.Message, finalMessageID string) (domain.Message, bool) {
 	if finalMessageID != "" {
 		for _, message := range messages {
 			if message.ID == finalMessageID && message.Role == domain.RoleAssistant && !domain.IsHydrationMessage(message) {
@@ -235,7 +229,7 @@ func (a *Service) SteerHeadlessTurn(conversationID, text string) error {
 	if run == nil {
 		return fmt.Errorf("no active headless turn for conversation %s", conversationID)
 	}
-	entry := newSteerEntry(text, nil)
+	entry := NewSteerEntry(text, nil)
 	if !run.QueueSteer(entry) {
 		return fmt.Errorf("a steer is already queued for conversation %s", conversationID)
 	}
@@ -283,7 +277,7 @@ func (a *Service) ResolveHeadlessModel(modelID string) (*domain.Provider, string
 // its explicit cascade found no usable provider; it must never be reinterpreted
 // as the automation delegate model.
 func (a *Service) resolveHeadlessModelForKind(modelID string, kind AgentKind) (*domain.Provider, string, string, error) {
-	if isLearnerKind(kind) && strings.TrimSpace(modelID) == "" {
+	if tools.IsLearnerKind(kind) && strings.TrimSpace(modelID) == "" {
 		return nil, "", "", fmt.Errorf("no learner model is available")
 	}
 	return a.ResolveHeadlessModel(modelID)

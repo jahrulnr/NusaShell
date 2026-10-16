@@ -39,14 +39,6 @@ func (s *Service) DeleteLearningJob(jobID string) {
 	}
 }
 
-// pruneLearningEdges removes every graph edge touching a node that no
-// longer exists (record deleted, skill deleted). The graph renderer also
-// filters dangling edges, so this keeps edges.jsonl tidy rather than
-// correct-by-render.
-func (s *Service) pruneLearningEdges(nodeID string) {
-	s.PruneEdges(nodeID)
-}
-
 // detailString extracts a string detail field from a trajectory event.
 func DetailString(detail map[string]interface{}, key string) string {
 	if detail == nil {

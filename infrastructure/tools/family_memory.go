@@ -3,10 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"nusashell/domain"
+	"nusashell/pkg/yamlmd"
 )
 
 // executeMemoryFamily runs the memory root's ops. It is reached only through
@@ -16,7 +18,7 @@ func (t *Toolbox) executeMemoryFamily(ctx context.Context, op string, argsJSON [
 	switch op {
 	case "search":
 		if t.MemoryRecords == nil {
-			return "", depMissing("memory record store not configured")
+			return "", errors.New("memory record store not configured")
 		}
 		var args struct {
 			Query   string `json:"query"`
@@ -43,7 +45,7 @@ func (t *Toolbox) executeMemoryFamily(ctx context.Context, op string, argsJSON [
 		}
 		items := make([]any, 0)
 		for _, rec := range t.MemoryRecords.List() {
-			if !memoryRecordMatches(rec, filter) {
+			if !rec.Matches(filter) {
 				continue
 			}
 			items = append(items, formatMemoryRecordJSON(rec))
@@ -55,7 +57,7 @@ func (t *Toolbox) executeMemoryFamily(ctx context.Context, op string, argsJSON [
 
 	case "get":
 		if t.MemoryRecords == nil {
-			return "", depMissing("memory record store not configured")
+			return "", errors.New("memory record store not configured")
 		}
 		var args struct {
 			ID string `json:"id"`
@@ -71,11 +73,11 @@ func (t *Toolbox) executeMemoryFamily(ctx context.Context, op string, argsJSON [
 		if err != nil {
 			return "", err
 		}
-		return yamlBlock(formatMemoryRecordJSON(rec)), nil
+		return yamlmd.Block(formatMemoryRecordJSON(rec)), nil
 
 	case "list":
 		if t.MemoryRecords == nil {
-			return yamlBlock(map[string]any{"count": 0, "error": "memory record store not configured"}), nil
+			return yamlmd.Block(map[string]any{"count": 0, "error": "memory record store not configured"}), nil
 		}
 		var args struct {
 			Type    string `json:"type"`
@@ -98,7 +100,7 @@ func (t *Toolbox) executeMemoryFamily(ctx context.Context, op string, argsJSON [
 		}
 		items := make([]any, 0)
 		for _, rec := range t.MemoryRecords.List() {
-			if !memoryRecordMatches(rec, filter) {
+			if !rec.Matches(filter) {
 				continue
 			}
 			items = append(items, formatMemoryRecordJSON(rec))
@@ -111,10 +113,6 @@ func (t *Toolbox) executeMemoryFamily(ctx context.Context, op string, argsJSON [
 	default:
 		return "", fmt.Errorf("unknown %s op %q", "memory_"+op, op)
 	}
-}
-
-func memoryRecordMatches(m *domain.MemoryRecord, filter domain.MemorySearchFilter) bool {
-	return m.Matches(filter)
 }
 
 func formatMemoryRecordJSON(m *domain.MemoryRecord) map[string]any {

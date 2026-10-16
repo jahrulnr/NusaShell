@@ -13,7 +13,7 @@ func (a *Service) RunTurn(run *TurnRun, provider *domain.Provider, apiKey, model
 	// Hydration is appended in addTurnMessages on a fresh room (and inside
 	// persistCompactedConversation after compaction). The turn loop never
 	// splices it. Leading checkpoints from older empty-room workspace picks
-	// are relocated only in chatMessages so the provider sees user →
+	// are relocated only in ChatMessages so the provider sees user →
 	// hydration without rewriting formed message IDs.
 	convID := run.ConversationID
 	flushed := false
@@ -21,9 +21,9 @@ func (a *Service) RunTurn(run *TurnRun, provider *domain.Provider, apiKey, model
 		defer func() {
 			turnLock.Unlock()
 			if flushed {
-				a.TriggerBackgroundCompletionTurn(convID)
+				a.startIdleConversationTurn(convID, false)
 			}
-			a.WakePendingPeerMessage(convID)
+			a.startIdleConversationTurn(convID, true)
 		}()
 		run.Cancel()
 		// Reject any pending ask_question calls for this run so the
@@ -134,7 +134,7 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	toolDefs := a.TurnToolDefs(run, settings)
 	maxTokens := domain.ResolveMaxOutput(provider, model, settings)
 	turnSystemPrompt := buildSystemPromptForRun(run, conversation, settings.UserPrompt)
-	promptCache := buildPromptCachePolicyForRequest(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run), turnSystemPrompt, toolDefs)
+	promptCache := buildPromptCachePolicyForRequest(settings, provider, model, run.ConversationID, PromptCachePrefixForRun(run), turnSystemPrompt, toolDefs)
 	conversation, err = a.maybeCompactInitialTurn(run, adapter, conversation, provider, model, asstMsgID, effort, settings, caps, toolDefs, maxTokens, promptCache, initialContinuation)
 	if err != nil {
 		a.FailTurn(run, asstMsgID, err)
@@ -144,7 +144,7 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	// cache policy from the post-compaction request contract so the first
 	// streamed request cannot carry a key derived from the old system tail.
 	turnSystemPrompt = buildSystemPromptForRun(run, conversation, settings.UserPrompt)
-	promptCache = buildPromptCachePolicyForRequest(settings, provider, model, run.ConversationID, promptCachePrefixForRun(run), turnSystemPrompt, toolDefs)
+	promptCache = buildPromptCachePolicyForRequest(settings, provider, model, run.ConversationID, PromptCachePrefixForRun(run), turnSystemPrompt, toolDefs)
 
 	// The round loop (stream → persist → execute tools → drain at the
 	// boundary → repeat) is the AgentEngine with the AgentConversation
@@ -158,7 +158,7 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 		}
 		return false, ""
 	}
-	if err := a.finishTurn(run, pr.messageID(), model, pr.totalUsageTokens(), pr.contextTokens(), autoContinueIndex); err != nil {
+	if err := a.finishTurn(run, pr.messageID(), model, pr.totalUsageTokens(), pr.lastUsage.ContextTokens(), autoContinueIndex); err != nil {
 		a.FailTurn(run, pr.messageID(), err)
 		return false, ""
 	}
@@ -208,7 +208,7 @@ func (a *Service) RunSingleTurn(run *TurnRun, provider *domain.Provider, apiKey,
 	// as a normal tool card. A hidden pure-hydration todo_list checkpoint
 	// is appended right after the announcement so the next provider round
 	// sees the current open checklist without a visible tool card.
-	nextMsgID, err := a.appendAutoContinueBoundary(run.ConversationID, decision)
+	nextMsgID, err := a.appendAutoContinueBoundary(run.ConversationID, run.ProviderID, decision)
 	if err != nil {
 		a.log("error", "agent", "auto-continue: failed to append boundary: %v", err)
 		return false, ""
@@ -250,7 +250,7 @@ func (a *Service) ApplyQueuedSteer(run *TurnRun) (bool, error) {
 		return false, err
 	}
 	a.EmitInteractiveTurnEvent(run, contracts.EventSteerApplied, contracts.SteerEvent{
-		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied",
+		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied", MessageID: entry.Message.ID,
 	})
 	run.EmitHeadlessTranscript(domain.AcpTranscriptChunk{Kind: "prompt", Text: entry.Text})
 	a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)

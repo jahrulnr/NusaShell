@@ -17,11 +17,28 @@ type ToolDef struct {
 type ChatMessage struct {
 	Role           string // user | assistant | system | tool
 	Content        string
-	Reasoning      string              // assistant thinking text (UI / plaintext)
-	ReasoningExtra json.RawMessage     `json:"ReasoningExtra,omitempty"` // opaque encrypted reasoning replay state
-	ToolCalls      []domain.ToolCall   // assistant
-	ToolResult     *ToolResult         // tool
-	Attachments    []domain.Attachment // user only
+	Reasoning      string          // assistant thinking text (UI / plaintext)
+	ReasoningExtra json.RawMessage `json:"ReasoningExtra,omitempty"` // opaque encrypted reasoning replay state
+	// ReasoningExtraFor records which provider family produced the opaque
+	// ReasoningExtra payload (for example "anthropic", "openai", "openrouter",
+	// "gemini", or "codex"). Request conversion drops extras whose recorded
+	// producer does not match the target provider family; empty means legacy
+	// data with no recorded producer.
+	ReasoningExtraFor string `json:"ReasoningExtraFor,omitempty"`
+	// ReasoningExtraUpstream is the gateway-reported upstream that produced
+	// the opaque payload (OpenRouter's "provider" name, e.g. "Nvidia").
+	// Request conversion drops ReasoningExtra when the request pins a
+	// different upstream via ProviderRoute; an auto-routed request or an
+	// extra with no recorded upstream never gates.
+	ReasoningExtraUpstream string `json:"ReasoningExtraUpstream,omitempty"`
+	// ProviderID is the NusaShell provider instance that produced this
+	// message. Request conversion drops ReasoningExtra when both it and the
+	// request's ProviderID are set and differ — opaque payloads are
+	// credential/account scoped even inside one wire family.
+	ProviderID  string              `json:"ProviderID,omitempty"`
+	ToolCalls   []domain.ToolCall   // assistant
+	ToolResult  *ToolResult         // tool
+	Attachments []domain.Attachment // user only
 }
 
 // ToolResult is the model-visible output of one tool call.
@@ -50,6 +67,12 @@ type ChatRequest struct {
 	// when set, the adapter sends provider.order=[route] with
 	// allow_fallbacks=false (fail-closed, session cache stays warm).
 	ProviderRoute string
+	// ProviderID is the NusaShell provider instance this request targets.
+	// Request conversion drops per-message ReasoningExtra payloads whose
+	// recorded producer instance differs — encrypted reasoning state is
+	// scoped to the credentials/account that produced it. Empty disables
+	// the check (legacy/headless paths).
+	ProviderID string
 	// Sampling parameters. nil = use provider default. Set from
 	// domain.Settings at turn start.
 	Temperature      *float64
@@ -166,13 +189,30 @@ func (u ChatUsage) ContextTokens() int {
 type ChatResponse struct {
 	Content   string
 	Reasoning string
+	// Model is the model the response ran on as reported by the wire
+	// (OpenRouter's served slug, Anthropic's dated model id), resolved by
+	// the adapter and falling back to the requested model when the provider
+	// reports none. Persisted separately from the requested model as
+	// Message.ServedModel provenance.
+	Model string
+	// Upstream is the gateway-reported upstream provider name (OpenRouter's
+	// top-level "provider" field). Empty for direct providers and delegated
+	// OpenRouter wire paths that do not expose one.
+	Upstream string
 	// ReasoningExtra carries opaque OpenAI-family reasoning item JSON
-	// (encrypted_content / provider Extra) from the completed core response.
+	// (encrypted_content / provider Extra) or Anthropic thinking replay state
+	// (signature / redacted_thinking data) from the completed core response.
 	// Empty when the provider did not return Extra. Distinct from CompactionItems.
 	ReasoningExtra json.RawMessage `json:"ReasoningExtra,omitempty"`
-	ToolCalls      []domain.ToolCall
-	Usage          ChatUsage
-	StopReason     string
+	// ReasoningExtraFor records which provider family produced the opaque
+	// ReasoningExtra payload (for example "anthropic", "openai", "openrouter",
+	// "gemini", or "codex"). Request conversion drops extras whose recorded
+	// producer does not match the target provider family; empty means legacy
+	// data with no recorded producer.
+	ReasoningExtraFor string `json:"ReasoningExtraFor,omitempty"`
+	ToolCalls         []domain.ToolCall
+	Usage             ChatUsage
+	StopReason        string
 	// Warnings carries provider-level notices (dropped unsupported content
 	// blocks, malformed tool arguments, strict-tool omissions) that would
 	// otherwise be silently lost. Empty when the provider reported none.

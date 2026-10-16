@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"nusashell/application/agent"
+	"nusashell/application/conversation"
 	"nusashell/application/subagent"
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/core"
@@ -272,7 +274,7 @@ func TestHydrationRuntimeContext(t *testing.T) {
 func TestHydrationRuntimeContextListsInstructionFiles(t *testing.T) {
 	dir := instructionFixture(t)
 	app := &App{Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": {ID: "c1"}}}}
-	msgs := app.buildHydration(&domain.Conversation{ID: "c1", Workspace: dir})
+	msgs := app.agentService().BuildHydration(&domain.Conversation{ID: "c1", Workspace: dir})
 	runtimeSlot := findHydrationTool(msgs, "runtime_context")
 	if runtimeSlot == nil {
 		t.Fatal("runtime_context hydration slot missing")
@@ -1190,7 +1192,7 @@ func TestHydrationIncludesPendingBackgroundRuns(t *testing.T) {
 	runID := firstSpawnedRunID(t, out)
 
 	conv := &domain.Conversation{ID: "c1", Workspace: "/ws"}
-	msgs := app.buildHydration(conv)
+	msgs := app.agentService().BuildHydration(conv)
 	runtimeSlot := findHydrationTool(msgs, "runtime_context")
 	if runtimeSlot == nil {
 		t.Fatalf("runtime_context hydration slot missing; slots: %s", hydrationToolNames(msgs))
@@ -1222,7 +1224,7 @@ func TestHydrationOmitsBackgroundRunsWhenNonePending(t *testing.T) {
 		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": {ID: "c1"}}},
 		pendingRuns:   map[string]map[string]string{},
 	}
-	msgs := app.buildHydration(&domain.Conversation{ID: "c1"})
+	msgs := app.agentService().BuildHydration(&domain.Conversation{ID: "c1"})
 	runtimeSlot := findHydrationTool(msgs, "runtime_context")
 	if runtimeSlot == nil {
 		t.Fatalf("runtime_context hydration slot missing")
@@ -1250,7 +1252,7 @@ func TestCompactionRehydrationKeepsPendingBackgroundRuns(t *testing.T) {
 	}
 	app.trackPendingRun("c1", "run-x", "subagent")
 
-	if err := app.persistCompactedConversation(conv, "summary", 64_000); err != nil {
+	if err := app.agentService().PersistCompactedConversation(conv, "summary", 64_000); err != nil {
 		t.Fatalf("persistCompactedConversation: %v", err)
 	}
 	saved, err := store.Get("c1")
@@ -1331,7 +1333,7 @@ func hydrationPositionMsgs() []ChatMessage {
 // placeholder, not at the end of the conversation.
 func TestPersistHydrationInsertsBeforePendingAssistant(t *testing.T) {
 	app := &App{}
-	c := app.persistHydration(hydrationPositionFixture(), hydrationPositionMsgs())
+	c := app.agentService().PersistHydration(hydrationPositionFixture(), hydrationPositionMsgs())
 
 	if len(c.Messages) != 3 {
 		t.Fatalf("len(Messages) = %d, want 3 (user, hydration, placeholder)", len(c.Messages))
@@ -1349,7 +1351,7 @@ func TestPersistHydrationInsertsBeforePendingAssistant(t *testing.T) {
 	}
 
 	// Provider view: user → hydration assistant+result; empty placeholder skipped.
-	msgs := chatMessages(c, "m_asst", ModelCapabilities{})
+	msgs := agent.ChatMessages(c, "m_asst", ModelCapabilities{})
 	if len(msgs) != 3 ||
 		msgs[0].Role != "user" ||
 		msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) == 0 ||
@@ -1371,7 +1373,7 @@ func TestPersistHydrationFallsBackToAppendWhenAnchorMissing(t *testing.T) {
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "hi"},
 	)
 
-	out := app.persistHydration(c, hydrationPositionMsgs())
+	out := app.agentService().PersistHydration(c, hydrationPositionMsgs())
 
 	if len(out.Messages) != 2 {
 		t.Fatalf("len = %d, want 2", len(out.Messages))
@@ -1391,7 +1393,7 @@ func TestPersistHydrationDoesNotInsertWithoutUser(t *testing.T) {
 	app := &App{}
 	c := domain.NewConversation("conv_empty", "empty")
 
-	out := app.persistHydration(c, hydrationPositionMsgs())
+	out := app.agentService().PersistHydration(c, hydrationPositionMsgs())
 
 	if len(out.Messages) != 0 {
 		t.Fatalf("empty room must not persist hydration before a user exists, got %d messages: %+v", len(out.Messages), out.Messages)
@@ -1412,7 +1414,7 @@ func TestChatMessagesEmitsUserBeforeLeadingHydration(t *testing.T) {
 			{ID: "a1", Role: domain.RoleAssistant, Content: "work", Status: domain.StatusDone},
 		},
 	}
-	msgs := chatMessages(c, "", ModelCapabilities{})
+	msgs := agent.ChatMessages(c, "", ModelCapabilities{})
 	if len(msgs) < 2 {
 		t.Fatalf("got %d provider messages, want at least user + hydration", len(msgs))
 	}
@@ -1467,16 +1469,16 @@ func TestRelocateHydrationIsNoOpWhenAlreadyAfterUser(t *testing.T) {
 // checkpoint is identical to round 1's — the history only ever grows.
 func TestPersistHydrationKeepsRoundTwoPrefixStable(t *testing.T) {
 	app := &App{}
-	c := app.persistHydration(hydrationPositionFixture(), hydrationPositionMsgs())
+	c := app.agentService().PersistHydration(hydrationPositionFixture(), hydrationPositionMsgs())
 
-	round1 := chatMessages(c, "m_asst", ModelCapabilities{})
+	round1 := agent.ChatMessages(c, "m_asst", ModelCapabilities{})
 
 	// Round 1 completes: the placeholder is filled in place with content.
 	a := &c.Messages[2]
 	a.Content = "jawaban"
 	a.Status = domain.StatusDone
 
-	round2 := chatMessages(c, "m_asst", ModelCapabilities{})
+	round2 := agent.ChatMessages(c, "m_asst", ModelCapabilities{})
 
 	if len(round2) < len(round1) {
 		t.Fatalf("round2 shorter than round1: %d < %d", len(round2), len(round1))
@@ -1504,7 +1506,7 @@ func TestPersistHydrationInsertsAfterLastUserWhenKeepHasPriorRounds(t *testing.T
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
 
-	c = app.persistHydration(c, hydrationPositionMsgs())
+	c = app.agentService().PersistHydration(c, hydrationPositionMsgs())
 
 	if len(c.Messages) != 5 {
 		t.Fatalf("len(Messages) = %d, want 5", len(c.Messages))
@@ -1521,7 +1523,7 @@ func TestPersistHydrationInsertsAfterLastUserWhenKeepHasPriorRounds(t *testing.T
 		t.Fatalf("kept assistants shifted wrongly: %+v %+v %+v", c.Messages[2].ID, c.Messages[3].ID, c.Messages[4].ID)
 	}
 
-	msgs := chatMessages(c, "m_asst", ModelCapabilities{})
+	msgs := agent.ChatMessages(c, "m_asst", ModelCapabilities{})
 	if len(msgs) < 3 || msgs[0].Role != "user" || msgs[1].Role != "assistant" ||
 		len(msgs[1].ToolCalls) == 0 || !domain.IsHydrationCallID(msgs[1].ToolCalls[0].ID) {
 		t.Fatalf("provider order must start user → hydration, got %+v", rolesOf(msgs))
@@ -1574,17 +1576,17 @@ func TestFreshTurnHydrationSitsBetweenUserAndAssistant(t *testing.T) {
 		},
 		runs: map[string]*TurnRun{},
 	}
-	app.addTurnMessages(conv,
+	app.agentService().AddTurnMessages(conv,
 		domain.Message{ID: "u1", Role: domain.RoleUser, Content: "halo", Status: domain.StatusDone},
 		domain.Message{ID: "a1", Role: domain.RoleAssistant},
 	)
-	if err := bindConversation(store, conv).Save(); err != nil {
+	if err := conversation.Bind(store, conv).Save(); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c_fresh", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
+	app.agentService().RunTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
 
 	saved, err := app.Conversations.Get("c_fresh")
 	if err != nil {
@@ -1649,7 +1651,7 @@ func TestExecuteTurnToolsKeepsHydrationOnBriefChange(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
 
-	if err := app.executeTurnTools(run, "m1", conv.Messages[2].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
+	if err := app.agentService().ExecuteTurnTools(run, "m1", conv.Messages[2].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	// The hydration checkpoint must still be present.
@@ -1692,7 +1694,7 @@ func TestPersistCompactedConversationInsertsHydrationAfterHandover(t *testing.T)
 		Toolbox:       &recordingToolbox{},
 	}
 
-	if err := app.persistCompactedConversation(conv, "summary text", 1_000_000); err != nil {
+	if err := app.agentService().PersistCompactedConversation(conv, "summary text", 1_000_000); err != nil {
 		t.Fatalf("persistCompactedConversation: %v", err)
 	}
 
@@ -1759,7 +1761,7 @@ func TestFollowUpUserTurnDoesNotRelocateHydration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c_followup", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a2", false, ModelCapabilities{})
+	app.agentService().RunTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a2", false, ModelCapabilities{})
 
 	// The checkpoint must still sit immediately after u1, not after u2.
 	count := 0
@@ -1811,7 +1813,7 @@ func TestFreshTurnRepairsHydrationLeadingTheUser(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c_lead_turn", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
+	app.agentService().RunTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "a1", false, ModelCapabilities{})
 
 	saved, err := app.Conversations.Get("c_lead_turn")
 	if err != nil {

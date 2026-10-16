@@ -1,6 +1,7 @@
-/* ACP subagent live UI: dock chips, right drawer, peek popup. */
+/* ACP subagent transcript reader. Delegation cards open the popup; the
+ * conversation dock syncs transcripts through syncTranscript. */
 
-import { rpc, on } from '../../rpc.js';
+import { rpc } from '../../rpc.js';
 import { el, fmtTime } from '../../ui.js';
 import { updateScrollPin, isNestedScrollerEvent } from '../../agent-ui.js';
 import { renderMarkdown } from '../../markdown.js';
@@ -8,41 +9,27 @@ import { incrementalRender } from '../../incremental-render.js';
 import { highlightCode } from '../../highlight-render.js';
 import { attachZoomButtons } from '../../media-zoom.js';
 import { renderToolJob, reasoningDisclosure, setReasoningSource, setToolTerminalOutput, toolEventRequestLine } from './render.js';
+import { createSubagentPromptCard, syncSubagentPromptText } from './subagent-prompt.js?v=1';
 
 const LIVE = new Set(['starting', 'running', 'waiting_permission']);
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const RECENT_MS = 2 * 60 * 1000;
 
-// The ACP SSE server emits a comment ping every 15s. Browsers dispatch no
-// event for comment frames, so stream health is inferred from run frames:
-// silence beyond ~3 ping intervals while a run is live means the connection
-// is dead or half-open — reopen it and resync from a fresh snapshot.
-const RUN_STREAM_WATCHDOG_MS = 15 * 1000;
-const RUN_STREAM_STALL_MS = 45 * 1000;
-const RUN_STREAM_REOPEN_MS = 5 * 1000;
-
 const state = {
   runs: new Map(),
   conversationId: '',
-  drawerRunId: '',
   popupRunId: '',
   runLoads: new Map(),
   runLoadErrors: new Map(),
   activityTimer: null,
-  runStream: null,
-  runStreamSeq: 0,
-  runStreamLastFrameAt: 0,
-  runStreamWatchdog: null,
-  runStreamReopenTimer: null,
   streamedRunIDs: new Set(),
-  // connectionEpoch advances on every stream source replacement, open, and
-  // snapshot; HTTP responses started under an older epoch are discarded.
+  // connectionEpoch and streamRevision let a historical load discard itself
+  // when a newer generation has already replaced the run.
   connectionEpoch: 0,
-  // streamRevision orders stream frames; streamRevisions records the last
-  // frame revision per run so a response started earlier cannot overwrite it.
   streamRevision: 0,
   streamRevisions: new Map(),
-  bound: false,
+  popupBound: false,
+  popupReturnFocus: null,
 };
 
 // Per-run follow pins for ACP transcripts. Independent from the parent Agent
@@ -50,256 +37,23 @@ const state = {
 const followByRunId = new Map();
 const boundFollowScrollers = new WeakSet();
 
-// Agent name cache: agent_id → name. Hydrated lazily from acp.agents.list
-// so delegation cards can show "Devin" instead of "acp_4aa7732594cbfd1d".
+// Delegation cards look up agent_id → name. Nothing in this prototype fills
+// the map, so unresolved ids fall back in the card renderer.
 const agentNames = new Map();
-let agentNamesLoading = false;
-
-async function ensureAgentNames() {
-  if (agentNames.size > 0 || agentNamesLoading) return;
-  agentNamesLoading = true;
-  try {
-    const res = await rpc('acp.agents.list', {});
-    for (const a of res.agents ?? []) {
-      if (a.id && a.name) agentNames.set(a.id, a.name);
-    }
-  } catch {
-    /* backend may not be ready */
-  } finally {
-    agentNamesLoading = false;
-  }
-}
 
 export function agentNameForId(id) {
   if (!id) return '';
   return agentNames.get(id) || '';
 }
 
-export function bindSubagents({ getActiveConversationId } = {}) {
-  if (state.bound) return;
-  state.bound = true;
-  state.getActiveConversationId = getActiveConversationId || (() => '');
-
-  document.getElementById('acp-dock-toggle')?.addEventListener('click', () => {
-    const toggle = document.getElementById('acp-dock-toggle');
-    const list = document.getElementById('acp-dock-list');
-    const open = toggle.getAttribute('aria-expanded') === 'true';
-    toggle.setAttribute('aria-expanded', String(!open));
-    list.hidden = open;
-  });
-  document.getElementById('acp-dock-open-drawer')?.addEventListener('click', () => openDrawer(firstVisibleRunId()));
-  document.getElementById('acp-drawer-close')?.addEventListener('click', closeDrawer);
-  document.getElementById('acp-drawer-overlay')?.addEventListener('click', closeDrawer);
-  document.getElementById('acp-popup-close')?.addEventListener('click', closePopup);
-  document.getElementById('acp-popup-overlay')?.addEventListener('click', (event) => {
-    if (event.target.id === 'acp-popup-overlay') closePopup();
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return;
-    if (!document.getElementById('acp-popup-overlay')?.hidden) {
-      closePopup();
-      return;
-    }
-    if (!document.getElementById('acp-drawer')?.hidden) closeDrawer();
-  });
-
-  on('acp.session.mode_changed', (payload) => {
-    const run = state.runs.get(payload?.run_id);
-    if (run) {
-      run.current_mode_id = payload.mode_id;
-      renderAll();
-    }
-  });
-
-  void ensureAgentNames();
-  void hydrate();
-}
-
-export function setSubagentConversation(id) {
-  const conversationID = id || '';
-  if (state.conversationId !== conversationID) {
-    state.runStream?.close();
-    state.runStream = null;
-    state.runStreamSeq = 0;
-    stopRunStreamTimers();
-    state.conversationId = conversationID;
-    if (conversationID) openRunStream(conversationID);
-  }
-  void hydrate(conversationID);
-  renderDock();
-  if (!document.getElementById('acp-drawer')?.hidden) {
-    // A drawer showing a run from the previous room must not follow the
-    // user across rooms — reset to the new room's runs instead.
-    const run = state.runs.get(state.drawerRunId);
-    if (!run || (conversationID && run.conversation_id !== conversationID)) state.drawerRunId = '';
-    renderDrawer();
-  }
-}
-
-export function closeAcpOverlays() {
-  closePopup();
-  closeDrawer();
-}
-
-function openRunStream(conversationID) {
-  if (!conversationID || typeof EventSource === 'undefined') return;
-  const source = new EventSource(`/stream/acp?conversation_id=${encodeURIComponent(conversationID)}`);
-  state.runStream = source;
-  state.runStreamLastFrameAt = Date.now();
-  state.connectionEpoch++;
-  let opened = false;
-  source.onopen = () => {
-    if (state.runStream !== source || state.conversationId !== conversationID) return;
-    state.runStreamLastFrameAt = Date.now();
-    state.connectionEpoch++;
-    if (opened) {
-      // A native reconnect may have missed frames: stop trusting stream-owned
-      // runs until the fresh snapshot and hydrate below have replaced them.
-      releaseStreamedRuns(conversationID);
-      void hydrate(conversationID);
-    }
-    opened = true;
-  };
-  source.onerror = () => {
-    if (state.runStream !== source || state.conversationId !== conversationID) return;
-    // EventSource retries network failures on its own (readyState CONNECTING).
-    // A non-2xx response — e.g. 503 at the subscriber cap — fails permanently
-    // (readyState CLOSED) with no retry, so the stream must be reopened here.
-    if (source.readyState === 2) scheduleRunStreamReopen(conversationID);
-  };
-  source.addEventListener('acp.run', (event) => {
-    if (state.runStream !== source || state.conversationId !== conversationID) return;
-    state.runStreamLastFrameAt = Date.now();
-    let frame;
-    try { frame = JSON.parse(event.data); } catch { return; }
-    if (frame?.type === 'acp.run.snapshot') {
-      state.runStreamSeq = Number.isSafeInteger(Number(frame.seq)) ? Number(frame.seq) : 0;
-      state.connectionEpoch++;
-      releaseStreamedRuns(conversationID);
-      const seen = new Set();
-      for (const run of frame.runs || []) {
-        if (!run?.id || run.conversation_id !== conversationID) continue;
-        seen.add(run.id);
-        markStreamRevision(run.id);
-        upsertRun(run, { silent: true, streamed: true });
-      }
-      for (const [runID, run] of state.runs) {
-        if (run.conversation_id === conversationID && LIVE.has(run.status) && !seen.has(runID)) {
-          state.runs.delete(runID);
-          state.streamedRunIDs.delete(runID);
-          state.streamRevisions.delete(runID);
-          followByRunId.delete(runID);
-        }
-      }
-      renderAll();
-      void hydrate(conversationID);
-      return;
-    }
-    if (!['acp.run.started', 'acp.run.updated', 'acp.run.done'].includes(frame?.type)) return;
-    const seq = Number(frame.seq);
-    if (!Number.isSafeInteger(seq) || seq <= state.runStreamSeq) return;
-    // A missed incremental frame leaves the run state unknowable from here on.
-    // Drop this source and resubscribe for a fresh snapshot; the gap frame is
-    // not applied.
-    if (seq > state.runStreamSeq + 1) {
-      reopenRunStream(conversationID);
-      return;
-    }
-    state.runStreamSeq = seq;
-    const run = frame.run;
-    if (run?.conversation_id === conversationID) {
-      markStreamRevision(run.id);
-      upsertRun(run, { streamed: true });
-    }
-  });
-  startRunStreamWatchdog();
-}
-
-// startRunStreamWatchdog guards the conversation stream against the failure
-// modes EventSource cannot recover from itself: a silently dead connection
-// (half-open TCP after suspend/wake or a dropped NAT/proxy route) where no
-// frame ever arrives, and a permanently closed stream the browser will not
-// retry. Reopening resubscribes with a fresh snapshot, which also clears
-// streamed flags so hydration can apply state the dead stream missed.
-function startRunStreamWatchdog() {
-  if (state.runStreamWatchdog) return;
-  state.runStreamWatchdog = setInterval(() => {
-    const source = state.runStream;
-    const conversationID = state.conversationId;
-    if (!source || !conversationID) return;
-    if (source.readyState === 2) {
-      scheduleRunStreamReopen(conversationID);
-      return;
-    }
-    // Silence is only suspicious while a run is live — an idle room can go
-    // arbitrarily long without lifecycle frames.
-    if (!hasLiveRuns()) return;
-    if (Date.now() - state.runStreamLastFrameAt <= RUN_STREAM_STALL_MS) return;
-    reopenRunStream(conversationID);
-  }, RUN_STREAM_WATCHDOG_MS);
-  state.runStreamWatchdog.unref?.();
-}
-
-function stopRunStreamTimers() {
-  if (state.runStreamWatchdog) {
-    clearInterval(state.runStreamWatchdog);
-    state.runStreamWatchdog = null;
-  }
-  if (state.runStreamReopenTimer) {
-    clearTimeout(state.runStreamReopenTimer);
-    state.runStreamReopenTimer = null;
-  }
-}
-
-function reopenRunStream(conversationID) {
-  if (state.conversationId !== conversationID) return;
-  state.runStream?.close();
-  state.runStream = null;
-  state.runStreamSeq = 0;
-  openRunStream(conversationID);
-}
-
-// scheduleRunStreamReopen delays the reopen so a persistent failure (backend
-// down, subscriber cap saturated) cannot spin a tight reconnect loop.
-function scheduleRunStreamReopen(conversationID) {
-  if (state.runStreamReopenTimer || !conversationID) return;
-  state.runStreamReopenTimer = setTimeout(() => {
-    state.runStreamReopenTimer = null;
-    if (state.conversationId !== conversationID) return;
-    // Skip if a newer open/reconnecting stream already replaced the dead one.
-    if (state.runStream && state.runStream.readyState !== 2) return;
-    reopenRunStream(conversationID);
-  }, RUN_STREAM_REOPEN_MS);
-  state.runStreamReopenTimer.unref?.();
-}
-
-async function hydrate(conversationID = state.conversationId) {
-  const epoch = state.connectionEpoch;
-  const startRevision = state.streamRevision;
-  try {
-    const res = await rpc('acp.runs.list', conversationID ? { conversation_id: conversationID } : {});
-    if (state.conversationId !== conversationID || state.connectionEpoch !== epoch) return;
-    for (const run of res.runs ?? []) {
-      if ((!conversationID || run.conversation_id === conversationID) && !streamedSince(run.id, startRevision)) {
-        upsertRun(run, { silent: true });
-      }
-    }
-    renderAll();
-  } catch {
-    /* backend may not be ready */
-  }
-}
-
-// A room can render a persisted subagent card before the global run list has
-// hydrated (for example while the run SSE is reconnecting). Load the
-// exact run on demand instead of making a card depend on process-local cache.
-// ensureRun coalesces concurrent loads of one run within a single connection
-// generation (epoch + room). A load started under an older generation is never
-// shared: a new request is issued at once. A response or error is applied only
-// while its generation is still current and no newer stream frame has touched
-// the run; otherwise the cached run (or null) is returned and nothing is shown
-// as a failure. Invalidated loads re-render, which requests the run again only
-// if it is still selected, so a genuine failure is shown once and not retried.
+// A persisted subagent card can open before that run is in the local map.
+// Load the exact run through acp.runs.get instead of depending on a
+// process-local cache. ensureRun coalesces concurrent loads of one run within
+// a single generation (epoch + room). A response or error is applied only
+// while that generation is still current; otherwise the cached run (or null)
+// is returned and nothing is shown as a failure. Invalidated loads re-render,
+// which requests the run again only if it is still selected, so a genuine
+// failure is shown once and not retried.
 function ensureRun(runId) {
   if (!runId || state.runs.has(runId)) return Promise.resolve(state.runs.get(runId));
   const epoch = state.connectionEpoch;
@@ -365,29 +119,21 @@ function upsertRun(run, { silent, streamed = false } = {}) {
   if (!silent) renderAll();
 }
 
-function markStreamRevision(runID) {
-  state.streamRevision++;
-  state.streamRevisions.set(runID, state.streamRevision);
-}
-
 function streamedSince(runID, startRevision) {
   return (state.streamRevisions.get(runID) ?? 0) > startRevision;
-}
-
-function releaseStreamedRuns(conversationID) {
-  for (const runID of state.streamedRunIDs) {
-    if (state.runs.get(runID)?.conversation_id === conversationID) state.streamedRunIDs.delete(runID);
-  }
 }
 
 // pruneRuns drops terminal runs that fell out of the recent window and are
 // not part of the active conversation.
 // Without this the maps grow for the lifetime of the session even though
-// nothing can ever render those runs again.
+// nothing can ever render those runs again. A run mounted in the reader is
+// exempt — pruning it would strand the open transcript on a permanent
+// loading state.
 function pruneRuns() {
   const now = Date.now();
   const active = activeConversationId();
   for (const [id, run] of state.runs) {
+    if (id === state.popupRunId) continue;
     if (LIVE.has(run.status)) continue;
     if (active && run.conversation_id === active) continue;
     const ended = Date.parse(run.ended_at || run.updated_at || '') || 0;
@@ -404,9 +150,8 @@ function activeConversationId() {
   return state.getActiveConversationId?.() || state.conversationId;
 }
 
-// Dock chips: live runs of the active conversation plus runs that settled
-// within RECENT_MS. Newest runs are shown first so the active/latest work is
-// immediately reachable on a tall mobile drawer.
+// Recent runs of the active conversation: live runs, plus runs that settled
+// within RECENT_MS. Newest first.
 function visibleRuns() {
   const now = Date.now();
   const active = activeConversationId();
@@ -419,9 +164,8 @@ function visibleRuns() {
     }));
 }
 
-// Every run of the active conversation, settled included — the drawer's
-// switcher and the "open transcript" fallback must reach completed runs
-// as long as the conversation exists.
+// Every run of the active conversation, settled included, so a completed
+// card can still open its transcript after it leaves the recent window.
 function conversationRuns() {
   const active = activeConversationId();
   return sortRunsNewestFirst([...state.runs.values()]
@@ -452,9 +196,8 @@ export function firstVisibleRunId() {
 }
 
 function renderAll() {
-  renderDock();
-  if (!document.getElementById('acp-drawer')?.hidden) renderDrawer();
-  if (!document.getElementById('acp-popup-overlay')?.hidden) renderPopup();
+  const popupOverlay = document.getElementById('acp-popup-overlay');
+  if (popupOverlay && !popupOverlay.hidden) renderPopup();
   syncActivityTimer();
 }
 
@@ -475,7 +218,6 @@ function syncActivityTimer() {
         state.activityTimer = null;
         return;
       }
-      renderDock();
       refreshLiveStatusText();
     }, 1000);
     state.activityTimer?.unref?.();
@@ -488,84 +230,12 @@ function syncActivityTimer() {
 }
 
 function refreshLiveStatusText() {
-  const active = activeConversationId();
-  for (const item of document.querySelectorAll('.acp-run-sidebar .agent-conversation-item[data-run-id]')) {
-    const run = state.runs.get(item.dataset.runId);
-    if (run) updateRunSidebarItem(item, run, state.drawerRunId);
-  }
   for (const panel of document.querySelectorAll('.acp-run-panel[data-run-id]')) {
     const run = state.runs.get(panel.dataset.runId);
     const pill = panel.querySelector('.acp-status-pill');
     if (run && pill) {
       pill.className = `acp-status-pill is-${run.status}`;
       pill.textContent = runStatusText(run);
-    }
-  }
-  const selected = state.runs.get(state.drawerRunId);
-  const subtitle = document.getElementById('acp-drawer-subtitle');
-  if (subtitle && selected && (!active || selected.conversation_id === active)) {
-    subtitle.textContent = `${runStatusText(selected)} · ${shortPath(selected.workspace)}`;
-  }
-}
-
-function renderDock() {
-  const dock = document.getElementById('acp-dock');
-  const list = document.getElementById('acp-dock-list');
-  const title = document.getElementById('acp-dock-title');
-  const meta = document.getElementById('acp-dock-meta');
-  if (!dock || !list) return;
-  const runs = visibleRuns();
-  const hidden = runs.length === 0;
-  if (dock.hidden !== hidden) dock.hidden = hidden;
-  const live = runs.filter((r) => LIVE.has(r.status)).length;
-  const nextTitle = `${runs.length} subagent${runs.length === 1 ? '' : 's'}`;
-  const nextMeta = live ? `${live} live` : 'settled';
-  if (title && title.textContent !== nextTitle) title.textContent = nextTitle;
-  if (meta && meta.textContent !== nextMeta) meta.textContent = nextMeta;
-  renderDockList(list, runs);
-}
-
-export function renderDockList(list, runs) {
-  if (!list) return;
-  patchKeyedRunChildren(list, runs, buildDockChip, updateDockChip);
-}
-
-// Reconcile keyed run children without touching nodes that are already in the
-// right position. Stream snapshots arrive frequently; moving every existing
-// child with append() makes the browser redo layout while the user is trying
-// to click a chip or drawer item.
-function patchKeyedRunChildren(list, runs, build, update) {
-  const existing = new Map();
-  for (const child of [...list.children]) {
-    const id = child.dataset?.runId;
-    if (!id) continue;
-    if (existing.has(id)) {
-      child.remove();
-      continue;
-    }
-    existing.set(id, child);
-  }
-
-  const next = [];
-  const seen = new Set();
-  for (const run of runs || []) {
-    if (!run?.id || seen.has(run.id)) continue;
-    seen.add(run.id);
-    const child = existing.get(run.id);
-    if (child) {
-      update(child, run);
-      next.push(child);
-    } else {
-      next.push(build(run));
-    }
-  }
-
-  for (const [id, child] of existing) {
-    if (!seen.has(id)) child.remove();
-  }
-  for (let index = 0; index < next.length; index++) {
-    if (list.children[index] !== next[index]) {
-      list.insertBefore(next[index], list.children[index] || null);
     }
   }
 }
@@ -578,186 +248,47 @@ function runDisplayName(run) {
 
 export { runDisplayName };
 
-function buildDockChip(run) {
-  const name = runDisplayName(run);
-  const status = runStatusText(run);
-  const chip = el('button', {
-    class: `acp-dock-chip is-${run.status}`,
-    type: 'button',
-    role: 'listitem',
-    'data-run-id': run.id,
-    title: `${name} · ${status}`,
-  },
-    el('span', { class: 'acp-dock-chip-pulse', 'aria-hidden': 'true' }),
-    el('span', { class: 'acp-dock-chip-name', text: name }),
-    el('span', { class: 'acp-dock-chip-status', text: status }),
-  );
-  chip.addEventListener('click', () => openDrawer(run.id));
-  const peek = el('button', { class: 'acp-dock-chip-peek', type: 'button', title: 'Peek in popup', 'aria-label': 'Peek', text: '↗' });
-  peek.addEventListener('click', (event) => {
-    event.stopPropagation();
-    openPopup(run.id);
-  });
-  chip.append(peek);
-  return chip;
-}
-
-function updateDockChip(chip, run) {
-  const name = runDisplayName(run);
-  const statusText = runStatusText(run);
-  const nextClass = `acp-dock-chip is-${run.status}`;
-  const nextTitle = `${name} · ${statusText}`;
-  if (chip.className !== nextClass) chip.className = nextClass;
-  if (chip.title !== nextTitle) chip.title = nextTitle;
-  const nameEl = chip.querySelector('.acp-dock-chip-name');
-  if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
-  const statusEl = chip.querySelector('.acp-dock-chip-status');
-  if (statusEl && statusEl.textContent !== statusText) {
-    statusEl.textContent = statusText;
-  }
-}
-
+// Delegation cards call this name. It opens the single-run popup reader.
+// Historical runs load on demand through ensureRun / acp.runs.get.
 export function openDrawer(runId) {
-  state.drawerRunId = runId || firstVisibleRunId();
-  state.runLoadErrors.delete(state.drawerRunId);
-  const drawer = document.getElementById('acp-drawer');
-  const overlay = document.getElementById('acp-drawer-overlay');
-  drawer.hidden = false;
-  drawer.removeAttribute('inert');
-  drawer.setAttribute('aria-hidden', 'false');
-  drawer.classList.add('active');
-  overlay.classList.add('active');
-  overlay.setAttribute('aria-hidden', 'false');
-  renderDrawer();
-  if (state.drawerRunId && !state.runs.has(state.drawerRunId)) void ensureRun(state.drawerRunId);
-  document.getElementById('acp-drawer-close')?.focus();
-}
-
-function closeDrawer() {
-  const drawer = document.getElementById('acp-drawer');
-  const overlay = document.getElementById('acp-drawer-overlay');
-  drawer.classList.remove('active');
-  overlay.classList.remove('active');
-  overlay.setAttribute('aria-hidden', 'true');
-  drawer.setAttribute('aria-hidden', 'true');
-  drawer.setAttribute('inert', '');
-  drawer.hidden = true;
-  state.drawerRunId = '';
+  openPopup(runId || firstVisibleRunId());
 }
 
 function openPopup(runId) {
+  const overlay = document.getElementById('acp-popup-overlay');
+  if (!overlay) return;
   state.popupRunId = runId;
   state.runLoadErrors.delete(runId);
-  const overlay = document.getElementById('acp-popup-overlay');
+  // Learning cards and tests open the reader directly, so its controls are
+  // wired on first open.
+  bindPopupControls(overlay);
+  state.popupReturnFocus = document.activeElement;
   overlay.hidden = false;
   renderPopup();
   if (runId && !state.runs.has(runId)) void ensureRun(runId);
   document.getElementById('acp-popup-close')?.focus();
 }
 
+function bindPopupControls(overlay) {
+  if (state.popupBound) return;
+  state.popupBound = true;
+  document.getElementById('acp-popup-close')?.addEventListener('click', closePopup);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) closePopup();
+  });
+  overlay.ownerDocument?.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !overlay.hidden) closePopup();
+  });
+}
+
 function closePopup() {
-  document.getElementById('acp-popup-overlay').hidden = true;
+  const overlay = document.getElementById('acp-popup-overlay');
+  if (!overlay) return;
+  overlay.hidden = true;
   state.popupRunId = '';
-}
-
-function renderDrawer() {
-  const runs = conversationRuns();
-  // When a specific run was requested (card/dock click) but its record
-  // hasn't hydrated yet, show a loading state instead of silently
-  // switching to a different run.
-  const selected = state.runs.get(state.drawerRunId) || (state.drawerRunId ? undefined : runs[0]);
-  document.getElementById('acp-drawer-title').textContent = selected ? (runDisplayName(selected) || 'Subagent') : 'Subagents';
-  document.getElementById('acp-drawer-subtitle').textContent = selected
-    ? `${runStatusText(selected)} · ${shortPath(selected.workspace)}`
-    : 'No subagents in this conversation';
-  const body = document.getElementById('acp-drawer-body');
-  let shell = body.querySelector('.acp-drawer-shell');
-  if (!shell) {
-    const list = el('div', { class: 'agent-conversation-list acp-run-list', role: 'list' });
-    list.addEventListener('click', (event) => {
-      const item = event.target.closest('[data-run-id]');
-      if (!item) return;
-      state.drawerRunId = item.dataset.runId;
-      renderDrawer();
-    });
-    shell = el('div', { class: 'acp-drawer-shell' },
-      el('aside', { class: 'agent-conversations acp-run-sidebar', 'aria-label': 'Subagent runs' },
-        el('div', { class: 'agent-conversations-head' },
-          el('div', {},
-            el('span', { class: 'agent-panel-label', text: 'Subagents' }),
-            el('span', { class: 'agent-conversation-count acp-run-count' }),
-          ),
-        ),
-        list,
-      ),
-      el('div', { class: 'acp-run-content' }),
-    );
-    body.replaceChildren(shell);
-  }
-  renderRunSidebar(shell.querySelector('.acp-run-list'), runs, selected?.id || '');
-  const content = shell.querySelector('.acp-run-content');
-  if (!selected) {
-    const text = state.drawerRunId
-      ? (state.runLoadErrors.has(state.drawerRunId) ? 'Unable to load this transcript. Click the card again to retry.' : 'Loading transcript…')
-      : 'No subagents in this conversation. The parent agent can spawn them with the subagent tool.';
-    content.replaceChildren(el('p', { class: 'acp-empty', text }));
-    if (state.drawerRunId && !state.runLoadErrors.has(state.drawerRunId)) void ensureRun(state.drawerRunId);
-    return;
-  }
-  state.drawerRunId = selected.id;
-  const existing = content.querySelector(`.acp-run-panel[data-run-id="${selected.id}"]`);
-  if (!existing) {
-    mountRunPanel(content, selected);
-  } else {
-    bindTranscriptFollow(existing);
-    patchRunPanel(existing, selected);
-  }
-}
-
-export function renderRunSidebar(list, runs, selectedId) {
-  const count = list.closest('.acp-run-sidebar')?.querySelector('.acp-run-count');
-  if (count) count.textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;
-  if (!runs.length) {
-    if (!list.querySelector('.agent-conversation-empty')) {
-      list.replaceChildren(el('div', { class: 'agent-conversation-empty', text: 'No subagent runs yet.' }));
-    }
-    return;
-  }
-  list.querySelector('.agent-conversation-empty')?.remove();
-  patchKeyedRunChildren(
-    list,
-    runs,
-    buildRunSidebarItem,
-    (item, run) => updateRunSidebarItem(item, run, selectedId),
-  );
-}
-
-function buildRunSidebarItem(run) {
-  return el('div', {
-    class: `agent-conversation-item is-${run.status}`,
-    role: 'listitem',
-    'data-run-id': run.id,
-  },
-    el('button', { class: 'agent-conversation-open', type: 'button' },
-      el('span', { class: 'agent-conversation-title' }),
-      el('span', { class: 'agent-conversation-time' }),
-    ),
-  );
-}
-
-function updateRunSidebarItem(item, run, selectedId) {
-  const live = LIVE.has(run.status);
-  const nextClass = `agent-conversation-item is-${run.status}${run.id === selectedId ? ' is-active' : ''}${live ? ' is-running' : ''}`;
-  if (item.className !== nextClass) item.className = nextClass;
-  const title = item.querySelector('.agent-conversation-title');
-  const nextTitle = runDisplayName(run);
-  if (title && title.textContent !== nextTitle) title.textContent = nextTitle;
-  const time = item.querySelector('.agent-conversation-time');
-  const nextTime = `${runStatusText(run)} · ${shortPath(run.workspace)}`;
-  if (time && time.textContent !== nextTime) time.textContent = nextTime;
-  const dot = time?.querySelector('.agent-conversation-dot');
-  if (live && !dot) time?.append(el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' }));
-  if (!live) dot?.remove();
+  const target = state.popupReturnFocus;
+  state.popupReturnFocus = null;
+  if (target?.isConnected) target.focus();
 }
 
 function renderPopup() {
@@ -768,9 +299,11 @@ function renderPopup() {
     title.textContent = 'Subagent';
     body.replaceChildren(el('p', {
       class: 'acp-empty',
-      text: state.runLoadErrors.has(state.popupRunId)
-        ? 'Unable to load this transcript. Close and try again.'
-        : 'Loading transcript…',
+      text: !state.popupRunId
+        ? 'No subagent selected.'
+        : state.runLoadErrors.has(state.popupRunId)
+          ? 'Unable to load this transcript. Close and try again.'
+          : 'Loading transcript…',
     }));
     if (state.popupRunId && !state.runLoadErrors.has(state.popupRunId)) void ensureRun(state.popupRunId);
     return;
@@ -812,10 +345,8 @@ function buildRunPanel(run) {
 }
 
 // A freshly opened panel scrolls to the live tail only when that run's own
-// follow pin is still armed. Pin state is per runId (like Agent rooms), not
-// shared across the drawer scroller — switching subagent rooms must not
-// inherit another run's detached/follow lock, and must not touch the parent
-// conversation's pin.
+// follow pin is still armed. Pin state is per runId, so one reader does not
+// inherit another run's detached/follow lock or the parent conversation pin.
 function mountRunPanel(container, run) {
   const panel = buildRunPanel(run);
   container.replaceChildren(panel);
@@ -851,9 +382,8 @@ function patchRunPanel(panel, run) {
   syncTranscriptWithFollow(panel, run.transcript || [], run.prompt, run.started_at);
 }
 
-// Per-run follow helpers. Keyed by runId — not by the shared
-// .acp-run-content / .acp-popup scroller — so room switches keep each run's
-// own follow/detach preference and never touch the parent conversation pin.
+// Per-run follow helpers. Keyed by runId so the popup scroller keeps each
+// run's own follow/detach preference and never touches the parent pin.
 export function getSubagentFollow(runId) {
   if (!runId) return { pinned: true };
   let follow = followByRunId.get(runId);
@@ -874,7 +404,7 @@ export function resetSubagentFollowForTests() {
 }
 
 function transcriptScroller(panel) {
-  return panel?.querySelector('.acp-transcript')?.closest('.acp-run-content, .acp-popup') || null;
+  return panel?.querySelector('.acp-transcript')?.closest('.acp-popup') || null;
 }
 
 function runIdFromScroller(scroller) {
@@ -885,8 +415,8 @@ export function bindTranscriptFollow(panel) {
   const scroller = transcriptScroller(panel);
   if (!scroller || boundFollowScrollers.has(scroller)) return;
   boundFollowScrollers.add(scroller);
-  // Resolve the active runId on each gesture so one drawer/popup scroller can
-  // host many rooms without sharing a single pin object.
+  // Resolve the active runId on each gesture so the popup scroller does not
+  // share one pin object across runs.
   const applyIntent = (direction) => {
     const runId = runIdFromScroller(scroller);
     if (runId) applySubagentFollowIntent(runId, scroller, direction);
@@ -1038,12 +568,16 @@ function transcriptMessage(segment) {
 }
 
 function transcriptPromptMessage(segment) {
-  const body = el('div', { class: 'agent-bubble-text' });
-  renderPromptContent(body, segment.text);
+  const card = createSubagentPromptCard({
+    label: segment.key === 'prompt:initial' ? 'Delegation' : 'Steering',
+    className: 'agent-bubble',
+    bodyClass: 'agent-bubble-text',
+  });
+  syncSubagentPromptText(card, segment.text, renderPromptContent);
   const message = el('div', {
     class: 'agent-message acp-prompt-message',
     'data-transcript-segment-key': segment.key,
-  }, el('div', { class: 'agent-bubble' }, body));
+  }, card.root);
   if (segment.at) {
     message.append(el('div', { class: 'agent-message-meta', text: fmtTime(segment.at) }));
   }
@@ -1052,8 +586,10 @@ function transcriptPromptMessage(segment) {
 
 function updateTranscriptMessage(message, segment) {
   if (segment.kind === 'prompt') {
-    const body = message.querySelector(':scope > .agent-bubble > div');
-    if (body) renderPromptContent(body, segment.text);
+    // The prompt card owns its header and expand control; only the dedicated
+    // body may be re-rendered or the controls would be overwritten.
+    const card = message.querySelector(':scope > .agent-bubble > .subagent-prompt-body')?._subagentPromptCard;
+    if (card) syncSubagentPromptText(card, segment.text, renderPromptContent);
     const meta = message.querySelector(':scope > .agent-message-meta');
     if (segment.at && meta) meta.textContent = fmtTime(segment.at);
     return;
@@ -1367,10 +903,4 @@ function modelLabel(run) {
   if (status === 'rejected') return `${run.current_model_id} (rejected)`;
   if (status === 'unverified') return `${run.current_model_id} (unverified)`;
   return run.current_model_id;
-}
-
-function shortPath(path) {
-  if (!path) return 'no workspace';
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.slice(-2).join('/') || path;
 }

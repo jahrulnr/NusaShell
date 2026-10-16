@@ -750,17 +750,39 @@ test('openTextPreviewPopup renders Mermaid diagrams in markdown previews', async
 test('openTextPreviewPopup handles fetch errors gracefully', async () => {
   makeDom();
   const origFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: false,
-    status: 404,
-    statusText: 'Not Found',
-  });
+  let fetches = 0;
+  globalThis.fetch = async () => {
+    fetches++;
+    return {
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+    };
+  };
   try {
     await openTextPreviewPopup('/missing/file.go');
     const overlay = document.querySelector('.agent-text-preview-overlay');
     assert.ok(overlay);
-    assert.match(overlay.textContent, /Failed to load/);
-    overlay.remove();
+    const error = overlay.querySelector('.agent-text-preview-error');
+    assert.ok(error, 'fetch failure renders the friendly error card');
+    assert.equal(error.getAttribute('role'), 'alert', 'error card is announced');
+    assert.equal(overlay.querySelector('[data-preview-kind]')?.dataset.previewKind, 'error');
+    assert.equal(error.querySelector('strong')?.textContent, 'Could not preview file.go');
+    assert.match(error.textContent, /not available — it may have been moved, renamed, or deleted\./);
+    assert.equal(
+      error.querySelector('.agent-text-preview-error-detail')?.textContent,
+      '/missing/file.go — HTTP 404: Not Found',
+      'secondary detail keeps the path and HTTP status',
+    );
+    const actions = [...error.querySelectorAll('.agent-text-preview-error-action')];
+    assert.deepEqual(actions.map((b) => b.textContent), ['Retry']);
+    assert.ok(overlay.querySelector('.media-zoom-close'), 'the popup close remains available outside the centered error');
+    actions[0].click();
+    assert.equal(fetches, 2, 'Retry re-runs the fetch');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.ok(overlay.querySelector('.agent-text-preview-error'), 'error card re-renders after retry');
+    overlay.querySelector('.media-zoom-close').click();
+    assert.equal(document.querySelector('.agent-text-preview-overlay'), null, 'the outer Close dismisses the overlay');
   } finally {
     globalThis.fetch = origFetch;
     cleanup();

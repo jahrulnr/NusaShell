@@ -191,14 +191,13 @@ Pairing/session checks and SSE ping revalidation apply to both stream routes.
 The WS continues to carry agent lifecycle/control notifications, ACP
 permission and mode notifications, and non-agent domains.
 
-Agent tool cards use one placement rule for live rounds and persisted history
-(`frontend/js/views/agent/render.js`). Each card belongs to the assistant round
-that issued it; terminal cards group into stacks, and a standalone card splits
-the stack so later terminals stay after it. A replacement takes the old card's
-position, never the live tail. A `tool.completed` for a call already mounted
-from history patches that card, including across a later round or a steer, and
-only calls of the current round enter the live tool map. A settled card is not
-revived by a late start, an SSE tool frame, or its initial presentation.
+The Agent thread maps live rounds and persisted history to the same event
+widgets (`frontend/widgets/registry.js` and `frontend/widgets/tools/widgets.js`).
+`frontend/page/conversation/transcript-window.js` reconciles visible widgets by
+event identity inside a bounded reading window. Streaming updates patch the
+mounted widget; replacing a live host keeps its position in the transcript.
+`frontend/page/conversation/live-data.js` normalizes tool lifecycle events and
+keeps settled calls from being revived by late progress frames.
 Round starts are idempotent per run: a `turn.started` for a message the run has
 already applied, or for a persisted historical message, changes nothing.
 

@@ -3,12 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/pkg/yamlmd"
 )
 
 func (t *Toolbox) todoToolEntries() []toolEntry {
@@ -50,7 +52,7 @@ func (t *Toolbox) execSleep(ctx context.Context, argsJSON []byte) (string, error
 		return "", ctx.Err()
 	case <-time.After(time.Duration(args.Seconds) * time.Second):
 	}
-	return yamlBlock(map[string]any{"status": "slept"}), nil
+	return yamlmd.Block(map[string]any{"status": "slept"}), nil
 }
 
 func (t *Toolbox) executeWaitUntil(_ context.Context, argsJSON []byte) (string, error) {
@@ -66,7 +68,7 @@ func (t *Toolbox) executeWaitUntil(_ context.Context, argsJSON []byte) (string, 
 	if _, err := time.Parse(time.RFC3339, args.At); err != nil {
 		return "", fmt.Errorf("at must be RFC3339")
 	}
-	return yamlBlock(map[string]string{
+	return yamlmd.Block(map[string]string{
 		"hint": "Use a workflow step wait_until: <RFC3339>. The run enters waiting and resumes after restart.",
 		"at":   args.At,
 	}), nil
@@ -87,7 +89,7 @@ const (
 
 func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Todos == nil {
-		return "", depMissing("todo tracking is not available")
+		return "", errors.New("todo tracking is not available")
 	}
 	conversationID := application.ConversationIDFromContext(ctx)
 	if conversationID == "" {
@@ -264,7 +266,7 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 // the turn is cancelled. Requires a run id and conversation id in the context.
 func (t *Toolbox) execAskQuestion(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.AskQuestions == nil {
-		return "", depMissing("ask_question is not available in this runtime")
+		return "", errors.New("ask_question is not available in this runtime")
 	}
 	runID := application.RunIDFromContext(ctx)
 	if runID == "" {
@@ -308,7 +310,7 @@ func (t *Toolbox) execAskQuestion(ctx context.Context, argsJSON []byte) (string,
 		if !result.OK {
 			return "", fmt.Errorf("%s", result.Answer)
 		}
-		return yamlBlock(map[string]any{
+		return yamlmd.Block(map[string]any{
 			"ok":     true,
 			"via":    result.Via,
 			"answer": result.Answer,

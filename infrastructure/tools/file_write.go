@@ -1,7 +1,7 @@
 package tools
 
 // Write-shaped file tools: file_write, file_patch. Both mutate file content
-// through writeFileAtomic under a per-path lock and record a turndiff delta
+// through atomicfile.WriteWithRename under a per-path lock and record a turndiff delta
 // (or an inexact marker) so the UI can render the change.
 
 import (
@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"nusashell/domain/turndiff"
+	"nusashell/pkg/atomicfile"
+	"nusashell/pkg/yamlmd"
 )
 
 func executeFileWrite(ctx context.Context, args map[string]any) (bool, string, error) {
@@ -44,25 +46,25 @@ func executeFileWrite(ctx context.Context, args map[string]any) (bool, string, e
 	}
 	// Share the path lock with file_patch so a parallel overwrite cannot
 	// interleave with an in-flight same-path patch RMW.
-	unlock := lockFilePath(path)
+	unlock := lockFilePaths(path)
 	defer unlock()
 	pre := readPathText(path)
-	if err := writeFileAtomic(path, data, 0o644); err != nil {
-		recordInexact(ctx)
+	if err := atomicfile.WriteWithRename(path, data, 0o644, renameWithRetry); err != nil {
+		turndiff.Record(ctx, turndiff.Inexact())
 		return true, "", err
 	}
 	if !pre.exact || !isTrackableText(data) {
-		recordInexact(ctx)
+		turndiff.Record(ctx, turndiff.Inexact())
 	} else {
 		var overwritten *string
 		if pre.exists {
 			overwritten = turndiff.StringPtr(pre.text)
 		}
-		recordDelta(ctx, turndiff.AddFile(path, string(data), overwritten))
+		turndiff.Record(ctx, turndiff.AddFile(path, string(data), overwritten))
 	}
 	meta := map[string]any{"bytes": len(data), "sha256": fileSHA256(data), "written": true}
 	addFileWhitespaceMeta(meta, inspectFileWhitespace(data))
-	return true, yamlMD(meta, ""), nil
+	return true, yamlmd.MD(meta, ""), nil
 }
 
 func executeFilePatch(ctx context.Context, args map[string]any) (bool, string, error) {
@@ -84,7 +86,7 @@ func executeFilePatch(ctx context.Context, args map[string]any) (bool, string, e
 	}
 	// Serialize same-path RMW so parallel tool calls apply incrementally
 	// against the latest content instead of racing last-writer-wins.
-	unlock := lockFilePath(path)
+	unlock := lockFilePaths(path)
 	defer unlock()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -152,16 +154,16 @@ func executeFilePatch(ctx context.Context, args map[string]any) (bool, string, e
 		if encoding == "escaped" {
 			previewBody = escapeVisibleWhitespace(previewBody)
 		}
-		return true, yamlMD(meta, previewBody), nil
+		return true, yamlmd.MD(meta, previewBody), nil
 	}
-	if err := writeFileAtomic(path, []byte(out), 0o644); err != nil {
-		recordInexact(ctx)
+	if err := atomicfile.WriteWithRename(path, []byte(out), 0o644, renameWithRetry); err != nil {
+		turndiff.Record(ctx, turndiff.Inexact())
 		return true, "", err
 	}
 	if !isTrackableText(raw) || !isTrackableText([]byte(out)) {
-		recordInexact(ctx)
+		turndiff.Record(ctx, turndiff.Inexact())
 	} else {
-		recordDelta(ctx, turndiff.UpdateFile(path, s, out, nil, nil))
+		turndiff.Record(ctx, turndiff.UpdateFile(path, s, out, nil, nil))
 	}
-	return true, yamlMD(meta, ""), nil
+	return true, yamlmd.MD(meta, ""), nil
 }

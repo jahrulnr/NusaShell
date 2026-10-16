@@ -33,8 +33,11 @@ func NewTranscriber(dataDir string, modelFile, language func() string) *Transcri
 	return &Transcriber{modelFile: modelFile, language: language, dataDir: dataDir}
 }
 
-func (t *Transcriber) modelsDir() string { return modelsDir(t.dataDir) }
-func (t *Transcriber) engine() *Engine   { return New("", t.modelsDir()) }
+// engine builds an Engine bound to the runtime layout <data>/models/stt
+// (doc §9). A fresh Engine per call keeps model-dir changes live.
+func (t *Transcriber) engine() *Engine {
+	return New("", filepath.Join(t.dataDir, "models", "stt"))
+}
 func (t *Transcriber) request(req *application.OfflineSTTRequest) application.OfflineSTTRequest {
 	if req.Model == "" {
 		req.Model = t.modelFile()
@@ -44,9 +47,6 @@ func (t *Transcriber) request(req *application.OfflineSTTRequest) application.Of
 	}
 	return *req
 }
-
-// modelsDir returns <data>/models/stt (doc §9 runtime layout).
-func modelsDir(dataDir string) string { return filepath.Join(dataDir, "models", "stt") }
 
 // TranscribeOffline runs one whisper-cli invocation. The factory handles
 // settings precedence; the engine does everything observable on disk.

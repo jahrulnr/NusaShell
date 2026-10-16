@@ -11,6 +11,12 @@ type Response struct {
 
 	Model    string
 	Provider string
+	// Upstream is the gateway-reported upstream provider name (for example
+	// OpenRouter's top-level "provider" field naming which upstream served
+	// the model). It is provenance only — Provider remains the wire-family
+	// stamp that feeds reasoning replay decisions — and stays empty for
+	// direct providers whose responses carry no upstream field.
+	Upstream string
 
 	FinishReason    FinishReason
 	FinishReasonRaw string

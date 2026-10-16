@@ -66,122 +66,6 @@
 .acp-risk-option:last-child { border-right: 0; }
 .acp-risk-option.is-active { background: var(--accent-soft); color: var(--accent); }
 
-/* Dock */
-.acp-dock { flex: none; border-bottom: 1px solid var(--border-soft); background: var(--bg); }
-.acp-dock[hidden] { display: none; }
-.acp-dock-head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding-right: 8px; }
-.acp-dock-title { font: 12.5px/1.2 var(--font-body); }
-.acp-dock-meta {
-  margin-left: auto;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: var(--panel-alt);
-  color: var(--text-dim);
-  font: 11px/1.2 var(--font-mono);
-}
-.acp-dock-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 10px 10px; }
-.acp-dock-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 5px 8px 5px 10px;
-  background: var(--panel);
-  color: var(--text);
-  cursor: pointer;
-  font: 11.5px var(--font-body);
-}
-.acp-dock-chip:hover { border-color: var(--accent-border); }
-.acp-dock-chip-pulse {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--text-dim);
-}
-.acp-dock-chip.is-running .acp-dock-chip-pulse,
-.acp-dock-chip.is-starting .acp-dock-chip-pulse {
-  background: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft);
-  animation: acp-pulse 1.4s ease-in-out infinite;
-}
-.acp-dock-chip.is-waiting_permission .acp-dock-chip-pulse { background: var(--amber-bright); }
-.acp-dock-chip.is-failed .acp-dock-chip-pulse { background: var(--red); }
-.acp-dock-chip.is-completed .acp-dock-chip-pulse { background: var(--green); }
-.acp-dock-chip-status {
-  max-width: min(52vw, 18rem);
-  overflow: hidden;
-  color: var(--text-dim);
-  font: 10px var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.acp-dock-chip-peek {
-  margin: 0;
-  border: 0;
-  border-radius: 999px;
-  width: 20px; height: 20px;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.acp-dock-chip-peek:hover { background: var(--accent-soft); color: var(--accent); }
-@keyframes acp-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .35; }
-}
-
-/* Drawer */
-.acp-drawer-overlay {
-  width: min(780px, 100vw);
-}
-.acp-drawer {
-  position: fixed;
-  top: 0; right: -780px; bottom: 0;
-  width: min(780px, 100vw);
-  height: 100dvh;
-  max-height: 100dvh;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
-  z-index: 52;
-  display: flex;
-  flex-direction: column;
-  transition: right .25s ease;
-}
-.acp-drawer.active { right: 0; }
-#acp-drawer-body {
-  overflow: hidden;
-  padding: 0;
-}
-.acp-drawer-shell {
-  display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-}
-.acp-drawer .acp-run-sidebar {
-  position: static;
-  display: flex;
-  width: auto;
-  min-width: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-.acp-run-sidebar .agent-conversation-list {
-  min-height: 0;
-}
-.acp-run-sidebar .agent-conversation-item {
-  grid-template-columns: minmax(0, 1fr);
-}
-.acp-run-sidebar .agent-conversation-open {
-  width: 100%;
-}
-.acp-run-content {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 18px 20px;
-}
 .acp-run-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .acp-status-pill, .acp-risk-pill, .acp-model-pill, .acp-usage-pill {
   border-radius: 999px;
@@ -212,24 +96,24 @@
 .acp-run-panel { display: grid; gap: 12px; }
 /* Transcript content deliberately reuses agent.css. ACP prompts are a
  * separate event presentation, however: they are often long delegation
- * briefs and must not inherit the green, right-aligned main user bubble. */
+ * briefs and must not inherit the green, right-aligned main user bubble.
+ * Scoped to .acp-run-panel so the dock transcript keeps its own palette. */
 .acp-run-panel > .agent-thread {
   flex: none;
   overflow: visible;
   padding: 0;
 }
-.acp-transcript .acp-prompt-message {
+.acp-run-panel .acp-prompt-message {
   align-self: stretch;
   align-items: stretch;
   width: 100%;
   max-width: none;
 }
-.acp-transcript .acp-prompt-message .agent-bubble {
+.acp-run-panel .acp-prompt-message .agent-bubble {
   box-sizing: border-box;
   width: 100%;
-  max-height: min(38vh, 380px);
-  overflow-y: auto;
-  padding: 12px 14px;
+  overflow: hidden;
+  padding: 0;
   border: 1px solid var(--border-soft);
   border-left: 2px solid var(--accent-border);
   border-radius: 8px;
@@ -240,22 +124,33 @@
   line-height: 1.5;
   white-space: normal;
 }
-.acp-transcript .acp-prompt-message .agent-bubble > :first-child { margin-top: 0; }
-.acp-transcript .acp-prompt-message .agent-bubble > :last-child { margin-bottom: 0; }
-.acp-transcript .acp-prompt-message .agent-bubble h1,
-.acp-transcript .acp-prompt-message .agent-bubble h2,
-.acp-transcript .acp-prompt-message .agent-bubble h3,
-.acp-transcript .acp-prompt-message .agent-bubble h4 {
+/* Prompt card chrome: the header gives the prompt a clear identity and the
+ * toggle expands the clamped preview into a bounded scroll reader. The full
+ * prompt is always reachable — the preview never truncates data. */
+.acp-run-panel .subagent-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--border-soft); }
+.acp-run-panel .subagent-prompt-label { color: var(--accent); font: 600 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.acp-run-panel .subagent-prompt-toggle { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 32px; margin: 0; padding: 2px 10px; border: 1px solid var(--border-soft); border-radius: 999px; background: transparent; color: var(--text-dim); cursor: pointer; font: 11px var(--font-mono); }
+.acp-run-panel .subagent-prompt-toggle:hover, .acp-run-panel .subagent-prompt-toggle:focus-visible { border-color: var(--accent-border); color: var(--accent); outline: none; }
+.acp-run-panel .subagent-prompt-toggle[hidden] { display: none; }
+.acp-run-panel .subagent-prompt-body { min-width: 0; box-sizing: border-box; padding: 12px 14px; overflow-wrap: anywhere; }
+.acp-run-panel .subagent-prompt:not(.is-collapsed) > .subagent-prompt-body { max-height: min(38vh, 380px); overflow-y: auto; overscroll-behavior: contain; }
+.acp-run-panel .subagent-prompt.is-collapsed > .subagent-prompt-body { max-height: calc(5 * 1.5em); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent); mask-image: linear-gradient(to bottom, #000 62%, transparent); }
+.acp-run-panel .acp-prompt-message .subagent-prompt-body > :first-child { margin-top: 0; }
+.acp-run-panel .acp-prompt-message .subagent-prompt-body > :last-child { margin-bottom: 0; }
+.acp-run-panel .acp-prompt-message .agent-bubble h1,
+.acp-run-panel .acp-prompt-message .agent-bubble h2,
+.acp-run-panel .acp-prompt-message .agent-bubble h3,
+.acp-run-panel .acp-prompt-message .agent-bubble h4 {
   margin: .85em 0 .35em;
   color: var(--text);
   line-height: 1.25;
 }
-.acp-transcript .acp-prompt-message .agent-bubble p,
-.acp-transcript .acp-prompt-message .agent-bubble ul,
-.acp-transcript .acp-prompt-message .agent-bubble ol { margin: .55em 0; }
-.acp-transcript .acp-prompt-message .agent-bubble ul,
-.acp-transcript .acp-prompt-message .agent-bubble ol { padding-left: 1.35em; }
-.acp-transcript .acp-prompt-message .agent-bubble code {
+.acp-run-panel .acp-prompt-message .agent-bubble p,
+.acp-run-panel .acp-prompt-message .agent-bubble ul,
+.acp-run-panel .acp-prompt-message .agent-bubble ol { margin: .55em 0; }
+.acp-run-panel .acp-prompt-message .agent-bubble ul,
+.acp-run-panel .acp-prompt-message .agent-bubble ol { padding-left: 1.35em; }
+.acp-run-panel .acp-prompt-message .agent-bubble code {
   padding: .08em .3em;
   border-radius: 4px;
   background: rgba(4, 12, 18, .82);
@@ -263,7 +158,7 @@
   font-family: var(--font-mono);
   font-size: .9em;
 }
-.acp-transcript .acp-prompt-message .agent-bubble pre {
+.acp-run-panel .acp-prompt-message .agent-bubble pre {
   max-width: 100%;
   overflow-x: auto;
   padding: 9px;
@@ -273,8 +168,8 @@
   font: 10.5px/1.5 var(--font-mono);
   white-space: pre;
 }
-.acp-transcript .acp-prompt-message .agent-bubble pre code { padding: 0; background: transparent; color: inherit; }
-.acp-transcript .acp-prompt-message .agent-message-meta {
+.acp-run-panel .acp-prompt-message .agent-bubble pre code { padding: 0; background: transparent; color: inherit; }
+.acp-run-panel .acp-prompt-message .agent-message-meta {
   align-self: flex-start;
   padding-left: 2px;
 }
@@ -314,40 +209,5 @@
 .acp-popup-body { padding: 16px 18px 20px; }
 
 @media (max-width: 720px) {
-  .acp-drawer, .acp-drawer-overlay { width: 100%; }
-  .acp-drawer { right: -100%; }
-  .acp-drawer-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
-  }
-  .acp-drawer .acp-run-sidebar {
-    inset: auto;
-    min-height: 0;
-    max-height: min(220px, 30dvh);
-    overflow: hidden;
-    padding: 12px 14px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border-soft);
-  }
-  .acp-run-sidebar .agent-conversations-head { padding: 0 2px 8px; }
-  .acp-run-sidebar .agent-conversation-list {
-    flex-direction: row;
-    gap: 8px;
-    min-height: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 0 0 4px;
-  }
-  .acp-run-sidebar .agent-conversation-item {
-    flex: 0 0 min(220px, 72vw);
-    grid-template-columns: minmax(0, 1fr);
-    padding: 4px;
-  }
-  .acp-run-sidebar .agent-conversation-open { padding: 8px 9px; }
-  .acp-run-content {
-    min-width: 0;
-    overflow-x: hidden;
-    padding: 16px;
-  }
   .acp-mode-config { grid-template-columns: 1fr; }
 }

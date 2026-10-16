@@ -63,7 +63,7 @@ func TestRunOneToolAnnotatesConversationAndWorkspace(t *testing.T) {
 		Workspace:      "/ws/proj",
 		Ctx:            context.Background(),
 	}
-	got := app.runOneTool(run, "msg_1", domain.ToolCall{ID: "call_1", Name: "todo", Args: `{}`}, ModelCapabilities{}, domain.Settings{}, 1)
+	got := app.agentService().RunOneTool(run, "msg_1", domain.ToolCall{ID: "call_1", Name: "todo", Args: `{}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	if got.Status != domain.ToolOK {
 		t.Fatalf("status = %s output = %q, want ok", got.Status, got.Output)
 	}

@@ -111,17 +111,17 @@ func TestUtilityHelpers(t *testing.T) {
 	if got := string(StrJSON(`quoted`)); got != `"quoted"` {
 		t.Fatalf("StrJSON() = %q", got)
 	}
-	if got := DataURLBase64("data:image/png;base64,AAAA"); got != "AAAA" {
+	if got := domain.DataURLBase64("data:image/png;base64,AAAA"); got != "AAAA" {
 		t.Fatalf("DataURLBase64() = %q, want AAAA", got)
 	}
-	if got := DataURLBase64("not-a-data-url"); got != "" {
+	if got := domain.DataURLBase64("not-a-data-url"); got != "" {
 		t.Fatalf("DataURLBase64(invalid) = %q, want empty", got)
 	}
 	attachment := domain.Attachment{Name: "notes.txt", Content: "hello", MediaType: "text/plain"}
-	if !strings.Contains(TextAttachmentContent(attachment), "notes.txt") {
+	if !strings.Contains(domain.TextAttachmentContent(attachment), "notes.txt") {
 		t.Fatal("TextAttachmentContent omitted attachment name")
 	}
-	if got := DocumentAttachmentContent(attachment); got != "[Attached document: notes.txt (text/plain)]" {
+	if got := domain.DocumentAttachmentContent(attachment); got != "[Attached document: notes.txt (text/plain)]" {
 		t.Fatalf("DocumentAttachmentContent() = %q", got)
 	}
 }

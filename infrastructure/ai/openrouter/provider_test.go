@@ -423,7 +423,8 @@ func TestReasoningDetailsRoundTrip(t *testing.T) {
 				t.Fatalf("decode request body: %v", err)
 			}
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{
-				"model":"anthropic/claude-sonnet-4",
+				"model":"anthropic/claude-sonnet-4-6-20260301",
+				"provider":"Google",
 				"choices":[{
 					"message":{
 						"content":"ok",
@@ -448,6 +449,12 @@ func TestReasoningDetailsRoundTrip(t *testing.T) {
 	}
 	if resp.Reasoning() != "sum" {
 		t.Fatalf("reasoning = %q", resp.Reasoning())
+	}
+	if resp.Model != "anthropic/claude-sonnet-4-6-20260301" {
+		t.Fatalf("model = %q, want served slug", resp.Model)
+	}
+	if resp.Upstream != "Google" {
+		t.Fatalf("upstream = %q, want top-level provider", resp.Upstream)
 	}
 	_, err = p.Chat(context.Background(), &core.Request{
 		Model:    "anthropic/claude-sonnet-4",

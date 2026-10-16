@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"nusashell/pkg/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -682,8 +683,8 @@ func TestWriteFileAtomicRetriesTransientRenameFailure(t *testing.T) {
 	sleepFn = func(d time.Duration) { sleeps = append(sleeps, d) }
 	renameGoos = "windows"
 
-	if err := writeFileAtomic(path, []byte("data"), 0o644); err != nil {
-		t.Fatalf("writeFileAtomic: %v", err)
+	if err := atomicfile.WriteWithRename(path, []byte("data"), 0o644, renameWithRetry); err != nil {
+		t.Fatalf("atomicfile.WriteWithRename: %v", err)
 	}
 	if attempts != 3 {
 		t.Fatalf("rename attempts = %d, want 3", attempts)
@@ -713,7 +714,7 @@ func TestWriteFileAtomicNoRetryOnPermanentRenameFailure(t *testing.T) {
 	sleepFn = func(time.Duration) { sleepCalls++ }
 	renameGoos = "windows"
 
-	if err := writeFileAtomic(path, []byte("x"), 0o644); err == nil {
+	if err := atomicfile.WriteWithRename(path, []byte("x"), 0o644, renameWithRetry); err == nil {
 		t.Fatal("expected error from permanently failing rename")
 	}
 	if attempts != 1 {
@@ -739,7 +740,7 @@ func TestWriteFileAtomicRetryIsBounded(t *testing.T) {
 	sleepFn = func(time.Duration) {}
 	renameGoos = "windows"
 
-	err := writeFileAtomic(path, []byte("x"), 0o644)
+	err := atomicfile.WriteWithRename(path, []byte("x"), 0o644, renameWithRetry)
 	if err == nil {
 		t.Fatal("expected error after exhausting retries")
 	}

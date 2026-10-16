@@ -362,10 +362,3 @@ func contextWindowFromCatalog(kind domain.ProviderKind, current, catalog int) in
 	}
 	return current
 }
-
-// ContextWindowFromCatalog is exported for application-level model
-// resolution, which must apply the same Codex direct-API policy before an
-// agent turn starts.
-func ContextWindowFromCatalog(kind domain.ProviderKind, current, catalog int) int {
-	return contextWindowFromCatalog(kind, current, catalog)
-}

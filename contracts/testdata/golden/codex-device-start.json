@@ -1,0 +1,7 @@
+{
+  "device_auth_id": "device-1",
+  "user_code": "ABCD-EFGH",
+  "verification_url": "https://auth.openai.com/codex/device",
+  "interval_seconds": 5,
+  "expires_at": 1800000000
+}

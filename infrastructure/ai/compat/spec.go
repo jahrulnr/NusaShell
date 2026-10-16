@@ -96,6 +96,12 @@ type ResponseSpec struct {
 	ReasoningFields           []string
 	HasCompletionTokenDetails bool
 	HasCacheTokens            bool
+	// UpstreamFromResponse enables capturing the gateway-reported upstream
+	// name from a top-level "provider" field (OpenRouter responses and
+	// stream chunks) into core.Response.Upstream. Providers without the
+	// field leave it empty; a stray same-named field on unrelated gateways
+	// is ignored unless the spec opts in.
+	UpstreamFromResponse bool
 }
 
 type StreamSpec struct {

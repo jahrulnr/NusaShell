@@ -16,8 +16,8 @@ const (
 	retryMaxDelay  = domain.RetryMaxDelay
 )
 
-func providerRetryDelay(err error, retry int) (time.Duration, bool) {
-	if !isRetryableProviderError(err) {
+func RetryDelay(err error, retry int) (time.Duration, bool) {
+	if !IsRetryableError(err) {
 		return 0, false
 	}
 	var upstream *domain.ProviderError
@@ -38,7 +38,7 @@ func providerRetryDelay(err error, retry int) (time.Duration, bool) {
 	return delay + time.Duration(rand.Int63n(int64(delay/4)+1)), true
 }
 
-func isRetryableProviderError(err error) bool {
+func IsRetryableError(err error) bool {
 	return domain.CanAutoRetry(err)
 }
 
@@ -46,7 +46,7 @@ func isRetryableProviderError(err error) bool {
 // operators can tell a 429 rate limit from a mid-stream EOF without digging
 // through wrapped layers. Non-ProviderError values pass through as their plain
 // Error() string.
-func describeProviderError(err error) string {
+func DescribeError(err error) string {
 	if err == nil {
 		return ""
 	}
@@ -67,7 +67,7 @@ func describeProviderError(err error) string {
 	return strings.Join(parts, " ")
 }
 
-func isContextOverflowError(err error) bool {
+func IsContextOverflow(err error) bool {
 	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) {
 		return false
@@ -86,7 +86,7 @@ func isContextOverflowError(err error) bool {
 	return domain.IsContextOverflowFailure(body)
 }
 
-func contextLimitFromError(err error) (int, bool) {
+func ContextLimit(err error) (int, bool) {
 	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) || upstream.Err == nil {
 		return 0, false
@@ -95,17 +95,17 @@ func contextLimitFromError(err error) (int, bool) {
 	return n, ok
 }
 
-func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
+func ShouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
 	if tpmDominatedRequest(err) {
 		return true
 	}
-	if !isContextOverflowError(err) {
+	if !IsContextOverflow(err) {
 		return false
 	}
 	if estimatedTokens > compactionTrigger {
 		return true
 	}
-	_, ok := contextLimitFromError(err)
+	_, ok := ContextLimit(err)
 	return ok
 }
 
@@ -125,7 +125,7 @@ func errBody(err error) string {
 	return err.Error()
 }
 
-func isPrematureStreamEnd(err error) bool {
+func IsPrematureStreamEnd(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -135,16 +135,3 @@ func isPrematureStreamEnd(err error) bool {
 	}
 	return upstream.Kind == domain.KindConnect && errors.Is(err, io.ErrUnexpectedEOF)
 }
-
-// Exported names for root wrappers. Unexported names stay so in-package
-// tests and the original call sites keep matching.
-
-func RetryDelay(err error, retry int) (time.Duration, bool) { return providerRetryDelay(err, retry) }
-func IsRetryableError(err error) bool                       { return isRetryableProviderError(err) }
-func DescribeError(err error) string                        { return describeProviderError(err) }
-func IsContextOverflow(err error) bool                      { return isContextOverflowError(err) }
-func ContextLimit(err error) (int, bool)                    { return contextLimitFromError(err) }
-func ShouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
-	return shouldEmergencyCompact(err, estimatedTokens, compactionTrigger)
-}
-func IsPrematureStreamEnd(err error) bool { return isPrematureStreamEnd(err) }

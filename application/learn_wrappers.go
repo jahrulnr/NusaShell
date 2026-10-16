@@ -2,10 +2,8 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 
 	"nusashell/application/learn"
-	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
 )
@@ -85,7 +83,7 @@ func (b bm25KeywordIndex) Search(query string, topK int) []learn.SearchResult {
 type learnerHeadless struct{ app *App }
 
 func (h learnerHeadless) RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error) {
-	return h.app.runHeadlessTurnKind(ctx, prompt, model, trust, schema, AgentLearner)
+	return h.app.agentService().RunHeadlessTurnKind(ctx, prompt, model, trust, schema, AgentLearner)
 }
 
 func (a *App) learningSearch() *LearningSearcher {
@@ -108,10 +106,6 @@ func (a *App) InvalidateLearningSearcher() {
 	}
 }
 
-func (a *App) pruneLearningEdges(nodeID string) {
-	a.learnService().PruneEdges(nodeID)
-}
-
 func (a *App) recordExperience(conv *domain.Conversation, headless bool) {
 	a.learnService().RecordExperience(conv, headless)
 }
@@ -127,21 +121,9 @@ func learningNodeIDsFromTool(app *App, toolCall domain.ToolCall, output string) 
 	return learn.LearningNodeIDsFromTool(app.learnService(), toolCall, output)
 }
 
-func (a *App) emitSkillLifecycle(op, id, status, conversationID string) {
-	a.learnService().EmitSkillLifecycle(op, id, status, conversationID)
-}
-
 func (a *App) learnerNudgeInterval() int {
 	if a == nil || a.Settings == nil {
 		return domain.DefaultLearnerNudgeInterval
 	}
 	return domain.EffectiveLearnerNudgeInterval(a.Settings.Get().LearnerNudgeInterval)
-}
-
-func (a *App) dispatchLearning(method string, payload json.RawMessage) (any, *contracts.RPCError) {
-	return a.learnService().Dispatch(method, payload)
-}
-
-func (a *App) dispatchExperience(method string, payload json.RawMessage) (any, *contracts.RPCError) {
-	return a.learnService().Dispatch(method, payload)
 }

@@ -183,6 +183,10 @@ func (a *App) handleCodexLogin(req contracts.CodexLoginRequest) (any, *contracts
 		a.log("warn", "ai", "codex login failed: %v", err)
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
+	return a.completeCodexLogin(req.ProviderID, tok)
+}
+
+func (a *App) completeCodexLogin(providerID string, tok CodexToken) (any, *contracts.RPCError) {
 	// Marshal token as JSON for storage
 	tokenJSON, err := json.Marshal(CodexTokenJSON{
 		AccessToken:  tok.AccessToken,
@@ -196,11 +200,11 @@ func (a *App) handleCodexLogin(req contracts.CodexLoginRequest) (any, *contracts
 		return nil, rpcInternal(err)
 	}
 	tokenStr := string(tokenJSON)
-	if err := PersistCodexToken(a.Credentials, req.ProviderID, tok.AccountID, tokenStr); err != nil {
+	if err := PersistCodexToken(a.Credentials, providerID, tok.AccountID, tokenStr); err != nil {
 		return nil, rpcInternal(err)
 	}
 	// Mark provider as having credentials
-	a.markProviderHasCreds(req.ProviderID, true)
+	a.markProviderHasCreds(providerID, true)
 	a.log("info", "ai", "codex login successful: account %s", tok.AccountID)
 	return contracts.CodexLoginResult{AccountID: tok.AccountID}, nil
 }
@@ -466,18 +470,20 @@ func (a *App) handleCodexUsage(req contracts.CodexUsageRequest) (any, *contracts
 		entry.ResetCreditsAvailable = usage.ResetCreditsAvailable
 		if usage.PrimaryWindow != nil {
 			entry.PrimaryWindow = &contracts.CodexUsageWindowDTO{
-				UsedPercent:       usage.PrimaryWindow.UsedPercent,
-				RemainingPercent:  100 - usage.PrimaryWindow.UsedPercent,
-				ResetAt:           usage.PrimaryWindow.ResetAt,
-				ResetAfterSeconds: usage.PrimaryWindow.ResetAfterSeconds,
+				UsedPercent:        usage.PrimaryWindow.UsedPercent,
+				RemainingPercent:   100 - usage.PrimaryWindow.UsedPercent,
+				ResetAt:            usage.PrimaryWindow.ResetAt,
+				ResetAfterSeconds:  usage.PrimaryWindow.ResetAfterSeconds,
+				LimitWindowSeconds: usage.PrimaryWindow.LimitWindowSeconds,
 			}
 		}
 		if usage.WeeklyWindow != nil {
 			entry.WeeklyWindow = &contracts.CodexUsageWindowDTO{
-				UsedPercent:       usage.WeeklyWindow.UsedPercent,
-				RemainingPercent:  100 - usage.WeeklyWindow.UsedPercent,
-				ResetAt:           usage.WeeklyWindow.ResetAt,
-				ResetAfterSeconds: usage.WeeklyWindow.ResetAfterSeconds,
+				UsedPercent:        usage.WeeklyWindow.UsedPercent,
+				RemainingPercent:   100 - usage.WeeklyWindow.UsedPercent,
+				ResetAt:            usage.WeeklyWindow.ResetAt,
+				ResetAfterSeconds:  usage.WeeklyWindow.ResetAfterSeconds,
+				LimitWindowSeconds: usage.WeeklyWindow.LimitWindowSeconds,
 			}
 		}
 		accounts = append(accounts, entry)
@@ -607,4 +613,51 @@ func (a *App) deleteCodexAccountCredentials(providerID, providerName string) {
 			a.log("warn", "ai", "failed to delete credential %s: %v", id, err)
 		}
 	}
+}
+
+// Device login requests are bounded independently; no goroutine or callback
+// listener survives a disconnected browser. The browser owns polling/expiry.
+func (a *App) handleCodexDeviceStart(req contracts.CodexLoginRequest) (any, *contracts.RPCError) {
+	p, rpcErr := a.ensureCodexProvider(req.ProviderID)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if p.Kind != domain.ProviderCodex {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "provider is not Codex"}
+	}
+	if a.CodexOAuth == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "codex OAuth is not configured"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	code, err := a.CodexOAuth.StartDeviceLogin(ctx)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	return contracts.CodexDeviceStartResult{DeviceAuthID: code.DeviceAuthID, UserCode: code.UserCode, VerificationURL: code.VerificationURL, IntervalSeconds: code.IntervalSeconds, ExpiresAt: code.ExpiresAt}, nil
+}
+func (a *App) handleCodexDevicePoll(req contracts.CodexDevicePollRequest) (any, *contracts.RPCError) {
+	p, rpcErr := a.ensureCodexProvider(req.ProviderID)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if p.Kind != domain.ProviderCodex || strings.TrimSpace(req.DeviceAuthID) == "" || strings.TrimSpace(req.UserCode) == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "Codex provider, device_auth_id and user_code are required"}
+	}
+	if a.CodexOAuth == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "codex OAuth is not configured"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tok, err := a.CodexOAuth.PollDeviceLogin(ctx, req.DeviceAuthID, req.UserCode)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	if tok == nil {
+		return contracts.CodexDevicePollResult{Status: "pending"}, nil
+	}
+	if _, rpcErr := a.completeCodexLogin(req.ProviderID, *tok); rpcErr != nil {
+		return nil, rpcErr
+	}
+	return contracts.CodexDevicePollResult{Status: "complete", AccountID: tok.AccountID}, nil
 }

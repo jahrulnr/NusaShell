@@ -115,7 +115,7 @@ func TestExecuteGenerateImageRequiresProvider(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	output, atts, err := app.executeGenerateImage(run, domain.ToolCall{
+	output, atts, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc_abc", Name: "generate_image", Args: `{"prompt":"a boat"}`,
 	}, domain.Settings{})
 	if err == nil {
@@ -142,7 +142,7 @@ func TestExecuteGenerateImageSavesWithoutPersistingDataURL(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	output, atts, err := app.executeGenerateImage(run, domain.ToolCall{
+	output, atts, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc_abc123", Name: "generate_image", Args: `{"prompt":"a red boat","size":"1024x1024"}`,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "gpt-image-1"})
 	if err != nil {
@@ -217,7 +217,7 @@ func TestExecuteGenerateImageLoadsReferencedPaths(t *testing.T) {
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	args, _ := jsonGenerateArgs(saved)
-	_, _, err := app.executeGenerateImage(run, domain.ToolCall{
+	_, _, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc_edit", Name: "generate_image", Args: args,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "openai/gpt-image-2"})
 	if err != nil {
@@ -255,7 +255,7 @@ func TestExecuteGenerateImageRejectsI2IOnT2IOnlyModel(t *testing.T) {
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	args, _ := jsonGenerateArgs(refPath)
-	msg, _, err := app.executeGenerateImage(run, domain.ToolCall{
+	msg, _, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc_edit", Name: "generate_image", Args: args,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "t2i-only"})
 	if err == nil {
@@ -292,7 +292,7 @@ func TestExecuteGenerateImageAllowsI2IOnVisionModel(t *testing.T) {
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	args, _ := jsonGenerateArgs(refPath)
-	_, _, err := app.executeGenerateImage(run, domain.ToolCall{
+	_, _, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc_edit", Name: "generate_image", Args: args,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "i2i-capable"})
 	if err != nil {
@@ -319,7 +319,7 @@ func TestGenerateImageWithRetryRetries503(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	_, atts, err := app.executeGenerateImage(run, domain.ToolCall{
+	_, atts, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc1", Name: "generate_image", Args: `{"prompt":"x"}`,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "gpt-image-1"})
 	if err != nil {
@@ -386,7 +386,7 @@ func TestChatMessagesForProviderHydratesFilePath(t *testing.T) {
 func TestPersistGeneratedImagesNamesIndexedWhenNGreaterThanOne(t *testing.T) {
 	png := png1x1(t)
 	app := &App{Attachments: &memAttachmentStore{root: t.TempDir()}}
-	atts, paths, err := app.persistGeneratedImages("c1", "tc-n", &ImageGenResult{
+	atts, paths, err := app.mediaService().PersistGeneratedImages("c1", "tc-n", &ImageGenResult{
 		Images: []GeneratedImage{
 			{Bytes: png, MediaType: "image/png"},
 			{Bytes: png, MediaType: "image/png"},
@@ -407,7 +407,7 @@ func TestPersistGeneratedImagesRejectsOversize(t *testing.T) {
 	app := &App{Attachments: &memAttachmentStore{root: t.TempDir()}}
 	huge := make([]byte, generatedmedia.MaxGeneratedImageBytes+1)
 	copy(huge, png1x1(t))
-	_, _, err := app.persistGeneratedImages("c1", "tc", &ImageGenResult{
+	_, _, err := app.mediaService().PersistGeneratedImages("c1", "tc", &ImageGenResult{
 		Images: []GeneratedImage{{Bytes: huge, MediaType: "image/png"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "8 MiB") {
@@ -501,7 +501,7 @@ func TestExecuteGenerateImageCodexFailoverSwitchesAccount(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	_, atts, err := app.executeGenerateImage(run, domain.ToolCall{
+	_, atts, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc1", Name: "generate_image", Args: `{"prompt":"a boat"}`,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "gpt-image-2"})
 	if err != nil {
@@ -545,7 +545,7 @@ func TestExecuteGenerateImageCodexPrepareFailureFailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	output, atts, err := app.executeGenerateImage(run, domain.ToolCall{
+	output, atts, err := app.mediaService().ExecuteGenerateImage(mediaCall(run), domain.ToolCall{
 		ID: "tc1", Name: "generate_image", Args: `{"prompt":"a boat"}`,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "gpt-image-2"})
 	if err == nil || !strings.Contains(output, "all Codex accounts are rate-limited") {

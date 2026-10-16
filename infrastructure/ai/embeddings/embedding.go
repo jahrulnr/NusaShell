@@ -112,7 +112,7 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 	}
 	inputs := make([]string, len(texts))
 	for i, t := range texts {
-		inputs[i] = truncateInput(t, maxTokens)
+		inputs[i] = truncateInputRunes(t, maxTokens*embeddingCharsPerToken)
 	}
 	for attempt := 0; ; attempt++ {
 		payload := map[string]any{"model": e.Model, "input": inputs}
@@ -172,13 +172,10 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 // inside the token budget so the sent text never exceeds the cap.
 const truncationMarker = "…[truncated]"
 
-// truncateInput keeps the first maxTokens tokens (estimated at
-// embeddingCharsPerToken chars each) of s and appends an omission marker so
-// callers can tell the input was cut. Rune-safe for non-ASCII content.
-func truncateInput(s string, maxTokens int) string {
-	return truncateInputRunes(s, maxTokens*embeddingCharsPerToken)
-}
-
+// truncateInputRunes keeps the first limit runes of s and appends an
+// omission marker so callers can tell the input was cut. Rune-safe for
+// non-ASCII content. Callers pass maxTokens*embeddingCharsPerToken as the
+// limit to approximate a token budget.
 func truncateInputRunes(s string, limit int) string {
 	runes := []rune(s)
 	if limit <= 0 {

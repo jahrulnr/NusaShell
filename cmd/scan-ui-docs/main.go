@@ -1,6 +1,8 @@
 // Command scan-ui-docs generates the agent-usable UI documentation corpus
 // from resources/agent/docs/ui-source/ui-map.json and validates it
-// against the frontend source (frontend/index.html + frontend/js/**/*.js).
+// against the frontend source (frontend/index.html + the JS trees under
+// frontend/page, frontend/shared, frontend/widgets, and frontend/js,
+// skipping vendor, tests, and node_modules directories).
 //
 // The generated files resources/agent/docs/ui-*.md are embedded at
 // build time by resources/resources.go so the agent can surface them
@@ -115,7 +117,10 @@ func run(repoRoot, outDir string, check bool, stdout, stderr io.Writer) int {
 	}
 	uiMapPath := filepath.Join(root, "resources", "agent", "docs", "ui-source", "ui-map.json")
 	htmlPath := filepath.Join(root, "frontend", "index.html")
-	jsDir := filepath.Join(root, "frontend", "js")
+	// Active UI code can live in any of these subtrees; missing dirs are
+	// skipped so the scanner works for both the current frontend/js-only
+	// layout and layouts that add page/, shared/, or widgets/.
+	scanDirs := []string{"page", "shared", "widgets", "js"}
 	dest := outDir
 	if dest == "" {
 		dest = filepath.Join(root, "resources", "agent", "docs")
@@ -137,18 +142,31 @@ func run(repoRoot, outDir string, check bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var jsFiles []string
-	err = filepath.WalkDir(jsDir, func(path string, d os.DirEntry, err error) error {
+	for _, dir := range scanDirs {
+		scanRoot := filepath.Join(root, "frontend", dir)
+		if st, statErr := os.Stat(scanRoot); statErr != nil || !st.IsDir() {
+			continue
+		}
+		err = filepath.WalkDir(scanRoot, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				switch d.Name() {
+				case "vendor", "tests", "node_modules":
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(d.Name(), ".js") {
+				jsFiles = append(jsFiles, path)
+			}
+			return nil
+		})
 		if err != nil {
-			return err
+			fmt.Fprintf(stderr, "scan-ui-docs: walk %s: %v\n", scanRoot, err)
+			return 1
 		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".js") {
-			jsFiles = append(jsFiles, path)
-		}
-		return nil
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "scan-ui-docs: walk js: %v\n", err)
-		return 1
 	}
 	sort.Strings(jsFiles)
 	jsSources := make([]string, 0, len(jsFiles))
@@ -298,7 +316,7 @@ func run(repoRoot, outDir string, check bool, stdout, stderr io.Writer) int {
 	if check {
 		mode = "checked"
 	}
-	fmt.Fprintf(stdout, "UI docs %s: %d views (scanned %d JS files in %s)\n", mode, generated, len(jsFiles), filepath.Join("frontend", "js"))
+	fmt.Fprintf(stdout, "UI docs %s: %d views (scanned %d JS files in %s)\n", mode, generated, len(jsFiles), "frontend/{page,shared,widgets,js}")
 	return 0
 }
 

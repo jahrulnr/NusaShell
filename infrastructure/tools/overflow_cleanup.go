@@ -16,14 +16,10 @@ const ToolOverflowMaxAge = 24 * time.Hour
 
 const toolOverflowSweepInterval = time.Hour
 
-// SweepToolOverflow deletes regular files and directories under
-// nusatemp.Path whose mtime is at least maxAge before now. Missing dir is
-// a no-op. Aged installer/whisper staging dirs are RemoveAll'd so a
-// crash before defer cleanup does not leak past 24h.
-func SweepToolOverflow(now time.Time, maxAge time.Duration) (int, error) {
-	return sweepToolOverflowDir(nusatemp.Path(), now, maxAge)
-}
-
+// sweepToolOverflowDir deletes regular files and directories under dir whose
+// mtime is at least maxAge before now. Missing dir is a no-op. Aged
+// installer/whisper staging dirs are RemoveAll'd so a crash before defer
+// cleanup does not leak past 24h.
 func sweepToolOverflowDir(dir string, now time.Time, maxAge time.Duration) (int, error) {
 	if maxAge <= 0 {
 		maxAge = ToolOverflowMaxAge
@@ -83,7 +79,7 @@ func runOverflowCleanup(ctx context.Context, maxAge, interval time.Duration, now
 		interval = toolOverflowSweepInterval
 	}
 	sweep := func() {
-		_, _ = SweepToolOverflow(now(), maxAge)
+		_, _ = sweepToolOverflowDir(nusatemp.Path(), now(), maxAge)
 	}
 	sweep()
 	ticker := time.NewTicker(interval)

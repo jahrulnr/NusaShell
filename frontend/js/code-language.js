@@ -127,17 +127,21 @@ export function ensureCodeMirror() {
     return Promise.resolve(window.CodeMirror);
   }
   if (cmPromise) return cmPromise;
+  // Module-relative so the same file resolves vendor assets in the
+  // experimental mount (/.experimental/widget-conversation/) and after
+  // promotion (/js → /vendor). Same pattern as highlight-render.js.
+  const asset = (path) => new URL(`../vendor/codemirror/${path}`, import.meta.url).href;
   cmPromise = (async () => {
     // Core first — it defines window.CodeMirror.
-    await appendScript('/vendor/codemirror/codemirror.min.js');
+    await appendScript(asset('codemirror.min.js'));
     if (typeof window !== 'undefined' && typeof window.CodeMirror !== 'function') {
       throw new Error('CodeMirror loaded but window.CodeMirror is undefined');
     }
     // CSS (base + Dracula theme) and mode scripts can load in parallel.
     await Promise.all([
-      appendStylesheet('/vendor/codemirror/codemirror.min.css'),
-      appendStylesheet('/vendor/codemirror/theme/dracula.min.css'),
-      ...CODEMIRROR_MODE_SCRIPTS.map((m) => appendScript(`/vendor/codemirror/${m}`)),
+      appendStylesheet(asset('codemirror.min.css')),
+      appendStylesheet(asset('theme/dracula.min.css')),
+      ...CODEMIRROR_MODE_SCRIPTS.map((m) => appendScript(asset(m))),
     ]);
     return window.CodeMirror;
   })().catch((err) => {

@@ -66,23 +66,11 @@ var (
 	WorkspaceFromContext = tools.WorkspaceFromContext
 )
 
-func isLearnerKind(kind AgentKind) bool {
-	return tools.IsLearnerKind(kind)
-}
-
 func bindConversation(store ConversationStore, c *domain.Conversation) *conversation.Repository {
 	if store == nil || c == nil {
 		return nil
 	}
 	return conversation.Bind(store, c)
-}
-
-func NewConversation(store ConversationStore, title string) *conversation.Repository {
-	return conversation.NewConversation(store, title)
-}
-
-func listInstructionFiles(workspace string) []string {
-	return conversation.ListInstructionFiles(workspace)
 }
 
 func toToolDef(t tools.ToolInfo) ToolDef {
@@ -104,14 +92,6 @@ type (
 	streamedTurnRound = StreamedTurnRound
 	toolExecResult    = ToolExecResult
 )
-
-func cloneConversation(c *domain.Conversation) *domain.Conversation {
-	return conversation.Clone(c)
-}
-
-func OpArg(argsJSON []byte) string {
-	return tools.OpArg(argsJSON)
-}
 
 func rpcInternal(err error) *contracts.RPCError {
 	return &contracts.RPCError{Code: contracts.CodeInternal, Message: err.Error()}

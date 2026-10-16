@@ -1,8 +1,6 @@
 package application
 
 import (
-	"context"
-
 	"nusashell/application/media"
 	"nusashell/domain"
 )
@@ -56,18 +54,6 @@ func (a *App) executeGenerateMedia(run *TurnRun, toolCall domain.ToolCall, setti
 	return a.mediaService().ExecuteGenerateMedia(mediaCall(run), toolCall, settings)
 }
 
-func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
-	return a.mediaService().ExecuteGenerateImage(mediaCall(run), toolCall, settings)
-}
-
-func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
-	return a.mediaService().ExecuteGenerateSpeech(mediaCall(run), toolCall, settings)
-}
-
-func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
-	return a.mediaService().ExecuteGenerateVideo(mediaCall(run), toolCall, settings)
-}
-
 func (a *App) executeReadDocument(run *TurnRun, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings) (string, []domain.Attachment, error) {
 	return a.mediaService().ExecuteReadDocument(mediaCall(run), toolCall, mediaCaps(caps), settings)
 }
@@ -82,24 +68,4 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 
 func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings) (string, []domain.Attachment, error) {
 	return a.mediaService().ExecuteReadImage(mediaCall(run), toolCall, mediaCaps(caps), settings)
-}
-
-func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Settings, attachments []domain.Attachment) []domain.Attachment {
-	return a.mediaService().DescribeImagesWithFallback(ctx, settings, attachments)
-}
-
-func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Settings, attachments []domain.Attachment) []domain.Attachment {
-	return a.mediaService().DescribeAudiosWithFallback(ctx, settings, attachments)
-}
-
-func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Settings, attachments []domain.Attachment) []domain.Attachment {
-	return a.mediaService().DescribeVideosWithFallback(ctx, settings, attachments)
-}
-
-func (a *App) saveGeneratedMedia(conversationID, baseName, kind string, data []byte, inline bool) (domain.Attachment, string, error) {
-	return a.mediaService().SaveGenerated(conversationID, baseName, kind, data, inline)
-}
-
-func (a *App) persistGeneratedImages(conversationID, toolCallID string, result *ImageGenResult) ([]domain.Attachment, []string, error) {
-	return a.mediaService().PersistGeneratedImages(conversationID, toolCallID, result)
 }

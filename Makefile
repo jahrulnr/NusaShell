@@ -40,7 +40,7 @@ test-frontend:
 	@if [ ! -d node_modules ]; then \
 		echo "test-frontend: frontend dependencies are missing; run npm ci first." >&2; exit 1; \
 	fi
-	@fail=0; for f in $$(find frontend/js -name '*.js'); do \
+	@fail=0; for f in $$(find frontend/js frontend/page frontend/shared frontend/widgets -name '*.js'); do \
 		node --check "$$f" || fail=1; \
 	done; \
 	if [ "$$fail" -eq 1 ]; then echo "frontend: syntax check failed"; exit 1; fi

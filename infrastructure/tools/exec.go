@@ -23,6 +23,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
+	"nusashell/pkg/yamlmd"
 )
 
 const (
@@ -163,7 +164,7 @@ func runExecSync(ctx context.Context, args *execArgs, onChunk func(string)) (str
 				}
 			}
 			attachExecOverflow(meta, spill, spillPath, out)
-			return yamlMD(meta, body), nil
+			return yamlmd.MD(meta, body), nil
 		case <-ctx.Done():
 			killProcessTree(cmd)
 			<-done
@@ -239,7 +240,7 @@ func (t *Toolbox) execSpawnBackground(ctx context.Context, args *execArgs) (stri
 	}
 	p.markStarted()
 	go p.waitLoop()
-	return yamlMD(map[string]any{
+	return yamlmd.MD(map[string]any{
 		"exec_id":    p.id,
 		"status":     "running",
 		"pid":        cmd.Process.Pid,
@@ -269,7 +270,7 @@ func (t *Toolbox) execStatus(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return yamlMD(p.meta(), ""), nil
+	return yamlmd.MD(p.meta(), ""), nil
 }
 
 // execWait blocks until the process exits, timeout_ms elapses, or the call
@@ -288,11 +289,11 @@ func (t *Toolbox) execWait(ctx context.Context, id string, timeoutMs int) (strin
 	}
 	select {
 	case <-p.done:
-		return yamlMD(p.meta(), strings.TrimRight(p.buf.Snapshot(), "\n")), nil
+		return yamlmd.MD(p.meta(), strings.TrimRight(p.buf.Snapshot(), "\n")), nil
 	case <-timeoutC:
 		meta := p.meta()
 		meta["wait_timeout"] = true
-		return yamlMD(meta, strings.TrimRight(p.buf.Snapshot(), "\n")), nil
+		return yamlmd.MD(meta, strings.TrimRight(p.buf.Snapshot(), "\n")), nil
 	case <-ctx.Done():
 		return "", fmt.Errorf("exec wait cancelled: %w\npartial output:\n%s", ctx.Err(), p.buf.Snapshot())
 	}
@@ -306,7 +307,7 @@ func (t *Toolbox) execKill(ctx context.Context, id string) (string, error) {
 		return "", err
 	}
 	p.terminate()
-	return yamlMD(p.meta(), ""), nil
+	return yamlmd.MD(p.meta(), ""), nil
 }
 
 func (t *Toolbox) execList(ctx context.Context) (string, error) {

@@ -1526,3 +1526,51 @@ func TestMCPServersListReportsPluginUI(t *testing.T) {
 
 // helper: POST raw bytes (used by malformed body test)
 var _ = bytes.NewBuffer
+
+// Device login uses the normal RPC dispatcher/envelope, including validation.
+func TestRPCCodexDeviceLoginValidation(t *testing.T) {
+	h := newHarness(t, nil)
+	result := h.rpc(t, "ai.codex.device.poll", map[string]any{"provider_id": "codex"})
+	if result.OK || result.Error == nil || result.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("poll = %+v", result)
+	}
+	result = h.rpc(t, "ai.codex.device.start", map[string]any{"provider_id": "codex"})
+	if result.OK || result.Error == nil || result.Error.Code != "INTERNAL_ERROR" {
+		t.Fatalf("start without OAuth = %+v", result)
+	}
+}
+
+type deviceLoginTransportOAuth struct{}
+
+func (deviceLoginTransportOAuth) Login(context.Context) (application.CodexToken, error) {
+	panic("browser login invoked")
+}
+func (deviceLoginTransportOAuth) ExtractProfile(string) (string, string) { return "", "" }
+func (deviceLoginTransportOAuth) StartDeviceLogin(context.Context) (application.CodexDeviceCode, error) {
+	return application.CodexDeviceCode{DeviceAuthID: "device", UserCode: "CODE", VerificationURL: "https://auth.openai.com/codex/device", IntervalSeconds: 5, ExpiresAt: 1800000000}, nil
+}
+func (deviceLoginTransportOAuth) PollDeviceLogin(context.Context, string, string) (*application.CodexToken, error) {
+	return &application.CodexToken{AccessToken: "test-access", RefreshToken: "test-refresh", AccountID: "test-account"}, nil
+}
+func TestRPCCodexDeviceLoginComplete(t *testing.T) {
+	h := newHarness(t, nil)
+	h.app.CodexOAuth = deviceLoginTransportOAuth{}
+	start := h.rpc(t, "ai.codex.device.start", map[string]any{"provider_id": "codex"})
+	if !start.OK {
+		t.Fatalf("start = %+v", start)
+	}
+	result := h.rpc(t, "ai.codex.device.poll", map[string]any{"provider_id": "codex", "device_auth_id": "device", "user_code": "CODE"})
+	if !result.OK {
+		t.Fatalf("poll = %+v", result)
+	}
+	var payload struct {
+		Status    string `json:"status"`
+		AccountID string `json:"account_id"`
+	}
+	if err := json.Unmarshal(result.Result, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Status != "complete" || payload.AccountID != "test-account" {
+		t.Fatalf("wire = %+v", payload)
+	}
+}

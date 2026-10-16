@@ -1,0 +1,28 @@
+{
+  "accounts": [
+    {
+      "account_id": "one",
+      "active": false,
+      "limit_reached": false,
+      "primary_window": {
+        "used_percent": 0,
+        "remaining_percent": 100,
+        "reset_at": 1800000000,
+        "limit_window_seconds": 18000
+      },
+      "weekly_window": {
+        "used_percent": 100,
+        "remaining_percent": 0,
+        "reset_after_seconds": 3600,
+        "limit_window_seconds": 604800
+      },
+      "reset_credits_available": 0
+    },
+    {
+      "account_id": "missing",
+      "active": false,
+      "limit_reached": false,
+      "reset_credits_available": 0
+    }
+  ]
+}

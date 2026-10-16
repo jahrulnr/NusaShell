@@ -27,7 +27,7 @@ func NewSpeechSynthesizerFactory() application.SpeechSynthesizerFactory {
 		}
 		if p.Kind == domain.ProviderGemini {
 			return &ttsclient.GeminiClient{
-				BaseURL: geminiSpeechBaseURL(p.BaseURL),
+				BaseURL: geminiAPIRoot(p.BaseURL),
 				APIKey:  apiKey,
 				HTTP:    client,
 			}, nil

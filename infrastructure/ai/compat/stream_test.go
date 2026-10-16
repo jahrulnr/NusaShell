@@ -682,6 +682,35 @@ func TestStreamRepeatedFinishReasonOnUsageChunkCompletesOnce(t *testing.T) {
 	}
 }
 
+// TestStreamCapturesUpstreamOnlyWhenSpecOptsIn proves the top-level
+// "provider" chunk field (OpenRouter's served-by name) reaches
+// core.Response.Upstream only for specs that declare it — a stray same-named
+// field on a vanilla gateway must not become provenance.
+func TestStreamCapturesUpstreamOnlyWhenSpecOptsIn(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"model":"served/x-1","provider":"UpstreamCo","choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	resp, err := core.Collect(streamFromSSE(t, body, Spec{Name: "compat"}, nil))
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if resp.Upstream != "" {
+		t.Fatalf("Upstream = %q, want empty without spec opt-in", resp.Upstream)
+	}
+
+	resp, err = core.Collect(streamFromSSE(t, body, Spec{Name: "openrouter", Response: ResponseSpec{UpstreamFromResponse: true}}, nil))
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if resp.Upstream != "UpstreamCo" {
+		t.Fatalf("Upstream = %q, want UpstreamCo", resp.Upstream)
+	}
+}
+
 // pipeStream builds a stream whose body is fully test-controlled: the caller
 // writes SSE frames through the returned writer and decides when (or whether)
 // the connection ends.

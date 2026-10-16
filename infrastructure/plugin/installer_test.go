@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/pkg/archive"
 )
 
 func writeTarGz(t *testing.T, files map[string]string) []byte {
@@ -61,7 +62,7 @@ func TestExtractTarGz(t *testing.T) {
 		"ui/":            "",
 		"ui/index.html":  "<html></html>",
 	})
-	if err := extractTarGz(io.NopCloser(bytes.NewReader(data)), stage); err != nil {
+	if err := archive.UntarGz(io.NopCloser(bytes.NewReader(data)), stage, nil); err != nil {
 		t.Fatalf("extract: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(stage, "manifest.json")); err != nil {
@@ -80,7 +81,7 @@ func TestExtractTarGzRejectsTraversal(t *testing.T) {
 	data := writeTarGz(t, map[string]string{
 		"../evil": "boom",
 	})
-	if err := extractTarGz(io.NopCloser(bytes.NewReader(data)), stage); err == nil {
+	if err := archive.UntarGz(io.NopCloser(bytes.NewReader(data)), stage, nil); err == nil {
 		t.Fatal("expected path traversal to be rejected")
 	}
 }
@@ -114,7 +115,7 @@ func TestExtractZip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := extractZip(zr, stage); err != nil {
+	if err := archive.Unzip(zr, stage, nil); err != nil {
 		t.Fatalf("extract: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(stage, "manifest.json")); err != nil {
@@ -134,7 +135,7 @@ func TestExtractZipRejectsTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := extractZip(zr, stage); err == nil {
+	if err := archive.Unzip(zr, stage, nil); err == nil {
 		t.Fatal("expected path traversal to be rejected")
 	}
 }

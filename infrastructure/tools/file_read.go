@@ -13,6 +13,7 @@ import (
 	"time"
 
 	clock "nusashell/pkg/time"
+	"nusashell/pkg/yamlmd"
 )
 
 func executeFileRead(args map[string]any) (bool, string, error) {
@@ -65,7 +66,7 @@ func executeFileRead(args map[string]any) (bool, string, error) {
 		meta["binary"] = true
 		meta["size"] = len(data)
 		meta["file_bytes"] = fileSize
-		return true, yamlMD(meta, "[binary file — not rendered]"), nil
+		return true, yamlmd.MD(meta, "[binary file — not rendered]"), nil
 	}
 
 	requested := fileArgInt(args, "max_bytes", 0)
@@ -89,7 +90,7 @@ func executeFileRead(args map[string]any) (bool, string, error) {
 		meta["bytes"] = 0
 		meta["truncated"] = true
 		meta["hint"] = fmt.Sprintf("file is %d bytes (%d lines); metadata only — read a slice with start_line/end_line or max_bytes, or grep for the region", fileSize, meta["total_lines"])
-		return true, yamlMD(meta, ""), nil
+		return true, yamlmd.MD(meta, ""), nil
 	}
 
 	truncated := false
@@ -116,7 +117,7 @@ func executeFileRead(args map[string]any) (bool, string, error) {
 	if fileArgBool(args, "show_whitespace") {
 		body = escapeVisibleWhitespace(body)
 	}
-	return true, yamlMD(meta, body), nil
+	return true, yamlmd.MD(meta, body), nil
 }
 
 func executeFileList(args map[string]any) (bool, string, error) {
@@ -148,7 +149,7 @@ func executeFileList(args map[string]any) (bool, string, error) {
 		meta["truncated"] = true
 		meta["shown"] = len(lines)
 	}
-	return true, yamlMD(meta, strings.Join(lines, "\n")), nil
+	return true, yamlmd.MD(meta, strings.Join(lines, "\n")), nil
 }
 
 func executeFileInfo(args map[string]any) (bool, string, error) {
@@ -162,7 +163,7 @@ func executeFileInfo(args map[string]any) (bool, string, error) {
 		// caller can branch without parsing error strings (this absorbs
 		// the old file_exists contract).
 		if os.IsNotExist(err) {
-			return true, yamlBlock(map[string]any{"exists": false}), nil
+			return true, yamlmd.Block(map[string]any{"exists": false}), nil
 		}
 		return true, "", err
 	}
@@ -174,5 +175,5 @@ func executeFileInfo(args map[string]any) (bool, string, error) {
 		"mode":     info.Mode().String(),
 		"modified": clock.NewTime(info.ModTime()).Format(time.RFC3339),
 	}
-	return true, yamlBlock(meta), nil
+	return true, yamlmd.Block(meta), nil
 }

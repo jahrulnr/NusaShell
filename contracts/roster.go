@@ -45,6 +45,8 @@ const (
 	// managed runtime binary (auto-downloaded), and supports multiple
 	// ChatGPT accounts per provider.
 	MethodCodexLogin           = "ai.codex.login"
+	MethodCodexDeviceStart     = "ai.codex.device.start"
+	MethodCodexDevicePoll      = "ai.codex.device.poll"
 	MethodCodexLogout          = "ai.codex.logout"
 	MethodCodexImport          = "ai.codex.import"
 	MethodCodexAccountsList    = "ai.codex.accounts.list"
@@ -444,6 +446,11 @@ type TurnStartResult struct {
 	RunID           string `json:"run_id"`
 	ConversationID  string `json:"conversation_id,omitempty"`
 	ConversationKey string `json:"conversation_key,omitempty"`
+	// UserMessageID is the persisted id of the user message this turn
+	// appended. The client keys its optimistic row by this id so the
+	// authoritative snapshot merge adopts it by identity — server-side
+	// attachment rewrites (file_path on disk save) cannot fork a second row.
+	UserMessageID string `json:"user_message_id,omitempty"`
 }
 
 type TurnStopRequest struct {
@@ -691,6 +698,9 @@ type SteerEvent struct {
 	Text           string `json:"text,omitempty"`
 	Status         string `json:"status"`
 	Reason         string `json:"reason,omitempty"` // "user" | "discarded"
+	// MessageID is the persisted user message the steer materialized into.
+	// Set only on "applied" so the UI can anchor that exact transcript row.
+	MessageID string `json:"message_id,omitempty"`
 }
 
 // ---- ask_question ----
@@ -911,9 +921,8 @@ type ModelEndpointsResult struct {
 
 // ---- codex ----
 
-// CodexLoginRequest triggers the OAuth PKCE flow for a Codex provider.
-// The browser opens the ChatGPT auth page; after callback, the token
-// is stored in CredentialStore and returned (without the refresh token).
+// CodexLoginRequest identifies the provider for browser PKCE login or
+// device-code challenge creation. Tokens remain in CredentialStore.
 type CodexLoginRequest struct {
 	ProviderID string `json:"provider_id"`
 }
@@ -921,6 +930,24 @@ type CodexLoginRequest struct {
 type CodexLoginResult struct {
 	AccountID string `json:"account_id,omitempty"`
 	Email     string `json:"email,omitempty"`
+}
+
+// CodexDeviceStartResult returns a challenge without opening the server browser.
+type CodexDeviceStartResult struct {
+	DeviceAuthID    string `json:"device_auth_id"`
+	UserCode        string `json:"user_code"`
+	VerificationURL string `json:"verification_url"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	ExpiresAt       int64  `json:"expires_at"`
+}
+type CodexDevicePollRequest struct {
+	ProviderID   string `json:"provider_id"`
+	DeviceAuthID string `json:"device_auth_id"`
+	UserCode     string `json:"user_code"`
+}
+type CodexDevicePollResult struct {
+	Status    string `json:"status"`
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // CodexImportRequest imports a token from the Codex CLI auth.json
@@ -999,12 +1026,13 @@ type CodexUsageRequest struct {
 	ProviderID string `json:"provider_id"`
 }
 
-// CodexUsageWindowDTO is one rate-limit window (session or weekly).
+// CodexUsageWindowDTO is one rate-limit window; its duration is supplied by the provider.
 type CodexUsageWindowDTO struct {
-	UsedPercent       int   `json:"used_percent"`
-	RemainingPercent  int   `json:"remaining_percent"`
-	ResetAt           int64 `json:"reset_at,omitempty"` // unix seconds
-	ResetAfterSeconds int64 `json:"reset_after_seconds,omitempty"`
+	UsedPercent        int   `json:"used_percent"`
+	RemainingPercent   int   `json:"remaining_percent"`
+	ResetAt            int64 `json:"reset_at,omitempty"` // unix seconds
+	ResetAfterSeconds  int64 `json:"reset_after_seconds,omitempty"`
+	LimitWindowSeconds int64 `json:"limit_window_seconds,omitempty"`
 }
 
 type CodexUsageResult struct {

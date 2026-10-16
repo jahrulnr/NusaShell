@@ -1,0 +1,45 @@
+.user-widget {
+  width: min(600px, 88%);
+  margin-left: auto;
+  padding: 12px 14px 9px;
+  border: 1px solid rgba(121, 174, 232, .18);
+  border-right: 2px solid rgba(121, 174, 232, .42);
+  border-radius: 10px 10px 3px 10px;
+  background: rgba(20, 29, 51, .82);
+}
+.user-widget .widget-head { gap: 7px; margin-bottom: 8px; }
+.user-mark { display: grid; width: 21px; height: 21px; flex: none; place-items: center; border: 1px solid rgba(121, 174, 232, .34); border-radius: 50%; background: rgba(121, 174, 232, .08); color: var(--ocean, #79aee8); font: 700 9px var(--font-display, sans-serif); }
+.user-widget .widget-label { color: var(--ocean, #79aee8); font: 600 10px var(--font-mono, monospace); letter-spacing: .05em; text-transform: uppercase; }
+.message-body { color: var(--foam, #edf2f4); font-size: 13px; line-height: 1.6; }
+.message-markdown { min-width: 0; overflow-wrap: anywhere; }
+.message-markdown p { margin: 0 0 10px; white-space: pre-wrap; }
+.message-markdown p:last-child { margin-bottom: 0; }
+.message-markdown ul, .message-markdown ol { margin: 4px 0 11px; padding-left: 20px; }
+.message-markdown li { margin: 4px 0; padding-left: 3px; }
+.message-markdown li::marker { color: var(--lagoon, #58d1c3); }
+.message-markdown :is(h1, h2, h3) { margin: 14px 0 7px; color: var(--foam, #edf2f4); font-family: var(--font-display, sans-serif); line-height: 1.3; }
+.message-markdown h1 { font-size: 18px; }
+.message-markdown h2 { font-size: 16px; }
+.message-markdown h3 { font-size: 15px; }
+.message-markdown :is(pre, blockquote, table) { margin: 10px 0; }
+.message-markdown pre { max-width: 100%; overflow: auto; padding: 10px 12px; border: 1px solid rgba(31, 45, 69, .9); border-radius: 7px; background: #080d18; font: 11px/1.55 var(--font-mono, monospace); white-space: pre; }
+.message-markdown code { font-family: var(--font-mono, monospace); }
+.message-markdown :not(pre) > code { padding: 2px 4px; border-radius: 4px; background: rgba(31, 45, 69, .72); color: #a7d9d4; font-size: .86em; }
+.message-markdown blockquote { padding-left: 11px; border-left: 2px solid rgba(88, 209, 195, .45); color: var(--mist, #b9c3cc); white-space: pre-wrap; }
+.message-markdown a { color: #79b9e8; text-decoration-color: rgba(121, 185, 232, .45); }
+.message-markdown .markdown-table-scroll { max-width: 100%; overflow-x: auto; padding-inline-end: 2px; scroll-padding-inline-end: 2px; }
+.message-markdown table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
+.message-markdown :is(th, td) { max-width: 400px; padding: 6px 8px; border: 1px solid rgba(31, 45, 69, .9); overflow-wrap: anywhere; text-align: left; vertical-align: top; white-space: normal; }
+.message-markdown th { background: rgba(31, 45, 69, .42); }
+.message-attachments { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 7px; margin-top: 10px; }
+.message-attachment { position: relative; min-width: 0; margin: 0; overflow: hidden; border: 1px solid rgba(121, 174, 232, .18); border-radius: 7px; background: rgba(5, 8, 17, .44); }
+.message-attachment img, .message-attachment video { display: block; width: 100%; max-height: 220px; object-fit: contain; }
+.message-attachment audio { display: block; width: calc(100% - 12px); margin: 6px; }
+.message-attachment figcaption { overflow: hidden; padding: 6px 8px; color: var(--muted, #748197); font: 9px var(--font-mono, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.attachment-zoom { position: absolute; top: 6px; right: 6px; width: 27px; height: 27px; border: 1px solid rgba(121, 174, 232, .42); border-radius: 5px; background: rgba(5, 8, 17, .82); color: var(--foam, #edf2f4); cursor: pointer; }
+.attachment-file { display: grid; width: 100%; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center; padding: 10px; background: transparent; color: var(--mist, #b9c3cc); cursor: pointer; text-align: left; }
+.attachment-kind { color: var(--ocean, #79aee8); font: 8px var(--font-mono, monospace); }
+.attachment-name { overflow: hidden; font: 10px var(--font-mono, monospace); text-overflow: ellipsis; white-space: nowrap; }
+footer { display: flex; justify-content: flex-end; margin-top: 9px; padding-top: 7px; border-top: 1px solid rgba(31, 45, 69, .55); }
+.edit-message { padding: 3px 0; background: transparent; color: var(--muted, #748197); cursor: pointer; font: 9px var(--font-mono, monospace); }
+.edit-message:hover { color: var(--mist, #b9c3cc); }

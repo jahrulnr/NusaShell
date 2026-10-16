@@ -31,13 +31,13 @@ type ModelCapabilities struct {
 	ReasoningReplay bool
 }
 
-// modelCapabilitiesWithLearned is the testable form of model capabilities
+// ModelCapabilitiesWithLearned is the testable form of model capabilities
 // resolution: it accepts a learnedParamsCache for applying learned disabled
 // modalities and a modelOverridesCache for applying manual overrides. When
 // cache is nil, no learned overrides are applied; when manual is nil, no
 // manual overrides are applied. Precedence: catalog → learned → manual
 // (manual is applied last so it always wins).
-func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedparams.Cache, manual *modeloverrides.Cache) ModelCapabilities {
+func ModelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedparams.Cache, manual *modeloverrides.Cache) ModelCapabilities {
 	dc := domain.ModelCapabilitiesOf(provider, model)
 	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video, Document: dc.Document}
 	if provider != nil {
@@ -101,7 +101,7 @@ func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache
 	return caps
 }
 
-func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabilities) []ChatMessage {
+func ChatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabilities) []ChatMessage {
 	src := c.Messages
 	if domain.HydrationPrecedesFirstUser(src) {
 		src = domain.RelocateHydrationAfterFirstUser(src)
@@ -198,9 +198,11 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			if domain.IsHydrationMessage(m) && !caps.ReasoningReplay {
 				reasoning = ""
 			}
-			cm := ChatMessage{Role: "assistant", Content: content, Reasoning: reasoning, ToolCalls: m.ToolCalls}
+			cm := ChatMessage{Role: "assistant", Content: content, Reasoning: reasoning, ToolCalls: m.ToolCalls, ProviderID: m.ProviderID}
 			if len(m.ReasoningExtra) > 0 {
 				cm.ReasoningExtra = append(json.RawMessage(nil), m.ReasoningExtra...)
+				cm.ReasoningExtraFor = m.ReasoningExtraFor
+				cm.ReasoningExtraUpstream = m.ReasoningExtraUpstream
 			}
 			out = append(out, cm)
 			for _, tc := range m.ToolCalls {
@@ -215,7 +217,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 				toolContent := tooloutput.SummarizeToolContent(tc.Name, tc.Output)
 				toolAtts := tc.OutputAttachments
 				if len(toolAtts) > 0 {
-					toolAtts, toolContent = filterToolAttachmentsByCaps(toolAtts, toolContent, caps)
+					toolAtts, toolContent = FilterToolAttachmentsByCaps(toolAtts, toolContent, caps)
 				}
 				toolContent = tooloutput.WrapToolOutput(tc.Name, toolContent)
 				out = append(out, ChatMessage{Role: "tool", ToolResult: &ToolResult{
@@ -230,7 +232,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 	return out
 }
 
-// filterToolAttachmentsByCaps strips media attachments from a tool result
+// FilterToolAttachmentsByCaps strips media attachments from a tool result
 // when the active model does not support the corresponding modality, and
 // appends a text note to the content so the model knows the media exists
 // but couldn't be delivered. This prevents provider errors when a read_*
@@ -242,11 +244,11 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 //     natively at all — only frames as input_image)
 //   - image sent to a non-vision model
 //
-// The same gating applies to user-authored attachments in chatMessages
+// The same gating applies to user-authored attachments in ChatMessages
 // (stripped + placeholder) and to proactive fallback enrichment
 // (enrichWithAudioDescriptions / enrichWithVideoDescriptions describe the
 // media via a fallback model so the text-only model still gets the content).
-func filterToolAttachmentsByCaps(atts []domain.Attachment, content string, caps ModelCapabilities) ([]domain.Attachment, string) {
+func FilterToolAttachmentsByCaps(atts []domain.Attachment, content string, caps ModelCapabilities) ([]domain.Attachment, string) {
 	if len(atts) == 0 {
 		return atts, content
 	}
@@ -308,12 +310,12 @@ func (a *Service) SaveAttachmentsToDisk(conversationID string, attachments []dom
 	}
 }
 
-// toolRoundSignature returns a deterministic, order-independent signature for
+// ToolRoundSignature returns a deterministic, order-independent signature for
 // a set of tool calls. Tools are sorted by name+args so the same set in any
 // order produces the same signature. This lets the repeated-tool guard detect
 // parallel-tool loops (e.g. GPT-5.6 Luna calling 6 mcp_enable in a different
 // order each round).
-func toolRoundSignature(calls []domain.ToolCall) string {
+func ToolRoundSignature(calls []domain.ToolCall) string {
 	if len(calls) == 0 {
 		return ""
 	}
@@ -345,7 +347,7 @@ func (g *repeatedToolGuard) Check(calls []domain.ToolCall, content string) bool 
 		g.lastSig = ""
 		return false
 	}
-	sig := toolRoundSignature(calls)
+	sig := ToolRoundSignature(calls)
 	if sig == g.lastSig {
 		g.streak++
 	} else {

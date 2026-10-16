@@ -2,32 +2,24 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-// Minimal fixture covering every id the automation view touches.
+import { createAutomationPage } from '../page/automation/app.js';
+
 const VIEW_HTML = `<!doctype html><html><body>
-  <div id="automation-tabs" role="tablist">
-    <button type="button" data-auto-tab="workflows" role="tab" aria-selected="true">Workflows</button>
-    <button type="button" data-auto-tab="runs" role="tab" aria-selected="false">Runs</button>
-    <button type="button" data-auto-tab="schedules" role="tab" aria-selected="false">Schedules</button>
-    <button type="button" data-auto-tab="events" role="tab" aria-selected="false">Events</button>
+  <div class="automation-mode-switch" role="group">
+    <button type="button" data-automation-mode="workflows" aria-pressed="true">Workflows</button>
+    <button type="button" data-automation-mode="runs" aria-pressed="false">Runs</button>
   </div>
-  <button id="automation-new-btn" type="button"></button>
-  <button id="automation-enable-provider-btn" type="button"></button>
-  <span id="automation-stat-runnable"></span>
-  <span id="automation-stat-blocked"></span>
-  <span id="automation-stat-waiting"></span>
-  <div id="automation-blocked-banner" hidden><span id="automation-blocked-text"></span></div>
-  <div id="automation-workspace"></div>
-  <h2 id="automation-list-title"></h2>
+  <button id="automation-create" type="button"></button>
+  <button id="automation-refresh" type="button"></button>
   <span id="automation-list-count"></span>
   <div id="automation-list"></div>
-  <h2 id="automation-detail-title"></h2>
-  <div id="automation-detail-actions"></div>
-  <div id="automation-detail"></div>
+  <div id="automation-inspector-empty"></div>
+  <section id="automation-workflow-detail" hidden></section>
+  <section id="automation-run-detail" hidden></section>
+  <section id="automation-editor" hidden></section>
   <div id="toast-container"></div>
 </body></html>`;
 
-// A run with a running agent step (status running + output present) is what
-// makes renderRunDetail append the Steer button.
 const runningRun = {
   id: 'run-1',
   name: 'demo-run',
@@ -40,60 +32,54 @@ const runningRun = {
   }],
 };
 
-const tick = () => new Promise((r) => setTimeout(r, 40));
+const tick = () => new Promise((resolve) => setTimeout(resolve, 40));
 
-function rpcResult(result) {
-  return { ok: true, json: async () => ({ ok: true, result }) };
+function install(dom) {
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    HTMLElement: globalThis.HTMLElement,
+    requestAnimationFrame: globalThis.requestAnimationFrame,
+  };
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 0; };
+  return () => {
+    globalThis.window = previous.window;
+    globalThis.document = previous.document;
+    globalThis.HTMLElement = previous.HTMLElement;
+    globalThis.requestAnimationFrame = previous.requestAnimationFrame;
+    dom.window.close();
+  };
 }
 
 async function mountView() {
   const dom = new JSDOM(VIEW_HTML, { url: 'http://localhost/' });
-  const prevWindow = globalThis.window;
-  const prevDocument = globalThis.document;
-  const prevHTMLElement = globalThis.HTMLElement;
-  const prevRaf = globalThis.requestAnimationFrame;
-  const prevFetch = globalThis.fetch;
-  globalThis.window = dom.window;
-  globalThis.document = dom.window.document;
-  globalThis.HTMLElement = dom.window.HTMLElement;
-  globalThis.requestAnimationFrame = (cb) => { cb(); return 0; };
-
+  const restore = install(dom);
   const requests = [];
-  globalThis.fetch = async (_url, init) => {
-    const body = JSON.parse(init.body);
-    requests.push(body);
-    if (body.method === 'automation.list') return rpcResult({ workflows: [] });
-    if (body.method === 'automation.runs.list') return rpcResult({ runs: [runningRun] });
-    if (body.method === 'automation.schedules') return rpcResult({ schedules: [] });
-    if (body.method === 'automation.events') return rpcResult({ events: [] });
-    return rpcResult({});
+  const rpcClient = async (method, payload) => {
+    requests.push({ method, payload });
+    if (method === 'automation.list') return { workflows: [] };
+    if (method === 'automation.runs.list') return { runs: [runningRun] };
+    if (method === 'automation.runs.get') return { run: runningRun };
+    if (method === 'automation.schedules') return { schedules: [] };
+    if (method === 'automation.events') return { events: [] };
+    return {};
   };
-
-  const restore = () => {
-    globalThis.fetch = prevFetch;
-    globalThis.window = prevWindow;
-    globalThis.document = prevDocument;
-    globalThis.HTMLElement = prevHTMLElement;
-    globalThis.requestAnimationFrame = prevRaf;
-  };
-
-  try {
-    // Fresh module instance so module-level view state is not shared.
-    const mod = await import(`../js/views/automation.js?steer=${Date.now()}-${Math.random()}`);
-    await mod.initAutomation();
-  } catch (err) {
-    restore();
-    throw err;
-  }
-  return { requests, restore };
+  const page = createAutomationPage(dom.window.document, { rpcClient, onEvent: () => () => {} });
+  page.init();
+  page.activate();
+  await tick();
+  return { requests, restore, document: dom.window.document };
 }
 
-async function openSteerDialog() {
-  document.querySelector('[data-auto-tab="runs"]').click();
+async function openSteerDialog(document) {
+  document.querySelector('[data-automation-mode="runs"]').click();
   await tick();
-  document.querySelector('.automation-row').click();
-  const steer = [...document.querySelectorAll('#automation-detail-actions button')]
-    .find((b) => b.textContent === 'Steer');
+  await tick();
+  const steer = [...document.querySelectorAll('#automation-run-detail button')]
+    .find((button) => button.textContent.trim() === 'Steer');
   assert.ok(steer, 'Steer button rendered for a run with a running agent step');
   steer.click();
   await tick();
@@ -103,39 +89,40 @@ async function openSteerDialog() {
 }
 
 test('Steer dialog collects text and sends a string payload', async () => {
-  const { requests, restore } = await mountView();
+  const { requests, restore, document } = await mountView();
   try {
-    const overlay = await openSteerDialog();
+    const overlay = await openSteerDialog(document);
     const textarea = overlay.querySelector('textarea');
     assert.ok(textarea, 'dialog renders a textarea field');
     textarea.value = 'Please hurry up';
     const send = [...overlay.querySelectorAll('.ui-dialog-actions button')]
-      .find((b) => b.textContent === 'Send');
+      .find((button) => button.textContent.trim() === 'Send');
     assert.ok(send, 'Send action rendered');
     send.click();
     await tick();
-    const steer = requests.filter((r) => r.method === 'automation.runs.steer');
+    const steer = requests.filter((request) => request.method === 'automation.runs.steer');
     assert.equal(steer.length, 1);
     assert.equal(steer[0].payload.id, 'run-1');
     assert.equal(typeof steer[0].payload.text, 'string');
     assert.equal(steer[0].payload.text, 'Please hurry up');
+    assert.equal(document.getElementById('automation-list-count').textContent, '1');
   } finally {
     restore();
   }
 });
 
 test('Cancelling the Steer dialog sends no steer request', async () => {
-  const { requests, restore } = await mountView();
+  const { requests, restore, document } = await mountView();
   try {
-    const overlay = await openSteerDialog();
+    const overlay = await openSteerDialog(document);
     const textarea = overlay.querySelector('textarea');
     if (textarea) textarea.value = 'never sent';
     const cancel = [...overlay.querySelectorAll('.ui-dialog-actions button')]
-      .find((b) => b.textContent === 'Cancel');
+      .find((button) => button.textContent.trim() === 'Cancel');
     assert.ok(cancel, 'Cancel action rendered');
     cancel.click();
     await tick();
-    assert.equal(requests.filter((r) => r.method === 'automation.runs.steer').length, 0);
+    assert.equal(requests.filter((request) => request.method === 'automation.runs.steer').length, 0);
   } finally {
     restore();
   }

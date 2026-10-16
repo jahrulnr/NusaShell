@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"nusashell/domain/turndiff"
+	"nusashell/pkg/yamlmd"
 )
 
 func executeFileMkdir(args map[string]any) (bool, string, error) {
@@ -23,7 +24,7 @@ func executeFileMkdir(args map[string]any) (bool, string, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return true, "", err
 	}
-	return true, yamlBlock(map[string]any{"created": true}), nil
+	return true, yamlmd.Block(map[string]any{"created": true}), nil
 }
 
 func executeFileDelete(ctx context.Context, args map[string]any) (bool, string, error) {
@@ -47,15 +48,15 @@ func executeFileDelete(ctx context.Context, args map[string]any) (bool, string, 
 	defer unlock()
 	pre := readPathText(path)
 	if err := os.RemoveAll(path); err != nil {
-		recordInexact(ctx)
+		turndiff.Record(ctx, turndiff.Inexact())
 		return true, "", err
 	}
 	if pre.dir || !pre.exact {
-		recordInexact(ctx)
+		turndiff.Record(ctx, turndiff.Inexact())
 	} else {
-		recordDelta(ctx, turndiff.DeleteFile(path, pre.text))
+		turndiff.Record(ctx, turndiff.DeleteFile(path, pre.text))
 	}
-	return true, yamlBlock(map[string]any{"deleted": true}), nil
+	return true, yamlmd.Block(map[string]any{"deleted": true}), nil
 }
 
 func executeFileMove(ctx context.Context, args map[string]any) (bool, string, error) {
@@ -78,24 +79,24 @@ func executeFileMove(ctx context.Context, args map[string]any) (bool, string, er
 	if err := renameWithRetry(src, dst); err != nil {
 		// Fall back to copy+delete (e.g. cross-device rename).
 		if cerr := copyTree(src, dst); cerr != nil {
-			recordInexact(ctx)
+			turndiff.Record(ctx, turndiff.Inexact())
 			return true, "", err
 		}
 		if rerr := os.RemoveAll(src); rerr != nil {
-			recordInexact(ctx)
+			turndiff.Record(ctx, turndiff.Inexact())
 			return true, "", rerr
 		}
 	}
 	if srcPre.dir || !srcPre.exact || (dstPre.exists && !dstPre.exact) {
-		recordInexact(ctx)
+		turndiff.Record(ctx, turndiff.Inexact())
 	} else {
 		var overwritten *string
 		if dstPre.exists {
 			overwritten = turndiff.StringPtr(dstPre.text)
 		}
-		recordDelta(ctx, turndiff.UpdateFile(src, srcPre.text, srcPre.text, turndiff.StringPtr(dst), overwritten))
+		turndiff.Record(ctx, turndiff.UpdateFile(src, srcPre.text, srcPre.text, turndiff.StringPtr(dst), overwritten))
 	}
-	return true, yamlBlock(map[string]any{"moved": true}), nil
+	return true, yamlmd.Block(map[string]any{"moved": true}), nil
 }
 
 func executeFileCopy(ctx context.Context, args map[string]any) (bool, string, error) {
@@ -111,17 +112,17 @@ func executeFileCopy(ctx context.Context, args map[string]any) (bool, string, er
 	srcPre := readPathText(src)
 	dstPre := readPathText(dst)
 	if err := copyTree(src, dst); err != nil {
-		recordInexact(ctx)
+		turndiff.Record(ctx, turndiff.Inexact())
 		return true, "", err
 	}
 	if srcPre.dir || !srcPre.exact || (dstPre.exists && !dstPre.exact) {
-		recordInexact(ctx)
+		turndiff.Record(ctx, turndiff.Inexact())
 	} else {
 		var overwritten *string
 		if dstPre.exists {
 			overwritten = turndiff.StringPtr(dstPre.text)
 		}
-		recordDelta(ctx, turndiff.AddFile(dst, srcPre.text, overwritten))
+		turndiff.Record(ctx, turndiff.AddFile(dst, srcPre.text, overwritten))
 	}
-	return true, yamlBlock(map[string]any{"copied": true}), nil
+	return true, yamlmd.Block(map[string]any{"copied": true}), nil
 }

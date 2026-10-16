@@ -514,9 +514,10 @@ files.
 On the Codex provider detail page:
 
 - **ChatGPT Accounts** lists signed-in accounts with plan and session/weekly
-  usage bars. **Sign in with ChatGPT** runs OAuth PKCE. **Import from Codex
+  usage bars. **Sign in with ChatGPT** uses device-code login: open the displayed verification link on any device, enter the one-time code, and keep NusaShell open while it checks approval. The code expires after 15 minutes; Cancel stops further checks. The existing `ai.codex.login` browser PKCE RPC remains available explicitly. **Import from Codex
   CLI** reads `~/.codex/auth.json`. **Refresh** reloads usage and account
   availability; **Switch** and **Remove** manage accounts.
+- Account usage includes used and available percentages for both returned windows, with reset date and time. Period labels follow the supplied duration (5-hour, Weekly, or Monthly); a missing duration uses a neutral window label. Missing usage is shown as unavailable, never as zero usage.
 - **Codex Runtime** shows/downloads the managed official Codex CLI binary
   used for account-aware model listing and tooling.
 - In the Agent composer, the routing control becomes an account picker for a
@@ -535,6 +536,29 @@ Import from Codex CLI
 # BAD — treating paste as the only way to configure Codex
 Edit → paste OAuth access token → Save  (fallback only)
 ```
+
+### Device-code RPC flow
+
+`ai.codex.device.start` accepts `provider_id` and immediately returns
+`device_auth_id`, `user_code`, `verification_url`, `interval_seconds`, and
+`expires_at` (Unix seconds). `ai.codex.device.poll` accepts the same provider
+plus `device_auth_id` and `user_code`. `status=pending` means wait at least
+the supplied interval; `status=complete` includes the connected `account_id`.
+Only completion writes tokens to the existing active/account credential keys.
+Each RPC is bounded to 30 seconds. There is no background poller or callback
+listener; callers stop on cancellation, expiry, or error. A fresh attempt
+requests a new code. The browser PKCE endpoint is a separate explicit flow,
+never an automatic fallback for device authorization errors.
+
+```json
+{"method":"ai.codex.device.start","payload":{"provider_id":"codex"}}
+{"method":"ai.codex.device.poll","payload":{"provider_id":"codex","device_auth_id":"returned-device-id","user_code":"returned-user-code"}}
+```
+
+Good: show the returned link/code, wait `interval_seconds` between completed
+polls, stop at `expires_at`, then reload accounts on completion.
+Bad: call `ai.codex.login` expecting it to open the phone browser, poll in a
+busy loop, or keep polling after the user cancels.
 
 ### Seeding keys from the environment (explicit)
 
@@ -716,25 +740,59 @@ On Responses these rejections arrive mid-stream as an SSE `event: error`
 window; on Chat Completions they arrive as HTTP 429. Both surface a message
 naming the token numbers (limit, already-used, requested).
 
-## Encrypted reasoning replay (Responses / Codex)
+## Encrypted reasoning replay
 
 OpenAI Responses, Codex, and some OpenRouter/compat OpenAI routes return
 opaque reasoning state (often `encrypted_content` inside a reasoning item)
-alongside the visible thinking summary. NusaShell persists that payload and
-reattaches it on the next turn so multi-turn ChatGPT/Codex/OpenRouter
-Responses-style models keep reasoning continuity; the UI continues to show
-only plaintext thinking.
+alongside the visible thinking summary; Anthropic Messages returns thinking
+signatures and `redacted_thinking` data instead. NusaShell persists that
+payload and reattaches it on the next turn so multi-turn
+ChatGPT/Codex/OpenRouter Responses-style and Claude thinking models keep
+reasoning continuity; the UI continues to show only plaintext thinking.
 
-Encrypted reasoning replays on Responses/Codex; other kinds get plaintext
-thinking only:
+Each persisted payload is stamped with the provider family that produced it
+(`anthropic`, `openai`, `openrouter`, `gemini`, or `codex`). On the next
+turn the payload replays only to a wire that family interprets — a
+provider switch never echoes a foreign blob. Messages without a recorded
+producer keep the per-kind shape rules below.
+
+Assistant messages also record provenance next to the payload: the
+configured provider that served the turn, the gateway-reported upstream
+(OpenRouter's top-level `provider` name such as `Nvidia`), and the served
+model slug — OpenRouter aliases like `openrouter/auto` or `openrouter/free`
+resolve to a different actual model per request, and that slug is stored
+separately so the room keeps displaying and re-resolving the requested
+model. Replay drops the opaque payload (never the visible thinking text)
+when any check fails:
+
+- **Provider instance:** the payload replays only to the NusaShell provider
+  that produced it — two credentials on the same family do not share
+  encrypted state. Messages captured before this stamp, or requests without
+  one, keep replaying.
+- **Pinned upstream route:** when the room pins an OpenRouter upstream and
+  the payload was produced by a different upstream, it is dropped. Auto
+  routing never gates — the serving upstream is only knowable after the
+  response.
+- **OpenRouter format:** `reasoning_details` items may declare their
+  upstream wire family in `format`. A known format that mismatches the
+  requested model's vendor prefix is dropped (`anthropic-claude-v1` replays
+  only to `anthropic/*` models, `openai-responses-v1`/
+  `azure-openai-responses-v1` to `openai/*`, `xai-responses-v1` to
+  `x-ai/*`, `google-gemini-v1` to `google/*`, `meta-responses-v1` to
+  `meta-llama/*`). Items with `unknown`, no `format`, or an unrecognized
+  value replay unchanged, as do extras on routing aliases where no vendor
+  can be derived.
 
 - **Chat direct/vanilla OpenAI:** never forwards the opaque state — Chat
   Completions reject signed, redacted, or provider-extra reasoning blocks.
 - **Chat OpenRouter profile (including custom gateways):** keeps it only
   when it is a JSON array (`reasoning_details`); Codex encrypted objects are
   stripped.
-- **Messages (Anthropic):** never forwards it (Anthropic uses signature /
-  redacted thinking, not Responses-style extras).
+- **Messages (Anthropic):** forwards Anthropic's own opaque payload
+  (thinking signatures and `redacted_thinking` data), so signed thinking
+  blocks replay during tool loops. OpenAI-family extras and unsigned
+  plaintext reasoning are dropped — an unsigned thinking block would fail
+  the request.
 - **Responses / Codex:** forwards it unchanged for continuity.
 
 The server-side compaction checkpoint is kind-gated the same way

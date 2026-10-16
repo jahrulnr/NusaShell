@@ -6,10 +6,6 @@ import (
 	"nusashell/domain"
 )
 
-// TextAttachmentContent, DocumentAttachmentContent, and DataURLBase64 have
-// been moved to the domain package. The aiutil wrappers in util.go delegate
-// to the domain implementations for backward compatibility.
-
 // InputAudioFormat maps a MIME type to the OpenAI input_audio format enum
 // (mp3, wav, ogg, webm, flac). Unknown or empty media types default to mp3
 // (the most common TTS output).
@@ -38,7 +34,7 @@ func InputAudioBlock(att domain.Attachment) map[string]any {
 	return map[string]any{
 		"type": "input_audio",
 		"input_audio": map[string]any{
-			"data":   DataURLBase64(att.DataURL),
+			"data":   domain.DataURLBase64(att.DataURL),
 			"format": InputAudioFormat(att.MediaType),
 		},
 	}

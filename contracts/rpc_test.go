@@ -13,10 +13,6 @@ var update = flag.Bool("update", false, "rewrite golden fixtures")
 
 const goldenDir = "testdata/golden"
 
-func goldenPath(name string) string {
-	return filepath.Join(goldenDir, name)
-}
-
 func assertGolden(t *testing.T, name string, v any) {
 	t.Helper()
 	b, err := json.MarshalIndent(v, "", "  ")
@@ -24,7 +20,7 @@ func assertGolden(t *testing.T, name string, v any) {
 		t.Fatalf("marshal %s: %v", name, err)
 	}
 	b = append(b, '\n')
-	path := goldenPath(name)
+	path := filepath.Join(goldenDir, name)
 	if *update {
 		if err := os.MkdirAll(goldenDir, 0o755); err != nil {
 			t.Fatal(err)
@@ -450,5 +446,23 @@ func TestMessageDTORoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(in, out) {
 		t.Errorf("round trip mismatch:\n in: %+v\nout: %+v", in, out)
+	}
+}
+
+func TestCodexDeviceContracts(t *testing.T) {
+	assertGolden(t, "codex-device-start.json", CodexDeviceStartResult{DeviceAuthID: "device-1", UserCode: "ABCD-EFGH", VerificationURL: "https://auth.openai.com/codex/device", IntervalSeconds: 5, ExpiresAt: 1800000000})
+	assertGolden(t, "codex-device-pending.json", CodexDevicePollResult{Status: "pending"})
+	assertGolden(t, "codex-device-complete.json", CodexDevicePollResult{Status: "complete", AccountID: "account-1"})
+	assertGolden(t, "codex-device-poll.json", CodexDevicePollRequest{ProviderID: "codex", DeviceAuthID: "device-1", UserCode: "ABCD-EFGH"})
+}
+
+func TestCodexUsageWindowContracts(t *testing.T) {
+	assertGolden(t, "codex-usage-windows.json", CodexAccountsUsageResult{Accounts: []CodexAccountUsage{{AccountID: "one", PrimaryWindow: &CodexUsageWindowDTO{UsedPercent: 0, RemainingPercent: 100, LimitWindowSeconds: 18000, ResetAt: 1800000000}, WeeklyWindow: &CodexUsageWindowDTO{UsedPercent: 100, RemainingPercent: 0, LimitWindowSeconds: 604800, ResetAfterSeconds: 3600}}, {AccountID: "missing"}}})
+	b, err := json.Marshal(CodexUsageWindowDTO{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"used_percent":0,"remaining_percent":0}` {
+		t.Fatalf("zero duration must remain omitted: %s", b)
 	}
 }

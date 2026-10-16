@@ -143,7 +143,7 @@ func TestDescribeVideosWithFallbackSkipsExistingDescription(t *testing.T) {
 		{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,AAA="},
 		{Type: "text", Name: "video:clip.mp4", MediaType: "text/plain", Content: "[Video description for clip.mp4]\nexisting"},
 	}
-	out := app.describeVideosWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeVideosWithFallback(context.Background(), settings, atts)
 	if len(out) != 2 {
 		t.Fatalf("expected unchanged attachments, got %d", len(out))
 	}
@@ -202,7 +202,7 @@ func TestExecuteGenerateVideoT2V(t *testing.T) {
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	args, _ := json.Marshal(map[string]any{"prompt": "a sunset", "duration_seconds": 4, "resolution": "720p"})
-	_, atts, err := app.executeGenerateVideo(run, domain.ToolCall{
+	_, atts, err := app.mediaService().ExecuteGenerateVideo(mediaCall(run), domain.ToolCall{
 		ID: "tc1", Name: "generate_video", Args: string(args),
 	}, domain.Settings{VideoGenProviderID: "vid", VideoGenModelID: "x-ai/grok-imagine-video"})
 	if err != nil {
@@ -238,7 +238,7 @@ func TestExecuteGenerateVideoI2V(t *testing.T) {
 		"resolution":             "720p",
 		"referenced_image_paths": []string{refPath},
 	})
-	msg, atts, err := app.executeGenerateVideo(run, domain.ToolCall{
+	msg, atts, err := app.mediaService().ExecuteGenerateVideo(mediaCall(run), domain.ToolCall{
 		ID: "tc1", Name: "generate_video", Args: string(args),
 	}, domain.Settings{VideoGenProviderID: "vid", VideoGenModelID: "google/veo-3.1"})
 	if err != nil {
@@ -269,7 +269,7 @@ func TestExecuteGenerateVideoRejectsRelativeRefPath(t *testing.T) {
 		"prompt":                 "test",
 		"referenced_image_paths": []string{"relative/path.png"},
 	})
-	_, _, err := app.executeGenerateVideo(run, domain.ToolCall{
+	_, _, err := app.mediaService().ExecuteGenerateVideo(mediaCall(run), domain.ToolCall{
 		ID: "tc1", Name: "generate_video", Args: string(args),
 	}, domain.Settings{VideoGenProviderID: "vid", VideoGenModelID: "x"})
 	if err == nil {

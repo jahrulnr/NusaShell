@@ -571,7 +571,7 @@ func TestHandleConversationsSetWorkspaceSerializesTurnSave(t *testing.T) {
 	turnSaveDone := make(chan struct{})
 	go func() {
 		close(turnSaveStarted)
-		turnLock := app.conversationTurnLock("conv_1")
+		turnLock := app.agentService().ConversationTurnLock("conv_1")
 		turnLock.Lock()
 		defer turnLock.Unlock()
 		latest, err := store.Get("conv_1")
@@ -1229,7 +1229,7 @@ func TestAddTurnMessagesInjectsWorkspaceSwitchNotice(t *testing.T) {
 	}
 	saved := setWorkspace(t, app, "conv_1", newWS)
 
-	app.addTurnMessages(saved,
+	app.agentService().AddTurnMessages(saved,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "Sip, gas implement C", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
@@ -1324,7 +1324,7 @@ func TestAddTurnMessagesInjectsWorkspaceSwitchNotice(t *testing.T) {
 		t.Fatalf("file_read output = %q, want real AGENTS.md body", agents.Output)
 	}
 
-	app.addTurnMessages(saved,
+	app.agentService().AddTurnMessages(saved,
 		domain.Message{ID: "m_user2", Role: domain.RoleUser, Content: "lanjut", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst2", Role: domain.RoleAssistant},
 	)
@@ -1355,7 +1355,7 @@ func TestAddTurnMessagesWorkspaceSwitchOmitsMissingAgentsMD(t *testing.T) {
 		DirectoryBrowser: fakeDirBrowser{},
 	}
 	saved := setWorkspace(t, app, "conv_1", ws)
-	app.addTurnMessages(saved,
+	app.agentService().AddTurnMessages(saved,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "go", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
@@ -1388,7 +1388,7 @@ func TestWorkspaceSwitchNoticeIncludesInstructionFiles(t *testing.T) {
 		DirectoryBrowser: fakeDirBrowser{},
 	}
 	saved := setWorkspace(t, app, "conv_1", newWS)
-	app.addTurnMessages(saved,
+	app.agentService().AddTurnMessages(saved,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "go", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)

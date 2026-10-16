@@ -156,10 +156,13 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 	out := ChatResponse{
 		Content:    resp.Text(),
 		Reasoning:  resp.Reasoning(),
+		Model:      resp.Model,
+		Upstream:   resp.Upstream,
 		StopReason: string(resp.FinishReason),
 	}
 	if extra := reasoningExtraFromBlocks(resp.Blocks); len(extra) > 0 {
 		out.ReasoningExtra = extra
+		out.ReasoningExtraFor = reasoningProducerFamily(resp)
 	}
 	for _, call := range resp.ToolCalls() {
 		toolCall := domain.ToolCall{
@@ -194,7 +197,12 @@ func FromCoreResponse(resp *core.Response) ChatResponse {
 }
 
 // reasoningExtraFromBlocks returns the last non-empty ReasoningBlock.Extra
-// from a completed response (OpenAI-family encrypted_content replay state).
+// from a completed response (OpenAI-family encrypted_content replay state,
+// Anthropic thinking signatures, Gemini thought signatures). Paired with
+// Response.Reasoning() concatenating every block's text, a response with
+// multiple signed thinking blocks replays merged text under the last
+// signature — a known limitation while Anthropic interleaved thinking
+// (multi-block turns) is not configured.
 func reasoningExtraFromBlocks(blocks []core.Block) json.RawMessage {
 	var extra json.RawMessage
 	for _, block := range blocks {
@@ -205,6 +213,50 @@ func reasoningExtraFromBlocks(blocks []core.Block) json.RawMessage {
 		extra = append(json.RawMessage(nil), rb.Extra...)
 	}
 	return extra
+}
+
+// reasoningProducerFamily returns the provider family that produced a
+// response, as stamped by the wire adapter. The values are plain lowercase
+// family names like "anthropic", "openai", "openrouter", "gemini", or
+// "codex". OpenRouter-delegated Messages/Responses adapters keep the inner
+// wire's stamp ("anthropic"/"openai"), which is the family that produced —
+// and can interpret — the opaque replay payload.
+func reasoningProducerFamily(resp *core.Response) string {
+	if resp == nil {
+		return ""
+	}
+	if resp.Provider != "" {
+		return strings.ToLower(resp.Provider)
+	}
+	return strings.ToLower(resp.Usage.Provider)
+}
+
+// reasoningFamilyForKind maps a request's target provider kind to the
+// provider family that interprets its wire format. It is the fallback when
+// a response does not report its producer (fakes in tests) and the gate
+// that decides whether a persisted ReasoningExtra may reach this kind.
+func reasoningFamilyForKind(kind domain.ProviderKind, openRouter bool) string {
+	switch kind {
+	case domain.ProviderMessages:
+		return "anthropic"
+	case domain.ProviderChat:
+		if openRouter {
+			return "openrouter"
+		}
+		return "openai"
+	case domain.ProviderGemini:
+		return "gemini"
+	case domain.ProviderCodex:
+		// Codex keeps its own family even though its wire shape matches
+		// Responses: encrypted items issued by the Codex backend are not
+		// replayable on the public Responses API, so codex-marked extras
+		// are intentionally dropped when a conversation switches to a
+		// Responses provider.
+		return "codex"
+	default:
+		// Responses and any other OpenAI-compatible wire.
+		return "openai"
+	}
 }
 
 func cacheControlFor(ttl string) *core.CacheControl {
@@ -304,9 +356,41 @@ func assistantWirePayload(blocks []core.Block, kind domain.ProviderKind) bool {
 
 // reasoningExtraForKind returns the opaque ReasoningExtra payload when the
 // target provider kind can replay it. Foreign encrypted Codex/Responses
-// items must not reach OpenAI Chat or Anthropic Messages history.
-func reasoningExtraForKind(extra json.RawMessage, kind domain.ProviderKind, openRouter bool) json.RawMessage {
+// items must not reach OpenAI Chat or Anthropic Messages history, and a
+// payload whose recorded producer family (extraFor) does not match the
+// family that interprets the target wire is dropped before the per-kind
+// shape rules run. An empty marker is legacy data: the shape rules apply
+// unchanged so persisted extras keep their prior behavior.
+//
+// Three provenance gates run before the shape rules:
+//   - Producer instance: an extra may only replay to the provider instance
+//     that produced it. Encrypted reasoning is credential/account scoped —
+//     replaying one account's blob through another account of the same
+//     family leaks state across trust boundaries and often fails upstream.
+//     An empty ProviderID on either side is legacy data and does not gate.
+//   - Upstream route: when the request pins an OpenRouter upstream
+//     (ProviderRoute) and the extra was captured under a different
+//     gateway-reported upstream, the payload would cross providers — drop
+//     it. Auto-routed requests and extras with no recorded upstream never
+//     gate: the upstream is only knowable after the response.
+//   - OpenRouter format check: reasoning_details items may declare the
+//     upstream wire family via "format"; a known format that provably
+//     mismatches the requested model's vendor drops the extra rather than
+//     sticky-failing upstream (the open-webui#28240 pattern).
+func reasoningExtraForKind(m ChatMessage, req ChatRequest, kind domain.ProviderKind, openRouter bool) json.RawMessage {
+	extra := m.ReasoningExtra
 	if len(extra) == 0 {
+		return nil
+	}
+	if m.ProviderID != "" && req.ProviderID != "" && m.ProviderID != req.ProviderID {
+		return nil
+	}
+	if openRouter && m.ReasoningExtraUpstream != "" {
+		if route := normalizeUpstreamRoute(req.ProviderRoute); route != "" && route != normalizeUpstreamRoute(m.ReasoningExtraUpstream) {
+			return nil
+		}
+	}
+	if producer := strings.ToLower(m.ReasoningExtraFor); producer != "" && producer != reasoningFamilyForKind(kind, openRouter) {
 		return nil
 	}
 	switch kind {
@@ -316,6 +400,16 @@ func reasoningExtraForKind(extra json.RawMessage, kind domain.ProviderKind, open
 		// Gemini replays opaque thought-signature state as ReasoningBlock.Extra
 		// so a signature returned on a text part survives the round trip.
 		return extra
+	case domain.ProviderMessages:
+		// Anthropic replays thinking signatures and redacted_thinking data
+		// through the wire package's opaque Extra payload. Only an extra
+		// carrying an actual Anthropic replay value may be forwarded —
+		// anything else would become an unsigned thinking block the
+		// provider rejects.
+		if reasoningExtraHasAnthropicShape(extra) {
+			return extra
+		}
+		return nil
 	case domain.ProviderChat:
 		if !openRouter {
 			return nil
@@ -326,10 +420,114 @@ func reasoningExtraForKind(extra json.RawMessage, kind domain.ProviderKind, open
 		if err := json.Unmarshal(extra, &details); err != nil {
 			return nil
 		}
+		if openRouterReasoningVendorMismatch(details, req.Model) {
+			return nil
+		}
 		return extra
 	default:
 		return nil
 	}
+}
+
+// normalizeUpstreamRoute canonicalizes an upstream identity for comparison:
+// routing slugs (provider.order values like "amazon-bedrock" or
+// "deepinfra/fp4") and response-reported upstream names ("Amazon Bedrock")
+// use different spellings for the same provider, so both sides reduce to
+// lowercase alphanumeric (dropping a "/variant" suffix) before comparing.
+func normalizeUpstreamRoute(value string) string {
+	s := strings.ToLower(strings.TrimSpace(value))
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// openRouterReasoningFormatVendor maps a reasoning_details item's "format"
+// tag to the OpenRouter vendor slug prefix whose upstreams produce — and can
+// replay — that payload shape. Confirmed format values come from
+// OpenRouter's reasoning docs; unknown or future format strings stay
+// unmapped so they forward unchanged rather than guessing.
+var openRouterReasoningFormatVendor = map[string]string{
+	"openai-responses":          "openai",
+	"openai-responses-v1":       "openai",
+	"azure-openai-responses-v1": "openai",
+	"xai-responses-v1":          "x-ai",
+	"anthropic-claude-v1":       "anthropic",
+	"google-gemini-v1":          "google",
+	"meta-responses-v1":         "meta-llama",
+}
+
+// openRouterModelVendor derives the upstream vendor slug prefix from an
+// OpenRouter model id ("anthropic/claude-sonnet-4" → "anthropic"). Variant
+// suffixes (":free", ":extended") and a leading "models/" are stripped
+// first. Routing aliases ("openrouter/auto", "openrouter/free") and bare
+// model names have no derivable vendor and return "" — callers must then
+// forward the extra unchanged rather than guess.
+func openRouterModelVendor(model string) string {
+	slug := strings.ToLower(strings.TrimSpace(model))
+	slug = strings.TrimPrefix(slug, "models/")
+	if i := strings.IndexByte(slug, ':'); i >= 0 {
+		slug = slug[:i]
+	}
+	vendor, _, ok := strings.Cut(slug, "/")
+	if !ok || vendor == "openrouter" {
+		return ""
+	}
+	return vendor
+}
+
+// openRouterReasoningVendorMismatch reports whether a reasoning_details
+// array carries an item whose declared format provably belongs to a
+// different upstream vendor than the target model's slug prefix. Items
+// with no format, "unknown", or an unmapped format are ignored; an
+// underdetermined target vendor forwards the extra unchanged.
+func openRouterReasoningVendorMismatch(details []any, model string) bool {
+	target := openRouterModelVendor(model)
+	if target == "" {
+		return false
+	}
+	for _, item := range details {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		format, _ := entry["format"].(string)
+		format = strings.ToLower(strings.TrimSpace(format))
+		if format == "" || format == "unknown" {
+			continue
+		}
+		vendor, known := openRouterReasoningFormatVendor[format]
+		if known && vendor != target {
+			return true
+		}
+	}
+	return false
+}
+
+// reasoningExtraHasAnthropicShape reports whether an opaque reasoning extra
+// carries a usable Anthropic replay value: a non-empty "signature" or
+// "redacted" string. The payload shape is owned by the anthropic wire
+// package; this check only inspects key presence so the application layer
+// stays independent of its private decoder.
+func reasoningExtraHasAnthropicShape(extra json.RawMessage) bool {
+	var payload map[string]any
+	if err := json.Unmarshal(extra, &payload); err != nil {
+		return false
+	}
+	if signature, ok := payload["signature"].(string); ok && signature != "" {
+		return true
+	}
+	if redacted, ok := payload["redacted"].(string); ok && redacted != "" {
+		return true
+	}
+	return false
 }
 
 func chatMessageToCore(m ChatMessage, req ChatRequest, kind domain.ProviderKind, openRouter bool) core.Message {
@@ -343,9 +541,22 @@ func chatMessageToCore(m ChatMessage, req ChatRequest, kind domain.ProviderKind,
 		// message contains any thinking blocks, the first block must be
 		// `thinking` or `redacted_thinking`"). OpenAI Responses and compat
 		// providers don't care about block order — they route by type.
-		extra := reasoningExtraForKind(m.ReasoningExtra, kind, openRouter)
+		extra := reasoningExtraForKind(m, req, kind, openRouter)
 		hasExtra := len(extra) > 0
-		if m.Reasoning != "" || hasExtra {
+		if kind == domain.ProviderMessages {
+			// Anthropic accepts only signed thinking blocks: replaying
+			// plaintext-only or foreign reasoning produces an unsigned
+			// thinking block the provider rejects with a 400. Emit a
+			// ReasoningBlock only when the extra carries a usable
+			// Anthropic signature or redacted payload — the wire adapter
+			// decodes it back onto the block. A signed block is still
+			// emitted when visible reasoning text is empty, which the
+			// tool-loop protocol requires (an assistant message must start
+			// with a thinking block).
+			if hasExtra {
+				blocks = append(blocks, core.ReasoningBlock{Text: m.Reasoning, Extra: append(json.RawMessage(nil), extra...)})
+			}
+		} else if m.Reasoning != "" || hasExtra {
 			// Always send plaintext reasoning we have from the persisted
 			// conversation. Testing against OpenRouter confirms non-reasoning
 			// models safely ignore the reasoning field, and reasoning models
@@ -499,6 +710,12 @@ func (pc Context) withProviderOptions(req ChatRequest) ChatRequest {
 	if req.ReasoningSummary == "" {
 		req.ReasoningSummary = pc.ReasoningSummary
 	}
+	// Every request leaving through a Context carries the adapter's
+	// provider instance so the reasoning-extra instance gate cannot be
+	// skipped by a request builder that forgot to stamp ProviderID.
+	if req.ProviderID == "" {
+		req.ProviderID = pc.ProviderID
+	}
 	return req
 }
 
@@ -511,7 +728,7 @@ func (pc Context) Complete(ctx context.Context, req ChatRequest) (ChatResponse, 
 // Stream calls provider.Stream, sets up the idle watchdog, dispatches
 // content/reasoning deltas, and returns the converted response.
 func (pc Context) Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(string)) (ChatResponse, error) {
-	return StreamViaCore(ctx, pc.Provider, pc.withProviderOptions(req), pc.Kind, pc.OpenRouter, onDelta, onReasoning)
+	return StreamViaCoreWithToolActivity(ctx, pc.Provider, pc.withProviderOptions(req), pc.Kind, pc.OpenRouter, onDelta, onReasoning, nil, nil)
 }
 
 // ToolUseStart is a provider-side tool-call construction event. Re-exported
@@ -590,17 +807,26 @@ func CompleteViaCore(ctx context.Context, provider AIProvider, req ChatRequest, 
 	if err != nil {
 		return ChatResponse{}, MapCoreError(err, kind)
 	}
-	return FromCoreResponse(resp), nil
+	return fromCoreResponseForKind(resp, kind, openRouter), nil
 }
 
-// StreamViaCore calls provider.Stream, sets up the idle watchdog, dispatches
-// content/reasoning deltas via core.HandleWith, and returns the converted
-// response. Error mapping is applied.
-func StreamViaCore(ctx context.Context, provider AIProvider, req ChatRequest, kind domain.ProviderKind, openRouter bool, onDelta, onReasoning func(string)) (ChatResponse, error) {
-	return StreamViaCoreWithToolActivity(ctx, provider, req, kind, openRouter, onDelta, onReasoning, nil, nil)
+// fromCoreResponseForKind is FromCoreResponse plus the wire-kind fallback
+// for the reasoning-extra producer marker: a provider that does not stamp
+// its family on the response (fakes in tests, custom wrappers) still gets
+// the family that interprets the target wire recorded, so a captured
+// ReasoningExtra always names its producer.
+func fromCoreResponseForKind(resp *core.Response, kind domain.ProviderKind, openRouter bool) ChatResponse {
+	out := FromCoreResponse(resp)
+	if len(out.ReasoningExtra) > 0 && out.ReasoningExtraFor == "" {
+		out.ReasoningExtraFor = reasoningFamilyForKind(kind, openRouter)
+	}
+	return out
 }
 
-// StreamViaCoreWithToolActivity is StreamViaCore with optional callbacks for
+// StreamViaCoreWithToolActivity calls provider.Stream, sets up the idle
+// watchdog, dispatches content/reasoning deltas via core.HandleWith, and
+// returns the converted response. Error mapping is applied. It additionally
+// supports optional callbacks for
 // provider-side tool construction. The callbacks never receive raw argument
 // chunks from the application boundary; callers can use them as an activity
 // signal while core continues to aggregate and validate the final tool call.
@@ -643,5 +869,5 @@ func StreamViaCoreWithToolActivity(ctx context.Context, provider AIProvider, req
 	if err != nil {
 		return ChatResponse{}, MapCoreError(err, kind)
 	}
-	return FromCoreResponse(lr), nil
+	return fromCoreResponseForKind(lr, kind, openRouter), nil
 }

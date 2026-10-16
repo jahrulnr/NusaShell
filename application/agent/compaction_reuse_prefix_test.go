@@ -94,8 +94,8 @@ func TestReuseCompactionRequestSharesLiveTurnPrefix(t *testing.T) {
 
 	toolDefs := svc.TurnToolDefs(run, settings)
 	system := buildSystemPromptForRun(run, conv, settings.UserPrompt)
-	cache := buildPromptCachePolicyForRequest(settings, providerMeta, "model", conv.ID, promptCachePrefixForRun(run), system, toolDefs)
-	live := svc.buildTurnRequest(run, pc, cloneConversation(conv), "", "model", "high", toolDefs, settings, false, nil, 4000, cache, caps)
+	cache := buildPromptCachePolicyForRequest(settings, providerMeta, "model", conv.ID, PromptCachePrefixForRun(run), system, toolDefs)
+	live := svc.buildTurnRequest(run, pc, conv.Clone(), "", "model", "high", toolDefs, settings, false, nil, 4000, cache, caps)
 	liveCore := appprovider.ToCoreRequest(live, pc.Kind, pc.OpenRouter)
 
 	turn := &compactionTurn{run: run, tools: toolDefs, effort: "high", promptCache: cache}

@@ -27,6 +27,6 @@ func (a *Service) DeliverPeerMessage(targetID, fromID, content string) error {
 	}); err != nil {
 		return err
 	}
-	a.WakePendingPeerMessage(targetID)
+	a.startIdleConversationTurn(targetID, true)
 	return nil
 }

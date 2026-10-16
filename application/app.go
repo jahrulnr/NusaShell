@@ -627,7 +627,7 @@ func NewApp(deps Deps) *App {
 	// this event and answers via the agent.ask.answer RPC.
 	if app.AskQuestions != nil {
 		app.AskQuestions.SetOnAsk(func(runID, callID, conversationID string, req domain.AskQuestionRequest) {
-			app.Bus.Emit(contracts.EventAskPending, askPendingEvent(conversationID, runID, callID, req))
+			app.Bus.Emit(contracts.EventAskPending, agent.AskPendingEvent(conversationID, runID, callID, req))
 		})
 	}
 	// Wire ACP run snapshots, permission requests, and session mode changes to
@@ -640,13 +640,13 @@ func NewApp(deps Deps) *App {
 		)
 	}); ok {
 		sink.SetCallbacks(
-			func(run *domain.AcpRun) { app.emitAcpRun(contracts.EventAcpRunUpdated, run) },
+			func(run *domain.AcpRun) { app.subagentService().EmitRun(contracts.EventAcpRunUpdated, run) },
 			func(run *domain.AcpRun) {
-				app.emitAcpRun(contracts.EventAcpRunDone, run)
-				app.goSafe("acp", func() { app.onAcpRunDone(run) })
+				app.subagentService().EmitRun(contracts.EventAcpRunDone, run)
+				app.goSafe("acp", func() { app.subagentService().OnRunDone(run) })
 			},
 			func(run *domain.AcpRun, req domain.AcpPermissionRequest) {
-				app.emitAcpRun(contracts.EventAcpRunUpdated, run)
+				app.subagentService().EmitRun(contracts.EventAcpRunUpdated, run)
 				perm := contracts.AcpPermissionDTO{
 					ID: req.ID, SessionID: req.SessionID, ToolTitle: req.ToolTitle, ToolKind: req.ToolKind,
 					Paths: req.Paths, PathCount: len(req.Paths),
@@ -663,7 +663,7 @@ func NewApp(deps Deps) *App {
 				app.Bus.Emit(contracts.EventAcpSessionModeChanged, contracts.AcpModeChangedEvent{
 					RunID: run.ID, ModeID: run.CurrentModeID, Source: source,
 				})
-				app.emitAcpRun(contracts.EventAcpRunUpdated, run)
+				app.subagentService().EmitRun(contracts.EventAcpRunUpdated, run)
 			},
 		)
 	}
@@ -742,9 +742,9 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 	case strings.HasPrefix(method, "memory."):
 		return a.memoryService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "experience."):
-		return a.dispatchExperience(method, payload)
+		return a.learnService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "learning."):
-		return a.dispatchLearning(method, payload)
+		return a.learnService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "docs."):
 		return a.toolsService().Dispatch(method, payload)
 	case strings.HasPrefix(method, "settings."):

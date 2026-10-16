@@ -108,11 +108,33 @@ type Message struct {
 	Reasoning string // final reasoning (mirrors last reasoning step, for backward compat)
 	// ReasoningExtra holds opaque provider reasoning state for OpenAI-family
 	// Responses/Codex/compat replay (typically the reasoning item JSON that
-	// includes encrypted_content). Distinct from Conversation.CompactionBlob.
+	// includes encrypted_content) and Anthropic thinking replay (signature /
+	// redacted_thinking data). Distinct from Conversation.CompactionBlob.
 	// UI text stays in Reasoning; never log or surface this blob.
 	ReasoningExtra json.RawMessage `json:"ReasoningExtra,omitempty"`
-	Steps          []MessageStep
-	Model          string
+	// ReasoningExtraFor records which provider family produced the opaque
+	// ReasoningExtra payload (for example "anthropic", "openai", "openrouter",
+	// "gemini", or "codex"). The request conversion layer drops extras whose
+	// recorded producer does not match the target provider family so a
+	// provider switch never echoes a foreign payload to a wire that cannot
+	// interpret it. Empty means legacy data with no recorded producer.
+	ReasoningExtraFor string `json:"ReasoningExtraFor,omitempty"`
+	// ReasoningExtraUpstream records the gateway-reported upstream that
+	// produced the opaque payload (OpenRouter's top-level "provider" name,
+	// e.g. "Nvidia"). Replay gating drops the extra when the request pins a
+	// different upstream route (Conversation.ProviderRoute); auto-routed
+	// requests never gate on it.
+	ReasoningExtraUpstream string `json:"ReasoningExtraUpstream,omitempty"`
+	Steps                  []MessageStep
+	// Model stays the model the user requested for this turn: it is
+	// re-resolved for follow-up turns, telemetry pricing, and display, so a
+	// gateway-served slug must not overwrite it.
+	Model string
+	// ServedModel records the model the provider's response actually ran on
+	// (OpenRouter's served slug behind an alias like openrouter/free,
+	// Anthropic's dated model id). Empty when the provider reported none or
+	// echoed the requested model unchanged.
+	ServedModel    string `json:",omitempty"`
 	ProviderID     string // provider that served this turn; "" for legacy messages
 	Usage          *Usage
 	CreatedAt      time.Time

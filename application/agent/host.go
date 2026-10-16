@@ -48,7 +48,7 @@ func (a *Service) chatMessagesForProvider(c *domain.Conversation, pendingMsgID s
 	if a != nil && a.deps.ChatMessages != nil {
 		return a.deps.ChatMessages(c, pendingMsgID, caps)
 	}
-	return chatMessages(c, pendingMsgID, caps)
+	return ChatMessages(c, pendingMsgID, caps)
 }
 
 func (a *Service) compactionPrefixMessageCount(c *domain.Conversation, caps ModelCapabilities) int {
@@ -56,7 +56,7 @@ func (a *Service) compactionPrefixMessageCount(c *domain.Conversation, caps Mode
 		return 0
 	}
 	count := min(c.CompactionPrefixMessages, len(c.Messages))
-	prefix := cloneConversation(c)
+	prefix := c.Clone()
 	prefix.Messages = append([]domain.Message(nil), c.Messages[:count]...)
 	return len(a.chatMessagesForProvider(prefix, "", caps))
 }

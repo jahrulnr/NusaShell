@@ -14,7 +14,11 @@ const (
 type lazyTurnRecord struct {
 	ConversationID string
 	RunID          string
-	CreatedAt      time.Time
+	// UserMessageID is the persisted user message of the first turn. The
+	// dedup replay returns it so a retried start settles onto the same
+	// transcript row.
+	UserMessageID string
+	CreatedAt     time.Time
 }
 
 func validateConversationKey(key string) error {

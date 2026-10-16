@@ -15,6 +15,7 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
+	"nusashell/pkg/yamlmd"
 )
 
 const (
@@ -92,7 +93,7 @@ func (t *Toolbox) execMcpInstall(ctx context.Context, argsJSON []byte) (string, 
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if t.PluginInstaller == nil {
-		return "", depMissing("plugin installer not available")
+		return "", errors.New("plugin installer not available")
 	}
 	var src domain.PluginInstallSource
 	switch args.Source {
@@ -124,7 +125,7 @@ func (t *Toolbox) execMcpInstall(ctx context.Context, argsJSON []byte) (string, 
 	if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 		dropper.Drop(p.Manifest.MCPServerID())
 	}
-	return yamlMD(map[string]any{"status": "installed", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version}, "Plugin installed. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
+	return yamlmd.MD(map[string]any{"status": "installed", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version}, "Plugin installed. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
 }
 
 func (t *Toolbox) execMcpServerAdd(ctx context.Context, argsJSON []byte) (string, error) {
@@ -145,7 +146,7 @@ func (t *Toolbox) execMcpServerAdd(ctx context.Context, argsJSON []byte) (string
 		return "", fmt.Errorf("name is required")
 	}
 	if t.Plugins == nil {
-		return "", depMissing("plugin store not available")
+		return "", errors.New("plugin store not available")
 	}
 	transport := domain.PluginTransport(strings.TrimSpace(args.Transport))
 	if transport == "" {
@@ -181,7 +182,7 @@ func (t *Toolbox) execMcpServerAdd(ctx context.Context, argsJSON []byte) (string
 	if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 		dropper.Drop(p.Manifest.MCPServerID())
 	}
-	return yamlMD(map[string]any{"status": "added", "name": p.Manifest.Name, "id": p.Manifest.ID}, "Server added. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
+	return yamlmd.MD(map[string]any{"status": "added", "name": p.Manifest.Name, "id": p.Manifest.ID}, "Server added. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
 }
 
 func (t *Toolbox) execMcpRegister(ctx context.Context, argsJSON []byte) (string, error) {
@@ -195,7 +196,7 @@ func (t *Toolbox) execMcpRegister(ctx context.Context, argsJSON []byte) (string,
 		return "", fmt.Errorf("source is required: absolute path to a plugin folder containing manifest.json")
 	}
 	if t.Plugins == nil {
-		return "", depMissing("plugin store not available")
+		return "", errors.New("plugin store not available")
 	}
 	absSource, err := filepath.Abs(args.Source)
 	if err != nil {
@@ -209,7 +210,7 @@ func (t *Toolbox) execMcpRegister(ctx context.Context, argsJSON []byte) (string,
 	if mcp, ok := t.MCP.(interface{ Drop(string) }); ok {
 		mcp.Drop(p.Manifest.MCPServerID())
 	}
-	return yamlMD(map[string]any{"status": "registered", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version}, "Plugin registered. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
+	return yamlmd.MD(map[string]any{"status": "registered", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version}, "Plugin registered. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
 }
 
 func (t *Toolbox) execMcpEnable(ctx context.Context, argsJSON []byte) (string, error) {
@@ -223,7 +224,7 @@ func (t *Toolbox) execMcpEnable(ctx context.Context, argsJSON []byte) (string, e
 		return "", fmt.Errorf("id is required (use mcp_list to see registered plugins)")
 	}
 	if t.Plugins == nil || t.MCP == nil {
-		return "", depMissing("plugin runtime not available")
+		return "", errors.New("plugin runtime not available")
 	}
 	p, err := t.Plugins.Get(args.ID)
 	if err != nil {
@@ -233,7 +234,7 @@ func (t *Toolbox) execMcpEnable(ctx context.Context, argsJSON []byte) (string, e
 	// already_enabled signal without reconnecting. The agent should use
 	// tool_list or mcp_search to discover tools on an enabled server.
 	if tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID()); ok {
-		return yamlMD(map[string]any{
+		return yamlmd.MD(map[string]any{
 			"status": "already_enabled",
 			"server": p.Manifest.ID,
 			"tools":  len(tools),
@@ -245,7 +246,7 @@ func (t *Toolbox) execMcpEnable(ctx context.Context, argsJSON []byte) (string, e
 	if err != nil {
 		return "", fmt.Errorf("mcp_enable %q: %w", args.ID, err)
 	}
-	return yamlMD(map[string]any{
+	return yamlmd.MD(map[string]any{
 		"status": "enabled",
 		"server": p.Manifest.ID,
 		"tools":  len(tools),
@@ -263,14 +264,14 @@ func (t *Toolbox) execMcpDisable(ctx context.Context, argsJSON []byte) (string, 
 		return "", fmt.Errorf("id is required")
 	}
 	if t.MCP == nil {
-		return "", depMissing("plugin runtime not available")
+		return "", errors.New("plugin runtime not available")
 	}
 	dropper, ok := t.MCP.(interface{ Drop(string) })
 	if !ok {
 		return "", fmt.Errorf("mcp runtime does not support disconnect")
 	}
 	dropper.Drop("plugin:" + args.ID)
-	return yamlBlock(map[string]any{"status": "disabled"}), nil
+	return yamlmd.Block(map[string]any{"status": "disabled"}), nil
 }
 
 func (t *Toolbox) execMcpUnregister(ctx context.Context, argsJSON []byte) (string, error) {
@@ -284,7 +285,7 @@ func (t *Toolbox) execMcpUnregister(ctx context.Context, argsJSON []byte) (strin
 		return "", fmt.Errorf("id is required")
 	}
 	if t.Plugins == nil {
-		return "", depMissing("plugin store not available")
+		return "", errors.New("plugin store not available")
 	}
 	if _, err := t.Plugins.Get(args.ID); err != nil {
 		return "", fmt.Errorf("plugin %q not found", args.ID)
@@ -295,12 +296,12 @@ func (t *Toolbox) execMcpUnregister(ctx context.Context, argsJSON []byte) (strin
 	if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 		dropper.Drop("plugin:" + args.ID)
 	}
-	return yamlBlock(map[string]any{"status": "unregistered"}), nil
+	return yamlmd.Block(map[string]any{"status": "unregistered"}), nil
 }
 
 func (t *Toolbox) execMcpList(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Plugins == nil {
-		return yamlBlock(map[string]any{"count": 0, "plugins": []any{}}), nil
+		return yamlmd.Block(map[string]any{"count": 0, "plugins": []any{}}), nil
 	}
 	plugins, err := t.Plugins.List()
 	if err != nil {

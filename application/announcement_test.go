@@ -101,7 +101,7 @@ func TestSkillAnnouncementIncludesName(t *testing.T) {
 		Bus:           NewBus(),
 		Logs:          &fakeLogStore{},
 	}
-	if _, rpcErr := app.handleSkillsSave(contracts.SkillSaveRequest{Name: "tool-mapping", Content: "# Tool mapping"}); rpcErr != nil {
+	if _, rpcErr := app.skillsService().HandleSave(contracts.SkillSaveRequest{Name: "tool-mapping", Content: "# Tool mapping"}); rpcErr != nil {
 		t.Fatalf("handleSkillsSave: %v", rpcErr)
 	}
 	if got := conv.PendingAnnouncements[0].Message; got != "skill tool-mapping has changed, re-read if you are using this skill" {

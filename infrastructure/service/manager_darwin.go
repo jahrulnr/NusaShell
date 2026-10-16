@@ -4,6 +4,7 @@ package service
 
 import (
 	"fmt"
+	"nusashell/pkg/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,16 +37,8 @@ func launchdAgentsDir() string {
 	return filepath.Join(home, "Library", "LaunchAgents")
 }
 
-func (m *darwinManager) plistPath() string {
-	return filepath.Join(m.plistDir, LaunchdLabel+".plist")
-}
-
-func (m *darwinManager) domain() string {
-	return fmt.Sprintf("gui/%d", m.uid())
-}
-
 func (m *darwinManager) target() string {
-	return m.domain() + "/" + LaunchdLabel
+	return fmt.Sprintf("gui/%d/%s", m.uid(), LaunchdLabel)
 }
 
 func (m *darwinManager) Install() error {
@@ -65,7 +58,7 @@ func (m *darwinManager) Install() error {
 	if err := os.MkdirAll(m.plistDir, 0o755); err != nil {
 		return err
 	}
-	plistPath := m.plistPath()
+	plistPath := filepath.Join(m.plistDir, LaunchdLabel+".plist")
 	if err := assertNotSymlink(plistPath); err != nil {
 		return err
 	}
@@ -73,19 +66,19 @@ func (m *darwinManager) Install() error {
 	if snapshotErr != nil {
 		return snapshotErr
 	}
-	if err := atomicWrite(plistPath, []byte(LaunchdPlist(m.opts, env)), 0o644); err != nil {
+	if err := atomicfile.Write(plistPath, []byte(LaunchdPlist(m.opts, env)), 0o644); err != nil {
 		return err
 	}
 	// bootout first so a re-install replaces the loaded definition; a job that
 	// was never loaded reports an error here which is safe to ignore.
 	_, _ = m.run.Run("launchctl", "bootout", m.target())
-	if _, err := m.run.Run("launchctl", "bootstrap", m.domain(), plistPath); err != nil {
+	if _, err := m.run.Run("launchctl", "bootstrap", fmt.Sprintf("gui/%d", m.uid()), plistPath); err != nil {
 		// Restore the previous definition so a failed bootstrap never leaves a
 		// half-installed agent behind.
 		if previous == nil {
 			_ = os.Remove(plistPath)
 		} else {
-			_ = atomicWrite(plistPath, previous, 0o644)
+			_ = atomicfile.Write(plistPath, previous, 0o644)
 		}
 		return fmt.Errorf("launchctl bootstrap failed: %w", err)
 	}
@@ -97,7 +90,7 @@ func (m *darwinManager) Uninstall() error {
 		return err
 	}
 	_, _ = m.run.Run("launchctl", "bootout", m.target())
-	plistPath := m.plistPath()
+	plistPath := filepath.Join(m.plistDir, LaunchdLabel+".plist")
 	if _, err := os.Lstat(plistPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -118,7 +111,7 @@ func (m *darwinManager) Uninstall() error {
 }
 
 func (m *darwinManager) Status() (Status, error) {
-	plistPath := m.plistPath()
+	plistPath := filepath.Join(m.plistDir, LaunchdLabel+".plist")
 	st := Status{DefinitionPath: plistPath}
 	if content, err := os.ReadFile(plistPath); err == nil {
 		st.Installed = true

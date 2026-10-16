@@ -271,7 +271,7 @@ func (i *Installer) installFromCatalog(ctx context.Context, id, stage string) (s
 	}
 	defer body.Close()
 
-	if err := extractTarGz(body, stage); err != nil {
+	if err := archive.UntarGz(body, stage, nil); err != nil {
 		return "", fmt.Errorf("plugin install: extract release: %w", err)
 	}
 
@@ -300,7 +300,7 @@ func (i *Installer) installFromGitHub(ctx context.Context, rawURL, subdir, ref, 
 	}
 	defer body.Close()
 
-	if err := extractTarGz(body, stage); err != nil {
+	if err := archive.UntarGz(body, stage, nil); err != nil {
 		return "", fmt.Errorf("plugin install: extract repo: %w", err)
 	}
 
@@ -353,7 +353,7 @@ func (i *Installer) installFromZip(data []byte, stage string) (string, error) {
 	if err := os.MkdirAll(extractDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := extractZip(&zr.Reader, extractDir); err != nil {
+	if err := archive.Unzip(&zr.Reader, extractDir, nil); err != nil {
 		return "", fmt.Errorf("plugin install: extract zip: %w", err)
 	}
 
@@ -410,14 +410,6 @@ func (i *Installer) resolveCatalogIcon(ctx context.Context, key, icon string) st
 		return FallbackIcon
 	}
 	return DataURL(data)
-}
-
-func extractTarGz(rc io.ReadCloser, dest string) error {
-	return archive.UntarGz(rc, dest, nil)
-}
-
-func extractZip(zr *zip.Reader, dest string) error {
-	return archive.Unzip(zr, dest, nil)
 }
 
 func findUniqueManifestDir(root string) (string, error) {

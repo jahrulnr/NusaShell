@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"nusashell/application/agent"
 	"nusashell/application/service/tooloutput"
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -50,7 +51,7 @@ func TestHandleToolStopInterruptsOnlyTheSelectedTool(t *testing.T) {
 
 	done := make(chan toolExecResult, 1)
 	go func() {
-		done <- app.runOneTool(run, "msg-1", domain.ToolCall{ID: "tool-1", Name: "exec", Args: `{}`}, ModelCapabilities{}, domain.Settings{}, 1)
+		done <- app.agentService().RunOneTool(run, "msg-1", domain.ToolCall{ID: "tool-1", Name: "exec", Args: `{}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	}()
 
 	select {
@@ -59,7 +60,7 @@ func TestHandleToolStopInterruptsOnlyTheSelectedTool(t *testing.T) {
 		t.Fatal("exec did not start")
 	}
 
-	if _, rpcErr := app.handleToolStop(contracts.ToolStopRequest{RunID: run.ID, ToolCallID: "tool-1"}); rpcErr != nil {
+	if _, rpcErr := app.agentService().HandleToolStop(contracts.ToolStopRequest{RunID: run.ID, ToolCallID: "tool-1"}); rpcErr != nil {
 		t.Fatalf("handleToolStop: %v", rpcErr)
 	}
 
@@ -98,14 +99,14 @@ func TestExecuteTurnToolsContinuesAfterPerToolStop(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- app.executeTurnTools(run, "msg-1", conv.Messages[1].ToolCalls, ModelCapabilities{}, domain.Settings{}, 1)
+		done <- app.agentService().ExecuteTurnTools(run, "msg-1", conv.Messages[1].ToolCalls, ModelCapabilities{}, domain.Settings{}, 1)
 	}()
 	select {
 	case <-box.started:
 	case <-time.After(time.Second):
 		t.Fatal("exec did not start")
 	}
-	if _, rpcErr := app.handleToolStop(contracts.ToolStopRequest{RunID: run.ID, ToolCallID: "tool-1"}); rpcErr != nil {
+	if _, rpcErr := app.agentService().HandleToolStop(contracts.ToolStopRequest{RunID: run.ID, ToolCallID: "tool-1"}); rpcErr != nil {
 		t.Fatalf("handleToolStop: %v", rpcErr)
 	}
 	select {
@@ -130,7 +131,7 @@ func TestExecuteTurnToolsContinuesAfterPerToolStop(t *testing.T) {
 func TestHandleToolStopRejectsUnknownToolCall(t *testing.T) {
 	run := &TurnRun{ID: "run-1", Ctx: context.Background()}
 	app := &App{runs: map[string]*TurnRun{run.ID: run}}
-	if _, rpcErr := app.handleToolStop(contracts.ToolStopRequest{RunID: run.ID, ToolCallID: "missing"}); rpcErr == nil || rpcErr.Code != contracts.CodeNotFound {
+	if _, rpcErr := app.agentService().HandleToolStop(contracts.ToolStopRequest{RunID: run.ID, ToolCallID: "missing"}); rpcErr == nil || rpcErr.Code != contracts.CodeNotFound {
 		t.Fatalf("unknown tool stop error = %+v, want NOT_FOUND", rpcErr)
 	}
 }
@@ -180,7 +181,7 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 				{"conversation", `{"op":"list"}`},
 			}
 			for _, call := range allowed {
-				res := app.runOneTool(run, "", domain.ToolCall{
+				res := app.agentService().RunOneTool(run, "", domain.ToolCall{
 					ID:   "call-" + call.name,
 					Name: call.name,
 					Args: call.args,
@@ -201,7 +202,7 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 				{Name: "skill", Args: `{"op":"save"}`},
 				{Name: "skill", Args: `{"op":"delete"}`},
 			} {
-				res := app.runOneTool(run, "", call, ModelCapabilities{}, domain.Settings{}, 1)
+				res := app.agentService().RunOneTool(run, "", call, ModelCapabilities{}, domain.Settings{}, 1)
 				if res.Status != domain.ToolFailed {
 					t.Fatalf("learner skill mutation %s must fail, got %+v", call.Args, res)
 				}
@@ -212,7 +213,7 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 			}
 			for _, name := range banned {
 				before := len(box.calls)
-				res := app.runOneTool(run, "", domain.ToolCall{
+				res := app.agentService().RunOneTool(run, "", domain.ToolCall{
 					ID:   "call-ban-" + name,
 					Name: name,
 					Args: `{}`,
@@ -225,7 +226,7 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 				}
 			}
 
-			learn := app.runOneTool(run, "", domain.ToolCall{
+			learn := app.agentService().RunOneTool(run, "", domain.ToolCall{
 				ID:   "call-learn",
 				Name: learnerResultToolName,
 				Args: `{"consolidate":{"action":"no_op","reason_for_no_op":"nothing durable"}}`,
@@ -243,7 +244,7 @@ func TestLearningToolCallsRejectBannedTools(t *testing.T) {
 func TestLearnerResultToolRejectedForConversationAgent(t *testing.T) {
 	app := &App{Bus: NewBus(), Toolbox: &countingToolbox{}}
 	run := &TurnRun{ID: "conv-run", ToolKind: AgentConversation, Ctx: context.Background()}
-	res := app.runOneTool(run, "", domain.ToolCall{
+	res := app.agentService().RunOneTool(run, "", domain.ToolCall{
 		ID:   "call-learn",
 		Name: learnerResultToolName,
 		Args: `{"consolidate":{"action":"no_op","reason_for_no_op":"x"}}`,
@@ -266,7 +267,7 @@ func TestExecAsyncRejectedForHeadlessKinds(t *testing.T) {
 				`{"op":"list"}`,
 			} {
 				before := len(box.calls)
-				res := app.runOneTool(run, "", domain.ToolCall{
+				res := app.agentService().RunOneTool(run, "", domain.ToolCall{
 					ID: "call-exec", Name: "exec", Args: args,
 				}, ModelCapabilities{}, domain.Settings{}, 1)
 				if res.Status != domain.ToolFailed {
@@ -277,7 +278,7 @@ func TestExecAsyncRejectedForHeadlessKinds(t *testing.T) {
 				}
 			}
 			// Sync exec stays available to headless kinds.
-			res := app.runOneTool(run, "", domain.ToolCall{
+			res := app.agentService().RunOneTool(run, "", domain.ToolCall{
 				ID: "call-exec-sync", Name: "exec", Args: `{"command":"echo ok"}`,
 			}, ModelCapabilities{}, domain.Settings{}, 1)
 			if res.Status == domain.ToolFailed {
@@ -292,7 +293,7 @@ func TestExecAsyncAllowedForConversationAgent(t *testing.T) {
 	app := &App{Bus: NewBus(), Toolbox: box}
 	for _, kind := range []AgentKind{"", AgentConversation} {
 		run := &TurnRun{ID: "conv-run", ToolKind: kind, Ctx: context.Background()}
-		res := app.runOneTool(run, "", domain.ToolCall{
+		res := app.agentService().RunOneTool(run, "", domain.ToolCall{
 			ID: "call-bg", Name: "exec", Args: `{"command":"sleep 5","background":true}`,
 		}, ModelCapabilities{}, domain.Settings{}, 1)
 		if res.Status == domain.ToolFailed {
@@ -412,7 +413,7 @@ func TestFilterToolAttachmentsByCapsNotesInsideUntrustedEnvelope(t *testing.T) {
 	}
 	caps := ModelCapabilities{Audio: false} // audio not supported → note appended
 	content := "Speech generated and saved."
-	filtered, result := filterToolAttachmentsByCaps(atts, content, caps)
+	filtered, result := agent.FilterToolAttachmentsByCaps(atts, content, caps)
 	if len(filtered) != 0 {
 		t.Fatalf("audio attachment should be stripped, got %d attachments", len(filtered))
 	}
@@ -496,7 +497,7 @@ func TestExecuteTurnToolsRunsConcurrently(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		err := app.executeTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1)
+		err := app.agentService().ExecuteTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1)
 		done <- err
 	}()
 
@@ -535,7 +536,7 @@ func TestExecuteTurnToolsRespectsMaxParallelTools(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		err := app.executeTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, settings, 1)
+		err := app.agentService().ExecuteTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, settings, 1)
 		done <- err
 	}()
 
@@ -586,7 +587,7 @@ func TestExecuteTurnToolsPersistsResultsInOrder(t *testing.T) {
 	}
 	app, conv, run := newBarrierApp(t, toolCalls, orderedToolbox{})
 
-	if err := app.executeTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
+	if err := app.agentService().ExecuteTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	got := conv.Messages[1].ToolCalls
@@ -631,7 +632,7 @@ func TestContextTokensUsesLastRoundNotSum(t *testing.T) {
 	round1 := ChatUsage{InputTokens: 1000, OutputTokens: 50}  // prompt + first answer
 	round2 := ChatUsage{InputTokens: 1200, OutputTokens: 120} // prompt grew (tool result), final answer
 
-	summed := mergeUsage(round1, round2)
+	summed := agent.MergeUsage(round1, round2)
 	if summed.ContextTokens() != 2370 {
 		t.Fatalf("sanity: merged sum = %d", summed.ContextTokens())
 	}
@@ -721,7 +722,7 @@ func TestRunOneToolFileWriteEmitsTurnDiff(t *testing.T) {
 		Ctx:            context.Background(),
 		TurnDiff:       turndiff.New(turndiff.WithDisplayRoot(dir)),
 	}
-	res := app.runOneTool(run, "m1", domain.ToolCall{
+	res := app.agentService().RunOneTool(run, "m1", domain.ToolCall{
 		ID:   "tc1",
 		Name: "file_write",
 		Args: `{"path":"` + jsonEscape(path) + `","content":"hello\n"}`,
@@ -753,7 +754,7 @@ func TestRunOneToolFilePatchEmitsTurnDiff(t *testing.T) {
 		Ctx:            context.Background(),
 		TurnDiff:       turndiff.New(turndiff.WithDisplayRoot(dir)),
 	}
-	write := app.runOneTool(run, "m1", domain.ToolCall{
+	write := app.agentService().RunOneTool(run, "m1", domain.ToolCall{
 		ID: "tc1", Name: "file_write", Args: `{"path":"` + jsonEscape(path) + `","content":"line1\n"}`,
 	}, ModelCapabilities{}, domain.Settings{}, 1)
 	if write.Status != domain.ToolOK {
@@ -761,7 +762,7 @@ func TestRunOneToolFilePatchEmitsTurnDiff(t *testing.T) {
 	}
 	_, events, unsub := bus.Subscribe()
 	defer unsub()
-	patch := app.runOneTool(run, "m1", domain.ToolCall{
+	patch := app.agentService().RunOneTool(run, "m1", domain.ToolCall{
 		ID: "tc2", Name: "file_patch", Args: `{"path":"` + jsonEscape(path) + `","old_string":"line1\n","new_string":"line2\n"}`,
 	}, ModelCapabilities{}, domain.Settings{}, 1)
 	if patch.Status != domain.ToolOK {
@@ -787,7 +788,7 @@ func TestRunOneToolExecDoesNotProduceTurnDiff(t *testing.T) {
 		Ctx:            context.Background(),
 		TurnDiff:       turndiff.New(turndiff.WithDisplayRoot(ws)),
 	}
-	res := app.runOneTool(run, "m1", domain.ToolCall{
+	res := app.agentService().RunOneTool(run, "m1", domain.ToolCall{
 		ID:   "tc1",
 		Name: "exec",
 		Args: `{"command":"echo hello-exec"}`,
@@ -826,7 +827,7 @@ func TestInterruptTurnPersistsOperationPatch(t *testing.T) {
 	run.InitTurnDiff()
 	run.TurnDiff.TrackDelta(turndiff.AddFile("note.txt", "hello\n", nil))
 
-	app.interruptTurn(run, "m1", streamedTurnRound{Content: "halo"}, ChatUsage{}, 0, "model-x")
+	app.agentService().InterruptTurn(run, "m1", streamedTurnRound{Content: "halo"}, ChatUsage{}, 0, "model-x")
 
 	patchPath := filepath.Join(dir, "conversations", "c1", "operation", "run_patch.patch")
 	b, err := os.ReadFile(patchPath)

@@ -1,6 +1,9 @@
 package aiutil
 
-import "testing"
+import (
+	"nusashell/domain"
+	"testing"
+)
 
 // TestSanitizeToolName verifies that tool names with characters outside the
 // OpenAI Responses API pattern ^[a-zA-Z0-9_-]+$ are replaced with underscores.
@@ -27,7 +30,7 @@ func TestSanitizeToolName(t *testing.T) {
 		{"unicode", "tööl", "t__l"},
 	}
 	for _, tc := range cases {
-		if got := SanitizeToolName(tc.in); got != tc.want {
+		if got := domain.SanitizeToolName(tc.in); got != tc.want {
 			t.Errorf("%s: SanitizeToolName(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
 		}
 	}

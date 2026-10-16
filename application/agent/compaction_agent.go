@@ -46,8 +46,8 @@ func (p *compactionPass) rules() AgentRules {
 		// Terminal: the summary() tool call (or content fallback) is
 		// valid when it is long enough and does not echo the assistant.
 		Terminal: func(st *RoundState, resp ChatResponse) bool {
-			summary := extractCompactionSummary(resp)
-			if compactionSummaryEchoesAssistant(summary, p.request.Messages) {
+			summary := ExtractCompactionSummary(resp)
+			if CompactionSummaryEchoesAssistant(summary, p.request.Messages) {
 				summary = ""
 			}
 			p.lastLen = len(strings.TrimSpace(summary))

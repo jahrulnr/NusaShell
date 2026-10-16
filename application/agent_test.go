@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"nusashell/application/agent"
+	"nusashell/application/conversation"
 	"nusashell/application/provider"
 	"nusashell/application/service/learnedparams"
 	"nusashell/contracts"
@@ -38,7 +40,7 @@ func TestUpdateToolResultUpdatesChronologicalToolCallStep(t *testing.T) {
 		}},
 	}}}
 
-	got := app.updateToolResult(conversation, "message-1", "call-1", domain.ToolOK, "first\nsecond", nil)
+	got := app.agentService().UpdateToolResult(conversation, "message-1", "call-1", domain.ToolOK, "first\nsecond", nil)
 
 	if got.Messages[0].ToolCalls[0].Status != domain.ToolOK || got.Messages[0].ToolCalls[0].Output != "first\nsecond" {
 		t.Fatalf("flat tool call = %+v, want completed result", got.Messages[0].ToolCalls[0])
@@ -58,13 +60,13 @@ func TestLastFailedAssistantIndex(t *testing.T) {
 	ok := domain.Message{ID: "a2", Role: domain.RoleAssistant, Status: domain.StatusDone, Content: "recovered"}
 	user := domain.Message{ID: "u1", Role: domain.RoleUser, Status: domain.StatusDone, Content: "hi"}
 
-	if got := lastFailedAssistantIndex([]domain.Message{user, hyd, failed}); got != 2 {
+	if got := agent.LastFailedAssistantIndex([]domain.Message{user, hyd, failed}); got != 2 {
 		t.Fatalf("last failed = %d, want 2", got)
 	}
-	if got := lastFailedAssistantIndex([]domain.Message{user, hyd, failed, ok}); got != -1 {
+	if got := agent.LastFailedAssistantIndex([]domain.Message{user, hyd, failed, ok}); got != -1 {
 		t.Fatalf("after successful retry last failed = %d, want -1", got)
 	}
-	if got := lastFailedAssistantIndex([]domain.Message{user, ok}); got != -1 {
+	if got := agent.LastFailedAssistantIndex([]domain.Message{user, ok}); got != -1 {
 		t.Fatalf("successful turn last failed = %d, want -1", got)
 	}
 }
@@ -88,9 +90,9 @@ func TestShouldContinueFailedTurn(t *testing.T) {
 // longer touches hydration, so the checkpoint stays at its epoch anchor
 // (after the first user / handover) across rounds.
 func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
-	conversation := &domain.Conversation{ID: "c1"}
+	conv := &domain.Conversation{ID: "c1"}
 	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conversation}},
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
 		Toolbox:       &recordingToolbox{},
 		Bus:           NewBus(),
 	}
@@ -109,11 +111,11 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 		return count
 	}
 
-	app.addTurnMessages(conversation,
+	app.agentService().AddTurnMessages(conv,
 		domain.Message{ID: "u1", Role: domain.RoleUser, Content: "first", Status: domain.StatusDone},
 		domain.Message{ID: "a1", Role: domain.RoleAssistant},
 	)
-	if err := bindConversation(app.Conversations, conversation).Save(); err != nil {
+	if err := conversation.Bind(app.Conversations, conv).Save(); err != nil {
 		t.Fatal(err)
 	}
 	if got := countCheckpoints(); got != 1 {
@@ -125,7 +127,7 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app.addTurnMessages(repo.Conversation(),
+	app.agentService().AddTurnMessages(repo.Conversation(),
 		domain.Message{ID: "u2", Role: domain.RoleUser, Content: "follow up", Status: domain.StatusDone},
 		domain.Message{ID: "a2", Role: domain.RoleAssistant},
 	)
@@ -136,11 +138,11 @@ func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
 		t.Fatalf("checkpoints after later user message = %d, want 1", got)
 	}
 
-	conversation, err = app.Conversations.Get("c1")
+	conv, err = app.Conversations.Get("c1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.persistCompactedConversation(conversation, "summary", 1_000_000); err != nil {
+	if err := app.agentService().PersistCompactedConversation(conv, "summary", 1_000_000); err != nil {
 		t.Fatalf("persistCompactedConversation: %v", err)
 	}
 	if got := countCheckpoints(); got != 1 {
@@ -159,7 +161,7 @@ func TestChatMessagesSkipsWhitespaceOnlyAssistantTurns(t *testing.T) {
 		}, Status: domain.StatusDone},
 		{ID: "pending", Role: domain.RoleAssistant},
 	}}
-	got := chatMessages(c, "pending", ModelCapabilities{})
+	got := agent.ChatMessages(c, "pending", ModelCapabilities{})
 	if len(got) != 4 {
 		t.Fatalf("got %d messages, want user + trimmed text + assistant + tool", len(got))
 	}
@@ -180,7 +182,7 @@ func TestChatMessagesKeepsReasoningOnlyAssistantTurns(t *testing.T) {
 		{ID: "a1", Role: domain.RoleAssistant, Reasoning: "thinking", Status: domain.StatusDone},
 		{ID: "pending", Role: domain.RoleAssistant},
 	}}
-	got := chatMessages(c, "pending", ModelCapabilities{Vision: true})
+	got := agent.ChatMessages(c, "pending", ModelCapabilities{Vision: true})
 	if len(got) != 2 {
 		t.Fatalf("got %d messages, want user + reasoning-only assistant", len(got))
 	}
@@ -237,7 +239,7 @@ func TestResolveCompactionAdapterReuseRequiresActiveModel(t *testing.T) {
 		CompactionWorkflow: domain.CompactionWorkflowReuse,
 		CompactionModel:    "other-provider:cheap-model",
 	}
-	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "active-model", 200000, settings)
+	gotAdapter, gotModel, gotWindow := app.agentService().ResolveCompactionAdapter(context.Background(), defaultAdapter, "active-model", 200000, settings)
 	if gotAdapter.Provider != defaultProvider || gotModel != "active-model" || gotWindow != 200000 {
 		t.Fatalf("reuse compaction route = adapter=%v model=%q window=%d, want active route", gotAdapter.Provider, gotModel, gotWindow)
 	}
@@ -255,7 +257,7 @@ func TestResolveCompactionAdapter_defaultUsesCurrentModel(t *testing.T) {
 	}
 	defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 	settings := domain.Settings{}
-	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
+	gotAdapter, gotModel, gotWindow := app.agentService().ResolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
 	if gotAdapter.Provider != defaultAdapter.Provider {
 		t.Fatal("expected default adapter when CompactionModel empty")
 	}
@@ -283,7 +285,7 @@ func TestResolveCompactionAdapter_overrideUsesSeparateModel(t *testing.T) {
 	}
 	defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 	settings := domain.Settings{CompactionModel: "cheap-prov:haiku"}
-	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
+	gotAdapter, gotModel, gotWindow := app.agentService().ResolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
 	if gotAdapter.Provider == defaultAdapter.Provider {
 		t.Fatal("expected a different adapter for compaction model override")
 	}
@@ -301,7 +303,7 @@ func TestResolveCompactionAdapterCodexKeepsSameModel(t *testing.T) {
 	app := &App{}
 	settings := domain.Settings{CompactionModel: "other-provider:cheap-model"}
 
-	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "gpt-5-codex", 400000, settings)
+	gotAdapter, gotModel, gotWindow := app.agentService().ResolveCompactionAdapter(context.Background(), defaultAdapter, "gpt-5-codex", 400000, settings)
 	if gotAdapter.Provider != defaultProvider {
 		t.Fatal("Codex compaction must keep the current adapter")
 	}
@@ -324,7 +326,7 @@ func TestResolveCompactionAdapter_overrideFallsBackOnResolveError(t *testing.T) 
 	}
 	defaultAdapter := stubProviderContext(&fakeVisionAdapter{description: "default"})
 	settings := domain.Settings{CompactionModel: "no-such-prov:no-such-model"}
-	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
+	gotAdapter, gotModel, gotWindow := app.agentService().ResolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
 	if gotAdapter.Provider != defaultAdapter.Provider {
 		t.Fatal("expected fallback to default adapter on resolve error")
 	}
@@ -345,13 +347,13 @@ func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	// Catalog model window wins over the global cap — the cap is only a
 	// fallback for models not in the catalog (avoids "1M model, why 200k?").
 	app := &App{}
-	if got := app.resolveContextWindow(provider, "long-model", settings); got != 1_000_000 {
+	if got := app.agentService().ResolveContextWindow(provider, "long-model", settings); got != 1_000_000 {
 		t.Fatalf("long model context = %d, want model window 1000000", got)
 	}
-	if got := app.resolveContextWindow(provider, "small-model", settings); got != 128_000 {
+	if got := app.agentService().ResolveContextWindow(provider, "small-model", settings); got != 128_000 {
 		t.Fatalf("small model context = %d, want model window 128000", got)
 	}
-	if got := app.resolveContextWindow(provider, "unknown", settings); got != 200_000 {
+	if got := app.agentService().ResolveContextWindow(provider, "unknown", settings); got != 200_000 {
 		t.Fatalf("unknown model context = %d, want fallback 200000", got)
 	}
 	if got := domain.EffectiveContextWindow(1_000_000, 0); got != 1_000_000 {
@@ -376,14 +378,14 @@ func TestResolveContextWindowLearnedCap(t *testing.T) {
 	settings := domain.Settings{MaxInputTokens: 200_000}
 	app := &App{learnedParams: cache}
 
-	if got := app.resolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 262144 {
+	if got := app.agentService().ResolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 262144 {
 		t.Fatalf("learned cap should override catalog: got %d, want 262144", got)
 	}
 	// A larger cap observed later does not erase the smaller cap. The
 	// registry keeps the smallest cap, so the 262144 limit stays in effect.
 	cache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
 		`This model's maximum context length is 2_000_000 tokens.`)
-	if got := app.resolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 262144 {
+	if got := app.agentService().ResolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 262144 {
 		t.Fatalf("larger cap must not erase smaller cap: got %d, want 262144", got)
 	}
 
@@ -392,11 +394,11 @@ func TestResolveContextWindowLearnedCap(t *testing.T) {
 	bigCache.LearnFrom400("tokenrouter", "qwen/qwen3.8-max-free",
 		`This model's maximum context length is 2_000_000 tokens.`)
 	bigApp := &App{learnedParams: bigCache}
-	if got := bigApp.resolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 1_000_000 {
+	if got := bigApp.agentService().ResolveContextWindow(provider, "qwen/qwen3.8-max-free", settings); got != 1_000_000 {
 		t.Fatalf("larger learned cap must not override catalog: got %d, want 1000000", got)
 	}
 	// Unknown model still falls back to settings, ignoring unrelated learned cap.
-	if got := app.resolveContextWindow(provider, "unknown", settings); got != 200_000 {
+	if got := app.agentService().ResolveContextWindow(provider, "unknown", settings); got != 200_000 {
 		t.Fatalf("unknown model context = %d, want fallback 200000", got)
 	}
 }
@@ -414,7 +416,7 @@ func TestInterruptTurnKeepsReasoning(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.interruptTurn(run, "m1", streamedTurnRound{Content: "hello", Reasoning: "think"}, ChatUsage{InputTokens: 100, OutputTokens: 4}, ChatUsage{InputTokens: 100, OutputTokens: 4}.ContextTokens(), "model-x")
+	app.agentService().InterruptTurn(run, "m1", streamedTurnRound{Content: "hello", Reasoning: "think"}, ChatUsage{InputTokens: 100, OutputTokens: 4}, ChatUsage{InputTokens: 100, OutputTokens: 4}.ContextTokens(), "model-x")
 
 	got := conv.Messages[0]
 	if got.Content != "hello" || got.Reasoning != "think" || got.Status != domain.StatusInterrupted {
@@ -446,7 +448,7 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 		Toolbox:       box,
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	if err := app.executeTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err == nil {
+	if err := app.agentService().ExecuteTurnTools(run, "m1", conv.Messages[1].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err == nil {
 		t.Fatal("want context error")
 	}
 	if len(box.names) != 0 {
@@ -522,7 +524,7 @@ func TestExecuteTurnToolsKeepsHydrationOnItemOnlyPatch(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: WithConversationID(context.Background(), "c1"), Cancel: func() {}}
 
-	if err := app.executeTurnTools(run, "m1", conv.Messages[2].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
+	if err := app.agentService().ExecuteTurnTools(run, "m1", conv.Messages[2].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}, 1); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	// The hydration checkpoint must still be present.
@@ -567,7 +569,7 @@ func TestRunOneToolKeepsPartialOutputInError(t *testing.T) {
 	toolbox := &partialOutputToolbox{err: partialErr}
 	app := &App{Bus: NewBus(), Toolbox: toolbox}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background(), Cancel: func() {}}
-	res := app.runOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{}`}, ModelCapabilities{}, domain.Settings{}, 1)
+	res := app.agentService().RunOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.Status != domain.ToolFailed {
 		t.Fatalf("status = %s, want failed", res.Status)
 	}
@@ -646,7 +648,7 @@ func TestRunOneToolStreamsDeltas(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	app := &App{RoundStreams: reg, Bus: NewBus(), Toolbox: &streamedRecordingToolbox{recordingToolbox: &recordingToolbox{}}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
-	res := app.runOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{}, 1)
+	res := app.agentService().RunOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.Output != "streamed-ok" {
 		t.Fatalf("output = %q", res.Output)
 	}
@@ -703,7 +705,7 @@ func TestRunOneToolNoStreamFallback(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	app := &App{RoundStreams: reg, Bus: NewBus(), Toolbox: &recordingToolbox{}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
-	res := app.runOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{}, 1)
+	res := app.agentService().RunOneTool(run, "m1", domain.ToolCall{ID: "t1", Name: "exec", Args: `{"command":"echo hi"}`}, ModelCapabilities{}, domain.Settings{}, 1)
 	if res.Output != "ok" {
 		t.Fatalf("output = %q", res.Output)
 	}
@@ -731,7 +733,7 @@ func TestDiscardQueuedSteerOnFail(t *testing.T) {
 	if !run.QueueSteer(&SteerEntry{ID: "s1", Text: "wait", Status: "queued"}) {
 		t.Fatal("queue steer")
 	}
-	app.failTurn(run, "m1", context.Canceled)
+	app.agentService().FailTurn(run, "m1", context.Canceled)
 	if run.QueuedSteer() != nil {
 		t.Fatal("queued steer should be discarded on fail")
 	}
@@ -788,7 +790,7 @@ func TestSteerHeadlessTurnAppliesUserMessage(t *testing.T) {
 	if err := app.SteerHeadlessTurn("c1", "  focus on tests  "); err != nil {
 		t.Fatal(err)
 	}
-	applied, err := app.applyQueuedSteer(run)
+	applied, err := app.agentService().ApplyQueuedSteer(run)
 	if err != nil || !applied {
 		t.Fatalf("apply: applied=%v err=%v", applied, err)
 	}
@@ -803,7 +805,7 @@ func TestSteerHeadlessTurnAppliesUserMessage(t *testing.T) {
 	if m.Role != domain.RoleUser || !m.Steer || m.Content != "focus on tests" {
 		t.Fatalf("persisted message = %+v", m)
 	}
-	msgs := chatMessages(saved, "", ModelCapabilities{})
+	msgs := agent.ChatMessages(saved, "", ModelCapabilities{})
 	if len(msgs) != 1 || msgs[0].Role != "user" || msgs[0].Content != "focus on tests" {
 		t.Fatalf("provider messages = %+v", msgs)
 	}
@@ -818,7 +820,7 @@ func TestApplyQueuedSteerRequeuesOnSaveFailure(t *testing.T) {
 	if !run.QueueSteer(&SteerEntry{ID: "s1", Text: "wait", Status: "queued", Message: msg}) {
 		t.Fatal("queue steer")
 	}
-	applied, err := app.applyQueuedSteer(run)
+	applied, err := app.agentService().ApplyQueuedSteer(run)
 	if err == nil || applied {
 		t.Fatalf("apply: applied=%v err=%v, want persist error", applied, err)
 	}
@@ -838,7 +840,7 @@ func TestCancelSteerEmitsTextAndUserReason(t *testing.T) {
 	_, events, unsub := app.Bus.Subscribe()
 	defer unsub()
 
-	got, rpcErr := app.handleTurnsCancelSteer(contracts.TurnCancelSteerRequest{ConversationID: "c1"})
+	got, rpcErr := app.agentService().HandleTurnsCancelSteer(contracts.TurnCancelSteerRequest{ConversationID: "c1"})
 	if rpcErr != nil {
 		t.Fatalf("cancel: %v", rpcErr)
 	}
@@ -871,7 +873,7 @@ func TestSteerAllowsAttachmentsWithoutText(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1"}
 	app.runs[run.ID] = run
 
-	_, rpcErr := app.handleTurnsSteer(context.Background(), contracts.TurnSteerRequest{
+	_, rpcErr := app.agentService().HandleTurnsSteer(context.Background(), contracts.TurnSteerRequest{
 		ConversationID: "c1",
 		Text:           "   ",
 		Attachments:    []contracts.AttachmentDTO{{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see this"}},
@@ -899,7 +901,7 @@ func TestTurnsActiveIncludesQueuedSteer(t *testing.T) {
 		t.Fatal("queue steer")
 	}
 	run.SetMessageID("m2")
-	got, rpcErr := app.handleTurnsActive(contracts.ConversationIDRequest{ID: "c1"})
+	got, rpcErr := app.agentService().HandleTurnsActive(contracts.ConversationIDRequest{ID: "c1"})
 	if rpcErr != nil {
 		t.Fatal(rpcErr)
 	}
@@ -922,7 +924,7 @@ func TestToolRoundSignatureStable(t *testing.T) {
 		{Name: "tool_schema", Args: `{"server":"Files","tool":"read"}`},
 		{Name: "mcp_enable", Args: `{"id":"x"}`},
 	}
-	if sigA, sigB := toolRoundSignature(a), toolRoundSignature(b); sigA != sigB {
+	if sigA, sigB := agent.ToolRoundSignature(a), agent.ToolRoundSignature(b); sigA != sigB {
 		t.Fatalf("order-independent signature mismatch:\n  A=%q\n  B=%q", sigA, sigB)
 	}
 }
@@ -1102,7 +1104,7 @@ func TestEmergencyCompactionReinjectsHydration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true})
+	app.agentService().RunTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true})
 
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
@@ -1141,7 +1143,7 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true})
+	app.agentService().RunTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true})
 
 	if adapter.completes != 0 {
 		t.Fatalf("Complete calls = %d, want 0 (must not compact a small transcript)", adapter.completes)
@@ -1267,7 +1269,7 @@ func TestMidTurnProactiveCompaction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{})
+	app.agentService().RunTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{})
 
 	if adapter.completes == 0 {
 		t.Fatal("expected proactive compaction (Complete calls > 0), got 0 — mid-turn check did not fire before round 2")
@@ -1306,7 +1308,7 @@ func TestMidTurnCompactionFailureStopsBeforeNextRound(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{})
+	app.agentService().RunTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{})
 
 	adapter.mu.Lock()
 	streams := adapter.streams
@@ -1431,8 +1433,8 @@ func TestCompactionPassBudgetShrinksWithRunningSummary(t *testing.T) {
 	// Window must leave room above the summary max-out floor
 	// (compactionSummaryMaxOut=64000) so the shrink is observable.
 	const window = 100_000
-	empty := compactionPassAvailable(window, "", compactionSummaryMaxOut)
-	grown := compactionPassAvailable(window, strings.Repeat("x", 8000), compactionSummaryMaxOut)
+	empty := agent.CompactionPassAvailable(window, "", compactionSummaryMaxOut)
+	grown := agent.CompactionPassAvailable(window, strings.Repeat("x", 8000), compactionSummaryMaxOut)
 	if grown >= empty {
 		t.Fatalf("available with large summary %d should be < empty %d", grown, empty)
 	}
@@ -1449,7 +1451,7 @@ func TestExtractCompactionSummaryPrefersToolCall(t *testing.T) {
 			{Name: compactionSummaryToolName, Args: `{"text":"handoff checkpoint from tool call"}`},
 		},
 	}
-	got := extractCompactionSummary(resp)
+	got := agent.ExtractCompactionSummary(resp)
 	if got != "handoff checkpoint from tool call" {
 		t.Fatalf("extractCompactionSummary = %q, want tool call text", got)
 	}
@@ -1458,7 +1460,7 @@ func TestExtractCompactionSummaryPrefersToolCall(t *testing.T) {
 func TestExtractCompactionSummaryFallsBackToContent(t *testing.T) {
 	// When the model doesn't call the tool, fall back to resp.Content.
 	resp := ChatResponse{Content: "plain text fallback"}
-	got := extractCompactionSummary(resp)
+	got := agent.ExtractCompactionSummary(resp)
 	if got != "plain text fallback" {
 		t.Fatalf("extractCompactionSummary = %q, want content fallback", got)
 	}
@@ -1470,7 +1472,7 @@ func TestExtractCompactionSummaryFallsBackOnBadArgs(t *testing.T) {
 		Content:   "fallback after bad args",
 		ToolCalls: []domain.ToolCall{{Name: compactionSummaryToolName, Args: `not json`}},
 	}
-	got := extractCompactionSummary(resp)
+	got := agent.ExtractCompactionSummary(resp)
 	if got != "fallback after bad args" {
 		t.Fatalf("extractCompactionSummary = %q, want content fallback on bad args", got)
 	}
@@ -1482,7 +1484,7 @@ func TestExtractCompactionSummaryIgnoresEmptyToolText(t *testing.T) {
 		Content:   "fallback when tool text empty",
 		ToolCalls: []domain.ToolCall{{Name: compactionSummaryToolName, Args: `{"text":""}`}},
 	}
-	got := extractCompactionSummary(resp)
+	got := agent.ExtractCompactionSummary(resp)
 	if got != "fallback when tool text empty" {
 		t.Fatalf("extractCompactionSummary = %q, want content fallback on empty tool text", got)
 	}
@@ -1507,7 +1509,7 @@ func TestCompactionUsesSummaryTool(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
+	summary, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1599,7 +1601,7 @@ func TestCompactionSurvivesThinkingProviderThatRejectsForcedToolChoice(t *testin
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
 
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
+	summary, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compaction failed against a thinking provider: %v", err)
 	}
@@ -1633,7 +1635,7 @@ func TestCompactionStripsEffortForNonReasoningModel(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1680,7 +1682,7 @@ func TestCompactionReuseUsesAgentPromptToolboxAndSharedCacheKey(t *testing.T) {
 	if cache == nil {
 		t.Fatal("expected shared prompt cache policy")
 	}
-	if _, err := app.compactConversationWithCache(context.Background(), pc, conv, "model", 4000, settings, domain.CompactionTriggerInitial, cache); err != nil {
+	if _, err := app.agentService().CompactConversationWithCache(context.Background(), pc, conv, "model", 4000, settings, domain.CompactionTriggerInitial, cache); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1759,7 +1761,7 @@ func compactionRequestForWorkflow(t *testing.T, workflow domain.CompactionWorkfl
 	if cache == nil {
 		t.Fatal("expected prompt cache policy")
 	}
-	if _, err := app.compactConversationWithCache(context.Background(), pc, conv, "model", 4000, settings, domain.CompactionTriggerInitial, cache); err != nil {
+	if _, err := app.agentService().CompactConversationWithCache(context.Background(), pc, conv, "model", 4000, settings, domain.CompactionTriggerInitial, cache); err != nil {
 		t.Fatalf("compaction (%s) failed: %v", workflow, err)
 	}
 	adapter.mu.Lock()
@@ -1826,7 +1828,7 @@ func TestCompactionRequestEndsWithUserHandoffAfterToolRound(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1871,7 +1873,7 @@ func TestCompactionRequestClonesPrefixThenAppendsHandoff(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -1906,7 +1908,7 @@ func TestAppendCompactionHandoffUserClosesToolRound(t *testing.T) {
 		{Role: "assistant", Content: "reading", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "file_read", Args: `{}`}}},
 		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "c1", Name: "file_read", Content: "package application"}},
 	}
-	got := appendCompactionHandoffUser(msgs)
+	got := agent.AppendCompactionHandoffUser(msgs)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3 (transcript + closer)", len(got))
 	}
@@ -1939,22 +1941,22 @@ func assertCompactionRequestEndsWithUserHandoff(t *testing.T, req *core.Request)
 func TestCompactionSummaryEchoesAssistant(t *testing.T) {
 	asst := strings.Repeat("Build hijau. Sekarang aku verifikasi dua konsumen kunci. ", 3)
 	msgs := []ChatMessage{{Role: "user", Content: "go"}, {Role: "assistant", Content: asst}}
-	if !compactionSummaryEchoesAssistant(asst+" extra", msgs) {
+	if !agent.CompactionSummaryEchoesAssistant(asst+" extra", msgs) {
 		t.Fatal("expected echo of latest assistant content")
 	}
-	if compactionSummaryEchoesAssistant("## Goal\nfix ordering\n## Done\nfound the Compact regroup bug", msgs) {
+	if agent.CompactionSummaryEchoesAssistant("## Goal\nfix ordering\n## Done\nfound the Compact regroup bug", msgs) {
 		t.Fatal("structured handoff must not be treated as an echo")
 	}
 }
 
 func TestReasoningDeltaVisibleSkipsLeadingWhitespace(t *testing.T) {
-	if reasoningDeltaVisible(" \n\t") {
+	if agent.ReasoningDeltaVisible(" \n\t") {
 		t.Fatal("leading whitespace-only reasoning must not be emitted")
 	}
-	if !reasoningDeltaVisible("ok") {
+	if !agent.ReasoningDeltaVisible("ok") {
 		t.Fatal("visible reasoning must be emitted")
 	}
-	if !reasoningDeltaVisible("ok\n") {
+	if !agent.ReasoningDeltaVisible("ok\n") {
 		t.Fatal("whitespace after visible text must still emit")
 	}
 }
@@ -1977,7 +1979,7 @@ func TestCompactionRetriesOnShortSummary(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
+	summary, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("expected success after retry, got error: %v", err)
 	}
@@ -2008,7 +2010,7 @@ func TestCompactionFailsAfterMaxRetries(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
+	_, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err == nil {
 		t.Fatal("expected error when all retries produce short summaries, got nil")
 	}
@@ -2042,7 +2044,7 @@ func TestCompactionBudgetDoublesOnRetry(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 200000, settings, domain.CompactionTriggerInitial)
+	_, _ = app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 200000, settings, domain.CompactionTriggerInitial)
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	expectedBudget := 800
@@ -2074,7 +2076,7 @@ func TestCompactionBudgetClampedToContextWindow(t *testing.T) {
 	settings.CompactionSummaryMaxTokens = 800
 	// Small context window (2000) so the doubled budget hits the clamp.
 	// maxBudget = 2000 - 300 (systemReserve) = 1700
-	_, _ = app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings, domain.CompactionTriggerInitial)
+	_, _ = app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings, domain.CompactionTriggerInitial)
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	maxBudget := 2000 - compactionSystemReserve
@@ -2113,7 +2115,7 @@ func TestCompactionStripsMediaAttachments(t *testing.T) {
 	}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 20000, settings, domain.CompactionTriggerInitial)
+	summary, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 20000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
 	}
@@ -2175,7 +2177,7 @@ func TestCompactionCapsOversizedToolOutput(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 	// Small window keeps the per-call cap small so truncation is observable.
-	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings, domain.CompactionTriggerInitial)
+	_, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 2000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compaction failed: %v", err)
 	}
@@ -2224,7 +2226,7 @@ func TestCompactionSummaryMinCharsFromSettings(t *testing.T) {
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
 	settings.CompactionSummaryMinChars = 500
-	_, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
+	_, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial)
 	if err == nil {
 		t.Fatal("expected error when summary < settings min chars, got nil")
 	}
@@ -2252,7 +2254,7 @@ func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
 	// summary reserve.
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, settings, domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -2321,7 +2323,7 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 		Bus:           NewBus(),
 	}
 	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range store.archived {
@@ -2361,7 +2363,7 @@ func TestPersistCompactedConversationPreservesTranscriptWhenArchiveFails(t *test
 	}
 	app := &App{Conversations: store, Bus: NewBus()}
 
-	err := app.persistCompactedConversation(conv, "summary", 1)
+	err := app.agentService().PersistCompactedConversation(conv, "summary", 1)
 	if err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("persistCompactedConversation error = %v, want archive failure", err)
 	}
@@ -2465,7 +2467,7 @@ func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
-	if _, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "model", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -2509,7 +2511,7 @@ func TestHealOrphanedRunningConversationHealsGhost(t *testing.T) {
 		Bus:           NewBus(),
 		runs:          map[string]*TurnRun{},
 	}
-	if !app.healOrphanedRunningConversation(conv) {
+	if !app.agentService().HealOrphanedRunningConversation(conv) {
 		t.Fatal("expected orphaned conversation to be healed")
 	}
 	if conv.Status != "idle" {
@@ -2537,7 +2539,7 @@ func TestHealOrphanedRunningConversationSkipsWhenRunActive(t *testing.T) {
 			"r1": {ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel},
 		},
 	}
-	if app.healOrphanedRunningConversation(conv) {
+	if app.agentService().HealOrphanedRunningConversation(conv) {
 		t.Fatal("should not heal when a run is active")
 	}
 	if conv.Status != "running" {
@@ -2559,7 +2561,7 @@ func TestHealOrphanedRunningConversationSkipsIdle(t *testing.T) {
 		Bus:           NewBus(),
 		runs:          map[string]*TurnRun{},
 	}
-	if app.healOrphanedRunningConversation(conv) {
+	if app.agentService().HealOrphanedRunningConversation(conv) {
 		t.Fatal("should not heal an idle conversation")
 	}
 }
@@ -2584,7 +2586,7 @@ func TestRecoverOrphanedTurnHealsAndEmitsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 
-	app.recoverOrphanedTurn(run)
+	app.agentService().RecoverOrphanedTurn(run)
 
 	if conv.Status != "idle" {
 		t.Fatalf("status = %q, want idle", conv.Status)
@@ -2628,7 +2630,7 @@ func TestRecoverOrphanedTurnSkipsIdleConversation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 
-	app.recoverOrphanedTurn(run)
+	app.agentService().RecoverOrphanedTurn(run)
 
 	if conv.Status != "idle" {
 		t.Fatalf("status = %q, want idle (unchanged)", conv.Status)
@@ -2832,7 +2834,7 @@ func TestFinalHeadlessAssistantMessageUsesTheLastTurnMessage(t *testing.T) {
 		{ID: "assistant-2", Role: domain.RoleAssistant, Content: "The file contains the final answer."},
 	}
 
-	message, ok := finalHeadlessAssistantMessage(messages, "assistant-2")
+	message, ok := agent.FinalHeadlessAssistantMessage(messages, "assistant-2")
 	if !ok {
 		t.Fatal("final assistant message was not found")
 	}
@@ -2847,7 +2849,7 @@ func TestFinalHeadlessAssistantMessageKeepsAnEmptyFinalRoundEmpty(t *testing.T) 
 		{ID: "assistant-2", Role: domain.RoleAssistant, Content: ""},
 	}
 
-	message, ok := finalHeadlessAssistantMessage(messages, "assistant-2")
+	message, ok := agent.FinalHeadlessAssistantMessage(messages, "assistant-2")
 	if !ok {
 		t.Fatal("final assistant message was not found")
 	}
@@ -2872,8 +2874,8 @@ func TestHeadlessWorkspaceLearnerUsesDataDir(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := headlessWorkspace(tt.ctxWS, tt.kind, tt.dataDir); got != tt.want {
-				t.Fatalf("headlessWorkspace(%q, %s, %q) = %q, want %q", tt.ctxWS, tt.kind, tt.dataDir, got, tt.want)
+			if got := agent.HeadlessWorkspace(tt.ctxWS, tt.kind, tt.dataDir); got != tt.want {
+				t.Fatalf("agent.HeadlessWorkspace(%q, %s, %q) = %q, want %q", tt.ctxWS, tt.kind, tt.dataDir, got, tt.want)
 			}
 		})
 	}
@@ -2885,7 +2887,7 @@ func TestHeadlessTurnsDoNotBroadcastRoomCompletion(t *testing.T) {
 	_, events, unsubscribe := bus.Subscribe()
 	defer unsubscribe()
 
-	app.emitInteractiveTurnEvent(&TurnRun{Headless: true, ID: "run_learn"}, contracts.EventTurnDone, contracts.TurnDoneEvent{
+	app.agentService().EmitInteractiveTurnEvent(&TurnRun{Headless: true, ID: "run_learn"}, contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: "run_learn", ConversationID: "conv_learn",
 	})
 	select {
@@ -2894,7 +2896,7 @@ func TestHeadlessTurnsDoNotBroadcastRoomCompletion(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	app.emitInteractiveTurnEvent(&TurnRun{Headless: false, ID: "run_chat"}, contracts.EventTurnDone, contracts.TurnDoneEvent{
+	app.agentService().EmitInteractiveTurnEvent(&TurnRun{Headless: false, ID: "run_chat"}, contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: "run_chat", ConversationID: "conv_chat",
 	})
 	select {
@@ -2944,8 +2946,8 @@ func TestTPMContextCap(t *testing.T) {
 		{0, 65536, 0},
 	}
 	for _, tc := range cases {
-		if got := tpmContextCap(tc.limit, tc.maxOutput); got != tc.want {
-			t.Errorf("tpmContextCap(%d, %d) = %d, want %d", tc.limit, tc.maxOutput, got, tc.want)
+		if got := agent.TPMContextCap(tc.limit, tc.maxOutput); got != tc.want {
+			t.Errorf("agent.TPMContextCap(%d, %d) = %d, want %d", tc.limit, tc.maxOutput, got, tc.want)
 		}
 	}
 }
@@ -2961,18 +2963,18 @@ func TestLearnTPMContextCapWiresIntoContextWindow(t *testing.T) {
 	run := &TurnRun{ID: "r1", ProviderID: "openai", Ctx: context.Background()}
 	err := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmRejectionBody)}
 
-	if !app.learnTPMContextCap(run, "gpt-5.6-luna", err, 65536) {
+	if !app.agentService().LearnTPMContextCap(run, "gpt-5.6-luna", err, 65536) {
 		t.Fatal("dominant TPM rejection must learn a context cap")
 	}
 	// Idempotent: the same rejection must not re-learn (cap unchanged).
-	if app.learnTPMContextCap(run, "gpt-5.6-luna", err, 65536) {
+	if app.agentService().LearnTPMContextCap(run, "gpt-5.6-luna", err, 65536) {
 		t.Fatal("repeat observation must not re-learn")
 	}
 
 	provider := &domain.Provider{ID: "openai", Models: []domain.Model{{ID: "gpt-5.6-luna", Context: 1000000}}}
 	settings := domain.DefaultSettings()
 	settings.MaxInputTokens = 1000000
-	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 184464 {
+	if got := app.agentService().ResolveContextWindow(provider, "gpt-5.6-luna", settings); got != 184464 {
 		t.Fatalf("resolveContextWindow = %d, want 184464 (TPM cap overrides catalog)", got)
 	}
 }
@@ -2987,7 +2989,7 @@ func TestLearnTPMContextCapSkipsModestRequests(t *testing.T) {
 	run := &TurnRun{ID: "r1", ProviderID: "openai", Ctx: context.Background()}
 	modest := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Rate limit reached for gpt-5.6-luna on tokens per min (TPM): Limit 500000, Used 450000, Requested 40000.")}
-	if app.learnTPMContextCap(run, "gpt-5.6-luna", modest, 65536) {
+	if app.agentService().LearnTPMContextCap(run, "gpt-5.6-luna", modest, 65536) {
 		t.Fatal("modest request must not learn a cap (congestion, not size)")
 	}
 	if got := app.learnedParams.ContextCap("openai", "gpt-5.6-luna"); got != 0 {
@@ -3042,7 +3044,7 @@ func TestStreamTurnRoundBailsToCompactionOnDominatedTPM(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", ProviderID: "openai", Ctx: context.Background()}
 
-	_, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-5.6-luna", "", nil, domain.Settings{}, false, 65536, nil, ModelCapabilities{}, 1)
+	_, err := app.agentService().StreamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-5.6-luna", "", nil, domain.Settings{}, false, 65536, nil, ModelCapabilities{}, 1)
 	if err == nil {
 		t.Fatal("dominated TPM must surface the provider error (compaction hook handles it)")
 	}
@@ -3107,7 +3109,7 @@ func TestMidToolCompactionFailureSkipsToolExecution(t *testing.T) {
 	}
 	provider := &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}
 	run := &TurnRun{ID: "run-mid-tool-failure", ConversationID: conv.ID, Ctx: context.Background()}
-	p := app.conversationRulesForTest(run, stubProviderContext(adapter), conv, settings, provider, "model", inFlightID, 2)
+	p := app.agentService().ConversationRulesForTest(run, stubProviderContext(adapter), conv, settings, provider, "model", inFlightID, 2)
 	calls := []domain.ToolCall{{ID: "call-1", Name: "read_file", Args: `{ "path": "/tmp/x" }`}}
 	_, err := p.Rules().Execute(&RoundState{}, ChatResponse{ToolCalls: calls}, calls)
 	if err == nil || !strings.Contains(err.Error(), "i/o timeout") {
@@ -3148,7 +3150,7 @@ func TestMidToolCompactionRunsAtToolRequestBoundary(t *testing.T) {
 	settings := domain.DefaultSettings()
 	provider := &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}
 	run := &TurnRun{ID: "run1", ConversationID: "c1", Ctx: context.Background()}
-	p := app.conversationRulesForTest(run, stubProviderContext(adapter), conv, settings, provider, "model", inFlightID, 2)
+	p := app.agentService().ConversationRulesForTest(run, stubProviderContext(adapter), conv, settings, provider, "model", inFlightID, 2)
 
 	if !p.TryMidToolCompaction() {
 		t.Fatal("mid-tool compaction did not run at the tool-request boundary")
@@ -3217,7 +3219,7 @@ func TestMidToolCompactionSkipsBelowTrigger(t *testing.T) {
 	// The request estimate includes the provider-visible system prompt, so use
 	// a window large enough for this intentionally tiny transcript to remain
 	// below the compaction watermark.
-	p := app.conversationRulesForTest(&TurnRun{ID: "run2", ConversationID: "c2", Ctx: context.Background()}, ProviderContext{}, conv, settings, &domain.Provider{Models: []domain.Model{{ID: "model", Context: 200000}}}, "model", "", 2)
+	p := app.agentService().ConversationRulesForTest(&TurnRun{ID: "run2", ConversationID: "c2", Ctx: context.Background()}, ProviderContext{}, conv, settings, &domain.Provider{Models: []domain.Model{{ID: "model", Context: 200000}}}, "model", "", 2)
 	if p.TryMidToolCompaction() {
 		t.Fatal("mid-tool compaction ran below the trigger")
 	}
@@ -3237,7 +3239,7 @@ func TestMidToolCompactionSkipsFirstRound(t *testing.T) {
 	conv := &domain.Conversation{ID: "c3", Messages: msgs}
 	app := &App{Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c3": conv}}, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
-	p := app.conversationRulesForTest(&TurnRun{ID: "run3", ConversationID: "c3", Ctx: context.Background()}, ProviderContext{}, conv, settings, &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}, "model", "", 1)
+	p := app.agentService().ConversationRulesForTest(&TurnRun{ID: "run3", ConversationID: "c3", Ctx: context.Background()}, ProviderContext{}, conv, settings, &domain.Provider{Models: []domain.Model{{ID: "model", Context: 4000}}}, "model", "", 1)
 	if p.TryMidToolCompaction() {
 		t.Fatal("mid-tool compaction ran on the first round")
 	}
@@ -3257,9 +3259,9 @@ func TestServerCompactionContextManagementEligibleModel(t *testing.T) {
 		{"o1", 180000},           // 200k * 0.9
 	}
 	for _, tc := range cases {
-		cm := serverCompactionContextManagement(tc.model)
+		cm := agent.ServerCompactionContextManagement(tc.model)
 		if cm == nil {
-			t.Fatalf("serverCompactionContextManagement(%q) = nil, want non-nil", tc.model)
+			t.Fatalf("agent.ServerCompactionContextManagement(%q) = nil, want non-nil", tc.model)
 		}
 		if len(cm) != 1 {
 			t.Fatalf("cm len = %d, want 1", len(cm))
@@ -3272,7 +3274,7 @@ func TestServerCompactionContextManagementEligibleModel(t *testing.T) {
 			t.Fatalf("cm[0].compact_threshold = %T, want int", cm[0]["compact_threshold"])
 		}
 		if threshold != tc.wantThreshold {
-			t.Errorf("serverCompactionContextManagement(%q) threshold = %d, want %d", tc.model, threshold, tc.wantThreshold)
+			t.Errorf("agent.ServerCompactionContextManagement(%q) threshold = %d, want %d", tc.model, threshold, tc.wantThreshold)
 		}
 	}
 }
@@ -3285,18 +3287,18 @@ func TestServerCompactionContextManagementIneligibleModel(t *testing.T) {
 		"",
 	}
 	for _, model := range cases {
-		cm := serverCompactionContextManagement(model)
+		cm := agent.ServerCompactionContextManagement(model)
 		if cm != nil {
-			t.Errorf("serverCompactionContextManagement(%q) = %v, want nil", model, cm)
+			t.Errorf("agent.ServerCompactionContextManagement(%q) = %v, want nil", model, cm)
 		}
 	}
 }
 
 func TestServerCompactionContextManagementCodexKindIsDisabled(t *testing.T) {
-	if got := serverCompactionContextManagementForKind("gpt-5-codex", domain.ProviderCodex); got != nil {
+	if got := agent.ServerCompactionContextManagementForKind("gpt-5-codex", domain.ProviderCodex); got != nil {
 		t.Fatalf("Codex context management = %v, want nil; Codex uses remote v2 trigger", got)
 	}
-	if got := serverCompactionContextManagementForKind("gpt-5.2", domain.ProviderResponses); got == nil {
+	if got := agent.ServerCompactionContextManagementForKind("gpt-5.2", domain.ProviderResponses); got == nil {
 		t.Fatal("Responses context management = nil, want eligible OpenAI directive")
 	}
 }
@@ -3309,9 +3311,9 @@ func TestServerCompactionContextManagementFloorEnforced(t *testing.T) {
 	defer func() { domain.ServerCompactionThresholdFloor = original }()
 
 	// o3 has 200k context, 0.9 * 200k = 180k < 200k floor → should use floor
-	cm := serverCompactionContextManagement("o3")
+	cm := agent.ServerCompactionContextManagement("o3")
 	if cm == nil {
-		t.Fatalf("serverCompactionContextManagement(o3) = nil, want non-nil")
+		t.Fatalf("agent.ServerCompactionContextManagement(o3) = nil, want non-nil")
 	}
 	threshold, _ := cm[0]["compact_threshold"].(int)
 	if threshold != 200000 {
@@ -3356,7 +3358,7 @@ func TestCompactConversationSkipsForServerSideEligibleModel(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	settings := domain.DefaultSettings()
 
-	summary, err := app.compactConversation(context.Background(), stubProviderContext(adapter), conv, "gpt-5.2", 4000, settings, domain.CompactionTriggerInitial)
+	summary, err := app.agentService().CompactConversation(context.Background(), stubProviderContext(adapter), conv, "gpt-5.2", 4000, settings, domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compactConversation: %v", err)
 	}
@@ -3394,7 +3396,7 @@ func TestCompactConversationUsesCodexRemoteCompaction(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	adapter := ProviderContext{Provider: provider, Kind: domain.ProviderCodex}
 
-	summary, err := app.compactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial)
+	summary, err := app.agentService().CompactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial)
 	if err != nil {
 		t.Fatalf("compactConversation: %v", err)
 	}
@@ -3470,7 +3472,7 @@ func TestCodexRemoteCompactionRebuildsAdapterAfterCircuitOpen(t *testing.T) {
 		},
 	}
 	adapter := ProviderContext{Provider: old, ProviderID: "codex", Kind: domain.ProviderCodex}
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err != nil {
 		t.Fatalf("compactConversation: %v", err)
 	}
 	if factoryKey != "new" {
@@ -3497,7 +3499,7 @@ func TestCompactConversationCodexFailureDoesNotFallbackToSummary(t *testing.T) {
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	adapter := ProviderContext{Provider: provider, Kind: domain.ProviderCodex}
 
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err == nil {
+	if _, err := app.agentService().CompactConversation(context.Background(), adapter, conv, "gpt-5-codex", 4000, domain.DefaultSettings(), domain.CompactionTriggerInitial); err == nil {
 		t.Fatal("expected Codex remote compaction error")
 	}
 	if provider.chatCalls != 0 {
@@ -3512,7 +3514,7 @@ func TestCompactConversationCodexFailureDoesNotFallbackToSummary(t *testing.T) {
 
 func TestModelCapabilitiesUnknownModelDefaultsVisionOnly(t *testing.T) {
 	provider := &domain.Provider{ID: "p1", Models: nil}
-	caps := modelCapabilitiesWithLearned(provider, "unknown-model", nil, nil)
+	caps := agent.ModelCapabilitiesWithLearned(provider, "unknown-model", nil, nil)
 	if !caps.Vision {
 		t.Errorf("unknown model should default Vision=true, got %+v", caps)
 	}
@@ -3528,7 +3530,7 @@ func TestModelCapabilitiesUnknownModelDefaultsVisionOnly(t *testing.T) {
 }
 
 func TestModelCapabilitiesNilProviderDefaultsVisionOnly(t *testing.T) {
-	caps := modelCapabilitiesWithLearned(nil, "any", nil, nil)
+	caps := agent.ModelCapabilitiesWithLearned(nil, "any", nil, nil)
 	if !caps.Vision {
 		t.Errorf("nil provider should default Vision=true, got %+v", caps)
 	}
@@ -3565,7 +3567,7 @@ func TestModelCapabilitiesFromMetadata(t *testing.T) {
 		{"llama-3", false, false, false, false},
 	}
 	for _, tt := range tests {
-		caps := modelCapabilitiesWithLearned(provider, tt.model, nil, nil)
+		caps := agent.ModelCapabilitiesWithLearned(provider, tt.model, nil, nil)
 		if caps.Vision != tt.wantVision || caps.Audio != tt.wantAudio || caps.Video != tt.wantVideo || caps.Document != tt.wantDocument {
 			t.Errorf("model %s: got %+v, want vision=%v audio=%v video=%v document=%v",
 				tt.model, caps, tt.wantVision, tt.wantAudio, tt.wantVideo, tt.wantDocument)
@@ -3586,7 +3588,7 @@ func TestModelCapabilitiesLearnedDisablesVision(t *testing.T) {
 
 	// Unknown model defaults Vision=true, but the learned rule overrides it.
 	provider := &domain.Provider{ID: "openrouter", Models: nil}
-	caps := modelCapabilitiesWithLearned(provider, "qwen3.8-max-free", cache, nil)
+	caps := agent.ModelCapabilitiesWithLearned(provider, "qwen3.8-max-free", cache, nil)
 	if caps.Vision {
 		t.Errorf("learned text-only should disable Vision, got %+v", caps)
 	}
@@ -3600,7 +3602,7 @@ func TestModelCapabilitiesLearnedDoesNotAffectOtherModel(t *testing.T) {
 	cache.LearnFrom400("openrouter", "qwen3.8-max-free", `text-only`)
 
 	provider := &domain.Provider{ID: "openrouter", Models: nil}
-	caps := modelCapabilitiesWithLearned(provider, "other-model", cache, nil)
+	caps := agent.ModelCapabilitiesWithLearned(provider, "other-model", cache, nil)
 	if !caps.Vision {
 		t.Errorf("learned rule for qwen3.8 leaked to other-model, got %+v", caps)
 	}
@@ -3615,7 +3617,7 @@ func TestChatMessagesAudioPlaceholderForNonAudioModel(t *testing.T) {
 		}},
 	}}
 
-	msgs := chatMessages(conv, "", ModelCapabilities{})
+	msgs := agent.ChatMessages(conv, "", ModelCapabilities{})
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
@@ -3644,7 +3646,7 @@ func TestChatMessagesVideoPlaceholderForNonVideoModel(t *testing.T) {
 		}},
 	}}
 
-	msgs := chatMessages(conv, "", ModelCapabilities{})
+	msgs := agent.ChatMessages(conv, "", ModelCapabilities{})
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
@@ -3673,7 +3675,7 @@ func TestChatMessagesAudioKeptForAudioModel(t *testing.T) {
 		}},
 	}}
 
-	msgs := chatMessages(conv, "", ModelCapabilities{Audio: true})
+	msgs := agent.ChatMessages(conv, "", ModelCapabilities{Audio: true})
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
@@ -3693,7 +3695,7 @@ func TestFilterToolAttachmentsByCapsStripsAudio(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "audio", Name: "recording.mp3", FilePath: "/tmp/rec.mp3"},
 	}
-	filtered, content := filterToolAttachmentsByCaps(atts, "Audio loaded.", ModelCapabilities{})
+	filtered, content := agent.FilterToolAttachmentsByCaps(atts, "Audio loaded.", ModelCapabilities{})
 	if len(filtered) != 0 {
 		t.Errorf("audio should be stripped for non-audio model, got %d attachments", len(filtered))
 	}
@@ -3711,7 +3713,7 @@ func TestFilterToolAttachmentsByCapsKeepsAudioForAudioModel(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "audio", Name: "recording.mp3", FilePath: "/tmp/rec.mp3"},
 	}
-	filtered, content := filterToolAttachmentsByCaps(atts, "Audio loaded.", ModelCapabilities{Audio: true})
+	filtered, content := agent.FilterToolAttachmentsByCaps(atts, "Audio loaded.", ModelCapabilities{Audio: true})
 	if len(filtered) != 1 || filtered[0].Type != "audio" {
 		t.Errorf("audio should be kept for audio-capable model, got %d attachments", len(filtered))
 	}
@@ -3726,7 +3728,7 @@ func TestFilterToolAttachmentsByCapsStripsVideo(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "video", Name: "clip.mp4", FilePath: "/tmp/clip.mp4"},
 	}
-	filtered, content := filterToolAttachmentsByCaps(atts, "Video loaded.", ModelCapabilities{})
+	filtered, content := agent.FilterToolAttachmentsByCaps(atts, "Video loaded.", ModelCapabilities{})
 	if len(filtered) != 0 {
 		t.Errorf("video should be stripped for non-video model, got %d attachments", len(filtered))
 	}
@@ -3741,7 +3743,7 @@ func TestFilterToolAttachmentsByCapsKeepsImageForVisionModel(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "image", Name: "photo.png", FilePath: "/tmp/photo.png"},
 	}
-	filtered, content := filterToolAttachmentsByCaps(atts, "Image loaded.", ModelCapabilities{Vision: true})
+	filtered, content := agent.FilterToolAttachmentsByCaps(atts, "Image loaded.", ModelCapabilities{Vision: true})
 	if len(filtered) != 1 || filtered[0].Type != "image" {
 		t.Errorf("image should be kept for vision-capable model, got %d attachments", len(filtered))
 	}
@@ -3764,12 +3766,12 @@ func TestModelCapabilitiesReasoningReplayFromCatalog(t *testing.T) {
 		},
 	}
 
-	caps := modelCapabilitiesWithLearned(provider, "glm-5.2", nil, nil)
+	caps := agent.ModelCapabilitiesWithLearned(provider, "glm-5.2", nil, nil)
 	if !caps.ReasoningReplay {
 		t.Errorf("glm-5.2 with interleaved_field=reasoning_content: ReasoningReplay = false, want true")
 	}
 
-	caps = modelCapabilitiesWithLearned(provider, "gpt-5.5", nil, nil)
+	caps = agent.ModelCapabilitiesWithLearned(provider, "gpt-5.5", nil, nil)
 	if caps.ReasoningReplay {
 		t.Errorf("gpt-5.5 with no interleaved_field: ReasoningReplay = true, want false")
 	}
@@ -3786,7 +3788,7 @@ func TestModelCapabilitiesReasoningReplayPatternFallback(t *testing.T) {
 			{ID: "stealth/ox-alpha"}, // no InterleavedField (OpenRouter hides it)
 		},
 	}
-	caps := modelCapabilitiesWithLearned(provider, "stealth/ox-alpha", nil, nil)
+	caps := agent.ModelCapabilitiesWithLearned(provider, "stealth/ox-alpha", nil, nil)
 	if !caps.ReasoningReplay {
 		t.Errorf("stealth/ox-alpha should match pattern fallback: ReasoningReplay = false, want true")
 	}
@@ -3813,12 +3815,12 @@ func TestModelCapabilitiesReasoningReplayOpenCodeHost(t *testing.T) {
 		},
 	}
 	for _, model := range []string{"glm-5.3-flash", "deepseek-v4-flash", "deepseek-v4.1-flash"} {
-		caps := modelCapabilitiesWithLearned(provider, model, nil, nil)
+		caps := agent.ModelCapabilitiesWithLearned(provider, model, nil, nil)
 		if !caps.ReasoningReplay {
 			t.Errorf("%s on opencode.ai: ReasoningReplay = false, want true", model)
 		}
 	}
-	nonReasoning := modelCapabilitiesWithLearned(provider, "omen-alpha", nil, nil)
+	nonReasoning := agent.ModelCapabilitiesWithLearned(provider, "omen-alpha", nil, nil)
 	if nonReasoning.ReasoningReplay {
 		t.Errorf("omen-alpha (non-reasoning) on opencode.ai: ReasoningReplay = true, want false")
 	}
@@ -3828,7 +3830,7 @@ func TestModelCapabilitiesReasoningReplayOpenCodeHost(t *testing.T) {
 		BaseURL: "https://api.openai.com/v1",
 		Models:  []domain.Model{{ID: "gpt-5.5"}},
 	}
-	caps := modelCapabilitiesWithLearned(other, "gpt-5.5", nil, nil)
+	caps := agent.ModelCapabilitiesWithLearned(other, "gpt-5.5", nil, nil)
 	if caps.ReasoningReplay {
 		t.Errorf("gpt-5.5 on openai.com: ReasoningReplay = true, want false")
 	}
@@ -3847,11 +3849,11 @@ func TestModelCapabilitiesReasoningFlagFromCatalog(t *testing.T) {
 			{ID: "openai/gpt-4.1", Reasoning: false},
 		},
 	}
-	caps := modelCapabilitiesWithLearned(provider, "deepseek/deepseek-r1", nil, nil)
+	caps := agent.ModelCapabilitiesWithLearned(provider, "deepseek/deepseek-r1", nil, nil)
 	if !caps.Reasoning {
 		t.Errorf("deepseek-r1 with Reasoning=true: caps.Reasoning = false, want true")
 	}
-	caps = modelCapabilitiesWithLearned(provider, "openai/gpt-4.1", nil, nil)
+	caps = agent.ModelCapabilitiesWithLearned(provider, "openai/gpt-4.1", nil, nil)
 	if caps.Reasoning {
 		t.Errorf("gpt-4.1 with Reasoning=false: caps.Reasoning = true, want false")
 	}
@@ -3866,7 +3868,7 @@ func TestChatMessagesDocumentPlaceholderForNonDocumentModel(t *testing.T) {
 		}},
 	}}
 
-	msgs := chatMessages(conv, "", ModelCapabilities{})
+	msgs := agent.ChatMessages(conv, "", ModelCapabilities{})
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
@@ -3894,7 +3896,7 @@ func TestChatMessagesDocumentKeptForDocumentModel(t *testing.T) {
 		}},
 	}}
 
-	msgs := chatMessages(conv, "", ModelCapabilities{Document: true})
+	msgs := agent.ChatMessages(conv, "", ModelCapabilities{Document: true})
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
@@ -3911,7 +3913,7 @@ func TestFilterToolAttachmentsByCapsStripsDocument(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "file", Name: "report.pdf", FilePath: "/tmp/report.pdf"},
 	}
-	filtered, content := filterToolAttachmentsByCaps(atts, "Document loaded.", ModelCapabilities{})
+	filtered, content := agent.FilterToolAttachmentsByCaps(atts, "Document loaded.", ModelCapabilities{})
 	if len(filtered) != 0 {
 		t.Errorf("file should be stripped for non-document model, got %d attachments", len(filtered))
 	}
@@ -3927,7 +3929,7 @@ func TestFilterToolAttachmentsByCapsKeepsDocumentForDocumentModel(t *testing.T) 
 	atts := []domain.Attachment{
 		{Type: "file", Name: "report.pdf", FilePath: "/tmp/report.pdf"},
 	}
-	filtered, content := filterToolAttachmentsByCaps(atts, "Document loaded.", ModelCapabilities{Document: true})
+	filtered, content := agent.FilterToolAttachmentsByCaps(atts, "Document loaded.", ModelCapabilities{Document: true})
 	if len(filtered) != 1 || filtered[0].Type != "file" {
 		t.Errorf("file should be kept for document-capable model, got %d attachments", len(filtered))
 	}
@@ -3955,7 +3957,7 @@ func TestChatMessagesToolResultNoteInsideUntrustedEnvelope(t *testing.T) {
 			}},
 		}}},
 	}}
-	msgs := chatMessages(conv, "", ModelCapabilities{}) // no audio cap
+	msgs := agent.ChatMessages(conv, "", ModelCapabilities{}) // no audio cap
 	var tool *ChatMessage
 	for i := range msgs {
 		if msgs[i].Role == "tool" && msgs[i].ToolResult != nil {
@@ -3998,7 +4000,7 @@ func TestDrainAnnouncementsInjectsPendingAtRoundBoundary(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1"}
 
-	applied, err := app.drainAnnouncements(run)
+	applied, err := app.agentService().DrainAnnouncements(run)
 	if err != nil {
 		t.Fatalf("drainAnnouncements: %v", err)
 	}
@@ -4033,7 +4035,7 @@ func TestDrainAnnouncementsMergesAllPendingTypesIntoOne(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1"}
 
-	applied, err := app.drainAnnouncements(run)
+	applied, err := app.agentService().DrainAnnouncements(run)
 	if err != nil {
 		t.Fatalf("drainAnnouncements: %v", err)
 	}
@@ -4068,7 +4070,7 @@ func TestPublishAnnouncementCapDropsOldest(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
 	for i := 0; i < maxPendingAnnouncements+1; i++ {
-		app.publishAnnouncement("c1", newAnnouncement(
+		app.agentService().PublishAnnouncement("c1", agent.NewAnnouncement(
 			"config_changed",
 			`{"type":"config_changed"}`,
 			"config changed "+strings.Repeat("x", i+1),
@@ -4097,7 +4099,7 @@ func TestDrainAnnouncementsEmptyQueueIsNoop(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 	run := &TurnRun{ID: "r1", ConversationID: "c1"}
 
-	applied, err := app.drainAnnouncements(run)
+	applied, err := app.agentService().DrainAnnouncements(run)
 	if err != nil {
 		t.Fatalf("drainAnnouncements: %v", err)
 	}
@@ -4114,7 +4116,7 @@ func TestPublishAnnouncementPersistsPending(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
-	app.publishAnnouncement("c1", newAnnouncement("config_changed", `{"type":"config_changed"}`, "config changed"))
+	app.agentService().PublishAnnouncement("c1", agent.NewAnnouncement("config_changed", `{"type":"config_changed"}`, "config changed"))
 
 	if len(conv.PendingAnnouncements) != 1 {
 		t.Fatalf("pending queue = %+v, want 1 entry", conv.PendingAnnouncements)
@@ -4131,10 +4133,10 @@ func TestPublishAnnouncementDedupsIdenticalAppendsDistinct(t *testing.T) {
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
 	// Distinct content: both arrive (append, never last-write-win).
-	app.publishAnnouncement("c1", newAnnouncement("config_changed", `{"type":"config_changed","changed":["subagent"]}`, "config changed 1"))
-	app.publishAnnouncement("c1", newAnnouncement("config_changed", `{"type":"config_changed","changed":["provider"]}`, "config changed 2"))
+	app.agentService().PublishAnnouncement("c1", agent.NewAnnouncement("config_changed", `{"type":"config_changed","changed":["subagent"]}`, "config changed 1"))
+	app.agentService().PublishAnnouncement("c1", agent.NewAnnouncement("config_changed", `{"type":"config_changed","changed":["provider"]}`, "config changed 2"))
 	// Exact duplicate of the first: skipped so bursts never double-book.
-	app.publishAnnouncement("c1", newAnnouncement("config_changed", `{"type":"config_changed","changed":["subagent"]}`, "config changed 1"))
+	app.agentService().PublishAnnouncement("c1", agent.NewAnnouncement("config_changed", `{"type":"config_changed","changed":["subagent"]}`, "config changed 1"))
 
 	// Save persists a clone, so re-fetch from the store.
 	got, err := store.Get("c1")
@@ -4159,7 +4161,7 @@ func TestPublishAnnouncementToAllSkipsHiddenAndSelf(t *testing.T) {
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": visible, "c2": hidden, "c3": self}}
 	app := &App{Conversations: store, Bus: NewBus(), Logs: &fakeLogStore{}}
 
-	app.publishAnnouncementToAll(newAnnouncement("memory_changed", `{"type":"memory_changed"}`, "memory changed"), "c3")
+	app.agentService().PublishAnnouncementToAll(agent.NewAnnouncement("memory_changed", `{"type":"memory_changed"}`, "memory changed"), "c3")
 
 	if len(visible.PendingAnnouncements) != 1 {
 		t.Fatalf("visible conversation pending = %+v, want 1", visible.PendingAnnouncements)
@@ -4191,7 +4193,7 @@ func TestPublishDrainConcurrentNoLostOrDoubleInjection(t *testing.T) {
 		go func(p int) {
 			defer wg.Done()
 			for i := 0; i < perPublisher; i++ {
-				app.publishAnnouncement("c1", newAnnouncement(
+				app.agentService().PublishAnnouncement("c1", agent.NewAnnouncement(
 					"config_changed",
 					`{"type":"config_changed"}`,
 					"config changed",
@@ -4211,7 +4213,7 @@ func TestPublishDrainConcurrentNoLostOrDoubleInjection(t *testing.T) {
 	}
 
 	// Drain injects it exactly once.
-	applied, err := app.drainAnnouncements(run)
+	applied, err := app.agentService().DrainAnnouncements(run)
 	if err != nil {
 		t.Fatalf("drainAnnouncements: %v", err)
 	}
@@ -4237,7 +4239,7 @@ func TestAddTurnMessagesDrainsPendingAnnouncements(t *testing.T) {
 
 	userMsg := domain.Message{ID: "u1", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone}
 	asstMsg := domain.Message{ID: "a1", Role: domain.RoleAssistant}
-	app.addTurnMessages(conv, userMsg, asstMsg)
+	app.agentService().AddTurnMessages(conv, userMsg, asstMsg)
 
 	// Order: user → announcement → assistant placeholder.
 	if len(conv.Messages) != 4 {
@@ -4298,7 +4300,7 @@ func TestHandleSettingsSetPublishesOnlyOnUserPromptChange(t *testing.T) {
 	}
 
 	// Unrelated settings change: no announcement.
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{
 		MaxToolRounds: intPtr(5),
 	}); rpcErr != nil {
 		t.Fatalf("handleSettingsSet: %v", rpcErr.Message)
@@ -4309,7 +4311,7 @@ func TestHandleSettingsSetPublishesOnlyOnUserPromptChange(t *testing.T) {
 
 	// Real UserPrompt change: announcement with the user_prompt surface.
 	prompt := "Always answer in Indonesian."
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{
 		UserPrompt: &prompt,
 	}); rpcErr != nil {
 		t.Fatalf("handleSettingsSet: %v", rpcErr.Message)
@@ -4324,7 +4326,7 @@ func TestHandleSettingsSetPublishesOnlyOnUserPromptChange(t *testing.T) {
 
 	// Same value saved again: no new announcement (coalesced by type anyway,
 	// but the publish must not fire at all).
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{
 		UserPrompt: &prompt,
 	}); rpcErr != nil {
 		t.Fatalf("handleSettingsSet: %v", rpcErr.Message)
@@ -4347,7 +4349,7 @@ func TestShouldAnnounceRestart(t *testing.T) {
 		ID: "conv_old", UpdatedAt: before,
 		Messages: []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "hi"}},
 	}
-	if !shouldAnnounceRestart(persisted, startedAt) {
+	if !agent.ShouldAnnounceRestart(persisted, startedAt) {
 		t.Error("conversation used before restart must announce")
 	}
 
@@ -4355,12 +4357,12 @@ func TestShouldAnnounceRestart(t *testing.T) {
 		ID: "conv_new", UpdatedAt: after,
 		Messages: []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "hi"}},
 	}
-	if shouldAnnounceRestart(fresh, startedAt) {
+	if agent.ShouldAnnounceRestart(fresh, startedAt) {
 		t.Error("conversation created after restart must not announce")
 	}
 
 	empty := &domain.Conversation{ID: "conv_empty", UpdatedAt: before}
-	if shouldAnnounceRestart(empty, startedAt) {
+	if agent.ShouldAnnounceRestart(empty, startedAt) {
 		t.Error("empty conversation (no history) must not announce")
 	}
 
@@ -4368,11 +4370,11 @@ func TestShouldAnnounceRestart(t *testing.T) {
 		ID: "conv_announced", UpdatedAt: after,
 		Messages: []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "hi"}},
 	}
-	if shouldAnnounceRestart(touched, startedAt) {
+	if agent.ShouldAnnounceRestart(touched, startedAt) {
 		t.Error("conversation already active in this process must not re-announce")
 	}
 
-	if shouldAnnounceRestart(persisted, time.Time{}) {
+	if agent.ShouldAnnounceRestart(persisted, time.Time{}) {
 		t.Error("zero startedAt must disable announcements")
 	}
 
@@ -4380,14 +4382,14 @@ func TestShouldAnnounceRestart(t *testing.T) {
 		ID: "conv_hyd", UpdatedAt: before,
 		Messages: []domain.Message{hydrationCheckpointMessage()},
 	}
-	if shouldAnnounceRestart(hydrationOnly, startedAt) {
+	if agent.ShouldAnnounceRestart(hydrationOnly, startedAt) {
 		t.Error("hydration-only transcript is not durable history; must not announce")
 	}
 }
 
 func TestRestartAnnouncementShape(t *testing.T) {
 	app := &App{Bus: NewBus()}
-	msg := app.restartAnnouncement()
+	msg := app.agentService().RestartAnnouncement()
 	if msg.Role != domain.RoleAssistant || msg.Status != domain.StatusDone {
 		t.Fatalf("unexpected message: %+v", msg)
 	}
@@ -4412,7 +4414,7 @@ func TestRestartAnnouncementShape(t *testing.T) {
 // the pre-filled output — never a synthetic user message.
 func TestAutoContinueAnnouncementShape(t *testing.T) {
 	app := &App{Bus: NewBus()}
-	msg := app.autoContinueAnnouncement(domain.AutoContinueDecision{ShouldContinue: true, ContinuesUsed: 2, OpenTodoCount: 3})
+	msg := app.agentService().AutoContinueAnnouncement(domain.AutoContinueDecision{ShouldContinue: true, ContinuesUsed: 2, OpenTodoCount: 3})
 	if msg.Role != domain.RoleAssistant || msg.Status != domain.StatusDone {
 		t.Fatalf("unexpected message: %+v", msg)
 	}
@@ -4454,7 +4456,7 @@ func TestAddTurnMessagesInjectsRestartAnnouncement(t *testing.T) {
 	}
 	app := &App{startedAt: startedAt}
 
-	app.addTurnMessages(conv,
+	app.agentService().AddTurnMessages(conv,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "hello again", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
@@ -4479,7 +4481,7 @@ func TestAddTurnMessagesInjectsRestartAnnouncement(t *testing.T) {
 
 	// One-shot per restart: addTurnMessages bumped UpdatedAt past
 	// startedAt, so the next turn in the same process gets nothing.
-	app.addTurnMessages(conv,
+	app.agentService().AddTurnMessages(conv,
 		domain.Message{ID: "m_user2", Role: domain.RoleUser, Content: "again", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst2", Role: domain.RoleAssistant},
 	)
@@ -4505,7 +4507,7 @@ func TestAddTurnMessagesSkipsFreshOrEmpty(t *testing.T) {
 		ID: "conv_fresh", CreatedAt: startedAt.Add(time.Minute), UpdatedAt: startedAt.Add(time.Minute),
 		Messages: []domain.Message{{ID: "m1", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone}},
 	}
-	app.addTurnMessages(fresh,
+	app.agentService().AddTurnMessages(fresh,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "first message", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
@@ -4518,7 +4520,7 @@ func TestAddTurnMessagesSkipsFreshOrEmpty(t *testing.T) {
 	}
 
 	empty := &domain.Conversation{ID: "conv_empty", UpdatedAt: startedAt.Add(-time.Hour)}
-	app.addTurnMessages(empty,
+	app.agentService().AddTurnMessages(empty,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
@@ -4537,7 +4539,7 @@ func TestAddTurnMessagesSkipsFreshOrEmpty(t *testing.T) {
 func TestAddTurnMessagesDerivesTitleFromFirstUserMessage(t *testing.T) {
 	conv := domain.NewConversation("conv_title", "Untitled")
 	app := &App{}
-	app.addTurnMessages(conv,
+	app.agentService().AddTurnMessages(conv,
 		domain.Message{ID: "m_user", Role: domain.RoleUser, Content: "Fix the room history window", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst", Role: domain.RoleAssistant},
 	)
@@ -4546,7 +4548,7 @@ func TestAddTurnMessagesDerivesTitleFromFirstUserMessage(t *testing.T) {
 	}
 
 	conv.Title = "My custom room"
-	app.addTurnMessages(conv,
+	app.agentService().AddTurnMessages(conv,
 		domain.Message{ID: "m_user2", Role: domain.RoleUser, Content: "Do not replace this title", Status: domain.StatusDone},
 		domain.Message{ID: "m_asst2", Role: domain.RoleAssistant},
 	)
@@ -4576,8 +4578,8 @@ func TestHasUserMessage(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := hasUserMessage(c.msgs); got != c.expected {
-				t.Errorf("hasUserMessage(%s) = %v, want %v", c.name, got, c.expected)
+			if got := agent.HasUserMessage(c.msgs); got != c.expected {
+				t.Errorf("agent.HasUserMessage(%s) = %v, want %v", c.name, got, c.expected)
 			}
 		})
 	}
@@ -4598,8 +4600,8 @@ func TestNeedsUserMessageAtEnd(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := needsUserMessageAtEnd(c.msgs); got != c.want {
-				t.Fatalf("needsUserMessageAtEnd(%s) = %v, want %v", c.name, got, c.want)
+			if got := agent.NeedsUserMessageAtEnd(c.msgs); got != c.want {
+				t.Fatalf("agent.NeedsUserMessageAtEnd(%s) = %v, want %v", c.name, got, c.want)
 			}
 		})
 	}
@@ -4626,7 +4628,7 @@ func (runtime *callbackAcpRuntime) SetCallbacks(
 // tool call + result, never as a system prompt mutation.
 func TestAppendContinuationTool(t *testing.T) {
 	base := []ChatMessage{{Role: "user", Content: "hi"}}
-	msgs := appendContinuationTool(base)
+	msgs := agent.AppendContinuationTool(base)
 
 	if len(msgs) != len(base)+2 {
 		t.Fatalf("want 2 synthetic messages appended, got %d total", len(msgs))
@@ -4689,7 +4691,7 @@ func TestSubagentResultMessageShape(t *testing.T) {
 		},
 	}
 	app := &App{}
-	msg := app.subagentResultMessage(run, "/data/run_abc.json", domain.ToolOK)
+	msg := app.agentService().SubagentResultMessage(run, "/data/run_abc.json", domain.ToolOK)
 
 	if msg.Role != domain.RoleAssistant || msg.Status != domain.StatusDone {
 		t.Fatalf("unexpected message: %+v", msg)
@@ -4746,7 +4748,7 @@ func TestCompleteSubagentRun(t *testing.T) {
 		ParentToolCallID: "call_parent",
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
-	turnLock := app.conversationTurnLock("c1")
+	turnLock := app.agentService().ConversationTurnLock("c1")
 	turnLock.Lock()
 	err := app.completeSubagentRunLocked("c1", run.ParentToolCallID, domain.ToolOK, run, "/data/run_xyz.json")
 	turnLock.Unlock()
@@ -4817,7 +4819,7 @@ func TestCompleteSubagentRunFailedStatus(t *testing.T) {
 		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run_fail", Status: domain.AcpRunFailed, Error: "boom"},
 		ParentToolCallID: "call_parent",
 	}
-	turnLock := app.conversationTurnLock("c1")
+	turnLock := app.agentService().ConversationTurnLock("c1")
 	turnLock.Lock()
 	err := app.completeSubagentRunLocked("c1", run.ParentToolCallID, domain.ToolFailed, run, "")
 	turnLock.Unlock()
@@ -4857,7 +4859,7 @@ func TestCompleteSubagentRunWaitsForActiveTurnMutation(t *testing.T) {
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
 
-	turnLock := app.conversationTurnLock("c1")
+	turnLock := app.agentService().ConversationTurnLock("c1")
 	turnLock.Lock()
 	completed := make(chan struct{})
 	go func() {
@@ -4920,7 +4922,7 @@ func TestAcpDoneCallbackDoesNotBlockActiveParentTool(t *testing.T) {
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
 
-	turnLock := app.conversationTurnLock("c1")
+	turnLock := app.agentService().ConversationTurnLock("c1")
 	turnLock.Lock()
 	returned := make(chan struct{})
 	go func() {
@@ -5027,9 +5029,9 @@ func (m *capMCP) Drop(string) {}
 // order, with monotonic seq numbers.
 func TestRoundStreamReplayCursor(t *testing.T) {
 	reg := NewRoundStreamRegistry()
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "a")
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "b")
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "c")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "a", nil, nil)
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "b", nil, nil)
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "c", nil, nil)
 
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 1)
 	if err != nil {
@@ -5082,7 +5084,7 @@ func TestRoundStreamPublishActivityCarriesNoToolArguments(t *testing.T) {
 // subscribers and the seal is idempotent.
 func TestRoundStreamSealDeliversDone(t *testing.T) {
 	reg := NewRoundStreamRegistry()
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "a")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "a", nil, nil)
 
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
@@ -5124,8 +5126,8 @@ func TestRoundStreamSealDeliversDone(t *testing.T) {
 // terminal frame (within the sealed TTL).
 func TestRoundStreamLateJoinReplay(t *testing.T) {
 	reg := NewRoundStreamRegistry()
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "y")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "x", nil, nil)
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "y", nil, nil)
 	reg.Seal("r", "m", 1, contracts.RoundDoneFrame{State: contracts.RoundStateDone, RunID: "r", MessageID: "m", Round: 1})
 
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
@@ -5187,7 +5189,7 @@ func TestRoundStreamWaitForLateCreate(t *testing.T) {
 		result <- sub
 	}()
 	time.Sleep(50 * time.Millisecond)
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "z")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "z", nil, nil)
 
 	select {
 	case sub := <-result:
@@ -5225,7 +5227,7 @@ func TestRoundStreamNotFound(t *testing.T) {
 func TestRoundStreamPublishAfterSealDropped(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	reg.Seal("r", "m", 1, contracts.RoundDoneFrame{State: contracts.RoundStateDone, RunID: "r", MessageID: "m", Round: 1})
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "late")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "late", nil, nil)
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -5254,7 +5256,7 @@ func TestRoundStreamSlowSubscriberBufferHeadroom(t *testing.T) {
 	// Bootstrap the stream so the subscriber attaches to a known stream
 	// (Subscribe otherwise waits for a stream to appear and would time out
 	// after roundStreamWaitTTL).
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "warmup")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "warmup", nil, nil)
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -5274,7 +5276,7 @@ func TestRoundStreamSlowSubscriberBufferHeadroom(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < total; i++ {
-			reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
+			reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "x", nil, nil)
 		}
 		close(done)
 	}()
@@ -5333,7 +5335,7 @@ func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
 	// subscriber will drain it on attach without blocking.
 	const head = 128
 	for i := 0; i < head; i++ {
-		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "h")
+		reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "h", nil, nil)
 	}
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
@@ -5352,7 +5354,7 @@ func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
 	// frames without reading. They sit in the subscriber's buffered channel.
 	const tail = 32
 	for i := 0; i < tail; i++ {
-		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "t")
+		reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "t", nil, nil)
 	}
 	// A new subscriber attaching with after=<head> gets the live tail
 	// cleanly — no gap visible to a fresh attacher, because the publisher
@@ -5376,7 +5378,7 @@ func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
 func TestRoundStreamLargeReplayDoesNotBlockSubscription(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	for i := 0; i < roundStreamFrameCap; i++ {
-		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
+		reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "x", nil, nil)
 	}
 
 	result := make(chan *RoundStreamSub, 1)
@@ -5550,29 +5552,29 @@ func TestAskQuestionService_OnAsk(t *testing.T) {
 }
 
 func TestIsLearnable400(t *testing.T) {
-	if !isLearnable400(&domain.ProviderError{StatusCode: 400, Err: errors.New("bad request")}) {
+	if !agent.IsLearnable400(&domain.ProviderError{StatusCode: 400, Err: errors.New("bad request")}) {
 		t.Error("400 should be learnable")
 	}
-	if isLearnable400(&domain.ProviderError{StatusCode: 429, Err: errors.New("rate limit")}) {
+	if agent.IsLearnable400(&domain.ProviderError{StatusCode: 429, Err: errors.New("rate limit")}) {
 		t.Error("429 should not be learnable")
 	}
-	if isLearnable400(&domain.ProviderError{StatusCode: 500, Err: errors.New("server error")}) {
+	if agent.IsLearnable400(&domain.ProviderError{StatusCode: 500, Err: errors.New("server error")}) {
 		t.Error("500 should not be learnable")
 	}
-	if isLearnable400(errors.New("plain error")) {
+	if agent.IsLearnable400(errors.New("plain error")) {
 		t.Error("non-ProviderError should not be learnable")
 	}
 }
 
 func TestExtractErrBody(t *testing.T) {
-	if got := extractErrBody(nil); got != "" {
-		t.Errorf("extractErrBody(nil) = %q, want empty", got)
+	if got := agent.ExtractErrBody(nil); got != "" {
+		t.Errorf("agent.ExtractErrBody(nil) = %q, want empty", got)
 	}
-	if got := extractErrBody(errors.New("plain")); got != "plain" {
-		t.Errorf("extractErrBody(plain) = %q, want plain", got)
+	if got := agent.ExtractErrBody(errors.New("plain")); got != "plain" {
+		t.Errorf("agent.ExtractErrBody(plain) = %q, want plain", got)
 	}
-	if got := extractErrBody(&domain.ProviderError{StatusCode: 400, Err: errors.New("unsupported")}); got != "unsupported" {
-		t.Errorf("extractErrBody(upstream) = %q, want unsupported", got)
+	if got := agent.ExtractErrBody(&domain.ProviderError{StatusCode: 400, Err: errors.New("unsupported")}); got != "unsupported" {
+		t.Errorf("agent.ExtractErrBody(upstream) = %q, want unsupported", got)
 	}
 }
 
@@ -5585,7 +5587,11 @@ func TestEstimateRequestTokensIncludesSystemAndTools(t *testing.T) {
 		{Role: "assistant", Content: "hi there"},
 	}
 	tools := []ToolDef{{Name: "exec", Description: "run a command"}}
-	got := estimateRequestTokens(system, messages, tools)
+	got := provider.EstimateRequestTokens(provider.ChatRequest{
+		System:   system,
+		Messages: messages,
+		Tools:    tools,
+	}, domain.ProviderChat, false)
 	if got <= int64(0) {
 		t.Fatalf("expected positive estimate, got %d", got)
 	}
@@ -5631,10 +5637,10 @@ func TestBuildPromptCachePolicyUsesDistinctAgentPrefixes(t *testing.T) {
 }
 
 func TestPromptCachePrefixForRunSeparatesHeadlessAgents(t *testing.T) {
-	if got := promptCachePrefixForRun(&TurnRun{}); got != promptCacheConversationPrefix {
+	if got := agent.PromptCachePrefixForRun(&TurnRun{}); got != promptCacheConversationPrefix {
 		t.Fatalf("interactive run prefix = %q, want %q", got, promptCacheConversationPrefix)
 	}
-	if got := promptCachePrefixForRun(&TurnRun{Headless: true}); got != promptCacheBackgroundPrefix {
+	if got := agent.PromptCachePrefixForRun(&TurnRun{Headless: true}); got != promptCacheBackgroundPrefix {
 		t.Fatalf("headless run prefix = %q, want %q", got, promptCacheBackgroundPrefix)
 	}
 }
@@ -5700,7 +5706,7 @@ func TestBuildPromptCachePolicyTTLFromProvider(t *testing.T) {
 
 func TestTruncateToolErrorShortMessage(t *testing.T) {
 	msg := "error: something went wrong"
-	if got := truncateToolError(msg); got != msg {
+	if got := agent.TruncateToolError(msg); got != msg {
 		t.Errorf("short error should be unchanged, got %q", got)
 	}
 }
@@ -5708,7 +5714,7 @@ func TestTruncateToolErrorShortMessage(t *testing.T) {
 func TestTruncateToolErrorLongMessage(t *testing.T) {
 	// Simulate a provider error that embeds base64 audio data (1.5MB+)
 	msg := "error: Failed to load image from data:audio/mpeg;base64,//Nkx" + strings.Repeat("A", 2000000)
-	got := truncateToolError(msg)
+	got := agent.TruncateToolError(msg)
 	if len(got) > maxToolErrorLen+100 {
 		t.Errorf("truncated error should be ~%d chars, got %d", maxToolErrorLen+100, len(got))
 	}
@@ -5722,7 +5728,7 @@ func TestTruncateToolErrorLongMessage(t *testing.T) {
 
 func TestTruncateToolErrorExactLimit(t *testing.T) {
 	msg := strings.Repeat("x", maxToolErrorLen)
-	if got := truncateToolError(msg); got != msg {
+	if got := agent.TruncateToolError(msg); got != msg {
 		t.Errorf("error at exact limit should be unchanged, got len %d", len(got))
 	}
 }
@@ -5813,7 +5819,7 @@ func TestStreamTurnRoundContinuesAfterPrematureEOF(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r-premature", ConversationID: "c-premature", ProviderID: "openai", Ctx: context.Background()}
 
-	res, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-4.1", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
+	res, err := app.agentService().StreamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-4.1", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
 	if err != nil {
 		t.Fatalf("streamTurnRound returned error after premature EOF: %v (expected continuation retry to succeed)", err)
 	}
@@ -5871,7 +5877,7 @@ func TestStreamTurnRoundDoesNotContinueWhenToolCallsInProgress(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r-premature-tools", ConversationID: "c-premature-tools", ProviderID: "openai", Ctx: context.Background()}
 
-	_, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-4.1", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
+	_, err := app.agentService().StreamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-4.1", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
 	if err == nil {
 		t.Fatal("expected error when tool calls in progress and stream cuts, got nil (should not continue with tool calls)")
 	}
@@ -5975,7 +5981,7 @@ func TestStreamTurnRoundPublishesToolConstructionActivity(t *testing.T) {
 		RoundStreams:  reg,
 	}
 	run := &TurnRun{ID: "r-activity", ConversationID: conv.ID, Ctx: context.Background()}
-	if _, err := app.streamTurnRoundOnce(run, stubProviderContext(&toolConstructionActivityProvider{}), conv, "a1", "test-model", "", nil, domain.Settings{}, false, nil, 100, nil, ModelCapabilities{}, 1); err != nil {
+	if _, err := app.agentService().StreamTurnRoundOnce(run, stubProviderContext(&toolConstructionActivityProvider{}), conv, "a1", "test-model", "", nil, domain.Settings{}, false, nil, 100, nil, ModelCapabilities{}, 1); err != nil {
 		t.Fatalf("streamTurnRoundOnce: %v", err)
 	}
 
@@ -6019,7 +6025,7 @@ func TestStreamTurnRoundStripsEffortForNonReasoningModel(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
 	caps := ModelCapabilities{Vision: true, Reasoning: false}
-	_, err := app.streamTurnRoundOnce(run, stubProviderContext(provider), &domain.Conversation{
+	_, err := app.agentService().StreamTurnRoundOnce(run, stubProviderContext(provider), &domain.Conversation{
 		ID: "c1",
 		Messages: []domain.Message{
 			{ID: "u1", Role: domain.RoleUser, Content: "hi"},
@@ -6051,7 +6057,7 @@ func TestStreamTurnRoundKeepsEffortForReasoningModel(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
 	caps := ModelCapabilities{Vision: true, Reasoning: true}
-	_, err := app.streamTurnRoundOnce(run, stubProviderContext(provider), &domain.Conversation{
+	_, err := app.agentService().StreamTurnRoundOnce(run, stubProviderContext(provider), &domain.Conversation{
 		ID: "c1",
 		Messages: []domain.Message{
 			{ID: "u1", Role: domain.RoleUser, Content: "hi"},
@@ -6128,7 +6134,7 @@ func TestStreamTurnRoundRetriesAfterLearnable400(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", ProviderID: "9router", Ctx: context.Background()}
 	caps := ModelCapabilities{Vision: true}
 
-	res, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a1", "qwen/qwen3.8-max-free", "", nil, domain.Settings{}, false, 100, nil, caps, 1)
+	res, err := app.agentService().StreamTurnRound(run, stubProviderContext(provider), conv, "a1", "qwen/qwen3.8-max-free", "", nil, domain.Settings{}, false, 100, nil, caps, 1)
 	if err != nil {
 		t.Fatalf("streamTurnRound returned error after learnable 400: %v (expected retry to succeed)", err)
 	}
@@ -6192,7 +6198,7 @@ func TestStreamTurnRoundRepairsAssistantPrefill400(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r-prefill", ConversationID: "c-prefill", ProviderID: "9router", Ctx: context.Background()}
 
-	res, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a2", "ag/claude-sonnet-4-6", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
+	res, err := app.agentService().StreamTurnRound(run, stubProviderContext(provider), conv, "a2", "ag/claude-sonnet-4-6", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
 	if err != nil {
 		t.Fatalf("streamTurnRound returned error after prefill repair: %v", err)
 	}
@@ -6267,7 +6273,7 @@ func TestStreamTurnRoundRetriesConnectionResetTransportError(t *testing.T) {
 	}
 	run := &TurnRun{ID: "r-reset", ConversationID: "c-reset", ProviderID: "openai", Ctx: context.Background()}
 
-	res, err := app.streamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-4.1", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
+	res, err := app.agentService().StreamTurnRound(run, stubProviderContext(provider), conv, "a1", "gpt-4.1", "", nil, domain.Settings{}, false, 100, nil, ModelCapabilities{}, 1)
 	if err != nil {
 		t.Fatalf("streamTurnRound returned error after connection reset: %v", err)
 	}
@@ -6300,10 +6306,10 @@ func requestHasImageBlock(req *core.Request) bool {
 func TestApplyStreamRoundPersistsReasoningExtra(t *testing.T) {
 	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-PERSIST"}`)
 	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
-	applyStreamRound(msg, "gpt-5.6-sol", streamedTurnRound{
+	agent.ApplyStreamRound(msg, "gpt-5.6-sol", streamedTurnRound{
 		Content:   "answer",
 		Reasoning: "think",
-		Response:  ChatResponse{ReasoningExtra: extra},
+		Response:  ChatResponse{ReasoningExtra: extra, ReasoningExtraFor: "openai"},
 	})
 	if msg.Reasoning != "think" {
 		t.Fatalf("Reasoning = %q, want think (UI text unchanged)", msg.Reasoning)
@@ -6311,15 +6317,67 @@ func TestApplyStreamRoundPersistsReasoningExtra(t *testing.T) {
 	if string(msg.ReasoningExtra) != string(extra) {
 		t.Fatalf("ReasoningExtra = %s, want %s", msg.ReasoningExtra, extra)
 	}
+	if msg.ReasoningExtraFor != "openai" {
+		t.Fatalf("ReasoningExtraFor = %q, want openai producer marker", msg.ReasoningExtraFor)
+	}
+}
+
+// TestApplyStreamRoundPersistsReasoningExtraUpstream proves the gateway
+// upstream provenance rides along with the extra it describes.
+func TestApplyStreamRoundPersistsReasoningExtraUpstream(t *testing.T) {
+	extra := json.RawMessage(`[{"type":"reasoning.encrypted","data":"c","format":"openai-responses-v1"}]`)
+	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
+	agent.ApplyStreamRound(msg, "openrouter/free", streamedTurnRound{
+		Content:  "answer",
+		Response: ChatResponse{ReasoningExtra: extra, ReasoningExtraFor: "openrouter", Upstream: "Nvidia"},
+	})
+	if msg.ReasoningExtraUpstream != "Nvidia" {
+		t.Fatalf("ReasoningExtraUpstream = %q, want Nvidia", msg.ReasoningExtraUpstream)
+	}
+}
+
+// TestApplyStreamRoundServedModelWins proves the provider-reported served
+// model is recorded as provenance while Model keeps the requested alias that
+// follow-up turns and pricing re-resolve.
+func TestApplyStreamRoundServedModelWins(t *testing.T) {
+	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
+	agent.ApplyStreamRound(msg, "openrouter/free", streamedTurnRound{
+		Content:  "answer",
+		Response: ChatResponse{Model: "nvidia/nemotron-3-super-120b-a12b:free"},
+	})
+	if msg.Model != "openrouter/free" {
+		t.Fatalf("Model = %q, want requested alias", msg.Model)
+	}
+	if msg.ServedModel != "nvidia/nemotron-3-super-120b-a12b:free" {
+		t.Fatalf("ServedModel = %q, want served slug", msg.ServedModel)
+	}
+}
+
+// TestApplyStreamRoundServedModelOmittedWhenEchoed proves a response that
+// reports the requested model (or none) does not write redundant provenance.
+func TestApplyStreamRoundServedModelOmittedWhenEchoed(t *testing.T) {
+	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
+	agent.ApplyStreamRound(msg, "gpt-5.6-sol", streamedTurnRound{
+		Content:  "answer",
+		Response: ChatResponse{Model: "gpt-5.6-sol"},
+	})
+	if msg.ServedModel != "" {
+		t.Fatalf("ServedModel = %q, want empty when served == requested", msg.ServedModel)
+	}
+	msg2 := &domain.Message{ID: "a2", Role: domain.RoleAssistant}
+	agent.ApplyStreamRound(msg2, "gpt-5.6-sol", streamedTurnRound{Content: "answer"})
+	if msg2.ServedModel != "" {
+		t.Fatalf("ServedModel = %q, want empty when provider reports none", msg2.ServedModel)
+	}
 }
 
 func TestChatMessagesForProviderReplaysReasoningExtra(t *testing.T) {
 	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-REPLAY"}`)
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone},
-		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Reasoning: "think", ReasoningExtra: extra, Status: domain.StatusDone},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Reasoning: "think", ReasoningExtra: extra, ReasoningExtraFor: "openai", Status: domain.StatusDone},
 	}}
-	msgs := chatMessages(conv, "", ModelCapabilities{})
+	msgs := agent.ChatMessages(conv, "", ModelCapabilities{})
 	var assistant *ChatMessage
 	for i := range msgs {
 		if msgs[i].Role == "assistant" {
@@ -6333,12 +6391,15 @@ func TestChatMessagesForProviderReplaysReasoningExtra(t *testing.T) {
 	if string(assistant.ReasoningExtra) != string(extra) {
 		t.Fatalf("ReasoningExtra = %s, want %s", assistant.ReasoningExtra, extra)
 	}
+	if assistant.ReasoningExtraFor != "openai" {
+		t.Fatalf("ReasoningExtraFor = %q, want openai producer marker", assistant.ReasoningExtraFor)
+	}
 }
 
 func TestApplyStreamRoundDropsWhitespaceOnlyContent(t *testing.T) {
 	for _, raw := range []string{"\n\n", "\n\n\n\n", "  \n"} {
 		msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
-		applyStreamRound(msg, "qwen", streamedTurnRound{Content: raw})
+		agent.ApplyStreamRound(msg, "qwen", streamedTurnRound{Content: raw})
 		if msg.Content != "" {
 			t.Fatalf("Content = %q from %q, want empty", msg.Content, raw)
 		}
@@ -6350,7 +6411,7 @@ func TestApplyStreamRoundDropsWhitespaceOnlyContent(t *testing.T) {
 
 func TestApplyStreamRoundTrimsLeadingTrailingNewlines(t *testing.T) {
 	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
-	applyStreamRound(msg, "qwen", streamedTurnRound{Content: "\n\nNow update main.go:\n\n"})
+	agent.ApplyStreamRound(msg, "qwen", streamedTurnRound{Content: "\n\nNow update main.go:\n\n"})
 	if msg.Content != "Now update main.go:" {
 		t.Fatalf("Content = %q, want trimmed text", msg.Content)
 	}
@@ -6362,7 +6423,7 @@ func TestApplyStreamRoundTrimsLeadingTrailingNewlines(t *testing.T) {
 // the two — stripping it runs words together ("here.And").
 func TestApplyStreamRoundKeepsTrailingSpace(t *testing.T) {
 	msg := &domain.Message{ID: "a1", Role: domain.RoleAssistant}
-	applyStreamRound(msg, "model", streamedTurnRound{Content: "The answer starts here. "})
+	agent.ApplyStreamRound(msg, "model", streamedTurnRound{Content: "The answer starts here. "})
 	if msg.Content != "The answer starts here. " {
 		t.Fatalf("Content = %q, want trailing space preserved", msg.Content)
 	}

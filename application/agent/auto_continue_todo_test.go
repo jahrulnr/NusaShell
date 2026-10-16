@@ -122,7 +122,7 @@ func TestAppendAutoContinueBoundaryOrdering(t *testing.T) {
 		},
 	})
 
-	nextMsgID, err := svc.appendAutoContinueBoundary("conv_order", domain.AutoContinueDecision{
+	nextMsgID, err := svc.appendAutoContinueBoundary("conv_order", "prov_test", domain.AutoContinueDecision{
 		ShouldContinue: true, ContinuesUsed: 1, OpenTodoCount: 1,
 	})
 	if err != nil {
@@ -181,7 +181,7 @@ func TestAppendAutoContinueBoundaryNoTodosPreservesOldShape(t *testing.T) {
 	}}
 	svc := New(Deps{Conversations: store})
 
-	nextMsgID, err := svc.appendAutoContinueBoundary("conv_notodos", domain.AutoContinueDecision{
+	nextMsgID, err := svc.appendAutoContinueBoundary("conv_notodos", "prov_test", domain.AutoContinueDecision{
 		ShouldContinue: true, ContinuesUsed: 1, OpenTodoCount: 0,
 	})
 	if err != nil {
@@ -238,7 +238,7 @@ func TestAutoContinueTodoHydrationFilteredByCompaction(t *testing.T) {
 
 // TestAutoContinueTodoHydrationRetainedInProviderMessages proves the hidden
 // todo_list checkpoint persisted by appendAutoContinueBoundary survives the
-// chatMessages translation that builds the provider-facing request: the
+// ChatMessages translation that builds the provider-facing request: the
 // provider sees a todo_list tool result carrying the current open item, while
 // the persisted hydration message in the conversation stays a pure hydration
 // message (domain.IsHydrationMessage). This closes the gap between "persisted
@@ -272,7 +272,7 @@ func TestAutoContinueTodoHydrationRetainedInProviderMessages(t *testing.T) {
 		},
 	})
 
-	nextMsgID, err := svc.appendAutoContinueBoundary("conv_provider", domain.AutoContinueDecision{
+	nextMsgID, err := svc.appendAutoContinueBoundary("conv_provider", "prov_test", domain.AutoContinueDecision{
 		ShouldContinue: true, ContinuesUsed: 1, OpenTodoCount: 2,
 	})
 	if err != nil {
@@ -311,7 +311,7 @@ func TestAutoContinueTodoHydrationRetainedInProviderMessages(t *testing.T) {
 	// is preserved (the test is robust to it being disabled, but we exercise
 	// the non-suppressing path explicitly).
 	caps := ModelCapabilities{ReasoningReplay: true}
-	providerMsgs := chatMessages(conv, nextMsgID, caps)
+	providerMsgs := ChatMessages(conv, nextMsgID, caps)
 	if len(providerMsgs) == 0 {
 		t.Fatal("provider messages must not be empty")
 	}
@@ -352,7 +352,7 @@ func TestAutoContinueTodoHydrationRetainedInProviderMessages(t *testing.T) {
 	}
 
 	// The fresh assistant placeholder (nextMsgID) must be skipped by
-	// chatMessages (it is empty), so it never appears as a trailing empty
+	// ChatMessages (it is empty), so it never appears as a trailing empty
 	// assistant turn in the provider payload.
 	for _, pm := range providerMsgs {
 		if pm.Role == "assistant" && pm.Content == "" && len(pm.ToolCalls) == 0 && pm.Reasoning == "" {

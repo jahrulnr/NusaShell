@@ -118,12 +118,7 @@ func (r *Resolver) PetsInstalledVersion() string {
 // Returns false when the procfs root is missing/empty (macOS, Windows, or
 // sandboxed tests).
 func (r *Resolver) PetsRunning() bool {
-	return len(r.PetsPIDs()) > 0
-}
-
-// PetsPIDs returns PIDs whose cmdline looks like a desktop pet process.
-func (r *Resolver) PetsPIDs() []int {
-	return r.petsPIDsMatching("")
+	return len(r.petsPIDsMatching("")) > 0
 }
 
 func (r *Resolver) petsPIDsMatching(binary string) []int {

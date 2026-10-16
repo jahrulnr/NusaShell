@@ -1,0 +1,476 @@
+/*
+ * MCP launcher for the conversation prototype.
+ * This stays local to .experimental so the production Home surface remains
+ * untouched while the launcher language is explored here.
+ */
+
+.conversation-surface {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-row: 1 / -1;
+  grid-template-rows: 43px minmax(0, 1fr);
+}
+
+.conversation-surface[hidden],
+.home-view[hidden] {
+  display: none;
+}
+
+/* Keep the original pet and a clear status while the prototype backend is unavailable. */
+.offline-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding: 28px;
+  background: var(--deep-water);
+  color: var(--foam);
+  text-align: center;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+.offline-screen[hidden] {
+  display: none;
+}
+
+.offline-mascot {
+  width: clamp(150px, 21vw, 250px);
+  height: auto;
+  max-height: 34vh;
+  object-fit: contain;
+  opacity: .94;
+  filter: drop-shadow(0 12px 20px rgba(3, 8, 5, .34));
+}
+.offline-screen h2 { max-width: 30ch; margin: 10px 0 0; color: var(--foam); font: 600 17px/1.35 var(--font-display); }
+.offline-screen p { max-width: 42ch; margin: 3px 0 0; color: var(--muted); font: 11px/1.5 var(--font-body); }
+/* Ported from production layout.css: breathing room before the retry CTA. */
+.offline-retry-btn { margin-top: 16px; }
+
+.home-view {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  overflow: hidden;
+  padding: clamp(24px, 5vw, 64px);
+  background:
+    radial-gradient(ellipse 70% 52% at 76% -8%, rgba(121, 174, 232, .18), transparent 68%),
+    radial-gradient(ellipse 62% 58% at 14% 108%, rgba(88, 209, 195, .14), transparent 72%),
+    #060d19;
+  color: var(--foam);
+  isolation: isolate;
+}
+
+.home-view::before {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background-image: url("./assets/topography.svg");
+  background-position: center;
+  background-size: cover;
+  content: "";
+  opacity: .72;
+  filter: brightness(1.25) saturate(.82);
+  pointer-events: none;
+}
+
+.home-view::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(4, 8, 17, .62), transparent 25%, transparent 75%, rgba(4, 8, 17, .46)),
+    linear-gradient(180deg, rgba(4, 8, 17, .28), transparent 36%, rgba(4, 8, 17, .38));
+  content: "";
+  pointer-events: none;
+}
+
+.home-launcher {
+  position: relative;
+  display: flex;
+  width: min(900px, 100%);
+  align-self: stretch;
+  flex-direction: column;
+  gap: clamp(36px, 7vh, 60px);
+  height: 100%;
+  min-height: 0;
+}
+
+.home-search-form {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  width: min(690px, 100%);
+  min-height: 56px;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  margin: 0 auto;
+  padding: 0 16px;
+  border: 1px solid rgba(150, 193, 227, .3);
+  border-radius: 999px;
+  background: rgba(9, 19, 34, .78);
+  box-shadow: 0 22px 62px rgba(0, 0, 0, .3), inset 0 1px rgba(255, 255, 255, .06);
+  backdrop-filter: blur(18px);
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.home-search-form:focus-within {
+  border-color: rgba(88, 209, 195, .72);
+  background: rgba(11, 28, 41, .88);
+  box-shadow: 0 22px 62px rgba(0, 0, 0, .34), 0 0 0 4px rgba(88, 209, 195, .08), inset 0 1px rgba(255, 255, 255, .08);
+}
+
+.home-search-form > svg {
+  width: 19px;
+  height: 19px;
+  flex: none;
+  color: var(--lagoon);
+}
+
+.home-search-form input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--foam);
+  font: 400 14px var(--font-body);
+}
+
+.home-search-form input::placeholder {
+  color: #8999ac;
+}
+
+.home-search-form kbd {
+  min-width: 24px;
+  padding: 3px 6px;
+  border: 1px solid rgba(121, 174, 232, .24);
+  border-radius: 5px;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+  text-align: center;
+}
+
+.home-apps-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.home-apps-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 4px 12px 0;
+  scrollbar-gutter: stable;
+}
+
+.home-apps-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 0;
+  margin-bottom: 10px;
+}
+
+.home-section-meta {
+  color: var(--muted);
+  font: 10px var(--font-mono);
+  white-space: nowrap;
+}
+
+.home-inline-action {
+  padding: 5px 9px;
+  border: 1px solid rgba(88, 209, 195, .32);
+  border-radius: 5px;
+  background: rgba(88, 209, 195, .08);
+  color: var(--lagoon);
+  cursor: pointer;
+  font: 10px var(--font-mono);
+}
+
+.home-inline-action:hover,
+.home-inline-action:focus-visible {
+  border-color: rgba(88, 209, 195, .72);
+  background: rgba(88, 209, 195, .16);
+  outline: 0;
+}
+
+/* Category filter row — mirrors the production launcher tabs with the
+   plugins-filter-button token language already used in this shell. */
+.home-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.home-category-tab {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 10px var(--font-mono);
+}
+
+.home-category-tab:hover,
+.home-category-tab:focus-visible {
+  border-color: var(--line-strong);
+  color: var(--mist);
+  outline: none;
+}
+
+.home-category-tab.is-active,
+.home-category-tab[aria-pressed="true"] {
+  border-color: rgba(88, 209, 195, .38);
+  background: rgba(88, 209, 195, .10);
+  color: var(--lagoon);
+}
+
+.home-app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  align-content: start;
+  gap: 10px;
+}
+
+.home-mcp-card {
+  min-width: 0;
+}
+
+.home-mcp-card-action {
+  display: grid;
+  width: 100%;
+  min-height: 92px;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 11px;
+  padding: 13px;
+  border: 1px solid rgba(121, 174, 232, .15);
+  border-radius: 10px;
+  background: rgba(10, 19, 34, .7);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .035);
+  color: var(--mist);
+  text-align: start;
+  text-decoration: none;
+  transition: border-color .18s ease, background .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+button.home-mcp-card-action {
+  cursor: pointer;
+}
+
+.home-mcp-card-action:hover,
+.home-mcp-card-action:focus-visible {
+  border-color: rgba(88, 209, 195, .62);
+  background: rgba(17, 39, 51, .84);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .08), 0 14px 32px rgba(0, 0, 0, .2), 0 0 0 3px rgba(88, 209, 195, .06);
+  color: var(--foam);
+  outline: 0;
+  transform: translateY(-2px);
+}
+
+.home-mcp-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  grid-row: span 2;
+  overflow: hidden;
+  border-radius: 9px;
+}
+
+.home-mcp-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-mcp-glyph {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.app-mark-lagoon {
+  background: rgba(88, 209, 195, .15);
+  color: var(--lagoon);
+}
+
+.home-mcp-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.home-mcp-copy strong,
+.home-mcp-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-mcp-copy strong {
+  color: var(--foam);
+  font: 600 12px var(--font-display);
+}
+
+.home-mcp-copy small {
+  color: var(--muted);
+  font: 9px var(--font-mono);
+}
+
+.home-mcp-status {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  color: var(--muted);
+  font: 9px var(--font-mono);
+}
+
+.home-mcp-status::before {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.home-mcp-status.is-connected,
+.home-mcp-status.is-running {
+  color: var(--lagoon);
+}
+
+.home-mcp-status.is-starting,
+.home-mcp-status.is-stopping {
+  color: var(--sand);
+}
+
+.home-mcp-status.is-crashed {
+  color: #ef8e9d;
+}
+
+.home-app-message {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0 0;
+  padding: 0 2px 4px;
+  color: var(--muted);
+  font: 10px/1.5 var(--font-mono);
+  text-align: center;
+}
+
+.home-app-message-title {
+  color: var(--mist);
+  font: 600 12px var(--font-display);
+}
+
+.home-app-message-detail {
+  color: var(--muted);
+  font: 10px/1.5 var(--font-mono);
+}
+
+.home-app-message[hidden],
+.home-inline-action[hidden] {
+  display: none;
+}
+
+.shell.home-active {
+  grid-template-columns: 62px 0 minmax(0, 1fr) 0;
+}
+
+.shell.home-active.global-nav-expanded {
+  grid-template-columns: 196px 0 minmax(0, 1fr) 0;
+}
+
+.shell.home-active.global-nav-closed,
+.shell.home-active.global-nav-expanded.global-nav-closed {
+  grid-template-columns: 0 0 minmax(0, 1fr) 0;
+}
+
+/* Match the other *-active surfaces: a hidden drawer/dock must not keep a
+ * rendered box in its collapsed grid track. visibility alone leaves a 1px
+ * border box whose children still propagate dead scroll width to the root. */
+.shell.home-active .room-drawer,
+.shell.home-active .context-dock {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+}
+.shell.home-active .context-dock { width: 0; max-width: 0; border-left: 0; }
+
+@media (min-width: 721px) and (max-width: 1040px) {
+  .shell.home-active {
+    grid-template-columns: 62px 0 minmax(0, 1fr);
+  }
+
+  .shell.home-active.global-nav-expanded {
+    grid-template-columns: 196px 0 minmax(0, 1fr);
+  }
+
+  .shell.home-active.global-nav-closed,
+  .shell.home-active.global-nav-expanded.global-nav-closed {
+    grid-template-columns: 0 0 minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .shell.home-active,
+  .shell.home-active.global-nav-expanded,
+  .shell.home-active.global-nav-closed,
+  .shell.home-active.global-nav-expanded.global-nav-closed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-search-form {
+    min-height: 52px;
+  }
+
+  .home-app-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 430px) {
+  .home-app-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-mcp-card-action,
+  .home-search-form {
+    animation: none;
+    transition: none;
+  }
+}

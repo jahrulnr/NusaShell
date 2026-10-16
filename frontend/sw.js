@@ -1,4 +1,4 @@
-// NusaShell service worker — PWA-grade offline shell.
+// NusaShell service worker — PWA-grade offline shell (widget-conversation shell).
 //
 // Strategy: network-first with cache fallback for same-origin GETs. While the
 // local server is up the browser always gets fresh assets (the server sends
@@ -11,8 +11,13 @@
 // (notification blips), /plugins/* (plugin UIs come from the plugin store
 // and can be installed/uninstalled at runtime). Cloning an SSE body in
 // this worker breaks Firefox (Failed to load /stream: unexpected error).
+//
+// The worker is registered from the shell directory — during development that
+// is /.experimental/widget-conversation/sw.js, after promotion /sw.js — so all
+// "./" paths below always resolve to the shell root in both layouts. Same rule
+// as production: cache assets exactly as requested, "?v=" query included.
 
-const CACHE = 'nusashell-shell-v2';
+const CACHE = 'nusashell-shell-v19';
 
 const NEVER_CACHE = [
   '/rpc/',
@@ -23,14 +28,82 @@ const NEVER_CACHE = [
   '/plugins/',
 ];
 
+// Precache the navigation entry plus every lazily-imported module (they never
+// appear in the runtime cache because nothing fetches them until the user
+// clicks) and the shell chrome the first offline boot needs. Stylesheet and
+// script URLs carry the same ?v= markers index.html requests — the query is
+// part of the cache key, so these entries must track index.html version bumps.
+// The shell is self-contained: js/, vendor/, fonts/, styles/ mirror the
+// production frontend/ layout, so './js/*' entries resolve under the
+// experimental mount and unchanged after promotion. The js/ entries below
+// are the shell-init.js static import graph — the minimum module set a cold
+// offline boot must evaluate; deeper graphs (markdown renderers, media-zoom,
+// CodeMirror) warm through the runtime/message caches on first online load.
+const PRECACHE = [
+  './',
+  './index.html',
+  './manifest.webmanifest',
+  './shell-init.js?v=5',
+  './page/conversation/app.js?v=104',
+  './page/conversation/room-menu.js?v=1',
+  './page/conversation/context-inspector.js?v=3',
+  './js/views/agent/subagent-prompt.js?v=1',
+  './shell.css?v=62',
+  './loading-layer.css?v=1',
+  './overlays.css?v=5',
+  './dock.css?v=27',
+  './home.css?v=4',
+  './skills.css?v=7',
+  './plugins.css?v=8',
+  './providers.css?v=12',
+  './logs.css?v=8',
+  './automation.css?v=4',
+  './telemetry.css?v=2',
+  './settings.css?v=3',
+  './learning.css?v=7',
+  './code-surface.css?v=1',
+  './vendor/lucide.min.js',
+  // Page controllers and the shared plugin launcher, pinned to the exact
+  // ?v= specifiers page/conversation/app.js (+ page/plugins/app.js) import.
+  './page/skills/app.js?v=2',
+  './page/plugins/app.js?v=1',
+  './page/learning/app.js?v=5',
+  './page/providers/app.js?v=4',
+  './page/logs/app.js?v=2',
+  './page/automation/app.js?v=3',
+  './js/plugin-window.js?v=1',
+  './page/settings/app.js',
+  './page/settings/model.js',
+  // shell-init.js import graph (offline cold boot).
+  './js/pwa.js',
+  './js/pwa-install.js',
+  './js/desktop-file-path.js',
+  './js/rpc.js',
+  './js/ui.js',
+  './js/pairing.js',
+  './js/pet-launcher.js',
+  './js/shell-shortcuts.js',
+  './js/pip.js',
+  './js/views/agent/room-info.js',
+  './vendor/slim-select/slimselect.es.js',
+  './vendor/qrcode/qrcode.mjs',
+  './fonts/fonts.css',
+  './nusashell-mark.png',
+];
+
 self.addEventListener('install', (event) => {
-  // Precache the navigation entry plus every lazily-imported module (they
-  // never appear in the runtime cache because nothing fetches them until the
-  // user clicks). Everything else fills the runtime cache as the first
-  // session fetches it.
+  // Unlike production's cache.addAll, entries are added one by one with
+  // allSettled: a URL that does not exist in the current layout (./js/pip.js
+  // before promotion, a stale ?v= after an index.html bump) must not abort
+  // installing an otherwise-working offline shell. Failures are warned, not
+  // silent.
   event.waitUntil(
     caches.open(CACHE)
-      .then((cache) => cache.addAll(['./', './index.html', './manifest.webmanifest', './js/pip.js']))
+      .then((cache) => Promise.allSettled(PRECACHE.map((url) => cache.add(url))))
+      .then((results) => {
+        const failed = PRECACHE.filter((_, i) => results[i].status === 'rejected');
+        if (failed.length) console.warn(`[sw] precache skipped: ${failed.join(', ')}`);
+      })
       .then(() => self.skipWaiting()),
   );
 });

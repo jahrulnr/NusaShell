@@ -155,22 +155,22 @@ func TestNormalizeSettingsPreservesUserPrompt(t *testing.T) {
 func TestHandleSettingsSetCompactionWorkflow(t *testing.T) {
 	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
 	model := "cheap:model"
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{CompactionModel: &model}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{CompactionModel: &model}); rpcErr != nil {
 		t.Fatalf("set compaction model: %v", rpcErr.Message)
 	}
 	reuse := string(domain.CompactionWorkflowReuse)
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{CompactionWorkflow: &reuse}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{CompactionWorkflow: &reuse}); rpcErr != nil {
 		t.Fatalf("set reuse workflow: %v", rpcErr.Message)
 	}
 	got := app.Settings.Get()
 	if got.CompactionWorkflow != domain.CompactionWorkflowReuse || got.CompactionModel != "" {
 		t.Fatalf("reuse settings = %+v, want reuse with no model override", got)
 	}
-	if dto := settingsDTO(got); dto.CompactionWorkflow != reuse {
+	if dto := settings.ToDTO(got); dto.CompactionWorkflow != reuse {
 		t.Fatalf("DTO compaction workflow = %q, want %q", dto.CompactionWorkflow, reuse)
 	}
 	bad := "not-a-workflow"
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{CompactionWorkflow: &bad}); rpcErr == nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{CompactionWorkflow: &bad}); rpcErr == nil {
 		t.Fatal("unknown compaction workflow must be rejected")
 	}
 }
@@ -180,24 +180,24 @@ func TestHandleSettingsSetCompactionWorkflow(t *testing.T) {
 func TestHandleSettingsSetSlowDown(t *testing.T) {
 	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
 
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{SlowDown: intPtr(3)}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{SlowDown: intPtr(3)}); rpcErr != nil {
 		t.Fatalf("set slow_down=3: %v", rpcErr.Message)
 	}
 	if got := app.Settings.Get().SlowDown; got != 3 {
 		t.Fatalf("SlowDown after set = %d, want 3", got)
 	}
-	if dto := settingsDTO(app.Settings.Get()); dto.SlowDown != 3 {
+	if dto := settings.ToDTO(app.Settings.Get()); dto.SlowDown != 3 {
 		t.Fatalf("settingsDTO.SlowDown = %d, want 3", dto.SlowDown)
 	}
 
 	for _, bad := range []int{-1, 61} {
-		if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{SlowDown: intPtr(bad)}); rpcErr == nil {
+		if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{SlowDown: intPtr(bad)}); rpcErr == nil {
 			t.Fatalf("slow_down=%d must be rejected", bad)
 		}
 	}
 
 	// Clearing back to 0 (off) must work.
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{SlowDown: intPtr(0)}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{SlowDown: intPtr(0)}); rpcErr != nil {
 		t.Fatalf("set slow_down=0: %v", rpcErr.Message)
 	}
 	if got := app.Settings.Get().SlowDown; got != 0 {
@@ -208,29 +208,29 @@ func TestHandleSettingsSetSlowDown(t *testing.T) {
 func TestHandleSettingsSetLearnerNudgeInterval(t *testing.T) {
 	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
 
-	if dto := settingsDTO(app.Settings.Get()); dto.LearnerNudgeInterval != domain.DefaultLearnerNudgeInterval {
+	if dto := settings.ToDTO(app.Settings.Get()); dto.LearnerNudgeInterval != domain.DefaultLearnerNudgeInterval {
 		t.Fatalf("unset DTO = %d, want default %d", dto.LearnerNudgeInterval, domain.DefaultLearnerNudgeInterval)
 	}
 
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(4)}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(4)}); rpcErr != nil {
 		t.Fatalf("set learner_nudge_interval=4: %v", rpcErr.Message)
 	}
 	if got := domain.EffectiveLearnerNudgeInterval(app.Settings.Get().LearnerNudgeInterval); got != 4 {
 		t.Fatalf("stored = %d, want 4", got)
 	}
-	if dto := settingsDTO(app.Settings.Get()); dto.LearnerNudgeInterval != 4 {
+	if dto := settings.ToDTO(app.Settings.Get()); dto.LearnerNudgeInterval != 4 {
 		t.Fatalf("DTO = %d, want 4", dto.LearnerNudgeInterval)
 	}
 
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(0)}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(0)}); rpcErr != nil {
 		t.Fatalf("set learner_nudge_interval=0: %v", rpcErr.Message)
 	}
-	if dto := settingsDTO(app.Settings.Get()); dto.LearnerNudgeInterval != 0 {
+	if dto := settings.ToDTO(app.Settings.Get()); dto.LearnerNudgeInterval != 0 {
 		t.Fatalf("DTO after disable = %d, want 0", dto.LearnerNudgeInterval)
 	}
 
 	for _, bad := range []int{-1, domain.LearnerNudgeIntervalCap + 1} {
-		if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(bad)}); rpcErr == nil {
+		if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{LearnerNudgeInterval: intPtr(bad)}); rpcErr == nil {
 			t.Fatalf("learner_nudge_interval=%d must be rejected", bad)
 		}
 	}
@@ -239,12 +239,12 @@ func TestHandleSettingsSetLearnerNudgeInterval(t *testing.T) {
 func TestHandleSettingsSetPetsAutoStart(t *testing.T) {
 	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
 
-	if dto := settingsDTO(app.Settings.Get()); dto.PetsAutoStart {
+	if dto := settings.ToDTO(app.Settings.Get()); dto.PetsAutoStart {
 		t.Fatal("default PetsAutoStart = true, want false")
 	}
 
 	on := true
-	got, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{PetsAutoStart: &on})
+	got, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{PetsAutoStart: &on})
 	if rpcErr != nil {
 		t.Fatalf("set pets_auto_start=true: %v", rpcErr.Message)
 	}
@@ -258,12 +258,12 @@ func TestHandleSettingsSetPetsAutoStart(t *testing.T) {
 	if !res.Settings.PetsAutoStart {
 		t.Fatal("settings.set result pets_auto_start = false, want true")
 	}
-	if dto := settingsDTO(app.Settings.Get()); !dto.PetsAutoStart {
+	if dto := settings.ToDTO(app.Settings.Get()); !dto.PetsAutoStart {
 		t.Fatal("settingsDTO.PetsAutoStart = false, want true")
 	}
 
 	off := false
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{PetsAutoStart: &off}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{PetsAutoStart: &off}); rpcErr != nil {
 		t.Fatalf("set pets_auto_start=false: %v", rpcErr.Message)
 	}
 	if app.Settings.Get().PetsAutoStart {
@@ -280,7 +280,7 @@ func TestHandleSettingsSetRemoteAccessPersistsAddressesAndRestartsOnToggle(t *te
 	}
 	enabled := true
 	addresses := []string{" https://shell.example ", "https://shell.example", "http://192.168.1.5:10994"}
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{
 		RemoteAccessEnabled:   &enabled,
 		RemoteAccessAddresses: &addresses,
 	}); rpcErr != nil {
@@ -299,7 +299,7 @@ func TestHandleSettingsSetRemoteAccessPersistsAddressesAndRestartsOnToggle(t *te
 	case <-time.After(time.Second):
 		t.Fatal("remote access toggle did not request backend restart")
 	}
-	raw, rpcErr := app.handleSettingsGet()
+	raw, rpcErr := app.settingsService().HandleGet()
 	res, ok := mustSettingsResult(t, raw, rpcErr)
 	if !ok || !res.Settings.RemoteAccessEnabled || !reflect.DeepEqual(res.Settings.RemoteAccessAddresses, want) {
 		t.Fatalf("settings DTO = %+v, want enabled addresses %v", res.Settings, want)
@@ -309,7 +309,7 @@ func TestHandleSettingsSetRemoteAccessPersistsAddressesAndRestartsOnToggle(t *te
 func TestHandleSettingsSetRemoteAccessRejectsInvalidAddress(t *testing.T) {
 	app := &App{Settings: &memSettingsStore{s: domain.DefaultSettings()}, Logs: &fakeLogStore{}}
 	addresses := []string{"https://user:pass@shell.example"}
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{RemoteAccessAddresses: &addresses}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{RemoteAccessAddresses: &addresses}); rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
 		t.Fatalf("invalid remote address error = %+v, want validation", rpcErr)
 	}
 	if got := app.Settings.Get().RemoteAccessAddresses; len(got) != 0 {
@@ -521,14 +521,14 @@ func TestHandleSettingsSetProjectMemoryBase(t *testing.T) {
 	app := NewApp(Deps{Settings: &fakeSettings{Settings: domain.DefaultSettings()}})
 
 	rel := "relative/path"
-	if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{ProjectMemoryBase: &rel}); err == nil {
+	if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{ProjectMemoryBase: &rel}); err == nil {
 		t.Fatal("relative project_memory_base must fail validation")
 	} else if !strings.Contains(err.Message, "absolute") {
 		t.Fatalf("validation message = %s", err.Message)
 	}
 
 	empty := ""
-	if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{ProjectMemoryBase: &empty}); err != nil {
+	if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{ProjectMemoryBase: &empty}); err != nil {
 		t.Fatalf("empty base must be allowed: %v", err)
 	}
 	if app.Settings.Get().ProjectMemoryBase != "" {
@@ -536,7 +536,7 @@ func TestHandleSettingsSetProjectMemoryBase(t *testing.T) {
 	}
 
 	abs := t.TempDir()
-	if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{ProjectMemoryBase: &abs}); err != nil {
+	if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{ProjectMemoryBase: &abs}); err != nil {
 		t.Fatalf("absolute base: %v", err)
 	}
 	if got := app.Settings.Get().ProjectMemoryBase; got != filepath.Clean(abs) {
@@ -545,7 +545,7 @@ func TestHandleSettingsSetProjectMemoryBase(t *testing.T) {
 
 	home := osUserHomeForTest(t)
 	tilde := "~/.memory"
-	if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{ProjectMemoryBase: &tilde}); err != nil {
+	if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{ProjectMemoryBase: &tilde}); err != nil {
 		t.Fatalf("~ expansion: %v", err)
 	}
 	want := filepath.Join(home, ".memory")
@@ -591,13 +591,13 @@ func TestHandleSettingsSetWebSearchStrategy(t *testing.T) {
 	app := NewApp(Deps{Settings: &fakeSettings{}})
 
 	bad := "all-at-once"
-	if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{WebSearchStrategy: &bad}); err == nil {
+	if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{WebSearchStrategy: &bad}); err == nil {
 		t.Fatal("invalid strategy must fail validation")
 	}
 
 	for _, ok := range []string{"", "auto", "round_robin", "random", "brave", "serper", "tavily", "startpage", "wikipedia", "github"} {
 		v := ok
-		if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{WebSearchStrategy: &v}); err != nil {
+		if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{WebSearchStrategy: &v}); err != nil {
 			t.Fatalf("strategy %q must be accepted: %v", v, err)
 		}
 		if got := app.Settings.Get().WebSearchStrategy; got != v {
@@ -606,7 +606,7 @@ func TestHandleSettingsSetWebSearchStrategy(t *testing.T) {
 	}
 
 	// The value round-trips through settings.get untainted (no key fields).
-	result, rpcErr := app.handleSettingsGet()
+	result, rpcErr := app.settingsService().HandleGet()
 	if rpcErr != nil {
 		t.Fatal(rpcErr)
 	}
@@ -624,7 +624,7 @@ func TestHandleSettingsSetWebSearchAPIKeys(t *testing.T) {
 	brave := "brave-secret"
 	serper := "serper-secret"
 	tavily := "tavily-secret"
-	if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{
+	if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{
 		WebSearchBraveAPIKey:  &brave,
 		WebSearchSerperAPIKey: &serper,
 		WebSearchTavilyAPIKey: &tavily,
@@ -644,7 +644,7 @@ func TestHandleSettingsSetWebSearchAPIKeys(t *testing.T) {
 
 	// Empty value clears the stored key (env fallback takes over).
 	empty := ""
-	if _, err := app.handleSettingsSet(contracts.SettingsSetRequest{WebSearchSerperAPIKey: &empty}); err != nil {
+	if _, err := app.settingsService().HandleSet(contracts.SettingsSetRequest{WebSearchSerperAPIKey: &empty}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := fc.keys["web_search_serper"]; ok {

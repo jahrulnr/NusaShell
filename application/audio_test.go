@@ -297,7 +297,7 @@ func TestDescribeAudiosWithFallbackSkipsExistingTranscript(t *testing.T) {
 		{Type: "audio", Name: "clip.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,AAA="},
 		{Type: "text", Name: "audio:clip.mp3", MediaType: "text/plain", Content: "[Audio transcript for clip.mp3]\nexisting"},
 	}
-	out := app.describeAudiosWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeAudiosWithFallback(context.Background(), settings, atts)
 	if len(out) != 2 {
 		t.Fatalf("expected unchanged attachments, got %d", len(out))
 	}

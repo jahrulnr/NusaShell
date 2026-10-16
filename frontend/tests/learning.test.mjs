@@ -3,95 +3,427 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderLogEntry, sortExperiencesNewestFirst } from '../js/views/learning.js';
+import {
+  filterMemoryEntries,
+  formatLearningDate,
+  isMemoryRecord,
+  memoryEntryBody,
+  sortExperiencesNewestFirst,
+  summarizeSignals,
+} from '../page/learning/model.js';
+import { createLearningPage } from '../page/learning/app.js';
 
-const learningCSS = await readFile(new URL('../styles/learning.css', import.meta.url), 'utf8');
-const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
-const learningView = await readFile(new URL('../js/views/learning.js', import.meta.url), 'utf8');
-const learningHTML = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+const root = new URL('../', import.meta.url);
 
-function withDocument(fn) {
-  const dom = new JSDOM('<body></body>');
-  const previousDocument = globalThis.document;
-  globalThis.document = dom.window.document;
+test('refresh indicators stay busy until graph/activity finish and clear after failure', async () => {
+  const dom = new JSDOM(await readFile(new URL('index.html', root), 'utf8'), { url: 'http://localhost/', pretendToBeVisual: true });
+  const restore = installDOMGlobals(dom.window);
+  let releaseGraph;
+  let rejectActivity;
+  const graph = new Promise(resolve => { releaseGraph = resolve; });
+  const activity = new Promise((_, reject) => { rejectActivity = reject; });
+  activity.catch(() => {});
+  const view = dom.window.document.querySelector('#learning-view');
+  const page = createLearningPage(view, {
+    rpcClient: method => method === 'learning.graph' ? graph : method === 'learning.log' ? activity : Promise.resolve({}),
+    onEvent: () => () => {}, graphFactory: () => null,
+  });
   try {
-    return fn(dom.window.document);
+    page.init();
+    const pending = page.refresh();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(view.querySelector('#learning-refresh').getAttribute('aria-busy'), 'true');
+    assert.equal(page.state.loading, true, 'a finished memory load must not stop the graph spinner');
+    releaseGraph({ nodes: [], edges: [] });
+    await pending;
+    assert.equal(view.querySelector('#learning-refresh').getAttribute('aria-busy'), 'false');
+    assert.equal(page.state.loading, false);
+    page.switchView('activity');
+    assert.equal(view.querySelector('#learning-log-refresh'), null);
+    assert.equal(view.querySelector('#learning-graph-refresh'), null);
+    const activityRefresh = page.refresh();
+    assert.equal(view.querySelector('#learning-refresh').getAttribute('aria-busy'), 'true');
+    rejectActivity(new Error('Fixture unavailable'));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await activityRefresh;
+    assert.equal(view.querySelector('#learning-refresh').getAttribute('aria-busy'), 'false');
+    assert.equal(view.querySelector('#learning-refresh').disabled, false);
   } finally {
-    globalThis.document = previousDocument;
+    releaseGraph({});
+    rejectActivity(new Error('Fixture cleanup'));
+    page.destroy();
+    restore();
+    dom.window.close();
   }
+});
+
+function installDOMGlobals(window) {
+  const names = [
+    'window', 'document', 'MutationObserver', 'requestAnimationFrame',
+    'cancelAnimationFrame', 'Node', 'HTMLElement', 'HTMLInputElement',
+    'HTMLTextAreaElement', 'localStorage',
+  ];
+  const previous = new Map();
+  for (const name of names) {
+    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value: window[name] });
+  }
+  // jsdom only provides requestAnimationFrame with pretendToBeVisual; page
+  // toasts call it through the global binding — fall back to a sync stub.
+  if (typeof globalThis.requestAnimationFrame !== 'function') {
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback) => { callback(0); return 0; },
+    });
+  }
+  return () => {
+    for (const name of names) {
+      const descriptor = previous.get(name);
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  };
 }
 
-test('About You is the first learning tab and exposes editable user memory', () => {
-  const doc = new JSDOM(learningHTML).window.document;
-  const tabs = [...doc.querySelectorAll('.learning-tabs [data-learning-tab]')];
-  assert.equal(tabs[0]?.dataset.learningTab, 'about');
-  assert.equal(tabs[0]?.textContent, 'About You');
-  assert.equal(tabs[0]?.getAttribute('aria-selected'), 'true');
-  assert.ok(doc.querySelector('#learning-panel-about'));
-  assert.ok(doc.querySelector('#learning-user-memory'));
-  assert.equal(doc.querySelector('#learning-panel-about')?.hidden, false);
+test('Learning model separates always-on documents from structured records', () => {
+  const user = { id: 'user-1', tier: 'user', content: 'Prefers compact UI' };
+  const record = { id: 'record-1', tier: 'record', type: 'preference', body: 'Use tabs for navigation' };
+  const legacyRecord = { id: 'record-2', type: 'fact', content: 'The shell runs locally' };
+
+  assert.equal(isMemoryRecord(user), false);
+  assert.equal(isMemoryRecord(record), true);
+  assert.equal(isMemoryRecord(legacyRecord), true);
+  assert.equal(memoryEntryBody({ subject: 'NusaShell', predicate: 'uses', object: 'Go' }), 'NusaShell uses Go');
+  assert.deepEqual(filterMemoryEntries([user, record, legacyRecord], 'LOCAL'), [legacyRecord]);
 });
 
-test('About Agent is an editable learning tab with its own document panel', () => {
-  const doc = new JSDOM(learningHTML).window.document;
-  const tab = doc.querySelector('#learning-tab-agent');
-  const panel = doc.querySelector('#learning-panel-agent');
-
-  assert.equal(tab?.dataset.learningTab, 'agent');
-  assert.equal(tab?.textContent, 'About Agent');
-  assert.equal(tab?.getAttribute('aria-controls'), 'learning-panel-agent');
-  assert.equal(panel?.getAttribute('aria-labelledby'), 'learning-tab-agent');
-  assert.ok(doc.querySelector('#learning-agent-memory'));
-  assert.ok(doc.querySelector('#learning-agent-save'));
+test('Learning model summarizes learning signals into readable labels', () => {
+  assert.deepEqual(summarizeSignals({
+    user_corrections: 2,
+    retries: 1,
+    failed_actions: 0,
+    verified_success: true,
+    root_cause_recovered: true,
+  }), ['2 corrections', '1 retry', 'verified', 'recovered']);
+  assert.deepEqual(summarizeSignals({}), []);
+  assert.equal(formatLearningDate('not-a-date'), 'Unknown time');
 });
 
-test('user memory editor uses the dedicated update RPC', () => {
-  assert.match(learningView, /memory\.user\.update/);
-  assert.match(learningView, /learning-user-memory/);
+test('experimental Learning page exposes a focused workbench surface', async () => {
+  const html = await readFile(new URL('index.html', root), 'utf8');
+  const css = await readFile(new URL('learning.css', root), 'utf8');
+  const app = await readFile(new URL('page/conversation/app.js', root), 'utf8');
+  const pageApp = await readFile(new URL('page/learning/app.js', root), 'utf8');
+  const graph = await readFile(new URL('page/learning/graph.js', root), 'utf8');
+  const { document } = new JSDOM(html).window;
+  const page = document.querySelector('#learning-view');
+
+  assert.ok(page);
+  assert.equal(page.getAttribute('aria-label'), 'Learning workbench');
+  assert.equal(document.querySelector('[data-global-route="learning"]')?.getAttribute('href'), '#learning');
+  assert.match(app, /learning-active/);
+  assert.match(app, /learningPage\?\.activate/);
+  assert.doesNotMatch(document.querySelector('#learning-view .learning-header')?.textContent || '', /Keep the useful parts/);
+  assert.equal(page.querySelector('.learning-metrics'), null);
+  assert.equal(page.querySelectorAll('.learning-panel-heading').length, 0);
+  assert.equal(page.querySelectorAll('#learning-panel-memory .learning-card-kicker, #learning-panel-experiences .learning-card-kicker, #learning-panel-activity .learning-card-kicker').length, 0);
+  assert.ok(page.querySelector('#learning-results-count'));
+  assert.ok(page.querySelector('#learning-experiences-count'));
+  assert.ok(page.querySelector('#learning-panel-activity .learning-activity-actions'));
+  assert.equal(document.querySelectorAll('[data-learning-tab]').length, 4);
+  assert.ok(page.querySelector('#learning-user-memory'));
+  assert.ok(page.querySelector('#learning-agent-memory'));
+  assert.ok(page.querySelector('#learning-search-input'));
+  assert.ok(page.querySelector('#learning-graph'));
+  assert.ok(page.querySelector('#learning-log'));
+  assert.equal(page.querySelector('#learning-experience-detail')?.getAttribute('aria-label'), 'Learning record details');
+  // Tree-relative needles hold both in the prototype (styles/...) — the
+  // vendored mirror shipped by P1 — and in the promoted frontend/ copy.
+  assert.match(html, /styles\/agent\.css/);
+  assert.match(html, /styles\/agent-tools\.css/);
+  assert.match(css, /\.learning-page\s*\{/);
+  assert.match(css, /\.learning-navigation-row\s*\{/);
+  assert.match(css, /\.learning-panel-tools\s*\{/);
+  assert.match(css, /\.learning-atlas-layout\s*\{[^}]*grid-template-columns:\s*minmax\(250px, \.68fr\) minmax\(0, 1\.32fr\);/);
+  assert.match(css, /\.learning-graph-canvas\s*\{/);
+  assert.match(css, /\.learning-graph-canvas\s+\.vis-network\s*> canvas\s*\{/);
+  assert.match(css, /\.learning-recent-item\s*\{[^}]*background:\s*transparent;/);
+  assert.match(css, /\.learning-experience-item\s*\{[^}]*background:\s*transparent;/);
+  assert.match(css, /\.learning-empty\s*\{[^}]*display:\s*grid;[^}]*gap:/);
+  assert.match(css, /\.learning-selection-empty\s*\{[^}]*display:\s*grid;[^}]*gap:/);
+  assert.match(css, /\.learning-log-meta\s*\{/);
+  assert.match(css, /\.learning-log-conversation-panel \.agent-message\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;/);
+  assert.match(css, /\.learning-log-conversation-panel \.agent-bubble\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;/);
+  assert.match(css, /\.learning-log-conversation-panel \.agent-bubble-text[\s\S]*font-size:\s*11px/);
+  assert.match(css, /\.learning-log-conversation-panel\s*\{/);
+  assert.match(css, /\.learning-log-entry-actions\s*\{/);
+  assert.match(css, /\.learning-log-delete-button\s*\{/);
+  assert.match(css, /\.learning-log-conversation-panel\s*\{[^}]*overflow:\s*visible;/);
+  assert.match(css, /\.learning-log-conversation-panel \.agent-bubble\s*\{[^}]*font-size:\s*11px/);
+  assert.match(css, /\.learning-panel\[data-learning-panel="activity"\]\s*\{[^}]*overflow:\s*hidden;/);
+  assert.match(css, /\.shell\.learning-active \.context-dock\s*\{[^}]*max-width:\s*0;/);
+  assert.match(css, /@media \(max-width: 760px\)/);
+  assert.match(css, /@media \(max-width: 430px\)[\s\S]*\.learning-tab\s*\{[^}]*padding-inline:\s*4px;[^}]*font-size:\s*9px;/);
+  assert.match(graph, /js\/views\/learning\.js/);
+  assert.match(graph, /vis-network\/vis-network\.esm\.min\.js/);
+  assert.match(pageApp, /js\/views\/agent\/render\.js/);
+  assert.match(pageApp, /renderConversation/);
+  assert.match(pageApp, /createLearningGraph/);
 });
 
-test('soul memory editor uses the dedicated update RPC', () => {
-  assert.match(learningView, /memory\.agent\.update/);
-  assert.match(learningView, /learning-agent-memory/);
-});
+test('Learning page blocks an over-cap profile draft before it can be saved', () => {
+  const dom = new JSDOM(`
+    <section id="learning">
+      <textarea id="learning-user-memory"></textarea>
+      <span id="learning-user-count"></span>
+      <span id="learning-user-status"></span>
+      <button id="learning-user-reload" type="button"></button>
+      <button id="learning-user-save" type="button"></button>
+    </section>`, { url: 'http://localhost/' });
+  const restore = installDOMGlobals(dom.window);
+  try {
+    const page = createLearningPage(dom.window.document.querySelector('#learning'), {
+      rpcClient: async () => ({ entries: [] }),
+      onEvent: () => () => {},
+    });
+    page.init();
+    const textarea = dom.window.document.querySelector('#learning-user-memory');
+    textarea.value = 'x'.repeat(4001);
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 
-test('Experience tab lists episodes and memory records', () => {
-  const doc = new JSDOM(learningHTML).window.document;
-  const tab = doc.querySelector('#learning-tab-experience');
-  assert.equal(tab?.dataset.learningTab, 'experience');
-  assert.ok(doc.querySelector('#learning-experience-list'));
-  assert.ok(doc.querySelector('#learning-records-list'));
-  assert.ok(doc.querySelector('#learning-record-delete'));
-  assert.match(learningView, /experience\.list/);
-  assert.match(learningView, /experience\.get/);
-  assert.match(learningView, /experience\.delete/);
-  assert.match(learningView, /memory\.delete/);
-  assert.ok(doc.querySelector('#learning-graph-delete'));
-  assert.match(learningView, /learning-experience-prev/);
-  assert.match(learningView, /learning-experience-next/);
-  assert.match(learningView, /sortExperiencesNewestFirst\(listFrom/);
-});
-
-test('Learning init control declarations precede their first use', () => {
-  // Regression guard for the class of bug where a control is referenced in
-  // initLearning but its `const` declaration is missing (runtime
-  // ReferenceError: graphDeleteBtn is not defined).
-  for (const name of ['graphDeleteBtn']) {
-    const decl = learningView.indexOf(`const ${name} = document.getElementById`);
-    const use = learningView.indexOf(`${name}.addEventListener`);
-    assert.ok(decl >= 0, `${name} must be declared in initLearning`);
-    assert.ok(use > decl, `${name} must be declared before its listener is attached`);
+    assert.equal(dom.window.document.querySelector('#learning-user-count').dataset.state, 'over');
+    assert.equal(dom.window.document.querySelector('#learning-user-status').textContent, 'Unsaved changes');
+    assert.equal(dom.window.document.querySelector('#learning-user-save').disabled, true);
+    page.destroy();
+  } finally {
+    restore();
   }
-  // Same wiring for the record delete button.
-  assert.ok(learningView.indexOf(`const deleteBtn = document.getElementById('learning-record-delete')`) >= 0);
-  // The retire action is gone: no stale id, no stale RPC, no dangling
-  // call to a function that no longer exists.
-  assert.ok(!learningView.includes('learning-record-retire'));
-  assert.ok(!learningView.includes('memory.retire'));
-  assert.ok(!learningView.includes('retireRecord'));
-  assert.ok(learningView.includes(`rpc('memory.delete', { id })`));
 });
 
+test('Learning refresh stays syncing until a slow graph request finishes', async () => {
+  const dom = new JSDOM(`
+    <section id="learning">
+      <span id="learning-sync-state"></span>
+    </section>`, { url: 'http://localhost/' });
+  const restore = installDOMGlobals(dom.window);
+  let finishGraph;
+  try {
+    const page = createLearningPage(dom.window.document.querySelector('#learning'), {
+      rpcClient: async (method) => {
+        if (method === 'memory.list') return { entries: [] };
+        if (method === 'experience.list') return { experiences: [], total: 0 };
+        if (method === 'learning.graph') return new Promise((resolve) => { finishGraph = resolve; });
+        throw new Error(`unexpected RPC ${method}`);
+      },
+      onEvent: () => () => {},
+    });
+    page.init();
+    const refresh = page.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(dom.window.document.querySelector('#learning-sync-state').textContent, 'Syncing…');
+    finishGraph({ nodes: [], edges: [] });
+    await refresh;
+    assert.equal(dom.window.document.querySelector('#learning-sync-state').textContent, 'Synced');
+  } finally {
+    restore();
+  }
+});
+
+test('Learning page reloads the graph when the backend finishes a rebuild', async () => {
+  const dom = new JSDOM('<section id="learning"></section>', { url: 'http://localhost/' });
+  const restore = installDOMGlobals(dom.window);
+  const handlers = new Map();
+  const graphCalls = [];
+  try {
+    const page = createLearningPage(dom.window.document.querySelector('#learning'), {
+      rpcClient: async (method) => {
+        if (method === 'learning.graph') { graphCalls.push(method); return { nodes: [], edges: [] }; }
+        if (method === 'memory.list') return { entries: [] };
+        if (method === 'experience.list') return { experiences: [], total: 0 };
+        throw new Error(`unexpected RPC ${method}`);
+      },
+      onEvent: (name, handler) => { handlers.set(name, handler); return () => {}; },
+      graphFactory: () => null,
+    });
+    page.init();
+    // The async edge builder emits learning.graph.updated after a changed
+    // fingerprint — the subscription is the only path that picks it up.
+    assert.ok(handlers.has('learning.graph.updated'), 'learning.graph.updated must be subscribed');
+    handlers.get('learning.graph.updated')();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(graphCalls.length, 1, 'the event triggers one graph reload');
+    page.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test('Learning activation rehydrates the graph after the surface becomes visible', () => {
+  const dom = new JSDOM('<section id="learning"></section>', { url: 'http://localhost/' });
+  const restore = installDOMGlobals(dom.window);
+  const calls = [];
+  try {
+    const page = createLearningPage(dom.window.document.querySelector('#learning'), {
+      rpcClient: async () => ({ entries: [] }),
+      onEvent: () => () => {},
+      graphFactory: () => ({
+        update: () => calls.push('update'),
+        fit: () => calls.push('fit'),
+        select: () => {},
+        destroy: () => {},
+      }),
+    });
+    page.init();
+    page.state.entries = [{ id: 'memory-1', tier: 'record', body: 'Keep this' }];
+    page.state.graphNodes = [{ id: 'memory-1', kind: 'memory', tier: 'record', name: 'Keep this' }];
+    page.activate();
+
+    assert.deepEqual(calls, ['update', 'fit']);
+  } finally {
+    restore();
+  }
+});
+
+test('Learning page loads the live contract and keeps memory actions local to the selected item', async () => {
+  const html = await readFile(new URL('index.html', root), 'utf8');
+  const dom = new JSDOM(html, { url: 'http://localhost/' });
+  const restore = installDOMGlobals(dom.window);
+  const calls = [];
+  const user = { id: 'user-1', tier: 'user', content: 'Prefers compact reviews', created_at: '2026-09-12T04:00:00Z' };
+  const agent = { id: 'agent-1', tier: 'agent', content: 'Keep changes focused' };
+  const record = {
+    id: 'memory-1', tier: 'record', type: 'preference', status: 'stable',
+    body: 'Use the existing extension seam', content: 'Use the existing extension seam',
+    scope: { level: 'project', project: 'NusaShell' }, updated_at: '2026-09-12T05:00:00Z',
+  };
+  const rpcClient = async (method, payload) => {
+    calls.push({ method, payload });
+    if (method === 'memory.list') return { entries: [user, agent, record] };
+    if (method === 'experience.list') return {
+      experiences: [{
+        id: 'experience-1', goal: 'Polish the Learning surface', timestamp: '2026-09-12T06:00:00Z',
+        outcome: { status: 'success' }, signals: { verified_success: true },
+      }],
+      total: 1,
+    };
+    if (method === 'learning.graph') return {
+      nodes: [
+        { id: 'skill-1', kind: 'skill', name: 'Frontend UI' },
+        { id: 'memory-1', kind: 'memory', tier: 'record', name: 'Use the seam' },
+      ],
+      edges: [{ from: 'skill-1', to: 'memory-1', type: 'related', weight: 0.8 }],
+    };
+    if (method === 'learning.search') return { items: [{ ...record, kind: 'memory', name: record.body, score: 0.91 }] };
+    if (method === 'memory.user.update') return { entry: { ...user, content: payload.content } };
+    throw new Error(`unexpected RPC ${method}`);
+  };
+
+  try {
+    const page = createLearningPage(dom.window.document.querySelector('#learning-view'), {
+      rpcClient,
+      onEvent: () => () => {},
+      graphFactory: () => null,
+    });
+    page.init();
+    await page.refresh();
+
+    assert.equal(dom.window.document.querySelector('.learning-metrics'), null);
+    assert.equal(dom.window.document.querySelector('#learning-user-memory').value, user.content);
+    assert.deepEqual(page.state.graphNodes.map(({ id }) => id), ['skill-1', 'memory-1']);
+
+    dom.window.document.querySelector('#learning-tab-memory').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(dom.window.document.querySelectorAll('#learning-results [data-result-id]').length, 1);
+    dom.window.document.querySelector('#learning-results [data-result-id]').click();
+    assert.match(dom.window.document.querySelector('#learning-selection').textContent, /Use the existing extension seam/);
+
+    const textarea = dom.window.document.querySelector('#learning-user-memory');
+    textarea.value = 'Prefer short, focused reviews';
+    textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    assert.equal(dom.window.document.querySelector('#learning-user-save').disabled, false);
+    dom.window.document.querySelector('#learning-user-save').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1), { method: 'memory.user.update', payload: { content: 'Prefer short, focused reviews' } });
+    assert.equal(dom.window.document.querySelector('#learning-user-status').textContent, 'Saved');
+  } finally {
+    restore();
+  }
+});
+
+test('Learning activity opens the persisted background agent conversation inline', async () => {
+  const html = await readFile(new URL('index.html', root), 'utf8');
+  const dom = new JSDOM(html, { url: 'http://localhost/' });
+  const restore = installDOMGlobals(dom.window);
+  const calls = [];
+  const rpcClient = async (method, payload) => {
+    calls.push({ method, payload });
+    if (method === 'learning.log') return {
+      entries: [{
+        type: 'review',
+        status: 'done',
+        ts: '2026-09-12T06:00:00Z',
+        conversation_id: 'source-1',
+        conversation_title: 'Polish the Learning surface',
+        llm_conversation_id: 'agent-run-1',
+        model: 'openrouter:nex-agi/nex-n2.5-pro:free',
+        mutations: [{ kind: 'memory.upsert', snippet: 'Use the existing seam' }],
+        detail: { job_id: 'job-1', kind: 'learner' },
+      }],
+      has_more: false,
+    };
+    if (method === 'learning.jobs.list') return { jobs: [] };
+    if (method === 'agent.conversations.get') return {
+      messages: [
+        { id: 'message-1', role: 'user', content: 'EXPERIENCE PACKET: keep the existing seam', created_at: '2026-09-12T05:59:00Z' },
+        { id: 'message-2', role: 'assistant', content: 'Keep one durable memory record.', created_at: '2026-09-12T06:00:00Z' },
+      ],
+    };
+    throw new Error(`unexpected RPC ${method}`);
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  try {
+    const page = createLearningPage(dom.window.document.querySelector('#learning-view'), {
+      rpcClient,
+      onEvent: () => () => {},
+      graphFactory: () => null,
+    });
+    page.init();
+    page.switchView('activity');
+    await flush();
+
+    const button = dom.window.document.querySelector('.learning-log-conversation-button');
+    assert.ok(button, 'expected a background agent log button');
+    const actions = button.closest('.learning-log-entry')?.querySelector('.learning-log-entry-actions');
+    assert.ok(actions, 'activity actions should share one row');
+    assert.equal(actions.querySelectorAll('button').length, 2);
+    const metadata = button.closest('.learning-log-entry')?.querySelector('.learning-log-meta');
+    assert.equal(metadata?.querySelector('.learning-log-meta-kind')?.textContent, 'kind: learner');
+    assert.equal(metadata?.querySelector('.learning-log-meta-model')?.textContent, 'model: openrouter:nex-agi/nex-n2.5-pro:free');
+    button.click();
+    await flush();
+    await flush();
+
+    const panel = dom.window.document.querySelector('.learning-log-conversation-panel');
+    assert.ok(panel, 'agent transcript should open below the activity entry');
+    assert.match(panel.textContent, /EXPERIENCE PACKET/);
+    assert.match(panel.textContent, /Keep one durable memory record/);
+    assert.equal(button.textContent, 'Hide agent log');
+    assert.deepEqual(calls.filter(({ method }) => method === 'agent.conversations.get'), [
+      { method: 'agent.conversations.get', payload: { id: 'agent-run-1' } },
+    ]);
+
+    button.click();
+    assert.equal(dom.window.document.querySelector('.learning-log-conversation-panel'), null);
+    assert.equal(button.textContent, 'View agent log');
+    page.destroy();
+  } finally {
+    restore();
+  }
+});
+
+// Ported from production frontend/tests/learning.test.mjs — re-pointed at the
+// live page/learning/model.js copy (the js/views/learning.js twin is dead
+// code post-promotion; model.js was made null-safe to keep this contract).
 test('Experience items are sorted newest first without mutating the payload', () => {
   const items = [
     { id: 'oldest', timestamp: '2026-01-01T00:00:00Z' },
@@ -108,135 +440,13 @@ test('Experience items are sorted newest first without mutating the payload', ()
   assert.deepEqual(sortExperiencesNewestFirst(null), []);
 });
 
-test('Learning subscribes to jobs and recorded experience, not review events', () => {
+// Ported subscription audit — now asserted against page/learning/app.js,
+// which keeps the same event set (jobs + experience, never review events).
+test('Learning subscribes to jobs and recorded experience, not review events', async () => {
+  const learningView = await readFile(new URL('page/learning/app.js', root), 'utf8');
   assert.match(learningView, /experience\.recorded/);
   assert.match(learningView, /learning\.job\.started/);
   assert.match(learningView, /learning\.job\.done/);
   assert.match(learningView, /learning\.job\.error/);
   assert.doesNotMatch(learningView, /learning\.review\.started/);
-});
-
-test('Search and graph copy talks about records, not fragments', () => {
-  assert.match(learningHTML, /Search records and skills/);
-  assert.match(learningHTML, />Record</);
-  assert.doesNotMatch(learningHTML, />Fragment</);
-});
-
-test('About You uses the available desktop width while retaining a comfortable mobile inset', () => {
-  assert.match(learningCSS, /\.learning-about-card\s*\{[\s\S]*?width:\s*min\(1180px,\s*calc\(100%\s*-\s*32px\)\);/);
-  assert.match(learningCSS, /\.learning-about-card\s*\{[\s\S]*?box-sizing:\s*border-box;/);
-  assert.match(learningCSS, /\.learning-memory-editor\s*\{[\s\S]*?min-height:\s*clamp\(300px,\s*42vh,\s*520px\);/);
-});
-
-test('Learning tabs are a self-contained control with breathing room before its panel', () => {
-  assert.match(learningHTML, /class="tabs learning-tabs" role="tablist"/);
-  assert.match(globalCSS, /\.tabs\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?padding:\s*3px;[\s\S]*?border:\s*1px solid var\(--border-soft\);/);
-  assert.match(learningCSS, /\.learning-about-panel\s*\{[\s\S]*?padding-top:\s*12px;/);
-});
-
-// The Learning log button is only real when there is a transcript behind it.
-// It used to render for any review entry with no handler and nothing to
-// fetch: it looked alive and did nothing, with no error to explain why.
-test('a job entry with a transcript exposes the LLM log button', () => {
-  const node = withDocument(() => renderLogEntry({
-    type: 'consolidate',
-    status: 'done',
-    llm_conversation_id: 'conv_llm_1',
-    mutations: [{ kind: 'memory.upsert', snippet: 'run gofmt before commit' }],
-  }));
-
-  const btn = node.querySelector('.learning-log-open');
-  assert.ok(btn, 'expected an LLM log button');
-  assert.equal(btn.textContent, 'View LLM log');
-  assert.equal(btn.type, 'button', 'a bare button inside a view must not submit anything');
-  assert.equal(btn.dataset.llmConversationId, 'conv_llm_1', 'the button must carry the transcript id');
-});
-
-test('a source conversation line is shown without leaking the raw id', () => {
-  const node = withDocument(() => renderLogEntry({
-    type: 'consolidate',
-    status: 'done',
-    conversation_id: 'conv_1234567890',
-    conversation_title: 'Refactor the learning log',
-    llm_conversation_id: 'conv_llm_1',
-  }));
-
-  const conv = node.querySelector('.learning-log-conv');
-  assert.ok(conv, 'expected a source-conversation line');
-  assert.equal(conv.querySelector('.learning-log-conv-label')?.textContent, 'Source');
-  assert.ok(conv.textContent.includes('Refactor the learning log'));
-  assert.ok(!conv.textContent.includes('conv_1234567890'), 'raw conversation id must not be displayed');
-});
-
-test('an entry without a transcript renders no button instead of a dead one', () => {
-  for (const entry of [
-    // A legacy review entry (recorded before job transcripts existed) and a
-    // job that ran without a model: neither has anything to open.
-    { type: 'review', status: 'done' },
-    { type: 'consolidate', status: 'done' },
-    { type: 'consolidate', status: 'error' },
-  ]) {
-    const node = withDocument(() => renderLogEntry(entry));
-    assert.equal(
-      node.querySelector('.learning-log-open'),
-      null,
-      `entry ${JSON.stringify(entry)} must not render a button it cannot fill`,
-    );
-  }
-});
-
-test('review log entry lists saved mutations as kind + snippet rows', () => {
-  const node = withDocument(() => renderLogEntry({
-    type: 'review',
-    status: 'done',
-    mutations: [
-      { kind: 'memory', tool: 'memory_save', snippet: 'Roles: use tuan/aku address style' },
-      { kind: 'skills', tool: 'skill_save', snippet: 'learning-ui-log' },
-    ],
-  }));
-
-  const rows = node.querySelectorAll('.learning-log-outcome-row');
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].querySelector('.learning-mut-kind')?.textContent, 'memory');
-  assert.ok(rows[1].textContent.includes('learning-ui-log'));
-});
-
-test('finished review with zero mutations says so explicitly', () => {
-  const node = withDocument(() => renderLogEntry({ type: 'review', status: 'done', mutations: [] }));
-  assert.ok(node.textContent.toLowerCase().includes('nothing to save'));
-});
-
-test('failed review stays concise and has no manual retry action', () => {
-  const node = withDocument(() => renderLogEntry({
-    type: 'review',
-    status: 'error',
-    error: 'provider returned a verbose 429 payload with internal details',
-  }));
-  assert.ok(node.textContent.includes('Background review failed during automatic processing.'));
-  assert.ok(!node.textContent.includes('verbose 429 payload'));
-  assert.equal(node.querySelector('.learning-log-open'), null);
-});
-
-test('cooldown skip is distinct from a completed review', () => {
-  // Skip reasons follow the split taxonomy (detail.reason):
-  // cooldown_active = deferred by retry cooldown, already_running = coalesced.
-  const node = withDocument(() => renderLogEntry({ type: 'review', status: 'skipped', detail: { reason: 'cooldown_active' } }));
-  assert.ok(node.querySelector('.learning-log-status-skipped'));
-  assert.ok(node.querySelector('.learning-log-skipped')?.textContent.includes('cooldown'));
-  assert.ok(!node.textContent.includes('Nothing to save'));
-
-  const coalesced = withDocument(() => renderLogEntry({ type: 'review', status: 'skipped', detail: { reason: 'already_running' } }));
-  assert.ok(coalesced.querySelector('.learning-log-skipped')?.textContent.includes('Coalesced'));
-});
-
-test('Learning mobile layout gives search controls and both panes room to scroll', () => {
-  const mobileRules = learningCSS.slice(learningCSS.indexOf('@media (max-width: 900px)'));
-  assert.match(mobileRules, /flex-wrap:\s*wrap/);
-  assert.match(mobileRules, /grid-template-rows:\s*minmax\(150px,\s*1fr\)\s+minmax\(220px,\s*1fr\)/);
-  assert.match(mobileRules, /min-height:\s*0/);
-  assert.match(mobileRules, /overflow-y:\s*auto/);
-});
-
-test('Learning splitter does not leave desktop inline columns active on narrow screens', () => {
-  assert.match(learningView, /removeProperty\(['"]grid-template-columns['"]\)/);
 });

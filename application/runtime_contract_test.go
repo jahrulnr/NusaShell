@@ -40,14 +40,14 @@ func TestExistingConversationAfterRestartUsesCurrentPromptAndTools(t *testing.T)
 			return adapter, nil
 		},
 	}
-	app.addTurnMessages(conv,
+	app.agentService().AddTurnMessages(conv,
 		domain.Message{ID: "u_new", Role: domain.RoleUser, Content: "new request", Status: domain.StatusDone},
 		domain.Message{ID: "a_new", Role: domain.RoleAssistant},
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	app.runTurn(&TurnRun{ID: "r_old_runtime", ConversationID: conv.ID, Ctx: ctx, Cancel: cancel},
+	app.agentService().RunTurn(&TurnRun{ID: "r_old_runtime", ConversationID: conv.ID, Ctx: ctx, Cancel: cancel},
 		&domain.Provider{ID: "provider", Kind: domain.ProviderChat, Models: []domain.Model{{ID: "model", Context: 128000}}},
 		"key", "model", "", "a_new", false, ModelCapabilities{})
 

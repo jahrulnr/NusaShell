@@ -109,7 +109,7 @@ function skillStatus(skill) {
 export function skillIsDeletable(skill) {
   const owner = String(skill?.owned_by || skill?.origin || '').trim();
   if (!owner || owner.startsWith('plugin:')) return false;
-  return owner === 'learned' || owner === 'user';
+  return owner === 'builtin' || owner === 'learned' || owner === 'user';
 }
 
 function versionLabel(skill) {

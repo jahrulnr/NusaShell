@@ -658,7 +658,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	})
 	tb.Acp = app
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := New(app, logger, StaticHandler(frontend.FS, false), false)
+	srv := NewWithIdentity(app, logger, StaticHandler(frontend.FS, false), false, CoreIdentity{})
 	httpSrv := httptest.NewServer(srv.Routes())
 	t.Cleanup(httpSrv.Close)
 	t.Cleanup(app.Close)

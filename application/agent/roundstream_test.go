@@ -15,9 +15,9 @@ import (
 // order, with monotonic seq numbers.
 func TestRoundStreamReplayCursor(t *testing.T) {
 	reg := NewRoundStreamRegistry()
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "a")
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "b")
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "c")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "a", nil, nil)
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "b", nil, nil)
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "c", nil, nil)
 
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 1)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestRoundStreamPublishActivityCarriesNoToolArguments(t *testing.T) {
 // subscribers and the seal is idempotent.
 func TestRoundStreamSealDeliversDone(t *testing.T) {
 	reg := NewRoundStreamRegistry()
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "a")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "a", nil, nil)
 
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
@@ -112,8 +112,8 @@ func TestRoundStreamSealDeliversDone(t *testing.T) {
 // terminal frame (within the sealed TTL).
 func TestRoundStreamLateJoinReplay(t *testing.T) {
 	reg := NewRoundStreamRegistry()
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "y")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "x", nil, nil)
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "y", nil, nil)
 	reg.Seal("r", "m", 1, contracts.RoundDoneFrame{State: contracts.RoundStateDone, RunID: "r", MessageID: "m", Round: 1})
 
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
@@ -175,7 +175,7 @@ func TestRoundStreamWaitForLateCreate(t *testing.T) {
 		result <- sub
 	}()
 	time.Sleep(50 * time.Millisecond)
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "z")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "z", nil, nil)
 
 	select {
 	case sub := <-result:
@@ -213,7 +213,7 @@ func TestRoundStreamNotFound(t *testing.T) {
 func TestRoundStreamPublishAfterSealDropped(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	reg.Seal("r", "m", 1, contracts.RoundDoneFrame{State: contracts.RoundStateDone, RunID: "r", MessageID: "m", Round: 1})
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "late")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "late", nil, nil)
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -242,7 +242,7 @@ func TestRoundStreamSlowSubscriberBufferHeadroom(t *testing.T) {
 	// Bootstrap the stream so the subscriber attaches to a known stream
 	// (Subscribe otherwise waits for a stream to appear and would time out
 	// after roundStreamWaitTTL).
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "warmup")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "warmup", nil, nil)
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestRoundStreamSlowSubscriberBufferHeadroom(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < total; i++ {
-			reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
+			reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "x", nil, nil)
 		}
 		close(done)
 	}()
@@ -321,7 +321,7 @@ func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
 	// subscriber will drain it on attach without blocking.
 	const head = 128
 	for i := 0; i < head; i++ {
-		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "h")
+		reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "h", nil, nil)
 	}
 	sub, err := reg.Subscribe(context.Background(), "r", "m", 0)
 	if err != nil {
@@ -340,7 +340,7 @@ func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
 	// frames without reading. They sit in the subscriber's buffered channel.
 	const tail = 32
 	for i := 0; i < tail; i++ {
-		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "t")
+		reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "t", nil, nil)
 	}
 	// A new subscriber attaching with after=<head> gets the live tail
 	// cleanly — no gap visible to a fresh attacher, because the publisher
@@ -364,7 +364,7 @@ func TestRoundStreamSlowSubscriberGapDetectable(t *testing.T) {
 func TestRoundStreamLargeReplayDoesNotBlockSubscription(t *testing.T) {
 	reg := NewRoundStreamRegistry()
 	for i := 0; i < roundStreamFrameCap; i++ {
-		reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "x")
+		reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "x", nil, nil)
 	}
 
 	result := make(chan *RoundStreamSub, 1)
@@ -402,7 +402,7 @@ func TestRoundStreamBeginAllowsSubscribeBeforeFirstDelta(t *testing.T) {
 	}
 	defer sub.Close()
 
-	reg.Publish("r", "m", 1, contracts.RoundDeltaText, "", "", "first")
+	reg.PublishWithArgsAndPresentation("r", "m", 1, contracts.RoundDeltaText, "", "", "first", nil, nil)
 	select {
 	case frame := <-sub.Frames():
 		if frame.Text != "first" {

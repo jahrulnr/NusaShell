@@ -1,0 +1,313 @@
+/* Conversation strips & chrome — page-scoped styles owned by the
+   conversation surface. Loaded dynamically by strips.js; production CSS
+   (agent.css) still covers .agent-compaction-status and .agent-room-info
+   internals, so this file supplies what the prototype layout needs: the
+   floating tool-job strip and the composer-integrated steer row. */
+
+/* --- Composer stack ----------------------------------------------------- */
+/* .composer-wrap is pointer-events:none so the stream stays scrollable under
+   it; the floating tool strip must regain hit-testing. The steer queue is no
+   longer a strip-level card: it mounts inside .composer as a stacked top
+   section and inherits the frame's hit-testing. */
+.composer-wrap > .agent-tool-job-strip {
+  pointer-events: auto;
+  margin: 0 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: rgba(13, 20, 37, .94);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, .4);
+  overflow: hidden;
+  backdrop-filter: blur(16px);
+}
+
+/* --- Steer queue (stacked composer section) ------------------------------
+   One pending steer renders as a compact row inside the composer frame —
+   the shared-card treatment, not a floating tray: no gap, no own border box,
+   drop shadow, or blur, and the steer-mode border wraps row + input as one
+   unit. A hairline divider separates the row from the input; the section
+   stays hidden while the queue is empty. */
+.composer > .agent-steer-queue {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.agent-steer-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  margin: 0;
+  padding: 4px 9px 4px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.agent-steer-queue-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--sand);
+}
+.agent-steer-queue-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--mist);
+  font: 12px/1.4 var(--font-body, inherit);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-steer-cancel {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.agent-steer-cancel:hover,
+.agent-steer-cancel:focus-visible {
+  border-color: rgba(225, 125, 134, .42);
+  color: var(--danger);
+  outline: none;
+}
+
+/* --- Tool job strip ----------------------------------------------------- */
+/* Production ships the #tool-job-strip markup but no rules for it; the strip
+   reuses the todo-strip/steer-queue visual language. */
+.agent-tool-job-strip { background: transparent; }
+.agent-tool-job-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px 0 0;
+}
+.agent-tool-job-strip-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: 12px/1.2 var(--font-body, inherit);
+}
+.agent-tool-job-strip-toggle:hover,
+.agent-tool-job-strip-toggle:focus-visible { background: rgba(255, 255, 255, .04); outline: none; }
+.agent-tool-job-strip-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex: none;
+  color: var(--text-faint, var(--muted));
+  font-size: 14px;
+  line-height: 1;
+  transition: transform .14s ease;
+}
+.agent-tool-job-strip-toggle[aria-expanded="true"] .agent-tool-job-strip-chevron { transform: rotate(90deg); }
+.agent-tool-job-strip-title { font: 11px/1.2 var(--font-mono, monospace); color: var(--text); }
+.agent-tool-job-strip-meta {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--panel-alt, rgba(255, 255, 255, .05));
+  color: var(--text-dim, var(--muted));
+  font: 10px/1.2 var(--font-mono, monospace);
+  white-space: nowrap;
+}
+.agent-tool-job-list {
+  display: grid;
+  gap: 4px;
+  max-height: 132px;
+  overflow-y: auto;
+  margin: 0 10px 8px;
+}
+.agent-tool-job-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 6px 4px 9px;
+  border: 1px solid var(--border-soft, var(--line));
+  border-radius: 7px;
+  background: var(--input-bg, rgba(255, 255, 255, .03));
+}
+.agent-tool-job-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font: 11px/1.35 var(--font-mono, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool-job-elapsed { color: var(--text-dim, var(--muted)); font: 10px/1 var(--font-mono, monospace); }
+.agent-tool-job-stop {
+  border: 1px solid var(--border-soft, var(--line));
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: transparent;
+  color: var(--sand, #e0af68);
+  cursor: pointer;
+  font: 10px/1.2 var(--font-mono, monospace);
+}
+.agent-tool-job-stop:hover, .agent-tool-job-stop:focus-visible {
+  border-color: var(--danger, #f7768e);
+  color: var(--danger, #f7768e);
+  outline: none;
+}
+.agent-tool-job-stop:disabled { opacity: .55; cursor: default; }
+
+/* --- Compaction row ------------------------------------------------------ */
+/* The production row is designed to hang on a bubble edge (mark has a
+   negative margin); inside the flat event stream it keeps its own indent. */
+#event-stream > .agent-compaction-status { margin-left: 12px; }
+
+/* --- Context meter fill -------------------------------------------------- */
+/* A single hollow progress ring. State colors change the arc only; the
+   dim remainder and empty center stay defined by shell.css. */
+.context-meter .meter-ring {
+  --meter-arc: var(--lagoon);
+}
+.context-meter[data-context="high"] .meter-ring {
+  --meter-arc: var(--sand, #e0af68);
+}
+.context-meter[data-context="critical"] .meter-ring {
+  --meter-arc: var(--danger, #f7768e);
+}
+
+/* --- Room info ----------------------------------------------------------- */
+/* Production agent.css floats .agent-room-info absolute over .conversation,
+   which made it cover #jump-latest at ~863px. In this prototype the section
+   (now only the mini-window control) is a .stream-toolbar flow item instead:
+   position:relative keeps it in the flex row. */
+.stream-toolbar > .agent-room-info {
+  position: relative;
+  top: auto;
+  right: auto;
+  z-index: 6;
+  flex: none;
+  align-self: center;
+}
+/* #jump-latest carries the auto margin that pushes the right-side group;
+   it is display:none below 720px, so the icons need the push themselves. */
+@media (max-width: 720px) {
+  .stream-toolbar > .agent-room-info { margin-left: auto; }
+}
+
+/* --- Room rename --------------------------------------------------------- */
+.room-rename-input {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--ocean, #4a6fa5);
+  border-radius: 6px;
+  background: var(--input-bg, rgba(255, 255, 255, .05));
+  color: var(--text);
+  font: 12px/1.3 var(--font-body, inherit);
+}
+.room-rename-input:focus { outline: 1px solid var(--ocean, #4a6fa5); }
+
+/* --- Todo delete ---------------------------------------------------------- */
+.dock-task { position: relative; }
+.dock-task-delete {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint, var(--muted));
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.dock-task-delete:hover, .dock-task-delete:focus-visible {
+  border-color: var(--danger, #f7768e);
+  color: var(--danger, #f7768e);
+  outline: none;
+}
+.dock-task-delete:disabled { opacity: .55; cursor: default; }
+
+/* --- Mini window (Document PiP) ------------------------------------------
+ * frontend/js/pip.js moves #agent-thread and #agent-composer-stack into the
+ * PiP document and drops an .agent-thread-pip-note placeholder behind. The
+ * wrapper is display:contents here so the normal layout is untouched; inside
+ * the PiP window the flex rules below reproduce the production body chrome
+ * (which lives in layout.css — not loaded by this prototype). */
+#agent-thread { display: contents; }
+
+.agent-thread-pip-note {
+  flex: 1 1 auto;
+  display: grid;
+  place-content: center;
+  padding: 28px;
+  color: var(--text-faint, var(--muted));
+  font-size: 12px;
+  text-align: center;
+}
+
+body.is-pip-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: var(--deep-water, #10121a);
+}
+body.is-pip-window #agent-thread {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+body.is-pip-window #agent-thread > .event-stream {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+body.is-pip-window #agent-composer-stack { flex: none; }
+/* The composer-wrap overlay contract only applies in the shell; inside the
+ * PiP window it docks in flow under the thread. */
+body.is-pip-window #agent-composer-stack {
+  position: static;
+  padding: 0 8px 8px;
+  pointer-events: auto;
+}
+/* The 180px stream bottom padding reserves room for the shell's overlay
+ * composer; with the composer in flow the transcript only needs breathing
+ * room. */
+body.is-pip-window #agent-thread > .event-stream { padding-bottom: 12px; }
+
+/* Popup fallback (?mini=1, marked by frontend/js/pwa.js as body.mini-mode):
+ * hide the shell chrome so the small window stays chat-first — mirrors
+ * production layout.css. The shell grid collapses to the conversation
+ * column; drawers/nav are also force-hidden regardless of init state. */
+body.mini-mode .global-nav,
+body.mini-mode .room-drawer,
+body.mini-mode .context-dock { display: none; }
+body.mini-mode .shell { grid-template-columns: 1fr; }
+body.mini-mode .conversation { grid-column: 1; }
+/* Nav/dock toggles are dead without their panels — declutter the topbar.
+   The context meter joins them: its only action opens the hidden dock. */
+body.mini-mode .global-nav-toggle,
+body.mini-mode .room-toggle,
+body.mini-mode .context-meter,
+body.mini-mode .dock-toggle { display: none; }

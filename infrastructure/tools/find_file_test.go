@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,7 +13,7 @@ func TestFindFileByExtension(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "b.go"), "x")
 	writeFile(t, filepath.Join(dir, "c.txt"), "x")
 
-	ok, out, err := executeFileTool("find_file", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "find_file", mustJSONArgs(t, map[string]any{
 		"pattern": "*.go",
 		"path":    dir,
 	}))
@@ -33,7 +34,7 @@ func TestFindFileRecursiveDoubleStar(t *testing.T) {
 	writeFile(t, filepath.Join(sub, "target.tsx"), "x")
 	writeFile(t, filepath.Join(dir, "other.ts"), "x")
 
-	ok, out, err := executeFileTool("find_file", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "find_file", mustJSONArgs(t, map[string]any{
 		"pattern": "**/*.tsx",
 		"path":    dir,
 	}))
@@ -55,7 +56,7 @@ func TestFindFileByName(t *testing.T) {
 	sub := filepath.Join(dir, "docs")
 	writeFile(t, filepath.Join(sub, "README.md"), "x")
 
-	ok, out, err := executeFileTool("find_file", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "find_file", mustJSONArgs(t, map[string]any{
 		"pattern": "README.md",
 		"path":    dir,
 	}))
@@ -77,7 +78,7 @@ func TestFindFileBraceExpansion(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "b.ts"), "x")
 	writeFile(t, filepath.Join(dir, "c.py"), "x")
 
-	ok, out, err := executeFileTool("find_file", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "find_file", mustJSONArgs(t, map[string]any{
 		"pattern": "*.{go,ts}",
 		"path":    dir,
 	}))
@@ -93,7 +94,7 @@ func TestFindFileBraceExpansion(t *testing.T) {
 }
 
 func TestFindFileEmptyPattern(t *testing.T) {
-	_, _, err := executeFileTool("find_file", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "find_file", mustJSONArgs(t, map[string]any{
 		"pattern": "",
 		"path":    "/tmp",
 	}))
@@ -103,7 +104,7 @@ func TestFindFileEmptyPattern(t *testing.T) {
 }
 
 func TestFindFileNonexistentPath(t *testing.T) {
-	_, _, err := executeFileTool("find_file", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "find_file", mustJSONArgs(t, map[string]any{
 		"pattern": "*.go",
 		"path":    "/nonexistent/xyz",
 	}))
@@ -121,7 +122,7 @@ func TestFindFileSkipsHiddenDirs(t *testing.T) {
 	writeFile(t, filepath.Join(gitDir, "config.go"), "x")
 	writeFile(t, filepath.Join(dir, "real.go"), "x")
 
-	ok, out, err := executeFileTool("find_file", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "find_file", mustJSONArgs(t, map[string]any{
 		"pattern": "*.go",
 		"path":    dir,
 	}))

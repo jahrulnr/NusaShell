@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"nusashell/application/conversation"
 	"nusashell/application/service/attachments"
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -26,6 +27,7 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 				RunID:           record.RunID,
 				ConversationID:  record.ConversationID,
 				ConversationKey: conversationKey,
+				UserMessageID:   record.UserMessageID,
 			}, nil
 		}
 	} else if _, rpcErr := a.getConversation(conversationID); rpcErr != nil {
@@ -71,6 +73,7 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 				RunID:           record.RunID,
 				ConversationID:  record.ConversationID,
 				ConversationKey: conversationKey,
+				UserMessageID:   record.UserMessageID,
 			}, nil
 		}
 	} else if a.ActiveRunForConversation(conversationID) != nil {
@@ -86,7 +89,7 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 
 	var repo *ConversationRepository
 	if isNewConversation {
-		repo = NewConversation(a.Conversations, "")
+		repo = conversation.NewConversation(a.Conversations, "")
 	} else {
 		var loadErr *contracts.RPCError
 		repo, loadErr = a.loadRepoRPC(conversationID)
@@ -144,14 +147,14 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 	if isNewConversation {
-		a.rememberLazyTurn(conversationKey, lazyTurnRecord{ConversationID: c.ID, RunID: run.ID, CreatedAt: time.Now()})
+		a.rememberLazyTurn(conversationKey, lazyTurnRecord{ConversationID: c.ID, RunID: run.ID, UserMessageID: userMsg.ID, CreatedAt: time.Now()})
 	}
 
 	a.goSafe("agent", func() {
-		a.RunTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
+		a.RunTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, ModelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 	})
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
-	return contracts.TurnStartResult{RunID: run.ID, ConversationID: c.ID, ConversationKey: conversationKey}, nil
+	return contracts.TurnStartResult{RunID: run.ID, ConversationID: c.ID, ConversationKey: conversationKey, UserMessageID: userMsg.ID}, nil
 }
 
 // handleTurnsRetry re-runs the last failed assistant message with a different
@@ -190,7 +193,7 @@ func (a *Service) HandleTurnsRetry(ctx context.Context, req contracts.TurnRetryR
 		a.HealOrphanedRunningConversation(c)
 	}
 
-	failedIdx := lastFailedAssistantIndex(c.Messages)
+	failedIdx := LastFailedAssistantIndex(c.Messages)
 	if failedIdx < 0 {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "no failed assistant turn to retry"}
 	}
@@ -227,17 +230,17 @@ func (a *Service) HandleTurnsRetry(ctx context.Context, req contracts.TurnRetryR
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.RunTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
+		a.RunTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, ModelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides))
 	})
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
 
-// lastFailedAssistantIndex returns the index of the last real (non-hydration)
+// LastFailedAssistantIndex returns the index of the last real (non-hydration)
 // assistant message when that message is in error status. Earlier failed
 // assistants stay in formed history after retry, so scanning for any error
 // would retry a recovered turn.
-func lastFailedAssistantIndex(msgs []domain.Message) int {
+func LastFailedAssistantIndex(msgs []domain.Message) int {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role != domain.RoleAssistant || domain.IsHydrationMessage(msgs[i]) {
 			continue
@@ -250,12 +253,12 @@ func lastFailedAssistantIndex(msgs []domain.Message) int {
 	return -1
 }
 
-// shouldAnnounceRestart reports whether a persisted conversation predates
+// ShouldAnnounceRestart reports whether a persisted conversation predates
 // the current process (was used before the backend restarted) and therefore
 // gets a one-shot restart announcement on its next user message. Fresh
 // conversations (created after startup) and empty conversations never
 // qualify; a zero startedAt (tests, unusual composition) disables it.
-func shouldAnnounceRestart(c *domain.Conversation, startedAt time.Time) bool {
+func ShouldAnnounceRestart(c *domain.Conversation, startedAt time.Time) bool {
 	return !startedAt.IsZero() && startedAt.After(c.UpdatedAt) && hasDurableHistory(c)
 }
 
@@ -283,7 +286,7 @@ func hasDurableHistory(c *domain.Conversation) bool {
 // workspace-switch notice is taken at the same moment so a pick that raced
 // this Save cannot double-inject.
 func (a *Service) AddTurnMessages(c *domain.Conversation, userMsg, asstMsg domain.Message) {
-	announce := shouldAnnounceRestart(c, a.startedAt)
+	announce := ShouldAnnounceRestart(c, a.startedAt)
 	wsNotice := a.TakeWorkspaceSwitchNotice(c)
 	c.AddMessage(userMsg)
 	if c.Title == "" || c.Title == "Untitled" {
@@ -302,7 +305,7 @@ func (a *Service) AddTurnMessages(c *domain.Conversation, userMsg, asstMsg domai
 		c.AddMessage(*wsNotice)
 	}
 	if announce {
-		c.AddMessage(a.restartAnnouncement())
+		c.AddMessage(a.RestartAnnouncement())
 	}
 	// Scan task memory before draining pending announcements so newly
 	// confirmed records (written after the previous turn) are announced in
@@ -358,7 +361,7 @@ func (a *Service) workspaceSwitchNotice(from, to string) domain.Message {
 	calls := []domain.ToolCall{{
 		ID:     domain.AnnouncementToolCallPrefix + nonce.Random(),
 		Name:   domain.AnnouncementToolName,
-		Args:   domain.WorkspaceChangedAnnouncementArgs(from, to, listInstructionFiles(to)),
+		Args:   domain.WorkspaceChangedAnnouncementArgs(from, to, conversation.ListInstructionFiles(to)),
 		Status: domain.ToolOK,
 		Output: domain.WorkspaceChangedAnnouncementMessage(from, to),
 	}}
@@ -390,11 +393,11 @@ func (a *Service) readWorkspaceAgentsMD(ws string) hydrationSlot {
 	}).readAgentsMD()
 }
 
-// restartAnnouncement builds the synthetic assistant message carrying the
+// RestartAnnouncement builds the synthetic assistant message carrying the
 // `announcement` tool call with its result pre-filled. It is persisted
 // into the conversation so the model sees it in this turn and in later
 // turns (auto-continue), and the UI renders it as a normal tool card.
-func (a *Service) restartAnnouncement() domain.Message {
+func (a *Service) RestartAnnouncement() domain.Message {
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
@@ -410,11 +413,11 @@ func (a *Service) restartAnnouncement() domain.Message {
 	}
 }
 
-// autoContinueAnnouncement builds the synthetic assistant message carrying
+// AutoContinueAnnouncement builds the synthetic assistant message carrying
 // the `announcement` tool call that continues the todo-driven chain into the
-// next turn. Mirrors restartAnnouncement: persisted, result pre-filled, args
+// next turn. Mirrors RestartAnnouncement: persisted, result pre-filled, args
 // self-describing the chain state (rounds used, open todos).
-func (a *Service) autoContinueAnnouncement(decision domain.AutoContinueDecision) domain.Message {
+func (a *Service) AutoContinueAnnouncement(decision domain.AutoContinueDecision) domain.Message {
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
@@ -477,8 +480,8 @@ func (a *Service) autoContinueTodoHydration(conversationID string) *domain.Messa
 // placeholder. The hidden hydration is a separate message so it never
 // leaks a hidden tool card into the visible announcement. Returns the new
 // assistant message ID.
-func (a *Service) appendAutoContinueBoundary(conversationID string, decision domain.AutoContinueDecision) (string, error) {
-	notice := a.autoContinueAnnouncement(decision)
+func (a *Service) appendAutoContinueBoundary(conversationID, providerID string, decision domain.AutoContinueDecision) (string, error) {
+	notice := a.AutoContinueAnnouncement(decision)
 	conv, err := a.loadRepo(conversationID)
 	if err != nil {
 		return "", err
@@ -494,7 +497,7 @@ func (a *Service) appendAutoContinueBoundary(conversationID string, decision dom
 	if err := conv.Save(); err != nil {
 		return "", err
 	}
-	_, nextMsgID, err := a.AppendTurnAssistant(conversationID)
+	_, nextMsgID, err := a.AppendTurnAssistant(conversationID, providerID)
 	return nextMsgID, err
 }
 
@@ -628,9 +631,9 @@ func (a *Service) HandleTurnsActive(req contracts.ConversationIDRequest) (any, *
 	return out, nil
 }
 
-// askPendingEvent maps a domain ask request to the wire event shape shared by
+// AskPendingEvent maps a domain ask request to the wire event shape shared by
 // the live EventAskPending and the agent.ask.pending list RPC.
-func askPendingEvent(conversationID, runID, callID string, req domain.AskQuestionRequest) contracts.AskPendingEvent {
+func AskPendingEvent(conversationID, runID, callID string, req domain.AskQuestionRequest) contracts.AskPendingEvent {
 	opts := make([]contracts.AskOptionDTO, len(req.Options))
 	for i, o := range req.Options {
 		opts[i] = contracts.AskOptionDTO{
@@ -659,7 +662,7 @@ func (a *Service) HandleAskPendingList(req contracts.AskPendingListRequest) (any
 	pending := a.AskQuestions.PendingForConversation(req.ConversationID)
 	asks := make([]contracts.AskPendingEvent, 0, len(pending))
 	for _, p := range pending {
-		asks = append(asks, askPendingEvent(p.ConversationID, p.RunID, p.CallID, p.Req))
+		asks = append(asks, AskPendingEvent(p.ConversationID, p.RunID, p.CallID, p.Req))
 	}
 	return contracts.AskPendingListResult{Asks: asks}, nil
 }
@@ -763,7 +766,7 @@ func (a *Service) HandleTurnsSteer(_ context.Context, req contracts.TurnSteerReq
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "steer text is required"}
 	}
 	a.SaveAttachmentsToDisk(req.ConversationID, attachments)
-	entry := newSteerEntry(text, attachments)
+	entry := NewSteerEntry(text, attachments)
 	if !run.QueueSteer(entry) {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "a steer is already queued for this turn"}
 	}

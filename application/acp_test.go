@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"nusashell/application/agent"
 	"nusashell/application/service/tooloutput"
 	"nusashell/application/subagent"
 	"nusashell/contracts"
@@ -41,13 +42,13 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
 
-	turnLock := app.conversationTurnLock("c1")
+	turnLock := app.agentService().ConversationTurnLock("c1")
 	turnLock.Lock()
 	defer turnLock.Unlock()
 
 	done := make(chan struct{})
 	go func() {
-		app.onAcpRunDone(acpRun)
+		app.subagentService().OnRunDone(acpRun)
 		close(done)
 	}()
 	select {
@@ -62,11 +63,11 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	if len(store.convs["c1"].Messages) != 2 {
 		t.Fatalf("messages = %d, want 2 before drain", len(store.convs["c1"].Messages))
 	}
-	if !app.hasPendingRuns("c1") {
+	if !app.agentService().HasPendingRuns("c1") {
 		t.Fatal("must stay pending until the parent turn drains the result")
 	}
 
-	applied, err := app.applyQueuedRunResults(parent)
+	applied, err := app.agentService().ApplyQueuedRunResults(parent)
 	if err != nil {
 		t.Fatalf("applyQueuedRunResults: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestOnAcpRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	if len(saved.Messages) != 3 || saved.Messages[2].ToolCalls[0].Name != domain.SubagentResultToolName {
 		t.Fatalf("synthetic subagent_result missing: %+v", saved.Messages)
 	}
-	if app.hasPendingRuns("c1") {
+	if app.agentService().HasPendingRuns("c1") {
 		t.Fatal("pending subagent must be untracked after drain")
 	}
 }
@@ -106,7 +107,7 @@ func TestOnAcpRunDoneInjectsImmediatelyWhenParentIdle(t *testing.T) {
 		Transcript:       []domain.AcpTranscriptChunk{{Kind: "text", Text: "done"}},
 	}
 
-	app.onAcpRunDone(acpRun)
+	app.subagentService().OnRunDone(acpRun)
 
 	saved := store.convs["c1"]
 	if saved.Messages[1].ToolCalls[0].Status != domain.ToolOK {
@@ -115,7 +116,7 @@ func TestOnAcpRunDoneInjectsImmediatelyWhenParentIdle(t *testing.T) {
 	if len(saved.Messages) != 3 || saved.Messages[2].ToolCalls[0].Name != domain.SubagentResultToolName {
 		t.Fatalf("idle completion must append subagent_result: %+v", saved.Messages)
 	}
-	if app.hasPendingRuns("c1") {
+	if app.agentService().HasPendingRuns("c1") {
 		t.Fatal("idle completion must untrack the run")
 	}
 }
@@ -191,18 +192,18 @@ func TestIdleSubagentCompletionStartsTurnAndResumesAutoContinue(t *testing.T) {
 		Ctx:            context.Background(),
 		Cancel:         func() {},
 	}
-	app.runTurn(parent, provider, "test-key", "model", "", "a2", false, ModelCapabilities{})
+	app.agentService().RunTurn(parent, provider, "test-key", "model", "", "a2", false, ModelCapabilities{})
 
 	parentDone := waitForTurnDoneEvent(t, events, conversationID, parent.ID, string(domain.AutoContinueAwaitingBackground))
 	if parentDone.AutoContinue.ShouldContinue {
 		t.Fatal("parent turn must pause auto-continue while the subagent is pending")
 	}
-	if !app.hasPendingRuns(conversationID) {
+	if !app.agentService().HasPendingRuns(conversationID) {
 		t.Fatal("subagent must remain pending after the parent turn ends")
 	}
 	assertNoAutoContinueAnnouncement(t, store.convs[conversationID])
 
-	app.onAcpRunDone(&domain.AcpRun{
+	app.subagentService().OnRunDone(&domain.AcpRun{
 		TaskState:        domain.TaskState[domain.AcpRunStatus]{ID: "run-subagent", Status: domain.AcpRunCompleted},
 		ConversationID:   conversationID,
 		ParentToolCallID: "call-subagent",
@@ -211,14 +212,14 @@ func TestIdleSubagentCompletionStartsTurnAndResumesAutoContinue(t *testing.T) {
 
 	waitForTurnDoneEvent(t, events, conversationID, "", string(domain.AutoContinueMaxReached))
 	deadline := time.Now().Add(2 * time.Second)
-	for app.activeRunForConversation(conversationID) != nil && time.Now().Before(deadline) {
+	for app.agentService().ActiveRunForConversation(conversationID) != nil && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if app.activeRunForConversation(conversationID) != nil {
+	if app.agentService().ActiveRunForConversation(conversationID) != nil {
 		t.Fatal("background completion turn is still active")
 	}
 
-	if app.hasPendingRuns(conversationID) {
+	if app.agentService().HasPendingRuns(conversationID) {
 		t.Fatal("completed subagent must be removed from pending runs")
 	}
 	assertCompletedSubagentAndContinuation(t, store.convs[conversationID])
@@ -331,11 +332,11 @@ func TestRoundBoundaryPlacesSteerAfterBackgroundResults(t *testing.T) {
 			}, "")
 		},
 	})
-	if !parent.QueueSteer(newSteerEntry("prioritize this", nil)) {
+	if !parent.QueueSteer(agent.NewSteerEntry("prioritize this", nil)) {
 		t.Fatal("queue steer")
 	}
 
-	rules := app.newConversationRules(parent, ProviderContext{}, conv, domain.DefaultSettings(), nil, "", "", "m2", ModelCapabilities{}, nil, 0, nil, false).Rules()
+	rules := app.agentService().NewConversationRules(parent, ProviderContext{}, conv, domain.DefaultSettings(), nil, "", "", "m2", ModelCapabilities{}, nil, 0, nil, false, "").Rules()
 	continued, err := rules.AfterRound(nil, ChatResponse{}, nil)
 	if err != nil {
 		t.Fatalf("round boundary: %v", err)
@@ -900,13 +901,13 @@ func TestDelegateModelSettingRoundTripsThroughSettingsRPC(t *testing.T) {
 	app := NewApp(Deps{Settings: settings})
 	configured := "  cheap:model  "
 
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{DelegateModel: &configured}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{DelegateModel: &configured}); rpcErr != nil {
 		t.Fatalf("settings.set delegate model: %v", rpcErr)
 	}
 	if got := settings.Get().DelegateModel; got != "cheap:model" {
 		t.Fatalf("stored delegate model = %q, want trimmed value", got)
 	}
-	result, rpcErr := app.handleSettingsGet()
+	result, rpcErr := app.settingsService().HandleGet()
 	if rpcErr != nil {
 		t.Fatalf("settings.get: %v", rpcErr)
 	}
@@ -915,7 +916,7 @@ func TestDelegateModelSettingRoundTripsThroughSettingsRPC(t *testing.T) {
 	}
 
 	empty := ""
-	if _, rpcErr := app.handleSettingsSet(contracts.SettingsSetRequest{DelegateModel: &empty}); rpcErr != nil {
+	if _, rpcErr := app.settingsService().HandleSet(contracts.SettingsSetRequest{DelegateModel: &empty}); rpcErr != nil {
 		t.Fatalf("clear delegate model: %v", rpcErr)
 	}
 	if got := settings.Get().DelegateModel; got != "" {
@@ -1038,13 +1039,13 @@ func TestDeliverRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	app.runs[parent.ID] = parent
 	app.trackPendingRun("c1", "run_del", "delegate")
 
-	turnLock := app.conversationTurnLock("c1")
+	turnLock := app.agentService().ConversationTurnLock("c1")
 	turnLock.Lock()
 	defer turnLock.Unlock()
 
 	done := make(chan struct{})
 	go func() {
-		app.deliverRunDone("c1", pendingRunDone{
+		app.agentService().DeliverRunDone("c1", pendingRunDone{
 			RunID: "run_del",
 			Complete: func(cid string) error {
 				run := &domain.AcpRun{TaskState: domain.TaskState[domain.AcpRunStatus]{ID: "run_del", Status: domain.AcpRunCompleted}}
@@ -1065,11 +1066,11 @@ func TestDeliverRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	if len(store.convs["c1"].Messages) != 2 {
 		t.Fatalf("messages = %d, want 2 before drain", len(store.convs["c1"].Messages))
 	}
-	if !app.hasPendingRuns("c1") {
+	if !app.agentService().HasPendingRuns("c1") {
 		t.Fatal("must stay pending until the parent turn drains the result")
 	}
 
-	applied, err := app.applyQueuedRunResults(parent)
+	applied, err := app.agentService().ApplyQueuedRunResults(parent)
 	if err != nil {
 		t.Fatalf("applyQueuedRunResults: %v", err)
 	}
@@ -1083,7 +1084,7 @@ func TestDeliverRunDoneQueuesWhileParentTurnActive(t *testing.T) {
 	if len(saved.Messages) != 3 || saved.Messages[2].ToolCalls[0].Name != domain.SubagentResultToolName {
 		t.Fatalf("synthetic subagent_result missing: %+v", saved.Messages)
 	}
-	if app.hasPendingRuns("c1") {
+	if app.agentService().HasPendingRuns("c1") {
 		t.Fatal("pending delegate must be untracked after drain")
 	}
 }

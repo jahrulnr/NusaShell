@@ -1,0 +1,276 @@
+.dock-section { margin: 0 0 22px; }
+.dock-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; color: var(--muted); font: 10px var(--font-mono); }
+.dock-section-head strong { color: var(--mist); font: 600 12px var(--font-display); }
+.dock-progress { height: 3px; margin-bottom: 11px; overflow: hidden; border-radius: 4px; background: var(--line); }
+.dock-progress span { display: block; height: 100%; background: var(--mangrove); transition: width .2s ease; }
+.dock-task-list, .context-list { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.dock-task-brief { max-height: min(28vh, 220px); margin: 0 0 12px; overflow: auto; padding: 9px 10px; border: 1px solid rgba(88, 209, 195, .18); border-left: 2px solid var(--lagoon); border-radius: 7px; background: rgba(5, 8, 17, .36); color: var(--mist); font-size: 11px; line-height: 1.5; scrollbar-gutter: stable; overflow-wrap: anywhere; }
+.dock-task-brief-label { margin-bottom: 6px; color: var(--lagoon); font: 600 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.dock-task-brief-content > :first-child { margin-top: 0; }
+.dock-task-brief-content > :last-child { margin-bottom: 0; }
+.dock-task-brief-content :is(p, ul, ol, blockquote, pre, table) { margin: 0 0 8px; }
+.dock-task-brief-content :is(ul, ol) { padding-left: 17px; }
+.dock-task-brief-content pre { max-width: 100%; overflow: auto; padding: 7px 8px; border-radius: 5px; background: rgba(0, 0, 0, .25); white-space: pre-wrap; }
+.dock-task-brief-content code { overflow-wrap: anywhere; }
+.dock-task-brief-content a { color: var(--ocean); overflow-wrap: anywhere; }
+.dock-task { display: flex; min-height: 38px; align-items: flex-start; gap: 9px; padding: 7px 8px; border-radius: 7px; color: var(--mist); cursor: pointer; font-size: 12px; }
+.dock-task:hover { background: rgba(255, 255, 255, .025); }
+.dock-task input { position: absolute; opacity: 0; }
+.dock-check { display: grid; width: 16px; height: 16px; flex: none; place-items: center; margin-top: 1px; border: 1px solid var(--line-strong); border-radius: 5px; }
+.dock-task input:checked + .dock-check { border-color: var(--mangrove); background: var(--mangrove); color: var(--midnight); }
+.dock-task input:checked + .dock-check::after { content: "✓"; font: 700 10px var(--font-mono); }
+.dock-task[data-status="in_progress"] .dock-check { border-color: rgba(88, 209, 195, .28); border-top-color: var(--lagoon); border-right-color: var(--lagoon); border-radius: 50%; background: transparent; animation: dock-task-spin .85s linear infinite; }
+.dock-task[data-status="in_progress"] .dock-check::after { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--lagoon); content: ""; }
+.dock-task[data-status="in_progress"] .dock-check { transform-origin: center; }
+@keyframes dock-task-spin { to { transform: rotate(360deg); } }
+.dock-task[data-status="in_progress"] > span:last-child { color: var(--foam); }
+.dock-task[data-status="pending"] input:disabled + .dock-check { opacity: .8; }
+.dock-task input:focus-visible + .dock-check { outline: 2px solid var(--lagoon); outline-offset: 2px; }
+.dock-task input:checked ~ span:last-child { color: var(--muted); text-decoration: line-through; }
+@media (prefers-reduced-motion: reduce) {
+  .dock-task[data-status="in_progress"] .dock-check { animation: none; }
+}
+.context-list li { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; padding: 9px 7px; border-bottom: 1px solid var(--line); }
+.context-key { color: var(--muted); font: 9px var(--font-mono); }
+.context-value { overflow: hidden; color: var(--mist); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.context-room-id { min-width: 0; overflow-wrap: anywhere; color: var(--mist); font: 9px/1.45 var(--font-mono); white-space: normal; word-break: break-word; }
+.context-usage { margin-top: 15px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: rgba(5, 8, 17, .30); }
+.context-usage-line { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--mist); font: 9px var(--font-mono); }
+.context-usage-track { height: 3px; border-radius: 4px; background: var(--line); }
+.context-usage-track span { display: block; width: 38%; height: 100%; border-radius: inherit; background: var(--ocean); }
+
+/* Context inspector: grouped rows that keep estimated (preflight, next
+ * request) and measured (provider-reported usage) numbers visibly separate.
+ * Unknown data is dimmed, never rendered as zero. */
+.context-inspector .context-group-label { margin: 14px 0 4px; color: var(--lagoon); font: 600 8px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.context-inspector .context-usage + .context-group-label { margin-top: 12px; }
+.context-inspector .context-list li { padding: 7px 7px; }
+.context-value[data-availability="unavailable"],
+.context-usage-line [data-availability="unavailable"] { color: var(--muted); font-style: italic; }
+.context-cat-meter { display: block; grid-column: 1 / -1; height: 2px; margin: -4px 0 1px; border-radius: 2px; background: var(--line); }
+.context-cat-meter span { display: block; height: 100%; border-radius: inherit; background: var(--ocean); }
+.context-cat-meter[data-cat="system"] span { background: var(--lagoon); }
+.context-cat-meter[data-cat="conversation"] span { background: var(--ocean); }
+.context-cat-meter[data-cat="tools"] span { background: var(--sand); }
+
+.subagent-switcher { position: relative; }
+.subagent-trigger { display: grid; width: 100%; min-height: 46px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: rgba(5, 8, 17, .46); cursor: pointer; text-align: left; }
+.subagent-trigger:hover, .subagent-trigger[aria-expanded="true"] { border-color: #48617f; background: var(--surface); }
+.subagent-trigger-copy { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.subagent-trigger-copy strong { overflow: hidden; color: var(--foam); font: 600 11px var(--font-display); text-overflow: ellipsis; white-space: nowrap; }
+.subagent-trigger-copy small { color: var(--muted); font: 9px var(--font-mono); }
+.subagent-chevron { color: var(--muted); font: 10px var(--font-mono); }
+.subagent-option-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.subagent-option-dot[data-status="running"] { background: var(--lagoon); box-shadow: 0 0 0 3px var(--lagoon-soft); }
+.subagent-option-dot[data-status="complete"] { background: var(--mangrove); }
+.subagent-options { position: absolute; z-index: 6; top: calc(100% + 5px); right: 0; left: 0; overflow: hidden; padding: 4px; border: 1px solid var(--line-strong); border-radius: 8px; background: #10192a; box-shadow: 0 16px 36px rgba(0, 0, 0, .48); }
+.subagent-options button { display: grid; width: 100%; min-height: 38px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 7px; border-radius: 6px; background: transparent; color: var(--mist); cursor: pointer; text-align: left; }
+.subagent-options button:hover, .subagent-options button:focus-visible, .subagent-options button[aria-selected="true"] { background: var(--surface-high); color: var(--foam); }
+.subagent-options button span:nth-child(2) { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-options small { color: var(--muted); font: 8px var(--font-mono); }
+.subagent-section { display: flex; min-height: 0; flex: 1; flex-direction: column; margin-bottom: 0; }
+.subagent-detail { display: flex; min-height: 0; flex: 1; flex-direction: column; margin-top: 12px; padding: 12px 2px 0; border-top: 1px solid var(--line); }
+.subagent-detail > header { display: flex; align-items: center; gap: 8px; }
+.subagent-agent { overflow: hidden; color: var(--ocean); font: 600 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.subagent-status { color: var(--muted); font: 600 9px var(--font-mono); }
+.subagent-status[data-status="running"] { color: var(--lagoon); }
+.subagent-status[data-status="complete"] { color: var(--mangrove); }
+.subagent-elapsed { margin-left: auto; color: var(--muted); font: 9px var(--font-mono); }
+/* Subagent prompt cards: one bounded, expandable frame shared by the dock
+ * objective and delegation/steering prompts inside the live transcript. The
+ * collapsed preview is a hard clamp; expanding opens the scrollable bound —
+ * full prompt text is never truncated. */
+.subagent-detail .subagent-prompt { box-sizing: border-box; min-width: 0; }
+.subagent-detail .subagent-objective-card { margin: 10px 0 14px; overflow: hidden; border: 1px solid rgba(88, 209, 195, .18); border-left: 2px solid var(--lagoon); border-radius: 7px; background: rgba(5, 8, 17, .36); color: var(--mist); }
+.subagent-detail .subagent-prompt-head { display: flex; min-height: 25px; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 5px 4px 9px; border-bottom: 1px solid var(--line); }
+.subagent-detail .subagent-prompt-label { color: var(--lagoon); font: 600 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.subagent-detail .subagent-prompt-toggle { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 32px; margin: 0; padding: 2px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ocean); cursor: pointer; font: 11px var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
+.subagent-detail .subagent-prompt-toggle:hover, .subagent-detail .subagent-prompt-toggle:focus-visible { background: var(--surface-high); color: var(--foam); outline: none; }
+.subagent-detail .subagent-prompt-toggle[hidden] { display: none; }
+.subagent-detail .subagent-prompt-body { min-width: 0; box-sizing: border-box; padding: 7px 9px 8px; overflow-wrap: anywhere; word-break: break-word; }
+.subagent-detail .subagent-prompt-body > :first-child { margin-top: 0; }
+.subagent-detail .subagent-prompt-body > :last-child { margin-bottom: 0; }
+.subagent-detail .subagent-prompt.is-collapsed > .subagent-prompt-body { max-height: calc(4 * 1.5em); overflow-y: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent); mask-image: linear-gradient(to bottom, #000 62%, transparent); }
+.subagent-detail .subagent-transcript .agent-bubble.subagent-prompt { padding: 0; overflow: hidden; border-left: 2px solid var(--lagoon); }
+.subagent-detail .subagent-transcript .subagent-prompt-body { max-height: calc(14 * 1.5em); overflow-y: auto; overscroll-behavior: contain; }
+.subagent-detail .subagent-transcript .subagent-prompt.is-collapsed > .subagent-prompt-body { max-height: calc(4 * 1.5em); overflow-y: hidden; }
+.subagent-objective { max-height: calc(10 * 1.5em); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-right: 5px; color: var(--mist); font-size: 11px; line-height: 1.5; scrollbar-gutter: stable; overflow-wrap: anywhere; }
+.subagent-objective :is(p, ul, ol, blockquote, pre) { margin: 0 0 8px; }
+.subagent-objective > :last-child { margin-bottom: 0; }
+.subagent-transcript { display: grid; min-width: 0; flex: 1; min-height: 0; align-content: start; gap: 7px; max-height: none; margin-top: 12px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-top: 10px; border-top: 1px solid var(--line); scrollbar-gutter: stable; }
+/* The Agent renderer owns transcript semantics. Keep its message and round
+ * nodes mounted so the live dock can patch content without collapsing a
+ * disclosure or moving the reader. These rules only adapt that contract to
+ * the compact right dock. */
+.subagent-transcript > .agent-message { min-width: 0; width: 100%; max-width: none; gap: 7px; }
+.subagent-transcript > .agent-message .agent-bubble { box-sizing: border-box; width: 100%; max-width: none; margin: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: rgba(5, 8, 17, .42); color: var(--mist); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.subagent-transcript > .agent-message .agent-bubble > :last-child { margin-top: 0; }
+.subagent-transcript .agent-bubble-text { min-width: 0; max-width: 100%; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; word-break: break-word; }
+.subagent-transcript > .agent-message.assistant .agent-bubble-text { padding-left: 0; border-left: 0; font-size: 10px; line-height: 1.5; }
+.subagent-transcript .agent-round { min-width: 0; max-width: 100%; }
+.subagent-transcript .agent-bubble-text :is(p, ul, ol, blockquote, pre) { max-width: 100%; overflow-wrap: anywhere; }
+.subagent-transcript .agent-bubble-text pre { box-sizing: border-box; max-width: 100%; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.subagent-transcript .agent-reasoning { min-width: 0; }
+.subagent-transcript .agent-reasoning-content { max-height: calc(8 * 1.8em); overflow-y: auto; font: 10px/1.8 var(--font-mono); line-height: 1.8; }
+.subagent-transcript .agent-reasoning-content :is(p, ul, ol) { margin: .9em 0; }
+.subagent-transcript .agent-tool-stack { min-width: 0; max-width: 100%; }
+.subagent-transcript .agent-tool-event { max-width: 100%; }
+.subagent-transcript :is(a, code) { overflow-wrap: anywhere; }
+.subagent-transcript > .agent-message .agent-bubble .markdown-table-scroll { box-sizing: border-box; width: min(100%, 400px); max-width: 400px; margin: .8em 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; padding-inline-end: 2px; scroll-padding-inline-end: 2px; scrollbar-gutter: stable; }
+.subagent-transcript > .agent-message .agent-bubble .markdown-table-scroll table { display: table; width: max-content; min-width: 100%; border-collapse: collapse; }
+
+/* The dock is a narrow, live reader. Keep tool activity scannable in its
+ * collapsed state, and let the user opt into the verbose request/output. */
+.subagent-transcript .agent-tool-stack { gap: 4px; }
+.subagent-transcript .agent-tool-event { border-radius: 6px; }
+.subagent-transcript .agent-tool-event-head { min-height: 26px; gap: 4px; padding: 3px 4px 3px 0; }
+.subagent-transcript .agent-tool-event-node { width: 18px; height: 18px; border-radius: 4px; font-size: 8px; }
+.subagent-transcript .agent-tool-event-head-text { gap: 4px; }
+.subagent-transcript .agent-tool-event-title { min-width: 0; max-width: 8rem; font-size: 10px; }
+.subagent-transcript .agent-tool-event-head-summary { flex-basis: 0; font-size: 8px; }
+.subagent-transcript .agent-tool-elapsed { max-width: 4rem; overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-transcript .agent-tool-event-chevron { font-size: 9px; }
+.subagent-transcript .agent-tool-event-body { gap: 7px; padding: 7px 6px 8px 24px; }
+.subagent-transcript .agent-tool-event .agent-tool-request,
+.subagent-transcript .agent-tool-event .agent-tool-event-output,
+.subagent-transcript .agent-tool-event .agent-tool-terminal-output {
+  box-sizing: border-box;
+  position: relative;
+  max-width: 100%;
+  overflow: auto;
+  padding: 6px 7px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: rgba(5, 8, 17, .52);
+  font: 8.5px/1.4 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.subagent-transcript .agent-tool-event .agent-tool-request { border-left: 2px solid var(--ocean); }
+.subagent-transcript .agent-tool-event .agent-tool-request {
+  display: -webkit-box;
+  max-height: 54px;
+  overflow: hidden;
+  cursor: zoom-in;
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.subagent-transcript .agent-tool-event .agent-tool-request.is-expanded {
+  display: block;
+  max-height: 240px;
+  overflow: auto;
+  cursor: zoom-out;
+  -webkit-line-clamp: unset;
+}
+.subagent-transcript .agent-tool-event .agent-tool-event-output,
+.subagent-transcript .agent-tool-event .agent-tool-terminal-output { padding-top: 21px; }
+.subagent-transcript .agent-tool-event .agent-tool-terminal-output { border-left: 2px solid var(--lagoon); }
+.subagent-transcript .agent-tool-event .agent-tool-request::before {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ocean);
+  content: "input";
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.subagent-transcript .agent-tool-event-summary-text { padding: 4px 6px; font-size: 8.5px; }
+.subagent-transcript .agent-tool-event .agent-tool-raw summary { padding: 4px 6px; font-size: 8px; }
+.subagent-transcript .agent-tool-event .agent-tool-raw > pre { max-height: 120px; padding: 0 6px 6px; font-size: 8px; }
+.subagent-transcript .agent-tool-event-output,
+.subagent-transcript .agent-tool-terminal-output { max-height: calc(6 * 1.4em); }
+.subagent-transcript .agent-tool-event-output::before,
+.subagent-transcript .agent-tool-terminal-output::before { display: block; margin-bottom: 5px; color: var(--ocean); content: "output"; font: 600 8px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.subagent-transcript .agent-tool-terminal-output::before { color: var(--lagoon); }
+
+/* ACP tool rows follow the primary terminal card: one terminal header,
+ * one compact command line, and one separate output pane. */
+.subagent-transcript .acp-terminal-card .acp-tool-kind {
+  flex: none;
+  color: var(--ocean);
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.subagent-transcript .acp-terminal-card .agent-tool-event-body { gap: 0; padding: 6px 8px 8px 24px; }
+.subagent-transcript .acp-terminal-card .agent-tool-request {
+  display: -webkit-box;
+  max-height: 39px;
+  padding: 4px 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text, var(--mist));
+  cursor: zoom-in;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.subagent-transcript .acp-terminal-card .agent-tool-request::before {
+  display: inline;
+  margin-right: 7px;
+  color: var(--lagoon);
+  content: "$";
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0;
+}
+.subagent-transcript .acp-terminal-card .agent-tool-request.is-expanded {
+  display: block;
+  max-height: 240px;
+  overflow: auto;
+  cursor: zoom-out;
+  -webkit-line-clamp: unset;
+}
+.subagent-transcript .acp-terminal-card .agent-tool-terminal-output {
+  max-height: calc(6 * 1.45em);
+  margin: 0;
+  overflow-y: auto;
+  padding: 8px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.subagent-transcript .acp-terminal-card .agent-tool-terminal-output::before { content: none; }
+.subagent-transcript .acp-terminal-card .agent-tool-result { border: 0; border-radius: 0; background: transparent; }
+.subagent-transcript .acp-terminal-card .agent-tool-event-summary-text { display: none; }
+.subagent-transcript .acp-terminal-card .agent-tool-event-output { max-height: calc(6 * 1.45em); padding: 8px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.subagent-transcript .acp-terminal-card .agent-tool-event-output::before { content: none; }
+
+/* Code remains a lightweight, wrapped block by default. The visible action
+ * opens the existing read-only CodeMirror surface when a wider source view
+ * or search is useful, without mounting an editor for every live delta. */
+.subagent-transcript .agent-bubble-text pre[data-complete="true"] { position: relative; padding: 28px 8px 8px; }
+.subagent-transcript .agent-bubble-text pre[data-complete="true"]::before { content: none; }
+.subagent-transcript .agent-bubble-text .code-language-label { position: absolute; top: 9px; left: 9px; max-width: calc(100% - 72px); overflow: hidden; color: var(--ocean); font: 600 8px/1 var(--font-mono); letter-spacing: .08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.subagent-transcript .agent-bubble-text .code-editor-trigger { position: absolute; top: 5px; right: 6px; min-height: 21px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 4px; background: rgba(5, 8, 17, .78); color: var(--ocean); cursor: pointer; font: 8px/1 var(--font-mono); }
+.subagent-transcript .agent-bubble-text .code-editor-trigger:hover,
+.subagent-transcript .agent-bubble-text .code-editor-trigger:focus-visible { border-color: var(--lagoon); color: var(--foam); outline: none; }
+
+/* Keep dense tables readable inside the narrow dock. The shared Agent rules
+ * use a border token that the experimental shell does not define, so these
+ * explicit boundaries must live at the dock boundary. */
+.subagent-transcript > .agent-message.assistant .agent-bubble .markdown-table-scroll { border: 1px solid var(--line-strong); border-radius: 6px; background: rgba(5, 8, 17, .28); }
+.subagent-transcript > .agent-message.assistant .agent-bubble .markdown-table-scroll table { border: 1px solid var(--line); }
+.subagent-transcript > .agent-message.assistant .agent-bubble .markdown-table-scroll :is(th, td) { border: 1px solid var(--line); padding: 6px 8px; }
+.subagent-transcript > .agent-message.assistant .agent-bubble .markdown-table-scroll th { background: var(--surface-high); color: var(--foam); }
+
+/* Match the actual code-surface header instead of leaving the shared
+ * assistant pseudo-label beside the MIME label. */
+.subagent-transcript > .agent-message.assistant .agent-bubble-text pre { border: 1px solid var(--line-strong); border-radius: 6px; overflow-x: auto; }
+.subagent-transcript > .agent-message.assistant .agent-bubble-text pre[data-complete="true"] { padding: 28px 8px 8px; }
+.subagent-transcript > .agent-message.assistant .agent-bubble-text pre[data-complete="true"]::before { content: none; }
+
+/* File-change prose is still assistant text, but its New/Modify/Delete
+ * lines are technical metadata. Preserve each source line and give it a
+ * bounded horizontal reader instead of wrapping every path into a tall blob. */
+.subagent-transcript .agent-bubble-text .subagent-change-summary { display: block; max-width: 100%; max-height: 12em; margin: 8px 0; overflow-x: auto; overflow-y: hidden; padding: 8px 9px; border: 1px solid var(--line); border-left: 2px solid var(--ocean); border-radius: 6px; background: rgba(5, 8, 17, .34); color: var(--mist); font: 9px/1.5 var(--font-mono); white-space: pre; overflow-wrap: normal; word-break: normal; scrollbar-gutter: stable; }
+.subagent-transcript .agent-bubble-text .subagent-change-summary::before { display: block; margin-bottom: 5px; color: var(--ocean); content: "CHANGE SET"; font: 600 8px/1 var(--font-mono); letter-spacing: .09em; }
+.subagent-transcript .agent-bubble-text .subagent-change-summary strong { color: var(--lagoon); font-weight: 600; }
+.subagent-transcript .agent-bubble-text .subagent-change-summary code { padding: 0; background: transparent; color: var(--mist); font: inherit; white-space: pre; overflow-wrap: normal; word-break: normal; }
+
+/* Tool rows are timeline events, not nested panels. Keep their request and
+ * status readable without a box around every row; the disclosure affordance,
+ * status glyph, hover, and focus state still communicate the interaction. */
+.subagent-transcript details.agent-tool-event[data-tool] { border: 0; border-radius: 0; background: transparent; }
+.subagent-transcript details.agent-tool-event[data-tool][open] { border-color: transparent; background: transparent; }
+.subagent-transcript details.agent-tool-event[data-tool].is-running { border-color: transparent; }

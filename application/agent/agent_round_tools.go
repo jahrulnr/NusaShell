@@ -137,10 +137,10 @@ func (a *Service) ExecuteTurnTools(run *TurnRun, messageID string, toolCalls []d
 		}
 		switch toolCalls[i].Name {
 		case "skill":
-			op := OpArg([]byte(toolCalls[i].Args))
+			op := tools.OpArg([]byte(toolCalls[i].Args))
 			if op == "save" || op == "delete" {
 				name := a.skillAnnouncementName(toolCalls[i].Args)
-				a.PublishAnnouncementToAll(newAnnouncement(
+				a.PublishAnnouncementToAll(NewAnnouncement(
 					"skills_changed",
 					domain.AnnouncementSkillsChangedArgs(op, name),
 					domain.AnnouncementSkillsChangedMessage(name),
@@ -181,7 +181,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		if recovered := recover(); recovered != nil {
 			result = ToolExecResult{
 				Status: domain.ToolFailed,
-				Output: "error: " + truncateToolError(fmt.Sprintf("tool %q panicked: %v", toolCall.Name, recovered)),
+				Output: "error: " + TruncateToolError(fmt.Sprintf("tool %q panicked: %v", toolCall.Name, recovered)),
 			}
 			// A faulty event subscriber must not turn a contained tool panic
 			// back into a process panic. The failed result is still returned to
@@ -228,7 +228,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 	var output string
 	var outputAttachments []domain.Attachment
 	var err error
-	if isLearnerKind(run.ToolKind) && tools.IsLearnerBannedTool(toolCall.Name) {
+	if tools.IsLearnerKind(run.ToolKind) && tools.IsLearnerBannedTool(toolCall.Name) {
 		res := ToolExecResult{
 			Status: domain.ToolFailed,
 			Output: fmt.Sprintf("error: tool %q is not available to the learner agent", toolCall.Name),
@@ -236,7 +236,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		a.emitToolCompleted(run, toolCall, res)
 		return res
 	}
-	if isLearnerKind(run.ToolKind) && tools.IsLearnerSkillMutation(toolCall.Name, []byte(toolCall.Args)) {
+	if tools.IsLearnerKind(run.ToolKind) && tools.IsLearnerSkillMutation(toolCall.Name, []byte(toolCall.Args)) {
 		res := ToolExecResult{
 			Status: domain.ToolFailed,
 			Output: "error: the periodic learner is memory-only; skill mutations are not available",
@@ -259,7 +259,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 	case compactionSummaryToolName:
 		err = fmt.Errorf("summary is only accepted when the system requests a context checkpoint; continue the current task")
 	case learnerResultToolName:
-		if !isLearnerKind(run.ToolKind) {
+		if !tools.IsLearnerKind(run.ToolKind) {
 			output = "error: learn is only available to the learner agent"
 			err = fmt.Errorf("learn is only available to the learner agent")
 		} else {
@@ -340,7 +340,7 @@ func (a *Service) RunOneTool(run *TurnRun, messageID string, toolCall domain.Too
 		}
 	} else if err != nil {
 		status = domain.ToolFailed
-		output = "error: " + truncateToolError(err.Error())
+		output = "error: " + TruncateToolError(err.Error())
 	}
 	// Async subagent: the tool returns immediately with "starting" status.
 	// Keep the tool call marked as running so the UI shows a spinner; the

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"nusashell/domain"
 	"strings"
 	"testing"
 	"time"
@@ -141,7 +142,7 @@ func TestRepairToolCallArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := RepairToolCallArguments(tt.input)
+			got := domain.RepairToolCallArguments(tt.input)
 			if got != tt.want {
 				t.Fatalf("RepairToolCallArguments(%q) = %q, want %q", tt.input, got, tt.want)
 			}

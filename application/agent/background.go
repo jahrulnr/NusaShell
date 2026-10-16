@@ -39,7 +39,7 @@ func (a *Service) DeliverRunDone(conversationID string, pending PendingRunDone) 
 		return
 	}
 	if a.UntrackPendingRun(conversationID, pending.RunID) {
-		a.TriggerBackgroundCompletionTurn(conversationID)
+		a.startIdleConversationTurn(conversationID, false)
 	}
 }
 
@@ -56,7 +56,7 @@ func (a *Service) CompleteSubagentRunLocked(conversationID, toolCallID string, s
 	if toolCallID != "" {
 		conv = a.UpdateToolResult(conv, "", toolCallID, status, domain.SubagentBriefResult(run), nil)
 	}
-	if err := repo.Add(domain.RoleAssistant, a.subagentResultMessage(run, outputPath, status)); err != nil {
+	if err := repo.Add(domain.RoleAssistant, a.SubagentResultMessage(run, outputPath, status)); err != nil {
 		a.log("error", "acp", "completeSubagentRun: add result failed: %v", err)
 		return err
 	}
@@ -83,7 +83,7 @@ func (a *Service) CompleteSubagentRunLocked(conversationID, toolCallID string, s
 	return nil
 }
 
-func (a *Service) subagentResultMessage(run *domain.AcpRun, outputPath string, status domain.ToolCallStatus) domain.Message {
+func (a *Service) SubagentResultMessage(run *domain.AcpRun, outputPath string, status domain.ToolCallStatus) domain.Message {
 	return domain.Message{
 		ID:        domain.NewID(domain.IDPrefixMsg),
 		Role:      domain.RoleAssistant,
@@ -99,18 +99,12 @@ func (a *Service) subagentResultMessage(run *domain.AcpRun, outputPath string, s
 	}
 }
 
-func (a *Service) TriggerBackgroundCompletionTurn(conversationID string) {
-	a.startIdleConversationTurn(conversationID, false)
-}
-
-// WakePendingPeerMessage starts one turn when a peer message is waiting and
-// the target conversation is idle. It is also called after every run cleanup
-// so a message that arrived during the terminal boundary cannot be stranded
-// merely because it observed the previous run as still active.
-func (a *Service) WakePendingPeerMessage(conversationID string) {
-	a.startIdleConversationTurn(conversationID, true)
-}
-
+// startIdleConversationTurn starts one turn for an idle conversation.
+// requirePeerMessage gates the trigger on a pending peer message: callers
+// pass false for background-completion wakeups and true when waking a room
+// that has peer mail. It is also called after every run cleanup so a message
+// that arrived during the terminal boundary cannot be stranded merely
+// because it observed the previous run as still active.
 func (a *Service) startIdleConversationTurn(conversationID string, requirePeerMessage bool) {
 	if conversationID == "" {
 		return
@@ -204,7 +198,7 @@ func (a *Service) startIdleConversationTurn(conversationID string, requirePeerMe
 	a.runsMu.Unlock()
 
 	bareModel := strings.TrimSpace(strings.TrimPrefix(model, provider.ID+"/"))
-	caps := modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides)
+	caps := ModelCapabilitiesWithLearned(provider, bareModel, a.learnedParams, a.modelOverrides)
 
 	a.goSafe("agent", func() {
 		a.RunTurn(run, provider, apiKey, bareModel, effort, asstMsg.ID, false, caps)

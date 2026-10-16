@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"nusashell/application/provider"
+	"nusashell/application/conversation"
 	"nusashell/domain"
 	"nusashell/pkg/nonce"
 	clock "nusashell/pkg/time"
 )
 
-func reasoningDeltaVisible(accumulated string) bool {
+func ReasoningDeltaVisible(accumulated string) bool {
 	return strings.TrimSpace(accumulated) != ""
 }
 
@@ -23,11 +23,11 @@ func reasoningDeltaVisible(accumulated string) bool {
 // adding semantic content the model would act on.
 const userNudgeText = domain.UserNudgeText
 
-// hasUserMessage reports whether the messages slice contains at least one
+// HasUserMessage reports whether the messages slice contains at least one
 // message with Role "user". It is kept separate from
-// needsUserMessageAtEnd because a provider may require the final role to be
+// NeedsUserMessageAtEnd because a provider may require the final role to be
 // user even when an earlier user message exists.
-func hasUserMessage(messages []ChatMessage) bool {
+func HasUserMessage(messages []ChatMessage) bool {
 	for _, m := range messages {
 		if m.Role == "user" {
 			return true
@@ -36,13 +36,13 @@ func hasUserMessage(messages []ChatMessage) bool {
 	return false
 }
 
-// needsUserMessageAtEnd reports whether a learned provider constraint needs a
+// NeedsUserMessageAtEnd reports whether a learned provider constraint needs a
 // synthetic user turn appended to the request. A tool result is already the
 // valid final turn of an active tool cycle, so it must not be followed by a
 // synthetic user message. Requests with no user at all preserve the older
 // nudge behavior.
-func needsUserMessageAtEnd(messages []ChatMessage) bool {
-	if !hasUserMessage(messages) {
+func NeedsUserMessageAtEnd(messages []ChatMessage) bool {
+	if !HasUserMessage(messages) {
 		return true
 	}
 	if len(messages) == 0 {
@@ -62,19 +62,19 @@ func withCompactionAnchorNudge(messages []ChatMessage, conversation *domain.Conv
 	if conversation == nil || strings.TrimSpace(conversation.CompactionBlob) == "" {
 		return messages
 	}
-	if domain.ReplaysCompactionBlob(kind) || hasUserMessage(messages) {
+	if domain.ReplaysCompactionBlob(kind) || HasUserMessage(messages) {
 		return messages
 	}
 	return append([]ChatMessage{{Role: "user", Content: userNudgeText}}, messages...)
 }
 
-// serverCompactionContextManagement returns the context_management directive
+// ServerCompactionContextManagement returns the context_management directive
 // for server-side compaction when the model is eligible. Returns nil for
 // ineligible models (the client-side summarization path handles them).
 // The threshold is max(context_window*0.9, floor) so small-window eligible
 // models (200k) trigger at a reasonable point while large-window models
 // (400k–1M) use most of their window before compacting.
-func serverCompactionContextManagement(model string) []map[string]any {
+func ServerCompactionContextManagement(model string) []map[string]any {
 	if !domain.OpenAISupportsServerCompaction(model) {
 		return nil
 	}
@@ -85,18 +85,18 @@ func serverCompactionContextManagement(model string) []map[string]any {
 	}
 }
 
-func serverCompactionContextManagementForKind(model string, kind domain.ProviderKind) []map[string]any {
+func ServerCompactionContextManagementForKind(model string, kind domain.ProviderKind) []map[string]any {
 	if domain.CodexSupportsRemoteCompaction(kind) {
 		return nil
 	}
-	return serverCompactionContextManagement(model)
+	return ServerCompactionContextManagement(model)
 }
 
-// appendContinuationTool appends the synthetic announcement tool call (with
+// AppendContinuationTool appends the synthetic announcement tool call (with
 // its result pre-filled) to the provider message list for a continuation
 // round after an interrupted response. Ephemeral: it exists only in this
 // request, never persisted to the conversation store.
-func appendContinuationTool(messages []ChatMessage) []ChatMessage {
+func AppendContinuationTool(messages []ChatMessage) []ChatMessage {
 	id := domain.AnnouncementToolCallPrefix + nonce.Random()
 	call := domain.ToolCall{ID: id, Name: domain.AnnouncementToolName, Args: "{}", Status: domain.ToolOK, Output: domain.AnnouncementInterruptedMessage}
 	return append(messages,
@@ -111,9 +111,9 @@ func appendContinuationTool(messages []ChatMessage) []ChatMessage {
 // produced and the "continue from where you stopped" instruction, so it
 // resumes the interrupted response without repeating prior text.
 //
-// This is the automatic-retry variant of appendContinuationTool: it carries
+// This is the automatic-retry variant of AppendContinuationTool: it carries
 // the partial content that was streamed but never persisted (the turn is
-// still in progress). Manual retries use appendContinuationTool directly
+// still in progress). Manual retries use AppendContinuationTool directly
 // because the partial content is already in the conversation store.
 func appendContinuationFromPartial(messages []ChatMessage, partial streamedTurnRound) []ChatMessage {
 	msg := ChatMessage{Role: "assistant"}
@@ -125,21 +125,11 @@ func appendContinuationFromPartial(messages []ChatMessage, partial streamedTurnR
 	}
 	if len(partial.Response.ReasoningExtra) > 0 {
 		msg.ReasoningExtra = append(json.RawMessage(nil), partial.Response.ReasoningExtra...)
+		msg.ReasoningExtraFor = partial.Response.ReasoningExtraFor
+		msg.ReasoningExtraUpstream = partial.Response.Upstream
 	}
 	messages = append(messages, msg)
-	return appendContinuationTool(messages)
-}
-
-// estimateRequestTokens keeps the old narrow test/helper API while routing it
-// through the provider boundary. Production turns use the full ChatRequest
-// estimator in application/provider so provider kind, reasoning replay, and
-// compaction items are included in the same calculation as the sent request.
-func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDef) int64 {
-	return provider.EstimateRequestTokens(provider.ChatRequest{
-		System:   system,
-		Messages: messages,
-		Tools:    tools,
-	}, domain.ProviderChat, false)
+	return AppendContinuationTool(messages)
 }
 
 const (
@@ -147,7 +137,7 @@ const (
 	promptCacheBackgroundPrefix   = domain.PromptCacheBackgroundPrefix
 )
 
-func promptCachePrefixForRun(run *TurnRun) string {
+func PromptCachePrefixForRun(run *TurnRun) string {
 	if run != nil && run.Headless {
 		return promptCacheBackgroundPrefix
 	}
@@ -212,7 +202,7 @@ func (a *Service) PersistHydration(c *domain.Conversation, msgs []ChatMessage) *
 func (a *Service) BuildHydration(c *domain.Conversation) []ChatMessage {
 	ctx := DefaultRuntimeContext(a.effectiveWorkspace(c.Workspace))
 	ctx.DataDir = a.DataDir
-	ctx.InstructionFiles = listInstructionFiles(c.Workspace)
+	ctx.InstructionFiles = conversation.ListInstructionFiles(c.Workspace)
 	// The runtime context slot also carries the active background/async tool
 	// runs so the model always knows which subagents/delegates were spawned
 	// and are still pending (fed into the compaction re-hydration too).

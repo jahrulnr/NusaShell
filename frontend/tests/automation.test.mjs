@@ -3,45 +3,47 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-const view = await readFile(new URL('../js/views/automation.js', import.meta.url), 'utf8');
-const css = await readFile(new URL('../styles/automation.css', import.meta.url), 'utf8');
-const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
+const view = await readFile(new URL('../page/automation/app.js', import.meta.url), 'utf8');
+const model = await readFile(new URL('../page/automation/model.js', import.meta.url), 'utf8');
+const css = await readFile(new URL('../automation.css', import.meta.url), 'utf8');
 
 test('Automation view is wired in the shell', () => {
   assert.match(html, /data-view="automation"/);
-  assert.match(html, /id="automation-tab-workflows"/);
-  assert.match(html, /id="automation-tab-runs"/);
-  assert.match(html, /id="automation-tab-schedules"/);
-  assert.match(html, /id="automation-tab-events"/);
-  assert.match(html, /id="automation-new-btn"/);
-  assert.match(html, /id="automation-blocked-banner"/);
-  assert.match(html, /id="automation-enable-provider-btn"/);
-  assert.match(html, /href="styles\/automation.css"/);
+  assert.match(html, /id="automation-create"/);
+  assert.match(html, /id="automation-list"/);
+  assert.match(html, /id="automation-list-count"/);
+  assert.match(html, /id="automation-inspector"/);
+  assert.match(html, /id="automation-run-detail"/);
+  assert.match(html, /data-automation-mode="workflows"/);
+  assert.match(html, /data-automation-mode="runs"/);
+  assert.match(html, /href="\.\/automation\.css\?v=/);
 });
 
 test('Automation view talks to Automation RPC', () => {
   for (const method of [
     'automation.list', 'automation.save', 'automation.run', 'automation.validate',
-    'automation.runs.list', 'automation.runs.cancel',
+    'automation.runs.list', 'automation.runs.cancel', 'automation.runs.steer',
   ]) {
-    assert.match(view, new RegExp(method.replace('.', '\\.')));
+    assert.match(view, new RegExp(method.replaceAll('.', '\\.')));
   }
-  assert.match(view, /createWizard/);
-  assert.match(view, /availability === 'invalid'/);
-  assert.match(view, /runBtn\.disabled = invalid/);
-  assert.match(css, /\.automation-pill\.invalid/);
+  assert.match(model, /availability === 'invalid'/);
+  assert.match(view, /canRunWorkflow/);
+  assert.match(view, /canSteerRun/);
+  assert.match(css, /\.automation-status-invalid/);
+  assert.match(css, /\.automation-callout\.is-invalid/);
 });
 
-test('Automation and Learning share a bounded segmented tab control', () => {
-  assert.match(html, /class="tabs learning-tabs" role="tablist"/);
-  assert.match(globalCSS, /\.tabs\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?padding:\s*3px;[\s\S]*?border:\s*1px solid var\(--border-soft\);/);
-  assert.match(css, /\.automation-toolbar \.tabs\s*\{[\s\S]*?max-width:\s*100%;/);
+test('Automation mode switch is a bounded two-lane control', () => {
+  assert.match(html, /class="automation-mode-switch" role="group" aria-label="Show automation records"/);
+  assert.match(css, /\.automation-mode-switch\s*\{[^}]*padding:\s*3px;[^}]*border:\s*1px solid var\(--line\);/);
+  const mobile = css.slice(css.indexOf('@media (max-width: 760px)'));
+  assert.match(mobile, /\.automation-topbar\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(mobile, /\.automation-topbar-actions\s*\{[^}]*flex-wrap:\s*wrap/);
 });
 
-test('Automation tabs expose and relabel their shared tab panel', () => {
-  for (const tab of ['workflows', 'runs', 'schedules', 'events']) {
-    assert.match(html, new RegExp(`id="automation-tab-${tab}"[^>]+aria-controls="automation-workspace"`));
-  }
-  assert.match(html, /id="automation-workspace"[^>]+role="tabpanel"[^>]+aria-labelledby="automation-tab-workflows"/);
-  assert.match(view, /setAttribute\('aria-labelledby', `automation-tab-\$\{tab\}`\)/);
+test('Automation mode buttons press state and the inspector stay in sync', () => {
+  assert.match(html, /data-automation-mode="workflows"[^>]*aria-pressed="true"/);
+  assert.match(html, /data-automation-mode="runs"[^>]*aria-pressed="false"/);
+  assert.match(html, /id="automation-inspector"[^>]*aria-label="Automation details"/);
+  assert.match(view, /button\.setAttribute\('aria-pressed', String\(pressed\)\)/);
 });

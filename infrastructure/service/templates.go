@@ -88,8 +88,8 @@ func LaunchdPlist(opts Options, env []string) string {
 		b.WriteString("    </dict>\n")
 	}
 	b.WriteString("    <key>StandardInPath</key>\n    <string>/dev/null</string>\n")
-	b.WriteString("    <key>StandardOutPath</key>\n    <string>" + xmlEscape(unixLogPath(opts.DataDir, "service-stdout.log")) + "</string>\n")
-	b.WriteString("    <key>StandardErrorPath</key>\n    <string>" + xmlEscape(unixLogPath(opts.DataDir, "service-stderr.log")) + "</string>\n")
+	b.WriteString("    <key>StandardOutPath</key>\n    <string>" + xmlEscape(path.Join(opts.DataDir, "logs", "service-stdout.log")) + "</string>\n")
+	b.WriteString("    <key>StandardErrorPath</key>\n    <string>" + xmlEscape(path.Join(opts.DataDir, "logs", "service-stderr.log")) + "</string>\n")
 	b.WriteString("  </dict>\n")
 	b.WriteString("</plist>\n")
 	return b.String()
@@ -191,10 +191,12 @@ func WindowsTaskScript(opts Options, env []string) string {
 			continue
 		}
 		assertNoCmdLineBreak(value, "task script environment")
-		lines = append(lines, `set "`+key+`=`+cmdEnvValue(value)+`"`)
+		// Percent signs are expanded by cmd.exe while a batch file is parsed;
+		// double them so a captured PATH is restored byte-for-byte.
+		lines = append(lines, `set "`+key+`=`+strings.ReplaceAll(value, "%", "%%")+`"`)
 	}
 	assertNoCmdLineBreak(opts.BinaryPath, "task script binary")
-	logPath := windowsLogPath(opts.DataDir, "service.log")
+	logPath := winJoin(opts.DataDir, "logs", "service.log")
 	lines = append(lines, quoteCmdScriptArg(opts.BinaryPath)+` >> `+quoteCmdScriptArg(logPath)+` 2>&1`)
 	return strings.Join(lines, "\r\n") + "\r\n"
 }
@@ -208,12 +210,6 @@ func WindowsHiddenLauncher(task WindowsTask) string {
 		`CreateObject("WScript.Shell").Run ` + quoteVBSString(`"`+task.ScriptPath+`"`),
 	}
 	return strings.Join(lines, "\r\n") + "\r\n"
-}
-
-func cmdEnvValue(value string) string {
-	// Percent signs are expanded by cmd.exe while a batch file is parsed;
-	// double them so a captured PATH is restored byte-for-byte.
-	return strings.ReplaceAll(value, "%", "%%")
 }
 
 func quoteCmdScriptArg(value string) string {
@@ -232,35 +228,22 @@ func assertNoCmdLineBreak(value, label string) {
 
 // WindowsTaskScriptPath returns the .cmd wrapper path under the service dir.
 func WindowsTaskScriptPath(dataDir string) string {
-	return windowsServicePath(dataDir, "nusashell-service.cmd")
+	return winJoin(dataDir, "service", "nusashell-service.cmd")
 }
 
 // WindowsHiddenLauncherPath returns the .vbs launcher path under the service
 // dir; this is the command the Scheduled Task executes.
 func WindowsHiddenLauncherPath(dataDir string) string {
-	return windowsServicePath(dataDir, "nusashell-service.vbs")
+	return winJoin(dataDir, "service", "nusashell-service.vbs")
 }
 
 // WindowsTaskLogPath returns the service log file under the data dir.
 func WindowsTaskLogPath(dataDir string) string {
-	return windowsLogPath(dataDir, "service.log")
+	return winJoin(dataDir, "logs", "service.log")
 }
 
-// windowsServicePath joins with Windows separators regardless of the
-// building OS so generated artifacts stay byte-stable on any host.
-func windowsServicePath(dataDir, name string) string {
-	return winJoin(dataDir, "service", name)
-}
-
-func windowsLogPath(dataDir, name string) string {
-	return winJoin(dataDir, "logs", name)
-}
-
-// unixLogPath joins with POSIX separators for launchd log paths.
-func unixLogPath(dataDir, name string) string {
-	return path.Join(dataDir, "logs", name)
-}
-
+// winJoin joins with Windows separators regardless of the building OS so
+// generated artifacts stay byte-stable on any host.
 func winJoin(parts ...string) string {
 	return strings.ReplaceAll(path.Join(parts...), "/", `\`)
 }

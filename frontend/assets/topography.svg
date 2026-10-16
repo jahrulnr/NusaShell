@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid slice" data-aquatic="waves">
+  <g class="wave-field" fill="none" stroke="#5fa7b8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.18" vector-effect="non-scaling-stroke">
+    <path d="M-120 140C30 62 190 66 340 140S650 218 800 140s310-74 520 0"/>
+    <path d="M-120 220C35 152 180 150 325 220s306 72 455 0 310-68 540 8"/>
+    <path d="M-120 315C40 242 185 248 330 315s300 74 458 0 312-74 532 5"/>
+    <path d="M-120 430C35 350 186 354 337 430s309 78 461 0 308-79 524 0"/>
+    <path d="M-120 555C36 482 190 486 340 555s306 78 460 0 306-74 528 7"/>
+    <path d="M-120 685C40 612 186 616 336 685s312 76 464 0 310-72 528 6"/>
+    <path d="M-120 815C30 746 184 746 334 815s310 78 462 0 314-72 528 8"/>
+  </g>
+  <g class="wave-field wave-field-highlight" fill="none" stroke="#58d1c3" stroke-width="0.8" stroke-linecap="round" opacity="0.11" vector-effect="non-scaling-stroke">
+    <path d="M-120 178C24 108 175 110 322 178s302 69 456 0 308-66 542 7"/>
+    <path d="M-120 355C26 286 178 290 324 355s306 70 462 0 306-67 534 6"/>
+    <path d="M-120 600C28 534 176 536 326 600s306 70 460 0 312-67 532 7"/>
+    <path d="M-120 860C24 794 178 798 326 860s304 68 460 0 312-65 532 8"/>
+  </g>
+</svg>

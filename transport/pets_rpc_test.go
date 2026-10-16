@@ -107,7 +107,7 @@ func newRPCHelper(t *testing.T, app *application.App) *rpcHelper {
 
 func newRPCHelperServer(t *testing.T, app *application.App, logger *slog.Logger) *httptest.Server {
 	t.Helper()
-	srv := New(app, logger, StaticHandler(nil, true), true)
+	srv := NewWithIdentity(app, logger, StaticHandler(nil, true), true, CoreIdentity{})
 	return httptest.NewServer(srv.Routes())
 }
 

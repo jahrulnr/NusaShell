@@ -66,16 +66,19 @@ func (p *conversationRules) Rules() AgentRules {
 			rr, err := p.svc.StreamTurnRound(p.run, p.adapter, p.conv, p.currentMsgID, p.model, p.effort, roundTools, p.settings, p.continuation, p.maxTokens, p.promptCache, p.caps, p.round)
 			p.continuation = false
 			resp := ChatResponse{
-				Content:         rr.Content,
-				Reasoning:       rr.Reasoning,
-				ReasoningExtra:  rr.Response.ReasoningExtra,
-				ToolCalls:       rr.Response.ToolCalls,
-				Usage:           rr.Response.Usage,
-				StopReason:      rr.Response.StopReason,
-				Warnings:        rr.Response.Warnings,
-				CompactionItems: rr.Response.CompactionItems,
+				Content:           rr.Content,
+				Reasoning:         rr.Reasoning,
+				Model:             rr.Response.Model,
+				Upstream:          rr.Response.Upstream,
+				ReasoningExtra:    rr.Response.ReasoningExtra,
+				ReasoningExtraFor: rr.Response.ReasoningExtraFor,
+				ToolCalls:         rr.Response.ToolCalls,
+				Usage:             rr.Response.Usage,
+				StopReason:        rr.Response.StopReason,
+				Warnings:          rr.Response.Warnings,
+				CompactionItems:   rr.Response.CompactionItems,
 			}
-			p.totalUsage = mergeUsage(p.totalUsage, rr.Response.Usage)
+			p.totalUsage = MergeUsage(p.totalUsage, rr.Response.Usage)
 			if rr.Response.Usage.ContextTokens() > 0 {
 				p.lastUsage = rr.Response.Usage
 			}
@@ -194,7 +197,7 @@ func (p *conversationRules) Rules() AgentRules {
 					return false
 				}
 				p.svc.log("warn", "ai", "continuing partial provider stream for turn %s", p.run.ID)
-				conv, msgID, aerr := p.svc.AppendTurnAssistant(p.run.ConversationID)
+				conv, msgID, aerr := p.svc.AppendTurnAssistant(p.run.ConversationID, p.run.ProviderID)
 				if aerr != nil {
 					p.svc.FailTurn(p.run, p.currentMsgID, aerr)
 					p.turnEnded = true
@@ -210,7 +213,7 @@ func (p *conversationRules) Rules() AgentRules {
 				p.round--
 				return true
 			}
-			if p.compactionAttempts < domain.MaxCompactionAttempts && (isContextOverflowError(rawStreamErr) || isTPMDominatedRequest(rawStreamErr)) {
+			if p.compactionAttempts < domain.MaxCompactionAttempts && (isContextOverflowError(rawStreamErr) || IsTPMDominatedRequest(rawStreamErr)) {
 				cw := p.svc.ResolveContextWindow(p.provider, p.model, p.settings)
 				trigger := domain.CompactionTriggerTokens(cw, domain.ResolveMaxOutput(p.provider, p.model, p.settings), p.settings)
 				preEmg := p.lastRequestEstimate
@@ -320,7 +323,7 @@ func (p *conversationRules) Rules() AgentRules {
 				}
 				return false, nil // terminal
 			}
-			conv, msgID, err := p.svc.AppendTurnAssistant(p.run.ConversationID)
+			conv, msgID, err := p.svc.AppendTurnAssistant(p.run.ConversationID, p.run.ProviderID)
 			if err != nil {
 				return false, err
 			}
@@ -371,7 +374,7 @@ func (p *conversationRules) promptCacheForTools(tools []ToolDef) *PromptCachePol
 		p.provider,
 		p.model,
 		conversationID,
-		promptCachePrefixForRun(p.run),
+		PromptCachePrefixForRun(p.run),
 		system,
 		tools,
 	)
@@ -439,9 +442,6 @@ func (p *conversationRules) tryMidToolCompaction() (bool, error) {
 		p.run.ID, p.round, est, p.conv.EstimateTokens(), len(p.conv.Messages))
 	return true, nil
 }
-
-// contextTokens is the last round's authoritative context fill.
-func (p *conversationRules) contextTokens() int { return p.lastUsage.ContextTokens() }
 
 // roundNumber is the current round for event/stream bookkeeping.
 func (p *conversationRules) roundNumber() int { return p.round }

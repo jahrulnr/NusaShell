@@ -38,7 +38,8 @@ func TestFrontendAssets(t *testing.T) {
 	h := newHarness(t, nil)
 
 	checks := map[string][]string{
-		"/js/app.js":                {"text/javascript", "application/javascript"},
+		"/page/conversation/app.js": {"text/javascript", "application/javascript"},
+		"/shell.css":                {"text/css"},
 		"/styles/global.css":        {"text/css"},
 		"/nusashell-mark.png":       {"image/png"},
 		"/agent-offline-mascot.png": {"image/png"},
@@ -63,22 +64,28 @@ func TestFrontendAssets(t *testing.T) {
 	}
 
 	// module imports must resolve (the app is served unbundled)
-	app, _ := http.Get(h.server.URL + "/js/app.js")
+	app, _ := http.Get(h.server.URL + "/page/conversation/app.js")
 	appBody, _ := io.ReadAll(app.Body)
 	app.Body.Close()
+	// Entry baru mengimpor ../../js/* (rpc, ui, dst.) plus modul page/,
+	// widgets/, dan shared/. Semua harus ter-serve dari embed.
 	for _, mod := range []string{
-		"./rpc.js", "./views/agent.js", "./views/agent/render.js", "./views/agent/composer.js", "./views/agent/model-picker.js",
-		"./views/skills.js", "./views/plugins.js", "./views/plugins-model.js", "./views/providers.js", "./views/logs.js", "./views/settings.js", "./ui.js", "./markdown.js",
+		"/js/rpc.js", "/js/ui.js", "/js/sounds.js", "/js/agent-ui.js",
+		"/js/thread-follow.js", "/js/media-zoom.js", "/js/plugin-window.js",
+		"/js/pwa-install.js", "/js/offline-screen.js", "/js/font-preferences.js",
+		"/page/home/mcp.js", "/page/settings/app.js", "/page/skills/app.js",
+		"/page/learning/app.js", "/page/automation/app.js", "/page/logs/app.js",
+		"/page/plugins/app.js", "/page/providers/app.js", "/page/telemetry/app.js",
+		"/shared/markdown-body.js", "/shared/widget-styles.js", "/widgets/registry.js",
 	} {
-		ref := strings.TrimPrefix(mod, "./")
-		resp, err := http.Get(h.server.URL + "/js/" + ref)
+		resp, err := http.Get(h.server.URL + mod)
 		if err != nil || resp.StatusCode != http.StatusOK {
 			t.Fatalf("module %s not served (status %v, err %v)", mod, resp.StatusCode, err)
 		}
 		resp.Body.Close()
 	}
-	if !strings.Contains(string(appBody), "boot") {
-		t.Fatalf("app.js content unexpected")
+	if !strings.Contains(string(appBody), "agent.turns.start") {
+		t.Fatalf("page/conversation/app.js content unexpected")
 	}
 
 	// fonts
@@ -141,7 +148,7 @@ func TestPWAServing(t *testing.T) {
 		t.Fatalf("sw.js content type = %q", ct)
 	}
 	swBody, _ := io.ReadAll(resp.Body)
-	for _, needle := range []string{"nusashell-shell-v2", "'fetch'", "/rpc/", "/plugins/", "./js/pip.js"} {
+	for _, needle := range []string{"nusashell-shell-v19", "'fetch'", "/rpc/", "/plugins/", "./js/pip.js"} {
 		if !strings.Contains(string(swBody), needle) {
 			t.Fatalf("sw.js missing %s", needle)
 		}
@@ -171,7 +178,7 @@ func TestPWAServing(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	html, _ := io.ReadAll(resp.Body)
-	for _, needle := range []string{`rel="manifest"`, `"theme-color"`, "js/pwa.js", "offline-screen"} {
+	for _, needle := range []string{`rel="manifest"`, `"theme-color"`, "shell-init.js", "offline-screen"} {
 		if !strings.Contains(string(html), needle) {
 			t.Fatalf("index.html missing %s", needle)
 		}

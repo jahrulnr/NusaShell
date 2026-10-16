@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { mock, test } from 'node:test';
+import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import {
-  bindSubagents,
-  setSubagentConversation,
+  openDrawer,
   sortRunsNewestFirst,
   syncTranscript,
   runDisplayName,
@@ -14,8 +13,6 @@ import {
   applySubagentFollowIntent,
   bindTranscriptFollow,
   resetSubagentFollowForTests,
-  renderDockList,
-  renderRunSidebar,
 } from '../js/views/agent/subagents.js';
 
 const acpCSS = await readFile(new URL('../styles/acp.css', import.meta.url), 'utf8');
@@ -67,88 +64,6 @@ test('ACP runs are ordered newest first, including legacy records without timest
     ordered.map((run) => run.id),
     ['new', 'old', 'legacy-b', 'legacy-a'],
   );
-});
-
-test('ACP run sidebar removes the empty marker when a room gains runs', () => {
-  const dom = new JSDOM('<!doctype html><html><body><aside class="acp-run-sidebar"><span class="acp-run-count"></span><div class="acp-run-list"></div></aside></body></html>');
-  global.window = dom.window;
-  global.document = dom.window.document;
-  try {
-    const list = document.querySelector('.acp-run-list');
-    renderRunSidebar(list, [], '');
-    assert.ok(list.querySelector('.agent-conversation-empty'));
-
-    renderRunSidebar(list, [{ id: 'run-1', title: 'Research', status: 'completed', workspace: '/tmp/project' }], 'run-1');
-
-    assert.equal(list.querySelector('.agent-conversation-empty'), null);
-    assert.equal(list.querySelectorAll('[data-run-id]').length, 1);
-    assert.equal(document.querySelector('.acp-run-count').textContent, '1 run');
-  } finally {
-    dom.window.close();
-    cleanup();
-  }
-});
-
-test('ACP run sidebar does not move unchanged items during a refresh', async () => {
-  const dom = new JSDOM('<!doctype html><html><body><aside class="acp-run-sidebar"><span class="acp-run-count"></span><div class="acp-run-list"></div></aside></body></html>');
-  global.window = dom.window;
-  global.document = dom.window.document;
-  try {
-    const list = document.querySelector('.acp-run-list');
-    const runs = [
-      { id: 'run-1', title: 'Research', status: 'running', workspace: '/tmp/project' },
-      { id: 'run-2', title: 'Implement', status: 'running', workspace: '/tmp/project' },
-    ];
-    renderRunSidebar(list, runs, 'run-1');
-    const firstItem = list.children[0];
-    const mutations = [];
-    const observer = new dom.window.MutationObserver((records) => mutations.push(...records));
-    observer.observe(list, { childList: true });
-
-    renderRunSidebar(list, runs, 'run-1');
-    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-
-    observer.disconnect();
-    assert.strictEqual(list.children[0], firstItem, 'unchanged item keeps its DOM position');
-    assert.equal(mutations.length, 0, 'refresh does not move unchanged items');
-  } finally {
-    dom.window.close();
-    cleanup();
-  }
-});
-
-test('ACP dock keeps unchanged chips and patches changed child text in place', async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div class="acp-dock-list"></div></body></html>');
-  global.window = dom.window;
-  global.document = dom.window.document;
-  try {
-    const list = document.querySelector('.acp-dock-list');
-    const runs = [
-      { id: 'run-1', title: 'Research', status: 'running', activity: 'thinking' },
-      { id: 'run-2', title: 'Implement', status: 'running', activity: 'thinking' },
-    ];
-    renderDockList(list, runs);
-    const firstChip = list.children[0];
-    const firstName = firstChip.querySelector('.acp-dock-chip-name');
-    const firstStatus = firstChip.querySelector('.acp-dock-chip-status');
-    const mutations = [];
-    const observer = new dom.window.MutationObserver((records) => mutations.push(...records));
-    observer.observe(list, { childList: true, attributes: true, characterData: true, subtree: true });
-
-    renderDockList(list, runs);
-    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-    assert.equal(mutations.length, 0, 'refresh does not mutate unchanged chips');
-
-    renderDockList(list, [{ ...runs[0], activity: 'tool call' }, runs[1]]);
-    assert.strictEqual(list.children[0], firstChip, 'changed run keeps its chip');
-    assert.strictEqual(firstChip.querySelector('.acp-dock-chip-name'), firstName, 'name child is retained');
-    assert.strictEqual(firstChip.querySelector('.acp-dock-chip-status'), firstStatus, 'status child is retained');
-    assert.match(firstStatus.textContent, /tool call/);
-    observer.disconnect();
-  } finally {
-    dom.window.close();
-    cleanup();
-  }
 });
 
 test('Subagent transcript updates a growing chunk in place', () => {
@@ -263,8 +178,8 @@ test('Subagent prompts render as isolated prompt events before and between assis
 
     const promptMessages = [...panel.querySelectorAll('.acp-transcript > .acp-prompt-message')];
     assert.equal(promptMessages.length, 2);
-    assert.equal(promptMessages[0].querySelector('.agent-bubble').textContent, 'initial delegation brief');
-    assert.equal(promptMessages[1].querySelector('.agent-bubble').textContent, 'steer from the parent');
+    assert.equal(promptMessages[0].querySelector('.subagent-prompt-body').textContent.trim(), 'initial delegation brief');
+    assert.equal(promptMessages[1].querySelector('.subagent-prompt-body').textContent.trim(), 'steer from the parent');
     assert.equal(promptMessages[0].classList.contains('user'), false, 'ACP prompt must not inherit the main user bubble');
     assert.equal(promptMessages[0].querySelector('.agent-bubble').classList.contains('acp-transcript'), false);
     assert.equal(panel.querySelectorAll('.acp-transcript > .agent-message.assistant').length, 2);
@@ -294,18 +209,11 @@ test('Subagent delegation and steering prompts render the same Markdown user con
   }
 });
 
-test('ACP drawer keeps the mobile run picker compact and transcript horizontally contained', () => {
-  const mobileRules = acpCSS.slice(acpCSS.indexOf('@media (max-width: 720px)'));
-  assert.match(mobileRules, /grid-template-rows:\s*minmax\(0,\s*auto\)\s+minmax\(0,\s*1fr\)/);
-  assert.match(mobileRules, /flex-direction:\s*row/);
-  assert.match(mobileRules, /overflow-x:\s*auto/);
-  assert.match(mobileRules, /overflow-x:\s*hidden/);
-});
-
 test('ACP prompt styling is bounded and scoped away from the main user bubble', () => {
-  assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \{[^}]*align-self:\s*stretch;/s);
-  assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \.agent-bubble \{[^}]*max-height:\s*min\(/s);
-  assert.match(acpCSS, /\.acp-transcript \.acp-prompt-message \.agent-bubble \{[^}]*overflow-y:\s*auto;/s);
+  assert.match(acpCSS, /\.acp-run-panel \.acp-prompt-message \{[^}]*align-self:\s*stretch;/s);
+  assert.match(acpCSS, /\.acp-run-panel \.subagent-prompt:not\(\.is-collapsed\) > \.subagent-prompt-body \{[^}]*max-height:\s*min\(/s);
+  assert.match(acpCSS, /\.acp-run-panel \.subagent-prompt:not\(\.is-collapsed\) > \.subagent-prompt-body \{[^}]*overflow-y:\s*auto;/s);
+  assert.match(acpCSS, /\.acp-popup\s*\{[^}]*max-height:\s*min\(86vh,\s*720px\);[^}]*overflow:\s*auto;/s);
 });
 
 test('subagent follow pin is per run id, independent across rooms', () => {
@@ -345,20 +253,20 @@ test('subagent follow store is keyed by run id, not a shared scroller WeakMap', 
   assert.match(subagentsView, /addEventListener\('keydown'/);
   assert.match(subagentsView, /pointerdown[\s\S]*?scrollbarDragging\s*=\s*true/);
   assert.match(subagentsView, /applySubagentFollowIntent\(runId, scroller, direction\)/);
-  assert.match(subagentsView, /updateScrollPin\(getSubagentFollow\(runId\), scroller, 24, \{ direction \}\)/);
+  assert.match(subagentsView, /updateScrollPin\(getSubagentFollow\(runId\), scroller, 24, \{ direction:/);
 });
 
 test('subagent transcript releases the run pin on an upward touch scroll', () => {
   resetSubagentFollowForTests();
   const dom = new JSDOM(
-    '<!doctype html><html><body><div class="acp-run-content">' +
+    '<!doctype html><html><body><div class="acp-popup" id="acp-popup">' +
     '<div class="acp-run-panel" data-run-id="run-a"><div class="agent-thread acp-transcript"></div></div>' +
     '</div></body></html>',
   );
   global.window = dom.window;
   global.document = dom.window.document;
   try {
-    const scroller = document.querySelector('.acp-run-content');
+    const scroller = document.querySelector('#acp-popup');
     bindTranscriptFollow(document.querySelector('.acp-run-panel'));
     assert.equal(getSubagentFollow('run-a').pinned, true);
     const touch = (type, y) => {
@@ -379,246 +287,36 @@ test('subagent transcript releases the run pin on an upward touch scroll', () =>
   }
 });
 
-test('subagent run lifecycle uses a conversation SSE instead of WebSocket run events', () => {
-  assert.match(subagentsView, /new EventSource\(/);
-  assert.match(subagentsView, /\/stream\/acp\?conversation_id=/);
-  assert.match(subagentsView, /addEventListener\('acp\.run'/);
-  assert.match(subagentsView, /acp\.run\.snapshot/);
-  assert.doesNotMatch(subagentsView, /on\('acp\.run\.(started|updated|done)'/);
-  assert.match(subagentsView, /runStreamSeq/);
-});
+const POPUP_HTML = `<!doctype html><html><body>
+  <section id="panel-subagents"></section>
+  <div class="acp-popup-overlay" id="acp-popup-overlay" hidden>
+    <div class="acp-popup" id="acp-popup" role="dialog" aria-modal="true" aria-labelledby="acp-popup-title">
+      <h2 id="acp-popup-title">Subagent</h2>
+      <button id="acp-popup-close" type="button">Close</button>
+      <div id="acp-popup-body"></div>
+    </div>
+  </div>
+</body></html>`;
 
-test('subagent SSE snapshots reconcile the active room and updates patch live state', () => {
-  const dom = new JSDOM(
-    '<!doctype html><html><body>' +
-    '<div id="acp-dock"><span id="acp-dock-title"></span><span id="acp-dock-meta"></span><div id="acp-dock-list"></div></div>' +
-    '<div id="acp-drawer" hidden></div><div id="acp-popup-overlay" hidden></div>' +
-    '</body></html>',
-  );
+test('openDrawer opens the popup reader for the requested run', async () => {
+  const dom = new JSDOM(POPUP_HTML, { url: 'http://localhost/' });
   global.window = dom.window;
   global.document = dom.window.document;
-  const previousEventSource = globalThis.EventSource;
-  const sources = [];
-  class FakeEventSource {
-    constructor(url) {
-      this.url = url;
-      this.listeners = new Map();
-      this.closed = false;
-      sources.push(this);
-    }
-    addEventListener(type, listener) {
-      const listeners = this.listeners.get(type) || [];
-      listeners.push(listener);
-      this.listeners.set(type, listeners);
-    }
-    close() { this.closed = true; }
-    emit(type, frame) {
-      for (const listener of this.listeners.get(type) || []) {
-        listener({ data: JSON.stringify(frame), lastEventId: String(frame.seq) });
-      }
-    }
-  }
-  globalThis.EventSource = FakeEventSource;
-  let activeConversationID = 'conv_1';
+  global.HTMLElement = dom.window.HTMLElement;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, result: { run: {
+    id: 'acprun_popup', agent_name: 'Devin', status: 'completed', prompt: 'scan', transcript: [{ kind: 'text', text: 'done' }],
+  } } }) });
   try {
-    bindSubagents({ getActiveConversationId: () => activeConversationID });
-    setSubagentConversation(activeConversationID);
-    assert.equal(sources.length, 1);
-    assert.equal(new URL(sources[0].url, 'http://localhost').searchParams.get('conversation_id'), 'conv_1');
-
-    const started = {
-      id: 'run_1', conversation_id: 'conv_1', agent_name: 'Helper', title: 'Inspect',
-      status: 'running', activity: 'thinking', started_at: new Date().toISOString(),
-    };
-    sources[0].emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_1', runs: [started] });
-    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent');
-
-    sources[0].emit('acp.run', {
-      type: 'acp.run.updated', seq: 2, run: { ...started, activity: 'tool' },
-    });
-    assert.match(document.querySelector('.acp-dock-chip-status').textContent, /tool/);
-
-    const completed = { ...started, status: 'completed', activity: '', ended_at: new Date().toISOString() };
-    sources[0].emit('acp.run', { type: 'acp.run.snapshot', seq: 3, conversation_id: 'conv_1', runs: [completed] });
-    sources[0].emit('acp.run', {
-      type: 'acp.run.updated', seq: 2, run: { ...started, activity: 'thinking' },
-    });
-    assert.equal(document.querySelector('.acp-dock-chip-status').textContent, 'done', 'snapshot resets the sequence and older frames are ignored');
-
-    activeConversationID = 'conv_2';
-    setSubagentConversation(activeConversationID);
-    assert.equal(sources[0].closed, true, 'leaving a room closes its run stream');
-    assert.equal(sources.length, 2);
+    openDrawer('acprun_popup');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(document.getElementById('acp-popup-overlay').hidden, false);
+    assert.equal(document.getElementById('acp-popup-title').textContent, 'Devin');
+    assert.match(document.getElementById('acp-popup-body').textContent, /done/);
+    document.getElementById('acp-popup-close').click();
+    assert.equal(document.getElementById('acp-popup-overlay').hidden, true);
   } finally {
-    setSubagentConversation('');
-    if (previousEventSource === undefined) delete globalThis.EventSource;
-    else globalThis.EventSource = previousEventSource;
-    dom.window.close();
-    cleanup();
-  }
-});
-
-function makeAcpDom() {
-  const dom = new JSDOM(
-    '<!doctype html><html><body>' +
-    '<div id="acp-dock" hidden><span id="acp-dock-title"></span><span id="acp-dock-meta"></span><div id="acp-dock-list"></div></div>' +
-    '<div id="acp-drawer" hidden><div id="acp-drawer-body"></div><span id="acp-drawer-title"></span><span id="acp-drawer-subtitle"></span></div>' +
-    '<div id="acp-drawer-overlay"></div><div id="acp-popup-overlay" hidden></div>' +
-    '</body></html>',
-  );
-  global.window = dom.window;
-  global.document = dom.window.document;
-  return dom;
-}
-
-function stubEventSource(sources) {
-  const previous = globalThis.EventSource;
-  class FakeEventSource {
-    constructor(url) {
-      this.url = url;
-      this.readyState = 0;
-      this.listeners = new Map();
-      this.closed = false;
-      sources.push(this);
-    }
-    addEventListener(type, listener) {
-      const listeners = this.listeners.get(type) || [];
-      listeners.push(listener);
-      this.listeners.set(type, listeners);
-    }
-    close() { this.closed = true; this.readyState = 2; }
-    open() { this.readyState = 1; this.onopen?.({}); }
-    emit(type, frame) {
-      for (const listener of this.listeners.get(type) || []) {
-        listener({ data: JSON.stringify(frame), lastEventId: String(frame.seq) });
-      }
-    }
-  }
-  globalThis.EventSource = FakeEventSource;
-  return () => {
-    if (previous === undefined) delete globalThis.EventSource;
-    else globalThis.EventSource = previous;
-  };
-}
-
-function stubRunsList(listedRuns) {
-  const previous = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    if (String(url).endsWith('/rpc/acp/runs/list')) {
-      return { ok: true, json: async () => ({ ok: true, result: { runs: listedRuns() } }) };
-    }
-    return { ok: true, json: async () => ({ ok: true, result: {} }) };
-  };
-  return () => { globalThis.fetch = previous; };
-}
-
-async function flushAsync() {
-  // Drain the microtask queue only — fetch/rpc stubs resolve via promises.
-  // setTimeout would deadlock tests running under mock.timers.
-  for (let i = 0; i < 10; i++) await Promise.resolve();
-}
-
-test('ACP stream watchdog reopens a silently dead stream so a missed done can heal', async () => {
-  const dom = makeAcpDom();
-  const sources = [];
-  const restoreES = stubEventSource(sources);
-  const liveRun = { id: 'run_w', conversation_id: 'conv_2', status: 'running', activity: 'thinking', started_at: new Date().toISOString() };
-  let runs = [liveRun];
-  const restoreFetch = stubRunsList(() => runs);
-  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
-  try {
-    bindSubagents({ getActiveConversationId: () => 'conv_2' });
-    setSubagentConversation('conv_2');
-    assert.equal(sources.length, 1);
-    const src = sources[0];
-    src.open();
-    src.emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_2', runs: [liveRun] });
-    await flushAsync();
-    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent');
-
-    // The connection dies silently: no frame ever reaches the client while
-    // the run settles server-side.
-    mock.timers.tick(20_000);
-    assert.equal(sources.length, 1, 'stream still fresh — no reopen');
-    mock.timers.tick(40_000);
-
-    assert.equal(sources.length, 2, 'watchdog reopened the stalled stream');
-    assert.equal(src.closed, true, 'dead stream is closed before reopening');
-
-    runs = [{ ...liveRun, status: 'completed', activity: '', ended_at: new Date().toISOString(), updated_at: new Date().toISOString() }];
-
-    sources[1].open();
-    sources[1].emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_2', runs: [] });
-    await flushAsync();
-    assert.equal(document.querySelector('.acp-dock-chip-status').textContent, 'done', 'hydration heals the missed terminal state');
-  } finally {
-    setSubagentConversation('');
-    mock.timers.reset();
-    restoreFetch();
-    restoreES();
-    dom.window.close();
-    cleanup();
-  }
-});
-
-test('ACP run stream reopens itself after a permanently closed EventSource', async () => {
-  const dom = makeAcpDom();
-  const sources = [];
-  const restoreES = stubEventSource(sources);
-  const restoreFetch = stubRunsList(() => []);
-  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
-  try {
-    bindSubagents({ getActiveConversationId: () => 'conv_2' });
-    setSubagentConversation('conv_2');
-    assert.equal(sources.length, 1);
-    const src = sources[0];
-    src.open();
-
-    // A non-2xx response (e.g. 503 at the subscriber cap) fails the
-    // EventSource permanently: readyState CLOSED, no browser retry.
-    src.readyState = 2;
-    src.onerror?.({});
-    assert.equal(sources.length, 1);
-    mock.timers.tick(6000);
-    assert.equal(sources.length, 2, 'closed stream is reopened after a short delay');
-    assert.equal(new URL(sources[1].url, 'http://localhost').searchParams.get('conversation_id'), 'conv_2');
-  } finally {
-    setSubagentConversation('');
-    mock.timers.reset();
-    restoreFetch();
-    restoreES();
-    dom.window.close();
-    cleanup();
-  }
-});
-
-test('ACP snapshot cleanup releases a dropped run so hydration can re-add it', async () => {
-  const dom = makeAcpDom();
-  const sources = [];
-  const restoreES = stubEventSource(sources);
-  const liveRun = { id: 'run_s', conversation_id: 'conv_2', status: 'running', activity: 'thinking', started_at: new Date().toISOString() };
-  let runs = [liveRun];
-  const restoreFetch = stubRunsList(() => runs);
-  try {
-    bindSubagents({ getActiveConversationId: () => 'conv_2' });
-    setSubagentConversation('conv_2');
-    const src = sources[0];
-    src.open();
-    src.emit('acp.run', { type: 'acp.run.snapshot', seq: 1, conversation_id: 'conv_2', runs: [liveRun] });
-    await flushAsync();
-    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent');
-
-    // A later snapshot drops the run; hydration must still be able to bring
-    // it back (e.g. a terminal record that the stream missed).
-    runs = [{ ...liveRun, status: 'completed', activity: '', ended_at: new Date().toISOString(), updated_at: new Date().toISOString() }];
-    src.emit('acp.run', { type: 'acp.run.snapshot', seq: 2, conversation_id: 'conv_2', runs: [] });
-    await flushAsync();
-    assert.equal(document.getElementById('acp-dock-title').textContent, '1 subagent', 'hydration re-adds the run dropped from the snapshot');
-    assert.equal(document.querySelector('.acp-dock-chip-status').textContent, 'done');
-  } finally {
-    setSubagentConversation('');
-    restoreFetch();
-    restoreES();
+    globalThis.fetch = previousFetch;
     dom.window.close();
     cleanup();
   }

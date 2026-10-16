@@ -807,14 +807,17 @@ func TestConversationCloneDeepCopy(t *testing.T) {
 		Workspace: "/w",
 		Messages: []Message{
 			{
-				ID:             "m1",
-				Role:           RoleAssistant,
-				Content:        "text",
-				Reasoning:      "why",
-				ReasoningExtra: json.RawMessage(`{"enc":"x"}`),
-				Model:          "m",
-				ProviderID:     "p",
-				Usage:          &Usage{InputTokens: 3, OutputTokens: 4},
+				ID:                     "m1",
+				Role:                   RoleAssistant,
+				Content:                "text",
+				Reasoning:              "why",
+				ReasoningExtra:         json.RawMessage(`{"enc":"x"}`),
+				ReasoningExtraFor:      "openai",
+				ReasoningExtraUpstream: "Nvidia",
+				Model:                  "m",
+				ServedModel:            "m-dated",
+				ProviderID:             "p",
+				Usage:                  &Usage{InputTokens: 3, OutputTokens: 4},
 				Steps: []MessageStep{
 					{Type: StepReasoning, Content: "r"},
 					{Type: StepToolCalls, ToolCalls: []ToolCall{

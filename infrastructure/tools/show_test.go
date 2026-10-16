@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +12,7 @@ func TestShowHTMLReturnsMetadata(t *testing.T) {
 	htmlPath := filepath.Join(dir, "game.html")
 	writeFile(t, htmlPath, "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>")
 
-	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":     "html",
 		"path":   htmlPath,
 		"width":  640,
@@ -45,7 +46,7 @@ func TestShowHTMLDefaultDimensions(t *testing.T) {
 	htmlPath := filepath.Join(dir, "page.html")
 	writeFile(t, htmlPath, "<p>test</p>")
 
-	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "html",
 		"path": htmlPath,
 	}))
@@ -58,7 +59,7 @@ func TestShowHTMLDefaultDimensions(t *testing.T) {
 }
 
 func TestShowHTMLFileNotFound(t *testing.T) {
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "html",
 		"path": "/nonexistent/file.html",
 	}))
@@ -68,7 +69,7 @@ func TestShowHTMLFileNotFound(t *testing.T) {
 }
 
 func TestShowHTMLMissingPath(t *testing.T) {
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op": "html",
 	}))
 	if err == nil {
@@ -81,7 +82,7 @@ func TestShowPDFReturnsMetadata(t *testing.T) {
 	pdfPath := filepath.Join(dir, "report.pdf")
 	writeFile(t, pdfPath, "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n")
 
-	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "pdf",
 		"path": pdfPath,
 	}))
@@ -109,7 +110,7 @@ func TestShowPDFRejectsNonPDFFile(t *testing.T) {
 	path := filepath.Join(dir, "not-a-pdf.bin")
 	writeFile(t, path, "plain text")
 
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "pdf",
 		"path": path,
 	}))
@@ -126,7 +127,7 @@ func TestShowPDFSizeCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "pdf",
 		"path": pdfPath,
 	}))
@@ -147,7 +148,7 @@ func TestShowImageReturnsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "image",
 		"path": pngPath,
 	}))
@@ -178,7 +179,7 @@ func TestShowImageReturnsMetadata(t *testing.T) {
 }
 
 func TestShowImageFileNotFound(t *testing.T) {
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "image",
 		"path": "/nonexistent/file.png",
 	}))
@@ -203,7 +204,7 @@ func TestShowImageSVG(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "image",
 		"path": svgPath,
 	}))
@@ -222,7 +223,7 @@ func TestShowImageSVG(t *testing.T) {
 }
 
 func TestShowInvalidOp(t *testing.T) {
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "spreadsheet",
 		"path": "/tmp/x",
 	}))
@@ -236,7 +237,7 @@ func TestShowMissingOp(t *testing.T) {
 	htmlPath := filepath.Join(dir, "page.html")
 	writeFile(t, htmlPath, "<p>test</p>")
 
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"path": htmlPath,
 	}))
 	if err == nil {
@@ -256,7 +257,7 @@ func TestShowHTMLSizeCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "html",
 		"path": htmlPath,
 	}))
@@ -286,7 +287,7 @@ func TestShowAudioReturnsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "audio",
 		"path": wavPath,
 	}))
@@ -322,7 +323,7 @@ func TestShowAudioRejectsNonAudioFile(t *testing.T) {
 	if err := os.WriteFile(notAudio, []byte{0x89, 0x50, 0x4e, 0x47}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "audio",
 		"path": notAudio,
 	}))
@@ -341,7 +342,7 @@ func TestShowAudioSizeCap(t *testing.T) {
 	if err := os.WriteFile(bigPath, big, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "audio",
 		"path": bigPath,
 	}))
@@ -353,7 +354,7 @@ func TestShowAudioSizeCap(t *testing.T) {
 func TestShowInvalidOpRejectsAudioWrongCase(t *testing.T) {
 	// Only the documented ops are accepted. Confirms the switch's default
 	// branch still fires for unknown ops, even ones containing "audio".
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "Audio",
 		"path": "/tmp/x",
 	}))
@@ -380,7 +381,7 @@ func TestShowVideoReturnsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, out, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	ok, out, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "video",
 		"path": mp4Path,
 	}))
@@ -418,7 +419,7 @@ func TestShowVideoRejectsNonVideoFile(t *testing.T) {
 	if err := os.WriteFile(notVideo, []byte{0x89, 0x50, 0x4e, 0x47}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "video",
 		"path": notVideo,
 	}))
@@ -437,7 +438,7 @@ func TestShowVideoSizeCap(t *testing.T) {
 	if err := os.WriteFile(bigPath, big, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := executeFileTool("show", mustJSONArgs(t, map[string]any{
+	_, _, err := executeFileToolCtx(context.Background(), "show", mustJSONArgs(t, map[string]any{
 		"op":   "video",
 		"path": bigPath,
 	}))

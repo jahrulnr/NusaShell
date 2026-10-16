@@ -16,6 +16,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
+	"nusashell/pkg/yamlmd"
 )
 
 // maxContractChars bounds a single contract body. Larger files are
@@ -197,7 +198,7 @@ func (t *Toolbox) execContractRead(ctx context.Context, argsJSON []byte) (string
 		if id != "" && id != "all" {
 			return "", fmt.Errorf("plugin id %q not found or declares no contract; use mcp_list to see configured servers", id)
 		}
-		return yamlBlock(map[string]any{"count": 0}), nil
+		return yamlmd.Block(map[string]any{"count": 0}), nil
 	}
 	var marked []string
 	var bodies []string
@@ -216,5 +217,5 @@ func (t *Toolbox) execContractRead(ctx context.Context, argsJSON []byte) (string
 	if truncatedAny {
 		meta["truncated"] = true
 	}
-	return yamlMD(meta, strings.Join(bodies, "\n\n---\n\n")), nil
+	return yamlmd.MD(meta, strings.Join(bodies, "\n\n---\n\n")), nil
 }

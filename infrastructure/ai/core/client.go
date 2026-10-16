@@ -142,7 +142,7 @@ func (c *Client) Stream(ctx context.Context, req Request) (Stream, error) {
 		return nil, err
 	}
 	stream = wrapProviderStreamErrors(c.provider.Name(), stream)
-	stream = newStreamIdleWatchdog(stream, cancel, c.streamIdleTimeout, c.provider.Name())
+	stream = WithStreamIdleWatchdog(stream, cancel, c.streamIdleTimeout, c.provider.Name())
 	stream = prependWarningEvents(stream, warnings)
 	return newHookedStream(streamCtx, meta, c.hooks, stream), nil
 }

@@ -175,7 +175,7 @@ func NewImageGeneratorFactory(creds application.CredentialStore) application.Ima
 		if p != nil && p.Kind == domain.ProviderGemini {
 			return &imagegen.Client{
 				Backend: imagegen.BackendGemini,
-				BaseURL: geminiImageBaseURL(p.BaseURL),
+				BaseURL: geminiAPIRoot(p.BaseURL),
 				APIKey:  apiKey,
 				HTTP:    requestClient,
 			}, nil
@@ -293,7 +293,7 @@ func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
 		}
 		if p.Kind == domain.ProviderGemini {
 			return &videogen.GeminiClient{
-				BaseURL: geminiImageBaseURL(p.BaseURL),
+				BaseURL: geminiAPIRoot(p.BaseURL),
 				APIKey:  apiKey,
 				HTTP:    client,
 			}, nil
@@ -338,11 +338,12 @@ func embeddingBaseURL(baseURL string) string {
 	return base
 }
 
-// geminiImageBaseURL normalizes a Gemini provider BaseURL to the API root
-// (ending with /v1beta) for the generateContent image endpoint. A base URL
-// that already carries /v1beta is used verbatim so Gemini-compatible gateways
-// keep working, matching the gemini wire package's apiRoot() normalization.
-func geminiImageBaseURL(baseURL string) string {
+// geminiAPIRoot normalizes a Gemini provider BaseURL to the API root
+// (ending with /v1beta) shared by the generateContent image and speech
+// endpoints. A base URL that already carries /v1beta is used verbatim so
+// Gemini-compatible gateways keep working, matching the gemini wire
+// package's apiRoot() normalization.
+func geminiAPIRoot(baseURL string) string {
 	base := strings.TrimRight(baseURL, "/")
 	if base == "" {
 		base = "https://generativelanguage.googleapis.com"
@@ -351,12 +352,4 @@ func geminiImageBaseURL(baseURL string) string {
 		return base
 	}
 	return base + "/v1beta"
-}
-
-// geminiSpeechBaseURL normalizes a Gemini provider BaseURL to the /v1beta API
-// root for the generateContent TTS surface. The normalization is identical to
-// the image surface (both use :generateContent under /v1beta); the separate
-// name keeps the TTS routing readable.
-func geminiSpeechBaseURL(baseURL string) string {
-	return geminiImageBaseURL(baseURL)
 }

@@ -307,8 +307,8 @@ func stripProviderSuffix(id string) string {
 	return id
 }
 
-// ensureLoaded fetches the catalog if stale or not yet loaded.
-func (c *Catalog) ensureLoaded(ctx context.Context) error {
+// EnsureLoaded fetches the catalog if stale or not yet loaded.
+func (c *Catalog) EnsureLoaded(ctx context.Context) error {
 	c.mu.RLock()
 	fresh := c.loaded && clock.NewTime().Since(c.fetched) < CacheTTL
 	c.mu.RUnlock()
@@ -658,11 +658,6 @@ func contains(slice []string, s string) bool {
 		}
 	}
 	return false
-}
-
-// EnsureLoaded is the public version for external callers.
-func (c *Catalog) EnsureLoaded(ctx context.Context) error {
-	return c.ensureLoaded(ctx)
 }
 
 // Loaded reports whether the catalog has been fetched and indexed.

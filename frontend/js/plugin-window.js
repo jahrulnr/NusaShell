@@ -18,12 +18,20 @@ export function openPluginWindow({ id, name, ui }) {
   // stacking duplicates when the tile is clicked again.
   const target = `nusashell-plugin:${id}`;
   const screen = (typeof window !== 'undefined' && window.screen) ? window.screen : {};
-  let win = null;
-  try {
-    win = window.open(url, target, windowFeatures(ui?.window, {
+  // Narrow viewports have no floating window to open: a sized popup is
+  // rejected or covers the whole screen. Dropping the popup features makes
+  // the same named target resolve to a normal browser tab — still synchronous
+  // inside the click handler, so the user-activation exemption holds and a
+  // blocked tab surfaces through the same false contract.
+  const features = narrowViewport()
+    ? ''
+    : windowFeatures(ui?.window, {
       width: screen.availWidth || screen.width,
       height: screen.availHeight || screen.height,
-    }));
+    });
+  let win = null;
+  try {
+    win = window.open(url, target, features);
   } catch {
     win = null;
   }
@@ -41,6 +49,18 @@ export function openPluginWindow({ id, name, ui }) {
     }
   }
   return true;
+}
+
+// narrowViewport mirrors the shell's <=720px overlay breakpoint — floating
+// plugin windows stop making sense exactly where panels turn into full-screen
+// overlays. matchMedia is the primary signal; innerWidth is the fallback for
+// environments without it.
+function narrowViewport() {
+  if (typeof window === 'undefined') return false;
+  if (typeof window.matchMedia === 'function') {
+    return window.matchMedia('(max-width: 720px)').matches;
+  }
+  return Number(window.innerWidth) <= 720;
 }
 
 // windowFeatures maps the manifest ui.window to window.open features. It always

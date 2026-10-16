@@ -7,7 +7,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -86,12 +85,6 @@ type Toolbox struct {
 	searchwireSearch searchwireSearchFunc
 }
 
-// depMissing is the standard guard error for an optional tool dependency
-// that was not wired at startup; msg keeps each site's established wording.
-func depMissing(msg string) error {
-	return errors.New(msg)
-}
-
 // containsString reports whether s contains v.
 func containsString(s []string, v string) bool {
 	for _, item := range s {
@@ -164,7 +157,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 	case strings.HasPrefix(name, "skill_"):
 		return t.executeSkillFamily(ctx, op, argsJSON)
 	case strings.HasPrefix(name, "memory_project_"):
-		return t.executeProjectMemoryFamily(ctx, op, argsJSON)
+		return t.executeProjectMemory(ctx, op, argsJSON)
 	case strings.HasPrefix(name, "memory_"):
 		return t.executeMemoryFamily(ctx, op, argsJSON)
 	case strings.HasPrefix(name, "docs_"):

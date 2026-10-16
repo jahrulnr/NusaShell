@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"nusashell/pkg/yamlmd"
 	"os"
 	"path/filepath"
 	"sort"
@@ -71,7 +72,7 @@ func executeFindFile(argsJSON []byte) (bool, string, error) {
 		return true, "", err
 	}
 	sort.Strings(matches)
-	return true, yamlBlock(map[string]any{"files": matches, "count": len(matches)}), nil
+	return true, yamlmd.Block(map[string]any{"files": matches, "count": len(matches)}), nil
 }
 
 // expandBraces expands {a,b,c} patterns into multiple glob patterns.

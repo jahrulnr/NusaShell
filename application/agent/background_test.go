@@ -237,7 +237,7 @@ func TestWakePendingPeerMessageAfterRunEnds(t *testing.T) {
 	service.runsMu.Lock()
 	delete(service.runs, "run-existing")
 	service.runsMu.Unlock()
-	service.WakePendingPeerMessage("conv_target")
+	service.startIdleConversationTurn("conv_target", true)
 
 	saved, err := store.Get("conv_target")
 	if err != nil {

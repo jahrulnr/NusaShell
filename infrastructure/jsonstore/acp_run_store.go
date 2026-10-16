@@ -71,7 +71,7 @@ func (s *AcpRunStore) conversationsDir() string {
 }
 
 func (s *AcpRunStore) conversationDir(conversationID string) (string, error) {
-	dir, err := conversationACPDir(s.conversationsDir(), conversationID)
+	dir, err := conversationSubdirPath(s.conversationsDir(), conversationID, acpDirName)
 	if err != nil {
 		return "", fmt.Errorf("acp run store: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"nusashell/application"
 	"nusashell/domain"
 	"nusashell/pkg/httpclient"
+	"nusashell/pkg/yamlmd"
 
 	"github.com/jahrulnr/searchwire"
 )
@@ -107,13 +108,6 @@ func (t *Toolbox) webAnswerSearcher() *searchwire.Searcher {
 	return searchwire.New(cfg)
 }
 
-// webSearchSearcher builds the searchwire.Searcher for web_search on
-// demand from the credential store, so provider API keys apply without a
-// restart (searchwire falls back to the standard env vars per call).
-func (t *Toolbox) webSearchSearcher() *searchwire.Searcher {
-	return searchwire.New(SearchwireSearchConfig(t.Credentials))
-}
-
 // webSearchSources resolves the Settings WebSearchStrategy into a per-call
 // searchwire source restriction for the given searcher:
 //
@@ -188,12 +182,12 @@ func (t *Toolbox) execWebSearch(ctx context.Context, argsJSON []byte) (string, e
 	// A fresh searcher per call keeps the provider API keys and the
 	// strategy from Settings live without a restart. The startup
 	// searcher remains the fallback when settings are unavailable.
-	searcher := t.webSearchSearcher()
+	searcher := searchwire.New(SearchwireSearchConfig(t.Credentials))
 	if searcher == nil {
 		searcher = t.Searcher
 	}
 	if searcher == nil {
-		return "", depMissing("search is not available")
+		return "", errors.New("search is not available")
 	}
 	strategy := ""
 	if t.Settings != nil {
@@ -248,7 +242,7 @@ func (t *Toolbox) execWebSearch(ctx context.Context, argsJSON []byte) (string, e
 
 func (t *Toolbox) execWebFetch(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Searcher == nil {
-		return "", depMissing("search is not available")
+		return "", errors.New("search is not available")
 	}
 	var args struct {
 		URL      string `json:"url"`
@@ -314,7 +308,7 @@ func (t *Toolbox) execWebFetch(ctx context.Context, argsJSON []byte) (string, er
 func (t *Toolbox) execWebAnswer(ctx context.Context, argsJSON []byte) (string, error) {
 	sw := t.webAnswerSearcher()
 	if sw == nil || !sw.CanAnswer() {
-		return "", depMissing("web_answer is not configured — set a provider and API key in Settings → Web Answer")
+		return "", errors.New("web_answer is not configured — set a provider and API key in Settings → Web Answer")
 	}
 	var args struct {
 		Question string `json:"question"`
@@ -331,5 +325,5 @@ func (t *Toolbox) execWebAnswer(ctx context.Context, argsJSON []byte) (string, e
 	if err != nil {
 		return "", fmt.Errorf("answer failed: %w", err)
 	}
-	return yamlMD(map[string]any{"provider": answer.Provider}, answer.Text), nil
+	return yamlmd.MD(map[string]any{"provider": answer.Provider}, answer.Text), nil
 }

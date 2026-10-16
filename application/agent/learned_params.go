@@ -6,9 +6,9 @@ import (
 	"nusashell/domain"
 )
 
-// extractErrBody returns the upstream error message string from an
+// ExtractErrBody returns the upstream error message string from an
 // domain.ProviderError, or the plain error string when not wrapped.
-func extractErrBody(err error) string {
+func ExtractErrBody(err error) string {
 	if err == nil {
 		return ""
 	}
@@ -19,10 +19,10 @@ func extractErrBody(err error) string {
 	return err.Error()
 }
 
-// isLearnable400 reports whether err is an HTTP 400 that the learning
+// IsLearnable400 reports whether err is an HTTP 400 that the learning
 // classifier should inspect. We only learn from 400s (not 429/5xx — those
 // are transient and handled by the retry loop).
-func isLearnable400(err error) bool {
+func IsLearnable400(err error) bool {
 	var upstream *domain.ProviderError
 	if !errors.As(err, &upstream) {
 		return false

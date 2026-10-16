@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"nusashell/domain"
+	"nusashell/pkg/atomicfile"
 )
 
 // Conversation storage layout
@@ -34,7 +35,7 @@ import (
 // unparsable message line instead of dropping the whole conversation.
 //
 // Saves no longer rewrite index.jsonl each time. meta.json carries the
-// latest header (a few KB, atomicWrite) and pending.jsonl receives one line
+// latest header (a few KB, atomicfile.Write) and pending.jsonl receives one line
 // per changed/new message, upserted by Message.ID at load: a known ID
 // replaces that message's content but keeps its first-seen position, a new
 // ID appends at the tail. index.jsonl is only rewritten when an epoch is
@@ -76,38 +77,6 @@ func conversationSubdirPath(conversationsDir, id, sub string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, sub), nil
-}
-
-// conversationIndexPath resolves the JSONL transcript path for a conversation.
-func conversationIndexPath(conversationsDir, id string) (string, error) {
-	return conversationSubdirPath(conversationsDir, id, conversationIndexName)
-}
-
-// conversationMetaPath resolves the meta.json sidecar holding the newest
-// header record for a conversation.
-func conversationMetaPath(conversationsDir, id string) (string, error) {
-	return conversationSubdirPath(conversationsDir, id, conversationMetaName)
-}
-
-// conversationPendingPath resolves the pending.jsonl upsert log of a
-// conversation.
-func conversationPendingPath(conversationsDir, id string) (string, error) {
-	return conversationSubdirPath(conversationsDir, id, conversationPendingName)
-}
-
-// conversationChunkDir resolves the compaction-chunk directory of a conversation.
-func conversationChunkDir(conversationsDir, id string) (string, error) {
-	return conversationSubdirPath(conversationsDir, id, chunkDirName)
-}
-
-// conversationACPDir resolves the ACP run-record directory of a conversation.
-func conversationACPDir(conversationsDir, id string) (string, error) {
-	return conversationSubdirPath(conversationsDir, id, acpDirName)
-}
-
-// conversationOperationDir resolves the turn-patch directory of a conversation.
-func conversationOperationDir(conversationsDir, id string) (string, error) {
-	return conversationSubdirPath(conversationsDir, id, operationDirName)
 }
 
 // conversationHeader is the first index.jsonl record: the conversation
@@ -173,11 +142,11 @@ func writeConversationIndex(indexPath string, headerLine []byte, msgLines [][]by
 		sb.Write(line)
 		sb.WriteByte('\n')
 	}
-	return atomicWrite(indexPath, sb.Bytes())
+	return atomicfile.Write(indexPath, sb.Bytes(), 0o644)
 }
 
 // appendPendingLines appends whole JSON lines to the pending upsert log in a
-// single O_APPEND write followed by fsync, matching atomicWrite durability:
+// single O_APPEND write followed by fsync, matching atomicfile.Write durability:
 // a crash can only lose the appended batch, never leave a half-written line
 // interleaved with another save. Returns the number of bytes written.
 func appendPendingLines(path string, lines [][]byte) (int, error) {
@@ -368,7 +337,7 @@ func legacyConversationFileID(name string) (string, bool) {
 // durably in place. Returns false (leaving everything untouched) when the
 // conversion cannot be done safely.
 func migrateLegacyConversationFile(conversationsDir, id, legacyPath string) bool {
-	indexPath, err := conversationIndexPath(conversationsDir, id)
+	indexPath, err := conversationSubdirPath(conversationsDir, id, conversationIndexName)
 	if err != nil {
 		slog.Warn("legacy conversation file has an unusable id and was left in place", "file", legacyPath, "error", err)
 		return false
@@ -403,7 +372,7 @@ func migrateLegacyConversationFile(conversationsDir, id, legacyPath string) bool
 		slog.Warn("legacy conversation folder could not be created", "file", legacyPath, "error", err)
 		return false
 	}
-	if err := atomicWrite(indexPath, out); err != nil {
+	if err := atomicfile.Write(indexPath, out, 0o644); err != nil {
 		slog.Warn("legacy conversation file could not be migrated", "file", legacyPath, "error", err)
 		return false
 	}

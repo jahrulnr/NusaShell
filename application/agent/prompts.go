@@ -73,10 +73,7 @@ var compactionHandoffUserPrompt = resources.UserPrompt("compaction")
 // Compaction summaries carry role=user (not system) so they appear in the
 // provider request's messages array as the first live message after
 // compaction — see domain.CompactionSummaryPrefix.
-func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
-	return buildSystemPromptForRun(nil, c, userPrompt)
-}
-
+//
 // buildSystemPromptForRun composes the system prompt for a specific turn run.
 // Headless Automation pipeline steps and internal delegates use their own
 // prompts instead of the interactive system prompt. The interactive path is

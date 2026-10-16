@@ -35,7 +35,7 @@ type anthropicContent struct {
 	Type         string                 `json:"type"`
 	Text         string                 `json:"text,omitempty"`
 	Source       *anthropicImageSource  `json:"source,omitempty"`
-	Thinking     string                 `json:"thinking,omitempty"`
+	Thinking     *string                `json:"thinking,omitempty"`
 	Signature    string                 `json:"signature,omitempty"`
 	Data         string                 `json:"data,omitempty"`
 	ID           string                 `json:"id,omitempty"`
@@ -535,12 +535,18 @@ func convertBlocks(blocks []core.Block) ([]anthropicContent, error) {
 			if err != nil {
 				return nil, err
 			}
-			if len(b.Redacted) > 0 {
-				out = append(out, anthropicContent{Type: "redacted_thinking", Data: string(b.Redacted), CacheControl: cache})
-			} else if b.Text == "" && b.Signature == "" {
+			// Signature and redacted data may sit on the typed fields or,
+			// after a persisted round trip through the application layer,
+			// inside the opaque Extra payload this package captured.
+			extraSignature, extraRedacted := thinkingFromExtra(b.Extra)
+			signature := firstNonEmpty(b.Signature, extraSignature)
+			redacted := firstNonEmpty(string(b.Redacted), extraRedacted)
+			if redacted != "" {
+				out = append(out, anthropicContent{Type: "redacted_thinking", Data: redacted, CacheControl: cache})
+			} else if b.Text == "" && signature == "" {
 				return nil, fmt.Errorf("anthropic reasoning block has empty text and no signature — reasoning was received from the provider but is missing on replay (input != output)")
 			} else {
-				out = append(out, anthropicContent{Type: "thinking", Thinking: b.Text, Signature: b.Signature, CacheControl: cache})
+				out = append(out, anthropicContent{Type: "thinking", Thinking: core.StringPtr(b.Text), Signature: signature, CacheControl: cache})
 			}
 		case core.ToolUseBlock:
 			input := map[string]any{}

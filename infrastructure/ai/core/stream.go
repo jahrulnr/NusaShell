@@ -72,6 +72,10 @@ type DoneEvent struct {
 	FinishReasonRaw string
 	Provider        string
 	Model           string
+	// Upstream is the gateway-reported upstream provider name (e.g.
+	// OpenRouter's per-chunk "provider" field). Empty when the wire does not
+	// report one.
+	Upstream string
 }
 
 type ErrorEvent struct {
@@ -305,6 +309,7 @@ type EventCollector struct {
 	refusal     strings.Builder
 	provider    string
 	model       string
+	upstream    string
 	warnings    []Warning
 	tools       *ToolUseAccumulator
 	// compactionItems captures opaque server-side compaction items forwarded
@@ -388,6 +393,9 @@ func (c *EventCollector) Apply(event Event) (bool, error) {
 		if e.Model != "" {
 			c.model = e.Model
 		}
+		if e.Upstream != "" {
+			c.upstream = e.Upstream
+		}
 		c.normalizeToolArguments()
 		return true, nil
 	default:
@@ -438,6 +446,7 @@ func (c *EventCollector) Response() *Response {
 		Usage:           c.usage,
 		Model:           c.model,
 		Provider:        c.provider,
+		Upstream:        c.upstream,
 		FinishReason:    c.finish,
 		FinishReasonRaw: c.finishRaw,
 		Refusal:         c.refusal.String(),
@@ -491,6 +500,7 @@ func (c *EventCollector) appendReasoning(delta ReasoningDelta) {
 		c.blocks = append(c.blocks, ReasoningBlock{
 			Signature: delta.Signature,
 			Redacted:  cloneBytes(delta.Redacted),
+			Extra:     cloneBytes(delta.Extra),
 		})
 		return
 	}

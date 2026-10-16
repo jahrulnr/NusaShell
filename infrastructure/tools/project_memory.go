@@ -8,6 +8,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/pkg/yamlmd"
 )
 
 func (t *Toolbox) executeProjectMemory(ctx context.Context, op string, argsJSON []byte) (string, error) {
@@ -59,7 +60,7 @@ func (t *Toolbox) executeProjectMemory(ctx context.Context, op string, argsJSON 
 		if err != nil {
 			return "", err
 		}
-		return yamlMD(map[string]any{"kind": args.Kind, "id": args.ID}, body), nil
+		return yamlmd.MD(map[string]any{"kind": args.Kind, "id": args.ID}, body), nil
 	case "admit":
 		res, err := t.ProjectMemory.Admit(ws, args.Kind, args.ID, args.Content)
 		if err != nil {
@@ -69,13 +70,13 @@ func (t *Toolbox) executeProjectMemory(ctx context.Context, op string, argsJSON 
 		if res.PatternNote != "" {
 			out["pattern_note"] = res.PatternNote
 		}
-		return yamlBlock(out), nil
+		return yamlmd.Block(out), nil
 	case "skip":
 		reason := strings.TrimSpace(args.Reason)
 		if reason == "" {
 			return "", fmt.Errorf("reason is required for op=skip")
 		}
-		return yamlBlock(map[string]any{"status": "skipped", "reason": reason}), nil
+		return yamlmd.Block(map[string]any{"status": "skipped", "reason": reason}), nil
 	case "archive":
 		if strings.TrimSpace(args.ID) == "" {
 			return "", fmt.Errorf("id is required")
@@ -83,7 +84,7 @@ func (t *Toolbox) executeProjectMemory(ctx context.Context, op string, argsJSON 
 		if err := t.ProjectMemory.Archive(ws, args.ID); err != nil {
 			return "", err
 		}
-		return yamlBlock(map[string]any{"status": "archived", "id": args.ID}), nil
+		return yamlmd.Block(map[string]any{"status": "archived", "id": args.ID}), nil
 	case "lint":
 		var kinds []string
 		if k := strings.TrimSpace(args.Kind); k != "" {

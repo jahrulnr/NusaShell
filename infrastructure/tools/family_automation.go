@@ -3,12 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"nusashell/domain"
 	clock "nusashell/pkg/time"
+	"nusashell/pkg/yamlmd"
 )
 
 // automationRunYAML is the agent-facing run snapshot for automation_wait /
@@ -32,7 +34,7 @@ func automationRunYAML(run *domain.WorkflowRun, extra map[string]any) map[string
 
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
 	if t.Automation == nil {
-		return "", true, depMissing("automation is not configured")
+		return "", true, errors.New("automation is not configured")
 	}
 	a := t.Automation
 	var args map[string]any
@@ -50,7 +52,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		if err != nil {
 			return "", true, err
 		}
-		return yamlBlock(v), true, nil
+		return yamlmd.Block(v), true, nil
 	}
 	switch name {
 	case "automation_validate":
@@ -147,7 +149,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 			return "", true, fmt.Errorf("no running agent step to steer")
 		}
 		if t.Steerer == nil {
-			return "", true, depMissing("steer is not configured")
+			return "", true, errors.New("steer is not configured")
 		}
 		if err := t.Steerer.SteerHeadlessTurn(convID, text); err != nil {
 			return "", true, err
@@ -222,7 +224,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 			return "", true, fmt.Errorf("workflow_id is required")
 		}
 		if a.Workflows == nil {
-			return "", true, depMissing("workflow store not configured")
+			return "", true, errors.New("workflow store not configured")
 		}
 		err := a.Workflows.Delete(ctx, workflowID)
 		return encode(map[string]any{"status": "deleted", "workflow_id": workflowID}, err)

@@ -1,96 +1,92 @@
 # Automation
 
-Manage durable once/every/when automation workflows, inspect DAG runs, and see waiting or blocked states without occupying a runner.
+The automation control room: workflows, runs, schedules, and event records in one browse column with stat cards, a mode switch, search, and an inspector with detail, steer/delete actions, and the YAML workflow editor.
 
-**How to open:** Click the Automation item in the left sidebar.
+**How to open:** Click the Automation item in the left rail, or open #automation.
 
-## Header stats
+## Header
 
-Counts of runnable, blocked, and waiting automation workflows so provider outages are visible without opening a run. On small screens the stats wrap below the header copy.
+Refresh, sync state, and the New workflow action; errors collapse into a retry banner.
+
+- **Automation sync state** (`#automation-sync-state`):
+
+- **Refresh automation** (`#automation-refresh`):
+
+- **New workflow** (`#automation-create`):
+
+- **Automation error banner** (`#automation-error`):
+
+- **Error message** (`#automation-error-message`):
+
+- **Retry loading** (`#automation-retry`):
+
+## Stats
+
+Counts of runnable, needs-attention, in-progress, and waiting items across workflows and runs.
 
 - **Runnable count** (`#automation-stat-runnable`):
-  - Type: text
-  - Notes: Header stat: workflows whose availability is runnable.
 
-- **Blocked count** (`#automation-stat-blocked`):
-  - Type: text
-  - Notes: Header stat: workflows blocked because a required capability provider is disabled.
+- **Needs attention count** (`#automation-stat-blocked`):
+
+- **In progress count** (`#automation-stat-active`):
 
 - **Waiting count** (`#automation-stat-waiting`):
-  - Type: text
-  - Notes: Header stat: runs waiting for a wake time or event without occupying a runner.
 
-## Toolbar
+## Browse
 
-Tabs switch between Workflows, Runs, Schedules, and Events in the same compact segmented control used by Learning. New workflow opens a once/every/when/manual wizard. Pipeline files from the data directory appear alongside saved automation workflows in the Workflows tab. On phones the tabs can scroll horizontally without widening the page.
+The mode switch filters workflows, runs, and event records; search narrows the list by name or state; the schedule rail lists upcoming runs. Blocked workflows show a callout with the reason and an enable-provider action when a capability is disabled.
 
-- **Automation tabs** (`#automation-tabs`):
-  - Type: tablist
-  - Notes: Compact segmented control switching the workspace between Workflows, Runs, Schedules, and Events.
+On mobile through 720px, Runs and Events use a full-width feed with sticky tabs and search. Opening a record shows its detail separately; Back returns to the same filter, selection and reading position. Workflow overview and desktop split panes remain available.
 
-- **Workflows tab** (`#automation-tab-workflows`):
-  - Type: tab
-  - Notes: Saved automation workflows plus pipeline files discovered in the data directory.
+- **Mode switch** (`[data-automation-mode]`):
+  - Type: button group
+  - Action: Filters the browse list between workflows, runs, and events.
 
-- **Runs tab** (`#automation-tab-runs`):
-  - Type: tab
-  - Notes: Automation run history with status pills and wake times.
-
-- **Schedules tab** (`#automation-tab-schedules`):
-  - Type: tab
-  - Notes: Trigger schedules with kind, status, and next fire time.
-
-- **Events tab** (`#automation-tab-events`):
-  - Type: tab
-  - Notes: Recorded automation events.
-
-- **New workflow** (`#automation-new-btn`):
-  - Type: button
-  - Action: Opens the new-automation wizard dialog: name, trigger family (Once/Every/When/Manual), a time-or-event field, and the Jobs YAML; validates then saves enabled.
-
-## Blocked provider
-
-When a saved automation workflow depends on a disabled MCP provider it stays BLOCKED rather than FAILED. Enable provider restores the binding without rewriting the workflow.
-
-- **Blocked provider banner** (`#automation-blocked-banner`):
-  - Type: banner
-  - Notes: Shown while at least one workflow is BLOCKED by a disabled capability provider; hidden otherwise.
-
-- **Blocked reason** (`#automation-blocked-text`):
-  - Type: text
-  - Notes: The first blocked workflow's blocked reason, or a generated '<name> is blocked.' message.
-
-- **Enable provider** (`#automation-enable-provider-btn`):
-  - Type: button
-  - Action: Re-enables the disabled capability provider so blocked workflows become runnable again.
-
-## List and detail
-
-The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions. Invalid YAML stays listed with an invalid pill; Run and Enable are disabled until the file is fixed.
+- **Automation search** (`#automation-search`):
 
 - **Automation list** (`#automation-list`):
-  - Type: list
-  - Action: Lists rows for the active tab (title, status pill, meta); clicking a row opens its detail.
-  - Notes: Invalid YAML files stay listed with an 'invalid' pill.
 
-- **List pane title** (`#automation-list-title`):
-  - Type: text
-  - Notes: Mirrors the active tab name (Workflows / Runs / Schedules / Events).
+- **List count** (`#automation-list-count`):
 
-- **List row count** (`#automation-list-count`):
-  - Type: text
+- **Next scheduled** (`#automation-schedule-title`):
 
-- **Automation tab panel** (`#automation-workspace`):
-  - Type: tabpanel
-  - Notes: Shared list and detail panel; its accessible label follows the active Workflows, Runs, Schedules, or Events tab.
+- **Scheduled runs** (`#automation-schedule-list`):
 
-- **Automation detail pane** (`#automation-detail`):
-  - Type: container
-  - Notes: Renders the selection: a workflow DAG with job needs and steps, run job status with step output, waiting wake times, the blocked reason, or raw JSON for events.
+- **Back to history** (`#automation-mobile-back`):
+  - Type: button
+  - Action: Returns from a run or event detail to the mobile history feed, retaining the filter, selection and scroll position.
+  - Notes: Shown only for mobile Runs and Events details through 720px.
 
-- **Detail title** (`#automation-detail-title`):
-  - Type: text
+## Inspector and editor
 
-- **Detail actions** (`#automation-detail-actions`):
-  - Type: container
-  - Notes: Per-selection buttons: workflows expose Run, Enable/Disable, and Delete (Run is disabled for invalid files; Enable is also disabled while an invalid file is already disabled); running, queued, or waiting runs expose Cancel plus Steer while an agent step is in-flight; failed runs expose Retry.
+The inspector renders the selected workflow (capabilities, enable/run/delete/steer actions), run (per-step progress and output, cancel/steer), or the YAML editor with validation.
+
+- **Automation inspector** (`#automation-inspector`):
+
+- **Inspector empty state** (`#automation-inspector-empty`):
+
+- **Create a workflow** (`#automation-empty-create`):
+
+- **Workflow detail** (`#automation-workflow-detail`):
+
+- **Run detail** (`#automation-run-detail`):
+
+- **Workflow editor** (`#automation-editor`):
+
+- **Editor title** (`#automation-editor-title`):
+
+- **Close editor** (`#automation-editor-close`):
+
+- **Editor form** (`#automation-editor-form`):
+
+- **Workflow name** (`#automation-editor-name`):
+
+- **Workflow YAML** (`#automation-editor-yaml`):
+
+- **Validation output** (`#automation-validation`):
+
+- **Cancel editor** (`#automation-editor-cancel`):
+
+- **Check YAML** (`#automation-editor-check`):
+
+- **Create workflow** (`#automation-editor-save`):

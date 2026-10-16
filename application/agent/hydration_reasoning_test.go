@@ -31,7 +31,7 @@ func TestHydrationReasoningOnlyReplaysWhenProviderRequiresIt(t *testing.T) {
 		ID: "u1", Role: domain.RoleUser, Content: "hi",
 	}}, persisted...)}
 
-	replayed := chatMessages(conversation, "", ModelCapabilities{ReasoningReplay: true})
+	replayed := ChatMessages(conversation, "", ModelCapabilities{ReasoningReplay: true})
 	var replayedReasoning string
 	for _, message := range replayed {
 		if message.Role == "assistant" {
@@ -43,7 +43,7 @@ func TestHydrationReasoningOnlyReplaysWhenProviderRequiresIt(t *testing.T) {
 		t.Fatal("required reasoning replay must include hydration reasoning")
 	}
 
-	omitted := chatMessages(conversation, "", ModelCapabilities{ReasoningReplay: false})
+	omitted := ChatMessages(conversation, "", ModelCapabilities{ReasoningReplay: false})
 	for _, message := range omitted {
 		if message.Role == "assistant" && message.Reasoning != "" {
 			t.Fatalf("optional hydration reasoning must be omitted, got %q", message.Reasoning)

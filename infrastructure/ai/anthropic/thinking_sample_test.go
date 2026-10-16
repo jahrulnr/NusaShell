@@ -96,6 +96,22 @@ func TestAnthropicStreamThinkingAndSignatureDeltaRoundTrip(t *testing.T) {
 		t.Fatalf("streaming response lost thinking signature — blocks: %#v", resp.Blocks)
 	}
 
+	// The signature_delta also lands on the opaque Extra payload the
+	// application layer persists, so a streamed signature survives the
+	// persisted round trip even though it arrives after the thinking text.
+	var extraSignature string
+	for _, block := range resp.Blocks {
+		if rb, ok := block.(core.ReasoningBlock); ok {
+			sig, _ := thinkingFromExtra(rb.Extra)
+			if sig == "EqQBCgIYAhIM1gbcDa9GJwZA2b3hGgxBdjrkzLoky3dl1pkiMOYds" {
+				extraSignature = sig
+			}
+		}
+	}
+	if extraSignature == "" {
+		t.Fatalf("streaming response lost signature in reasoning Extra — blocks: %#v", resp.Blocks)
+	}
+
 	// Verify text content
 	if resp.Text() != "The GCD is 21." {
 		t.Fatalf("text = %q, want %q", resp.Text(), "The GCD is 21.")
@@ -148,6 +164,9 @@ func TestAnthropicNonStreamingThinkingBlockWithSignatureRoundTrip(t *testing.T) 
 	}
 	if reasoningBlock.Text != "I should call the tool." || reasoningBlock.Signature != "sig-thinking" {
 		t.Fatalf("reasoning block = %+v", reasoningBlock)
+	}
+	if sig, _ := thinkingFromExtra(reasoningBlock.Extra); sig != "sig-thinking" {
+		t.Fatalf("reasoning block Extra = %s, want signature sig-thinking", reasoningBlock.Extra)
 	}
 
 	// Now round-trip: send the blocks back as assistant history
@@ -205,5 +224,113 @@ func TestAnthropicThinkingBlockSignatureOnlyPassesGuard(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("signature-only thinking block must pass guard, got error: %v", err)
+	}
+}
+
+// TestAnthropicThinkingBlockSignatureOnlyWireShape verifies the emitted JSON
+// for a signature-only thinking block carries the "thinking" key explicitly.
+// `display: "omitted"` models return thinking blocks whose thinking text is
+// empty; Anthropic's input schema requires the field on replay, so the key
+// must marshal as "thinking":"" rather than being dropped by omitempty.
+func TestAnthropicThinkingBlockSignatureOnlyWireShape(t *testing.T) {
+	out, err := convertBlocks([]core.Block{
+		core.ReasoningBlock{Extra: json.RawMessage(`{"signature":"sig-omitted"}`)},
+	})
+	if err != nil {
+		t.Fatalf("convertBlocks returned error: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("content = %#v", out)
+	}
+	raw, err := json.Marshal(out[0])
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	var block map[string]any
+	if err := json.Unmarshal(raw, &block); err != nil {
+		t.Fatalf("unmarshal content: %v", err)
+	}
+	if block["type"] != "thinking" || block["signature"] != "sig-omitted" {
+		t.Fatalf("content = %s", raw)
+	}
+	thinking, present := block["thinking"]
+	if !present || thinking != "" {
+		t.Fatalf("thinking key must be present as empty string, got %s", raw)
+	}
+}
+
+// TestConvertBlocksDecodesReasoningExtra verifies that signature and
+// redacted state survive the persisted round trip through
+// ReasoningBlock.Extra: the wire package encodes both into the opaque
+// payload on capture and decodes it back onto the emitted thinking /
+// redacted_thinking content on replay.
+func TestConvertBlocksDecodesReasoningExtra(t *testing.T) {
+	tests := []struct {
+		name         string
+		block        core.ReasoningBlock
+		wantType     string
+		wantThink    string
+		wantSign     string
+		wantRedacted string
+		wantErr      bool
+	}{
+		{
+			name:     "signature decoded from extra",
+			block:    core.ReasoningBlock{Text: "think", Extra: json.RawMessage(`{"signature":"sig-extra"}`)},
+			wantType: "thinking", wantThink: "think", wantSign: "sig-extra",
+		},
+		{
+			name:     "typed signature wins over extra",
+			block:    core.ReasoningBlock{Text: "think", Signature: "sig-direct", Extra: json.RawMessage(`{"signature":"sig-extra"}`)},
+			wantType: "thinking", wantThink: "think", wantSign: "sig-direct",
+		},
+		{
+			name:         "redacted decoded from extra",
+			block:        core.ReasoningBlock{Extra: json.RawMessage(`{"redacted":"opaque-data"}`)},
+			wantType:     "redacted_thinking",
+			wantRedacted: "opaque-data",
+		},
+		{
+			name:         "typed redacted wins over extra",
+			block:        core.ReasoningBlock{Redacted: []byte("typed-data"), Extra: json.RawMessage(`{"redacted":"extra-data"}`)},
+			wantType:     "redacted_thinking",
+			wantRedacted: "typed-data",
+		},
+		{
+			name:         "redacted wins over text and signature",
+			block:        core.ReasoningBlock{Text: "think", Signature: "sig", Extra: json.RawMessage(`{"signature":"sig","redacted":"opaque-data"}`)},
+			wantType:     "redacted_thinking",
+			wantRedacted: "opaque-data",
+		},
+		{
+			name:    "foreign extra shape keeps missing-signature error",
+			block:   core.ReasoningBlock{Extra: json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC"}`)},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := convertBlocks([]core.Block{tt.block})
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "missing on replay") {
+					t.Fatalf("expected missing-signature guard error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("convertBlocks returned error: %v", err)
+			}
+			if len(out) != 1 {
+				t.Fatalf("content = %#v", out)
+			}
+			got := out[0]
+			thinking := ""
+			if got.Thinking != nil {
+				thinking = *got.Thinking
+			}
+			if got.Type != tt.wantType || thinking != tt.wantThink || got.Signature != tt.wantSign || got.Data != tt.wantRedacted {
+				t.Fatalf("content = %#v, want type=%s thinking=%q signature=%q data=%q", got, tt.wantType, tt.wantThink, tt.wantSign, tt.wantRedacted)
+			}
+		})
 	}
 }

@@ -1,69 +1,95 @@
 # Navigation and Shell Chrome
 
-Global chrome surrounding every NusaShell view: the vertical sidebar owns identity, connection status, utilities, navigation, and storage; a small mobile bar only exposes drawer navigation.
+Global chrome surrounding every NusaShell view: a top bar owns the drawer toggles, brand, room heading, context meter, and dock toggle; the left rail holds navigation and utilities.
 
 **How to open:** Always visible when the NusaShell window is open.
 
-## Sidebar identity and utilities
+## Top bar
 
-The vertical sidebar identifies NusaShell with its brand mark and wordmark, shows compact backend connection status, and keeps settings plus the install shortcut (visible only while the browser offers installation) with the navigation. The desktop pet launcher sits above the Settings icon and is hidden entirely on macOS/Windows where the pet is unsupported (Linux only). A click launches or stops the installed pet, is ignored while an install is active, and opens a one-click install dialog when the binary is missing; its tooltip reports the current state, and the Settings Desktop pet card mirrors the same status on a coloured dot (green installed, pulsing amber installing, cyan running, red error).
+The top bar anchors the shell: hamburger and room-drawer toggles on the left, the NusaShell mark and room heading in the center, and the context meter plus conversation-dock toggle on the right. The context meter is visible only on Agent, where it opens the Context inspector; its ring fill tracks context usage while a data-connection state reflects WebSocket reachability. The room-drawer, context-meter, and dock toggles stay in the DOM on every route but are visible only while the Agent view is active (`.shell` carries `agent-active` only there); the narrow-width overlay backdrop is likewise scoped to the Agent surface so it can never cover a panel-less page. The room heading shows the active conversation title only while the Agent route owns the surface; every other route paints its own page label and asynchronous conversation updates cannot overwrite it.
 
-- **Connection status text** (`#conn-status`):
-  - Section: Sidebar
-  - Type: text
-  - Notes: Reflects backend reachability.
+Primary view titles are shown once in the global titlebar; duplicate in-page titles remain accessible to assistive technology without consuming visible space. Body-level toasts use the shell palette, a dismiss action, and a bounded mobile width.
 
-- **Connection orb** (`#conn-fill`):
-  - Section: Sidebar
-  - Type: indicator
-  - Notes: Color-coded connection state.
-
-- **Install NusaShell** (`#pwa-install-btn`):
-  - Section: Sidebar
+- **Navigation toggle** (`#global-nav-toggle`):
   - Type: button
-  - Notes: Visible only while an eligible browser offers installation; hidden in standalone/PWA and Electron runtimes; triggers the native install flow and hides after install/dismissal.
+  - Action: Toggles the global navigation rail open or closed.
 
-- **Desktop pet** (`#pet-btn`):
-  - Section: Sidebar
+- **Conversations drawer toggle** (`#room-drawer-toggle`):
   - Type: button
-  - Action: Single click when installed launches the desktop pet overlay if idle, or stops it if running. When not installed, opens a one-click install dialog.
-  - Notes: Hidden on macOS/Windows (pet is Linux-only). Sits above the Settings icon in the sidebar actions row. Launch failures mark an error state; the Settings Desktop pet card mirrors the status on a coloured dot (green installed, pulsing amber installing, cyan running, red error).
+  - Action: Toggles the room drawer (conversation list) open or closed.
+  - Related: Room drawer (`#room-drawer`), New chat (`#new-chat`)
+  - Notes: Agent-only control: always present in the top-bar DOM but hidden on every non-Agent route (`.shell:not(.agent-active)` display:nones it); leaving Agent also closes any open overlay panel so the shared backdrop cannot strand over a panel-less page.
 
-- **Pet install dialog** (`#pet-install-overlay`):
-  - Section: Sidebar
-  - Type: modal
-  - Notes: Shown when the user clicks the pet launcher with no binary on disk. Mirrors the offline TTS/STT install layout: description, bullet list, phase + indeterminate progress bar, error banner, Install/Cancel actions.
-
-- **Settings shortcut** (`#nav-settings-btn`):
-  - Section: Sidebar
+- **Context meter** (`#context-meter`):
   - Type: button
-  - Action: Opens the Settings view.
+  - Action: Opens the context dock Context panel; ring fill tracks the active room context usage.
+  - Notes: Agent-only control: it is hidden on non-Agent routes because only Agent owns the Context inspector. Doubles as the backend connection indicator: data-connection mirrors WebSocket reachability and its title reads Backend connected / Backend <state>. Context thresholds: data-context=high at >=80%, critical at >=95% of the active model context window.
 
-## Mobile navigation bar
-
-Desktop has no separate titlebar. Below 680px, a compact bar remains only as the reliable home for the drawer toggle while the sidebar itself is off-canvas. While a modal detail drawer (plugin details, ACP subagents) is open, the hamburger hides so it cannot collide with the drawer's close button in the same corner; the drawer's own X is the only exit control until it closes.
-
-- **Open navigation menu** (`#mobile-nav-toggle`):
+- **Dock toggle** (`#context-dock-toggle`):
   - Type: button
-  - Action: Opens or closes the off-canvas navigation drawer below 680px.
+  - Action: Toggles the conversation context dock open or closed.
+  - Related: Context dock (`#context-dock`)
+  - Notes: Agent-only control: always present in the top-bar DOM but hidden on every non-Agent route (`.shell:not(.agent-active)` display:nones it); leaving Agent also closes any open overlay panel so the shared backdrop cannot strand over a panel-less page.
 
-## Sidebar
+## Global navigation rail
 
-Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, Logs, and Telemetry. It can show icons with labels or icons only, and remembers that choice locally. Below 680px viewport width the sidebar becomes a bounded, vertically scrollable off-canvas drawer: the mobile navigation bar hamburger toggles it open, and it closes on backdrop click, Escape, or selecting a nav item. While closed, the drawer is hidden from keyboard and assistive-technology navigation; focus returns to the hamburger after dismissal.
+The left rail orders Home, Agent, Skills, Learning, Automation, Plugins, Providers, Logs, Telemetry, and Settings as icon links. It can show icons with labels or icons only and remembers that choice locally. The install shortcut appears only while the browser offers installation; the desktop pet entry sits just above Settings (hidden at the <=720px overlay breakpoint): it surfaces install/launch status and opens the install dialog when the binary is missing.
 
-Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view. Escape dismisses dialogs, toasts stay on hover, and Ctrl/Cmd+N starts a new agent conversation when the Agent view is open.
+Both Install and Pet drive hidden production-ID proxies (pwa-install-btn, pet-btn) so the shared pwa.js and pet-launcher.js modules work unchanged; the visible rail items are global-nav-install and global-nav-pet.
 
-- **Sidebar** (`#sidebar`):
+Below the nav breakpoints the rail becomes an off-canvas drawer: the top-bar nav toggle opens it and moves focus to the active rail item. It closes on backdrop click, Escape, selecting a nav item, or opening the room drawer/context dock — at the <=720px overlay breakpoint the rail and both conversation panels are mutually exclusive, so only one fixed overlay stays open at a time and no scrim can strand over a live panel — and focus returns to the toggle. Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view, Escape dismisses dialogs, Ctrl/Cmd+N starts a new agent conversation when the Agent view is open.
+
+Mobile Skills, Providers, Plugins, Logs, Learning, and Automation reopen at their index or primary tab when entered from navigation. In-page Back restores reading position; unsaved editor content is retained.
+
+- **Global navigation rail** (`#global-nav`):
+  - Section: Navigation rail
   - Type: container
-  - Notes: Holds navigation items and storage indicator.
+  - Notes: Left icon rail holding the 11 route items plus Install, Pet, Settings, and the compact-mode toggle.
 
-- **Collapse sidebar** (`#sidebar-mode-toggle`):
+- **Navigation items** (`[data-global-route]`):
+  - Section: Navigation rail
+  - Type: link list
+  - Action: Each item routes the shell to its view via hash links (#home, #agent, #skills, #learning, #automation, #plugins, #providers, #logs, #telemetry, #settings).
+  - Notes: Anchors with data-global-route carrying the hash route; the active one carries is-active and aria-current=page.
+
+- **Expand sidebar** (`#global-nav-expand`):
+  - Section: Navigation rail
   - Type: button
-  - Action: Toggles icon-only sidebar mode (persisted locally).
+  - Action: Toggles the rail between icon-only and icon+label modes; the choice persists in localStorage (nusashell.sidebarMode).
+  - Notes: At <=720px the rail is an always-labelled overlay drawer, so the same footer slot becomes a Close sidebar action that dismisses the drawer instead of toggling a mode it cannot show.
+
+- **Install app** (`#global-nav-install`):
+  - Section: Navigation rail
+  - Type: button
+  - Action: Shows only while the browser offers PWA installation; installs NusaShell as an app.
+  - Notes: Drives the hidden pwa-install-btn proxy so js/pwa.js keeps working.
+
+- **Desktop pet** (`#global-nav-pet`):
+  - Section: Navigation rail
+  - Type: button
+  - Action: Opens the desktop pet launcher: routes to Settings pet card and dispatches the pet launcher event.
+  - Notes: Drives the hidden pet-btn proxy via nusashell:open-pet-launcher so js/pet-launcher.js keeps working; a status dot on the icon reflects install state. Hidden at widths through 720px — the pet launcher is a desktop-only affordance.
+
+- **Install app proxy** (`#pwa-install-btn`):
+  - Section: Navigation rail
+  - Type: button
+  - Action: Hidden production-ID proxy bound by js/pwa.js initInstallButton; global-nav-install is the visible affordance.
+  - Notes: Kept inside a hidden wrapper so module state flips never render a duplicate control.
+
+- **Desktop pet proxy** (`#pet-btn`):
+  - Section: Navigation rail
+  - Type: button
+  - Action: Hidden production-ID proxy bound by js/pet-launcher.js (install dialog, launch toggle).
+  - Notes: Kept inside a hidden wrapper; global-nav-pet is the visible affordance.
+
+- **Navigation backdrop** (`#mobile-nav-backdrop`):
+  - Section: Navigation rail
+  - Type: overlay
+  - Action: Click to close the open navigation drawer on small screens.
 
 ## Offline screen
 
-Full-window overlay shown whenever the backend is unreachable. It covers every view so no half-broken UI stays interactive: an explicit offline verdict shows it immediately, while closed/error/reconnecting states only cover after a short persistence window so quick reconnects never flicker. Recovery hides it instantly and Try again reloads the shell (the cached app stays available while the server is down).
+Full-window overlay shown whenever the backend is unreachable. It covers every view so no half-broken UI stays interactive: an explicit offline verdict shows it immediately, while closed/error/reconnecting states only cover after a short persistence window so quick reconnects never flicker. Recovery hides it instantly and Try again reloads the shell (service worker serves the cached shell while the server is down).
 
 - **Offline screen** (`#offline-screen`):
   - Section: Navigation
@@ -73,7 +99,7 @@ Full-window overlay shown whenever the backend is unreachable. It covers every v
 - **Try again** (`#offline-retry-btn`):
   - Section: Navigation
   - Type: button
-  - Notes: Reloads the shell; the cached app stays available while the server is down.
+  - Notes: Reloads the shell; the service worker serves the cached app while the server is down.
 
 ## Device pairing gate
 
@@ -82,7 +108,7 @@ Full-window dialog shown when the backend requires device pairing (an unpaired n
 - **Device pairing gate** (`#pairing-gate`):
   - Section: Navigation — Overlays
   - Type: dialog
-  - Notes: Full-window dialog shown when the backend requires device pairing; owns the screen while pairing is required.
+  - Notes: Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED.
 
 - **Pairing gate title** (`#pairing-gate-title`):
   - Section: Navigation — Overlays
@@ -138,3 +164,12 @@ Full-window dialog shown when the backend requires device pairing (an unpaired n
   - Section: Navigation — Overlays
   - Type: status
   - Notes: Remaining challenge lifetime.
+
+## App loading layer
+
+Full-window boot overlay shown while the shell loads its first data; it hides once the app is interactive.
+
+- **Loading layer** (`#page-loading`):
+  - Section: Boot
+  - Type: overlay
+  - Notes: Full-window boot overlay removed once the shell is interactive.

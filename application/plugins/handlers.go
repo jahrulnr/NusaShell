@@ -375,10 +375,6 @@ func (s *Service) handleStop(req contracts.PluginIDRequest) (any, *contracts.RPC
 	return map[string]bool{"ok": true}, nil
 }
 
-func (s *Service) handleUninstall(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
-	return s.handleDelete(req)
-}
-
 func (s *Service) handleCheckUpdates() (any, *contracts.RPCError) {
 	if s.store == nil || s.installer == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin runtime not available"}

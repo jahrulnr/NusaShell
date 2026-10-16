@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"nusashell/application/agent"
 	"nusashell/application/service/attachments"
 	"nusashell/domain"
 )
@@ -45,7 +46,7 @@ func (a *App) hydrateAttachmentDataURLs(atts []domain.Attachment) []domain.Attac
 }
 
 func (a *App) chatMessagesForProvider(c *domain.Conversation, pendingMsgID string, caps ModelCapabilities) []ChatMessage {
-	msgs := chatMessages(c, pendingMsgID, caps)
+	msgs := agent.ChatMessages(c, pendingMsgID, caps)
 	if a == nil {
 		return msgs
 	}

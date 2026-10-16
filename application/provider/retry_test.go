@@ -13,7 +13,7 @@ import (
 )
 
 func TestProviderRetryDelayHonorsRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&domain.ProviderError{
+	delay, retryable := RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 3 * time.Second,
 		Err:        errors.New("rate limited"),
@@ -48,8 +48,8 @@ func TestIsRetryableProviderError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isRetryableProviderError(tt.err); got != tt.retryable {
-				t.Fatalf("isRetryableProviderError(%v) = %t, want %t", tt.err, got, tt.retryable)
+			if got := IsRetryableError(tt.err); got != tt.retryable {
+				t.Fatalf("IsRetryableError(%v) = %t, want %t", tt.err, got, tt.retryable)
 			}
 		})
 	}
@@ -60,7 +60,7 @@ func TestIsRetryableProviderError(t *testing.T) {
 // an 81-hour rate-limit reset) is NOT retried — the turn should fail fast so
 // the user sees the error instead of waiting hours inside a retry sleep.
 func TestProviderRetryDelayRejectsLongRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&domain.ProviderError{
+	delay, retryable := RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 81 * time.Hour,
 		Err:        errors.New("rate limited (reset after 81h 38m 41s)"),
@@ -76,7 +76,7 @@ func TestProviderRetryDelayRejectsLongRetryAfter(t *testing.T) {
 // TestProviderRetryDelayAcceptsShortRetryAfter verifies that a 429 with a
 // Retry-After within the cutoff is still retried with the provider's delay.
 func TestProviderRetryDelayAcceptsShortRetryAfter(t *testing.T) {
-	delay, retryable := providerRetryDelay(&domain.ProviderError{
+	delay, retryable := RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: 30 * time.Second,
 		Err:        errors.New("rate limited"),
@@ -93,7 +93,7 @@ func TestProviderRetryDelayAcceptsShortRetryAfter(t *testing.T) {
 // exactly at the cutoff is retryable, just above is not.
 func TestProviderRetryDelayAtCutoffBoundary(t *testing.T) {
 	// Exactly at cutoff — retryable
-	_, retryable := providerRetryDelay(&domain.ProviderError{
+	_, retryable := RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: domain.RetryAfterCutoff,
 		Err:        errors.New("rate limited"),
@@ -103,7 +103,7 @@ func TestProviderRetryDelayAtCutoffBoundary(t *testing.T) {
 	}
 
 	// Just above cutoff — not retryable
-	_, retryable = providerRetryDelay(&domain.ProviderError{
+	_, retryable = RetryDelay(&domain.ProviderError{
 		StatusCode: 429,
 		RetryAfter: domain.RetryAfterCutoff + 1*time.Second,
 		Err:        errors.New("rate limited"),
@@ -121,14 +121,14 @@ func TestProviderRetryDelayAtCutoffBoundary(t *testing.T) {
 func TestDescribeProviderError(t *testing.T) {
 	t.Run("non-upstream passthrough", func(t *testing.T) {
 		src := errors.New("boom")
-		if got := describeProviderError(src); got != "boom" {
-			t.Fatalf("describeProviderError(non-upstream) = %q, want %q", got, "boom")
+		if got := DescribeError(src); got != "boom" {
+			t.Fatalf("DescribeError(non-upstream) = %q, want %q", got, "boom")
 		}
 	})
 
 	t.Run("bare temporary EOF", func(t *testing.T) {
 		err := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: io.ErrUnexpectedEOF}
-		got := describeProviderError(err)
+		got := DescribeError(err)
 		if !strings.Contains(got, "unexpected EOF") {
 			t.Fatalf("describeProviderError must include underlying message, got %q", got)
 		}
@@ -147,7 +147,7 @@ func TestDescribeProviderError(t *testing.T) {
 			RetryAfter: 30 * time.Second,
 			Err:        errors.New("rate limited"),
 		}
-		got := describeProviderError(err)
+		got := DescribeError(err)
 		for _, want := range []string{"rate limited", "kind=http_status", "status=429", "retry_after=30s"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("describeProviderError missing %q in %q", want, got)
@@ -161,7 +161,7 @@ func TestDescribeProviderError(t *testing.T) {
 			StatusCode: 503,
 			Err:        errors.New("upstream down"),
 		}
-		got := describeProviderError(err)
+		got := DescribeError(err)
 		if !strings.Contains(got, "status=503") {
 			t.Fatalf("describeProviderError missing status=503 in %q", got)
 		}
@@ -224,14 +224,14 @@ func TestShouldEmergencyCompact(t *testing.T) {
 		Err:        errors.New("provider returned HTTP 400: unsupported parameter"),
 	}
 
-	if !shouldEmergencyCompact(overflow, 200_000, 150_000) {
+	if !ShouldEmergencyCompact(overflow, 200_000, 150_000) {
 		t.Error("expected emergency compact when estimate exceeds trigger")
 	}
 	// Even with a low heuristic estimate, an explicit context limit forces compaction.
-	if !shouldEmergencyCompact(overflow, 100_000, 150_000) {
+	if !ShouldEmergencyCompact(overflow, 100_000, 150_000) {
 		t.Error("expected emergency compact with explicit context limit despite low estimate")
 	}
-	if shouldEmergencyCompact(notOverflow, 200_000, 150_000) {
+	if ShouldEmergencyCompact(notOverflow, 200_000, 150_000) {
 		t.Error("unexpected emergency compact for non-overflow 400")
 	}
 }
@@ -243,13 +243,13 @@ func TestShouldEmergencyCompactCodexSSEContextOverflow(t *testing.T) {
 		Err:       errors.New("codex: stream error: Your input exceeds the context window of this model. Please adjust your input and try again."),
 	}
 
-	if !isContextOverflowError(err) {
+	if !IsContextOverflow(err) {
 		t.Fatal("Codex SSE context-window error must be classified as overflow")
 	}
-	if isRetryableProviderError(err) {
+	if IsRetryableError(err) {
 		t.Fatal("Codex SSE context-window error must not burn the normal retry budget")
 	}
-	if !shouldEmergencyCompact(err, 900_000, 700_000) {
+	if !ShouldEmergencyCompact(err, 900_000, 700_000) {
 		t.Fatal("Codex SSE context-window error must trigger emergency compaction")
 	}
 }
@@ -260,10 +260,10 @@ func TestContextLimitFromError(t *testing.T) {
 		StatusCode: 400,
 		Err:        errors.New(`provider returned HTTP 400: Requested token count exceeds the model's maximum context length of 262144 tokens.`),
 	}
-	if got, ok := contextLimitFromError(overflow); !ok || got != 262144 {
+	if got, ok := ContextLimit(overflow); !ok || got != 262144 {
 		t.Fatalf("contextLimitFromError = (%d, %t), want (262144, true)", got, ok)
 	}
-	if _, ok := contextLimitFromError(errors.New("plain error")); ok {
+	if _, ok := ContextLimit(errors.New("plain error")); ok {
 		t.Fatal("contextLimitFromError should not match non-ProviderError")
 	}
 }
@@ -274,7 +274,7 @@ func TestIsRetryableProviderErrorRejectsPermanentFailure(t *testing.T) {
 		StatusCode: 503,
 		Err:        errors.New("provider returned HTTP 503: insufficient balance"),
 	}
-	if isRetryableProviderError(err) {
+	if IsRetryableError(err) {
 		t.Fatal("503 with billing body must NOT be retryable")
 	}
 }
@@ -323,14 +323,14 @@ func TestIsTPMDominatedRequestApp(t *testing.T) {
 // oversized request, which fails again in every window.
 func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
 	err := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second, Err: errors.New(tpmOverflowBody)}
-	delay, retryable := providerRetryDelay(err, 1)
+	delay, retryable := RetryDelay(err, 1)
 	if retryable {
 		t.Fatalf("structural TPM must not be retryable, got delay=%s", delay)
 	}
 	// The transient variant with the same status stays retryable.
 	transient := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 200000, Requested 150000.")}
-	if _, retryable := providerRetryDelay(transient, 1); !retryable {
+	if _, retryable := RetryDelay(transient, 1); !retryable {
 		t.Fatal("transient TPM with Retry-After must stay retryable")
 	}
 }
@@ -344,17 +344,17 @@ func TestProviderRetryDelayRejectsStructuralTPM(t *testing.T) {
 // request is congestion and must not force compaction.
 func TestShouldEmergencyCompactTPM(t *testing.T) {
 	structural := &domain.ProviderError{Kind: domain.KindSSETransport, Temporary: true, Err: errors.New(tpmOverflowBody)}
-	if !shouldEmergencyCompact(structural, 50_000, 150_000) {
+	if !ShouldEmergencyCompact(structural, 50_000, 150_000) {
 		t.Fatal("structural TPM must force emergency compaction despite low estimate")
 	}
 	dominant := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 100000, Requested 300000.")}
-	if !shouldEmergencyCompact(dominant, 50_000, 150_000) {
+	if !ShouldEmergencyCompact(dominant, 50_000, 150_000) {
 		t.Fatal("dominant TPM (request > half the budget) must force emergency compaction")
 	}
 	modest := &domain.ProviderError{Kind: domain.KindHTTPStatus, StatusCode: 429, RetryAfter: 30 * time.Second,
 		Err: errors.New("Request too large on tokens per min (TPM): Limit 500000, Used 400000, Requested 40000.")}
-	if shouldEmergencyCompact(modest, 50_000, 150_000) {
+	if ShouldEmergencyCompact(modest, 50_000, 150_000) {
 		t.Fatal("modest TPM (congestion) must not force compaction")
 	}
 }

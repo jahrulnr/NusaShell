@@ -4,6 +4,7 @@ package service
 
 import (
 	"fmt"
+	"nusashell/pkg/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,10 +37,6 @@ func systemdUserUnitDir() string {
 	return filepath.Join(base, "systemd", "user")
 }
 
-func (m *linuxManager) unitPath() string {
-	return filepath.Join(m.unitDir, ServiceName+".service")
-}
-
 func (m *linuxManager) Install() error {
 	if err := guardOutsideService(ActionInstall); err != nil {
 		return err
@@ -57,14 +54,14 @@ func (m *linuxManager) Install() error {
 	if err := os.MkdirAll(m.unitDir, 0o755); err != nil {
 		return err
 	}
-	unitPath := m.unitPath()
+	unitPath := filepath.Join(m.unitDir, ServiceName+".service")
 	if err := assertNotSymlink(unitPath); err != nil {
 		return err
 	}
 	if err := backupExisting(unitPath); err != nil {
 		return fmt.Errorf("backing up previous unit: %w", err)
 	}
-	if err := atomicWrite(unitPath, []byte(SystemdUnit(m.opts, env)), 0o644); err != nil {
+	if err := atomicfile.Write(unitPath, []byte(SystemdUnit(m.opts, env)), 0o644); err != nil {
 		return err
 	}
 	return m.activate()
@@ -115,7 +112,7 @@ func (m *linuxManager) Uninstall() error {
 	// the unit-file removal below is the source of truth, so uninstall stays
 	// idempotent either way.
 	_, _ = m.run.Run("systemctl", "--user", "disable", "--now", ServiceName+".service")
-	unitPath := m.unitPath()
+	unitPath := filepath.Join(m.unitDir, ServiceName+".service")
 	if err := os.Remove(unitPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -129,7 +126,7 @@ func (m *linuxManager) Uninstall() error {
 }
 
 func (m *linuxManager) Status() (Status, error) {
-	unitPath := m.unitPath()
+	unitPath := filepath.Join(m.unitDir, ServiceName+".service")
 	st := Status{DefinitionPath: unitPath}
 	if content, err := os.ReadFile(unitPath); err == nil {
 		st.Installed = true

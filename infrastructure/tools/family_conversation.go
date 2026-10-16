@@ -3,10 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"nusashell/application"
+	"nusashell/pkg/yamlmd"
 )
 
 // executeConversationFamily runs the conversation root's ops. It is reached
@@ -16,7 +18,7 @@ func (t *Toolbox) executeConversationFamily(ctx context.Context, op string, args
 	switch op {
 	case "list":
 		if t.Conversations == nil {
-			return "", depMissing("conversation service not available")
+			return "", errors.New("conversation service not available")
 		}
 		var args struct {
 			Limit  int `json:"limit"`
@@ -40,7 +42,7 @@ func (t *Toolbox) executeConversationFamily(ctx context.Context, op string, args
 
 	case "search":
 		if t.Conversations == nil {
-			return "", depMissing("conversation service not available")
+			return "", errors.New("conversation service not available")
 		}
 		var args struct {
 			Query  string `json:"query"`
@@ -96,7 +98,7 @@ func (t *Toolbox) executeConversationFamily(ctx context.Context, op string, args
 
 	case "info":
 		if t.Conversations == nil {
-			return "", depMissing("conversation service not available")
+			return "", errors.New("conversation service not available")
 		}
 		var args struct {
 			ID    string `json:"id"`
@@ -112,11 +114,11 @@ func (t *Toolbox) executeConversationFamily(ctx context.Context, op string, args
 		if err != nil {
 			return "", err
 		}
-		return yamlBlock(info), nil
+		return yamlmd.Block(info), nil
 
 	case "read":
 		if t.Conversations == nil {
-			return "", depMissing("conversation service not available")
+			return "", errors.New("conversation service not available")
 		}
 		var args struct {
 			ID    string `json:"id"`
@@ -152,7 +154,7 @@ func (t *Toolbox) executeConversationFamily(ctx context.Context, op string, args
 
 	case "send":
 		if t.Conversations == nil {
-			return "", depMissing("conversation service not available")
+			return "", errors.New("conversation service not available")
 		}
 		var args struct {
 			ID      string `json:"id"`

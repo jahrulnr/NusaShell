@@ -379,11 +379,6 @@ func OpenRouterAttributionHeaders() map[string]string {
 	}
 }
 
-// RepairToolCallArguments delegates to domain.RepairToolCallArguments.
-func RepairToolCallArguments(value string) string {
-	return domain.RepairToolCallArguments(value)
-}
-
 // IncompleteSSEError returns the error for the "clean close, no terminator"
 // path.
 func IncompleteSSEError() error {

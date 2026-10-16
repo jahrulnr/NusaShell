@@ -433,10 +433,3 @@ func extractJWTClaims(jwt string) jwtClaims {
 		Name:      name,
 	}
 }
-
-// extractAccountID decodes a JWT id_token and extracts the
-// chatgpt_account_id from the https://api.openai.com/auth claim.
-// Kept for backward compatibility with Refresh callers.
-func extractAccountID(idToken string) string {
-	return extractJWTClaims(idToken).AccountID
-}

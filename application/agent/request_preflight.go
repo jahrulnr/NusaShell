@@ -39,15 +39,20 @@ func (a *Service) buildTurnRequest(run *TurnRun, adapter ProviderContext, conver
 		if partial != nil && (visible(partial.Content) || visible(partial.Reasoning)) {
 			messages = appendContinuationFromPartial(messages, *partial)
 		} else {
-			messages = appendContinuationTool(messages)
+			messages = AppendContinuationTool(messages)
 		}
 	}
-	if a.learnedParams != nil && a.learnedParams.NeedsUserNudge(providerID, model) && needsUserMessageAtEnd(messages) {
+	if a.learnedParams != nil && a.learnedParams.NeedsUserNudge(providerID, model) && NeedsUserMessageAtEnd(messages) {
 		messages = append(messages, ChatMessage{Role: "user", Content: userNudgeText})
 	}
 
 	return ChatRequest{
-		Model:                    model,
+		Model: model,
+		// ProviderID targets the adapter's provider instance — which may
+		// differ from run.ProviderID on the reuse-compaction path — so
+		// request conversion can scope opaque reasoning extras to the
+		// instance that produced them.
+		ProviderID:               adapter.ProviderID,
 		System:                   buildSystemPromptForRun(run, conversation, settings.UserPrompt),
 		Messages:                 messages,
 		Tools:                    tools,
@@ -67,7 +72,7 @@ func (a *Service) buildTurnRequest(run *TurnRun, adapter ProviderContext, conver
 		StripParams:              a.learnedParams.StripParams(providerID, model),
 		CompactionBlob:           conversation.CompactionBlob,
 		CompactionPrefixMessages: a.compactionPrefixMessageCount(conversation, caps),
-		ContextManagement:        serverCompactionContextManagementForKind(model, adapter.Kind),
+		ContextManagement:        ServerCompactionContextManagementForKind(model, adapter.Kind),
 	}
 }
 

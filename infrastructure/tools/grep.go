@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"nusashell/pkg/yamlmd"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -323,7 +324,7 @@ func formatRgResults(matches []grepMatch, mode, via string, capped bool, totalMa
 	}
 	if len(matches) == 0 {
 		meta["line_matches"] = 0
-		return yamlBlock(meta)
+		return yamlmd.Block(meta)
 	}
 	var b strings.Builder
 	switch mode {

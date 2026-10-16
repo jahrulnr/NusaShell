@@ -16,6 +16,8 @@
 //    chrome hidden via body.mini-mode). Not always-on-top, but fully
 //    functional on every engine.
 
+import { readoptWidgetStyles } from '../shared/widget-styles.js?v=7';
+
 const PIP_SIZE = { width: 460, height: 680 };
 const PLACEHOLDER_ID = 'agent-thread-pip-placeholder';
 
@@ -55,11 +57,17 @@ async function openDocumentPip() {
   pipWin.document.body.classList.add('is-pip-window');
   pipWin.document.body.appendChild(thread);
   if (composer) pipWin.document.body.appendChild(composer);
+  // Cross-document adoption empties every shadow root's adoptedStyleSheets;
+  // rebuild them against the PiP document (and back again on restore).
+  readoptWidgetStyles(thread);
+  if (composer) readoptWidgetStyles(composer);
   document.body.classList.add('is-pip-source');
 
   const restore = () => {
     placeholder.replaceWith(thread);
     if (composer) thread.insertAdjacentElement('afterend', composer);
+    readoptWidgetStyles(thread);
+    if (composer) readoptWidgetStyles(composer);
     document.body.classList.remove('is-pip-source');
     pipWin.document.body.classList.remove('is-pip-window');
   };
@@ -71,7 +79,11 @@ async function openDocumentPip() {
 function copyStyleSheets(pipWin) {
   for (const node of document.querySelectorAll('link[rel="stylesheet"], style')) {
     // Links re-fetch through the service worker cache, so this works even
-    // when the local server is temporarily unreachable.
-    pipWin.document.head.appendChild(node.cloneNode(true));
+    // when the local server is temporarily unreachable. Pin the resolved
+    // absolute URL: a relative href attribute would resolve against the PiP
+    // document's about:blank base and never load.
+    const clone = node.cloneNode(true);
+    if (clone.href) clone.href = node.href;
+    pipWin.document.head.appendChild(clone);
   }
 }

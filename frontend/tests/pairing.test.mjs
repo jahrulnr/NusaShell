@@ -43,7 +43,7 @@ test('pairing gate does not use native alert/confirm/prompt', () => {
 test('settings view includes remote access pairing panel', () => {
   assert.match(html, /id="pairing-panel"/);
   assert.match(html, /id="pairing-approval-overlay"/);
-  assert.match(html, /class="ui-dialog pairing-approval-dialog"[^>]+role="dialog"/);
+  assert.match(html, /class="settings-pairing-dialog"[^>]+role="dialog"/);
   assert.match(html, /id="pairing-approval-title"/);
   assert.match(html, /id="pairing-approval-close"/);
   assert.match(html, /id="settings-group-remote"/);
@@ -56,11 +56,11 @@ test('settings view includes remote access pairing panel', () => {
 });
 
 test('settings section nav includes remote access jump link', () => {
-  assert.match(html, /id="settings-jump-remote"[^>]+data-settings-section="settings-group-remote"/);
+  assert.match(html, /data-settings-section="remote"[^>]*id="settings-jump-remote"/);
 });
 
 test('pairing CSS is linked in index.html', () => {
-  assert.match(html, /<link[^>]+href="styles\/pairing.css"/);
+  assert.match(html, /<link[^>]+href="styles\/pairing.css\?v=1"/);
 });
 
 test('pairing gate has keyboard-accessible buttons with type=button', () => {

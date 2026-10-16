@@ -71,7 +71,7 @@ func (a *Service) conversationCompactionTurn(c *domain.Conversation, settings do
 	toolDefs := a.TurnToolDefs(run, settings)
 	if promptCache == nil {
 		system := buildSystemPromptForRun(run, c, settings.UserPrompt)
-		promptCache = buildPromptCachePolicyForContextWithContract(settings, adapter, model, c.ID, promptCachePrefixForRun(run), system, toolDefs)
+		promptCache = buildPromptCachePolicyForContextWithContract(settings, adapter, model, c.ID, PromptCachePrefixForRun(run), system, toolDefs)
 	}
 	return &compactionTurn{run: run, tools: toolDefs, effort: c.Effort, promptCache: promptCache}
 }
@@ -102,7 +102,7 @@ func (a *Service) compactionModelCapabilities(adapter ProviderContext, model str
 	if rpcErr != nil || provider == nil {
 		return ModelCapabilities{}
 	}
-	return modelCapabilitiesWithLearned(provider, bare, a.learnedParams, a.modelOverrides)
+	return ModelCapabilitiesWithLearned(provider, bare, a.learnedParams, a.modelOverrides)
 }
 
 // ResolveContextWindow returns the effective context window for compaction
@@ -150,15 +150,15 @@ const (
 // short". The compaction prompt carries the contract instead — one advertised
 // tool, "output only the handoff checkpoint via the summary tool" and "call the
 // summary tool exactly once" — and a model that replies in prose is still
-// usable: extractCompactionSummary falls back to resp.Content, while the
-// terminal rule (minimum length + compactionSummaryEchoesAssistant) rejects an
+// usable: ExtractCompactionSummary falls back to resp.Content, while the
+// terminal rule (minimum length + CompactionSummaryEchoesAssistant) rejects an
 // answer that just continues the live conversation.
 
-// extractCompactionSummary extracts the summary from the model response. It
+// ExtractCompactionSummary extracts the summary from the model response. It
 // prefers the summary() tool call (which carries the text in args, separate
 // from reasoning tokens) and falls back to resp.Content for non-tool-calling
 // models or when the model ignores the tool and replies as text.
-func extractCompactionSummary(resp ChatResponse) string {
+func ExtractCompactionSummary(resp ChatResponse) string {
 	for _, tc := range resp.ToolCalls {
 		if tc.Name != compactionSummaryToolName {
 			continue
@@ -173,10 +173,10 @@ func extractCompactionSummary(resp ChatResponse) string {
 	return resp.Content
 }
 
-// compactionSummaryEchoesAssistant reports whether the candidate summary is
+// CompactionSummaryEchoesAssistant reports whether the candidate summary is
 // just a copy of the latest assistant turn (the compaction model continuing
 // the live agent instead of writing a handoff).
-func compactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
+func CompactionSummaryEchoesAssistant(summary string, msgs []ChatMessage) bool {
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return false
@@ -208,11 +208,11 @@ func dedicatedCompactionToolDefs(a *Service) []ToolDef {
 // can serve it from the prompt cache. ok is false when the prefix and the
 // summary budget do not fit the context window.
 func (a *Service) reuseCompactionRequest(adapter ProviderContext, c *domain.Conversation, splitIdx int, model string, contextWindow, summaryBudget int, settings domain.Settings, caps ModelCapabilities, turn *compactionTurn) (ChatRequest, int, bool) {
-	prefix := cloneConversation(c)
+	prefix := c.Clone()
 	prefix.Messages = append([]domain.Message(nil), c.Messages[:splitIdx]...)
 	req := a.buildTurnRequest(turn.run, adapter, prefix, "", model, turn.effort, turn.tools, settings, false, nil, 0, turn.promptCache, caps)
 	messages := withCompactionAnchorNudge(a.chatMessagesForProvider(prefix, "", caps), prefix, adapter.Kind)
-	req.Messages = appendCompactionHandoffUser(messages)
+	req.Messages = AppendCompactionHandoffUser(messages)
 	room := contextWindow - int(provider.EstimateRequestTokens(req, adapter.Kind, adapter.OpenRouter))
 	return req, room, room >= summaryBudget
 }
@@ -427,9 +427,11 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 					continue
 				}
 				calls := capCompactionToolCalls(m.ToolCalls, toolCap)
-				cm := ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: calls}
+				cm := ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: calls, ProviderID: m.ProviderID}
 				if len(m.ReasoningExtra) > 0 {
 					cm.ReasoningExtra = append(json.RawMessage(nil), m.ReasoningExtra...)
+					cm.ReasoningExtraFor = m.ReasoningExtraFor
+					cm.ReasoningExtraUpstream = m.ReasoningExtraUpstream
 				}
 				msgs = append(msgs, cm)
 				for _, tc := range calls {
@@ -441,8 +443,9 @@ func (a *Service) compactConversationWithCache(ctx context.Context, adapter Prov
 		}
 		summary, err := runPass(ChatRequest{
 			Model:            model,
+			ProviderID:       adapter.ProviderID,
 			System:           systemPrompt,
-			Messages:         appendCompactionHandoffUser(msgs),
+			Messages:         AppendCompactionHandoffUser(msgs),
 			Tools:            compactionTools,
 			PromptCaching:    settings.PromptCaching,
 			PromptCache:      promptCache,
@@ -490,6 +493,7 @@ func (a *Service) compactCodexConversation(ctx context.Context, adapter Provider
 	request := func(active ProviderContext) (ChatResponse, error) {
 		return active.Stream(ctx, ChatRequest{
 			Model:                    model,
+			ProviderID:               active.ProviderID,
 			Messages:                 messages,
 			ConversationID:           c.ID,
 			CompactionBlob:           c.CompactionBlob,
@@ -611,10 +615,10 @@ func capCompactionToolCalls(calls []domain.ToolCall, capChars int) []domain.Tool
 	return out
 }
 
-// compactionPassAvailable is the per-pass token budget for message content.
+// CompactionPassAvailable is the per-pass token budget for message content.
 // The running summary grows across passes, so later chunks shrink to leave
 // room for it instead of using a one-shot 2000-token reserve.
-func compactionPassAvailable(contextWindow int, runningSummary string, summaryMaxOut int) int {
+func CompactionPassAvailable(contextWindow int, runningSummary string, summaryMaxOut int) int {
 	return compactionPassAvailableWithReserve(contextWindow, runningSummary, summaryMaxOut, compactionSystemReserve)
 }
 
@@ -631,9 +635,9 @@ func compactionPassAvailableWithReserve(contextWindow int, runningSummary string
 	return available
 }
 
-// appendCompactionHandoffUser appends the handoff command as the last user
+// AppendCompactionHandoffUser appends the handoff command as the last user
 // message so the compaction model is not left on an assistant/tool turn.
-func appendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
+func AppendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
 	closer := strings.TrimSpace(compactionHandoffUserPrompt)
 	if closer == "" {
 		return msgs
@@ -646,7 +650,7 @@ func (a *Service) PersistCompactedConversation(c *domain.Conversation, summary s
 		return fmt.Errorf("conversation is required")
 	}
 	repo := bindConversation(a.Conversations, c)
-	tmp := cloneConversation(c)
+	tmp := c.Clone()
 	tmp.Messages = domain.FilterHydrationDomainMessages(tmp.Messages)
 	toArchive := tmp.ArchiveMessages(keepBudget)
 	if len(toArchive) > 0 {
@@ -702,7 +706,7 @@ func (a *Service) PersistCodexCompactedConversation(c *domain.Conversation, blob
 		return fmt.Errorf("conversation is required")
 	}
 	repo := bindConversation(a.Conversations, c)
-	tmp := cloneConversation(c)
+	tmp := c.Clone()
 	tmp.Messages = domain.FilterHydrationDomainMessages(tmp.Messages)
 	toArchive := tmp.ArchiveBlobMessages(keepBudget)
 	if len(toArchive) > 0 {

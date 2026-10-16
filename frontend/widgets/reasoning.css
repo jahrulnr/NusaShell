@@ -1,0 +1,20 @@
+.reasoning-widget { color: var(--muted, #748197); }
+.reasoning-toggle { display: grid; width: 100%; grid-template-columns: auto auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 0; background: transparent; cursor: pointer; text-align: left; }
+.reasoning-toggle:hover .reasoning-summary { color: var(--mist, #b9c3cc); }
+.reasoning-icon { color: var(--sand, #d1b77f); font: 12px var(--font-mono, monospace); }
+.reasoning-label { color: var(--sand, #d1b77f); font: 600 10px var(--font-mono, monospace); }
+.reasoning-summary { overflow: hidden; color: var(--muted, #748197); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.reasoning-duration, .chevron { color: #59677d; font: 9px var(--font-mono, monospace); }
+.reasoning-details { margin: 4px 0 0 20px; padding: 9px 12px; border-left: 1px solid rgba(209, 183, 127, .28); color: var(--mist, #b9c3cc); font-size: 12px; }
+.reasoning-details :is(p, ul, ol) { margin: 0 0 8px; }
+.reasoning-details :is(ul, ol) { padding-left: 16px; }
+.reasoning-details li + li { margin-top: 5px; }
+.reasoning-details :is(pre, code) { font-family: var(--font-mono, monospace); }
+.reasoning-details pre { position: relative; max-height: 260px; margin: 8px 0; overflow: auto; padding: 30px 9px 9px; border: 1px solid rgba(64, 82, 104, .58); border-radius: 5px; background: #070b14; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reasoning-details .code-language-label { position: absolute; top: 8px; left: 10px; max-width: calc(100% - 72px); overflow: hidden; color: #8be9fd; font: 600 8px/1 var(--font-mono, monospace); letter-spacing: .08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.reasoning-details .code-editor-trigger { position: absolute; top: 5px; right: 6px; min-height: 21px; padding: 0 7px; border: 1px solid rgba(71, 105, 133, .72); border-radius: 4px; background: rgba(8, 13, 24, .86); color: #89a6c2; cursor: pointer; font: 8px var(--font-mono, monospace); opacity: .8; }
+.reasoning-details .code-editor-trigger:hover, .reasoning-details .code-editor-trigger:focus-visible { border-color: rgba(121, 185, 232, .9); color: #d7e4ed; opacity: 1; outline: none; }
+.reasoning-details a { color: var(--ocean, #79aee8); }
+.reasoning-details a.agent-local-link { text-decoration-style: dashed; text-underline-offset: 3px; }
+@media (hover: none) { .reasoning-details .code-editor-trigger { opacity: 1; } }
+@media (max-width: 620px) { .reasoning-duration { display: none; } }

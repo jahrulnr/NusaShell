@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"nusashell/application/agent"
 	"nusashell/application/conversation"
 	"nusashell/application/learn"
 	"nusashell/application/logs"
@@ -71,7 +72,7 @@ func (a *App) settingsService() *settings.Service {
 func (a *App) onSettingsApplied(old, next domain.Settings) {
 	a.InvalidateLearningSearcher()
 	if next.UserPrompt != old.UserPrompt {
-		a.publishAnnouncementToAll(newAnnouncement(
+		a.agentService().PublishAnnouncementToAll(agent.NewAnnouncement(
 			"config_changed",
 			domain.AnnouncementConfigChangedArgs([]string{"user_prompt"}),
 			domain.AnnouncementConfigChangedMessage([]string{"user instructions have changed"}),
@@ -82,32 +83,20 @@ func (a *App) onSettingsApplied(old, next domain.Settings) {
 	}
 }
 
-func (a *App) handleSettingsGet() (any, *contracts.RPCError) {
-	return a.settingsService().HandleGet()
-}
-
-func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contracts.RPCError) {
-	return a.settingsService().HandleSet(req)
-}
-
-func settingsDTO(s domain.Settings) contracts.SettingsDTO {
-	return settings.ToDTO(s)
-}
-
 func (a *App) skillsService() *skills.Service {
 	return skills.New(skills.Deps{
 		Store: a.Skills,
 		Log:   a.log,
 		Bus:   a.Bus,
 		OnChanged: func(op, name string) {
-			a.publishAnnouncementToAll(newAnnouncement(
+			a.agentService().PublishAnnouncementToAll(agent.NewAnnouncement(
 				"skills_changed",
 				domain.AnnouncementSkillsChangedArgs(op, name),
 				domain.AnnouncementSkillsChangedMessage(name),
 			), "")
 		},
 		OnLife: func(op, id, status string) {
-			a.emitSkillLifecycle(op, id, status, "")
+			a.learnService().EmitSkillLifecycle(op, id, status, "")
 		},
 	})
 }
@@ -122,13 +111,6 @@ func (a *App) skillName(id, ownedBy string) string {
 		return id
 	}
 	return strings.TrimSpace(s.Name)
-}
-
-func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.RPCError) {
-	return a.skillsService().HandleSave(req)
-}
-func (a *App) handleSkillsPromote(req contracts.SkillPromoteRequest) (any, *contracts.RPCError) {
-	return a.skillsService().HandlePromote(req)
 }
 
 func (a *App) petsDeps() pets.Deps {
@@ -147,16 +129,6 @@ func (a *App) petsService() *pets.Service {
 	}
 	a.petsSvc = pets.New(a.petsDeps())
 	return a.petsSvc
-}
-
-func (a *App) handlePetsStatus() (any, *contracts.RPCError) {
-	return a.petsService().HandleStatus()
-}
-func (a *App) handlePetsInstallStart(req contracts.PetsInstallStartRequest) (any, *contracts.RPCError) {
-	return a.petsService().HandleInstallStart(req)
-}
-func (a *App) handlePetsLaunch() (any, *contracts.RPCError) {
-	return a.petsService().HandleLaunch()
 }
 
 func (a *App) PetsInstallRunning() bool {
@@ -187,17 +159,17 @@ func (a *App) conversationDeps() conversation.Deps {
 		Acp:         a.Acp,
 		Log:         a.log,
 		LockTurn: func(id string) func() {
-			mu := a.conversationTurnLock(id)
+			mu := a.agentService().ConversationTurnLock(id)
 			mu.Lock()
 			return mu.Unlock
 		},
 		CancelRun: func(id string) {
-			if run := a.activeRunForConversation(id); run != nil {
+			if run := a.agentService().ActiveRunForConversation(id); run != nil {
 				run.Cancel()
 			}
 		},
 		Announce: func(targetID, fromID, content string) error {
-			return a.deliverPeerMessage(targetID, fromID, content)
+			return a.agentService().DeliverPeerMessage(targetID, fromID, content)
 		},
 	}
 	if a.DirectoryBrowser != nil {
@@ -275,14 +247,14 @@ func (a *App) memoryDeps() memory.Deps {
 			} else if a.User != nil {
 				path = a.User.Path()
 			}
-			a.publishAnnouncementToAll(newAnnouncement(
+			a.agentService().PublishAnnouncementToAll(agent.NewAnnouncement(
 				"memory_changed",
 				domain.AnnouncementMemoryChangedArgs(tier, op),
 				domain.AnnouncementMemoryChangedMessage(tier, path),
 			), "")
 		},
 		OnRecordDeleted: func(id string) {
-			a.pruneLearningEdges(id)
+			a.learnService().PruneEdges(id)
 			a.InvalidateLearningSearcher()
 		},
 	}
@@ -325,7 +297,7 @@ func (a *App) learnDeps() learn.Deps {
 		OnMemoryUpdated: a.emitMemoryUpdated,
 		OnSkillChanged: func(op, id, status, conversationID string) {
 			name := a.skillName(id, string(domain.SkillOriginLearned))
-			a.publishAnnouncementToAll(newAnnouncement(
+			a.agentService().PublishAnnouncementToAll(agent.NewAnnouncement(
 				"skills_changed",
 				domain.AnnouncementSkillsChangedArgs(op, name),
 				domain.AnnouncementSkillsChangedMessage(name),
@@ -353,10 +325,10 @@ func (a *App) learnDeps() learn.Deps {
 	}
 	if a.Conversations != nil {
 		d.PersistConversation = func(c *domain.Conversation) error {
-			return bindConversation(a.Conversations, c).Save()
+			return conversation.Bind(a.Conversations, c).Save()
 		}
 		d.LockConversation = func(id string) func() {
-			mu := a.conversationTurnLock(id)
+			mu := a.agentService().ConversationTurnLock(id)
 			mu.Lock()
 			return mu.Unlock
 		}
@@ -516,7 +488,7 @@ func (a *App) subagentDeps() subagent.Deps {
 		Go:            func(name string, fn func()) { a.goSafe(name, fn) },
 		OnAgentsChanged: func(name, action string) {
 			change := domain.AnnouncementConfigChangedDetail("subagent", name, action)
-			a.publishAnnouncementToAll(newAnnouncement(
+			a.agentService().PublishAnnouncementToAll(agent.NewAnnouncement(
 				"config_changed",
 				domain.AnnouncementConfigChangedArgs([]string{change}),
 				domain.AnnouncementConfigChangedMessage([]string{change}),
@@ -524,18 +496,18 @@ func (a *App) subagentDeps() subagent.Deps {
 		},
 		TrackPending: a.trackPendingRun,
 		DeliverRunDone: func(conversationID, runID string, complete func(cid string) error) {
-			a.deliverRunDone(conversationID, pendingRunDone{RunID: runID, Complete: complete})
+			a.agentService().DeliverRunDone(conversationID, pendingRunDone{RunID: runID, Complete: complete})
 		},
 		CompleteSubagent: a.completeSubagentRunLocked,
 		ResolveModel: func(string) (string, error) {
-			p, bare, _, err := a.resolveHeadlessModel("")
+			p, bare, _, err := a.agentService().ResolveHeadlessModel("")
 			if err != nil {
 				return "", err
 			}
 			return p.ID + ":" + bare, nil
 		},
 		Headless: func(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any, onUpdate func(string), onTranscript func(domain.AcpTranscriptChunk)) (map[string]any, string, error) {
-			return a.runHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentDelegate, onUpdate, onTranscript)
+			return a.agentService().RunHeadlessTurnKindObserved(ctx, prompt, model, trust, schema, AgentDelegate, "", onUpdate, onTranscript)
 		},
 		SteerHeadless: a.SteerHeadlessTurn,
 	}
@@ -571,7 +543,7 @@ func (a *App) providerDeps() provider.Deps {
 		OnProviderDeleted: a.deleteCodexAccountCredentials,
 		OnConfigChanged: func(name, action string) {
 			change := domain.AnnouncementConfigChangedDetail("provider", name, action)
-			a.publishAnnouncementToAll(newAnnouncement(
+			a.agentService().PublishAnnouncementToAll(agent.NewAnnouncement(
 				"config_changed",
 				domain.AnnouncementConfigChangedArgs([]string{change}),
 				domain.AnnouncementConfigChangedMessage([]string{change}),

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -316,13 +317,15 @@ func TestAssistantBlockCombinations(t *testing.T) {
 // TestReasoningBlockAlwaysFirstForAnthropic proves the Anthropic ordering
 // requirement: if a ReasoningBlock is present, it must be the first block.
 // Anthropic rejects with 400: "If an assistant message contains any thinking
-// blocks, the first block must be `thinking` or `redacted_thinking`".
+// blocks, the first block must be `thinking` or `redacted_thinking`". The
+// message carries the Anthropic-shaped replay extra a signed thinking block
+// is emitted from.
 func TestReasoningBlockAlwaysFirstForAnthropic(t *testing.T) {
 	req := ChatRequest{
 		Model: "claude-sonnet-4-6",
 		Messages: []ChatMessage{
 			{Role: "user", Content: "What is 2+2?"},
-			{Role: "assistant", Content: "Four", Reasoning: "User asks 2+2. Answer is 4.", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "verify", Args: "{}"}}},
+			{Role: "assistant", Content: "Four", Reasoning: "User asks 2+2. Answer is 4.", ReasoningExtra: json.RawMessage(`{"signature":"sig-1"}`), ReasoningExtraFor: "anthropic", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "verify", Args: "{}"}}},
 			{Role: "user", Content: "Thanks!"},
 		},
 	}
@@ -596,8 +599,57 @@ func TestChatKindDropsExtraOnlyReasoningWithoutReplay(t *testing.T) {
 	}
 }
 
+// TestMessagesKindStripsCodexReasoningExtra proves foreign encrypted
+// reasoning items never reach the Anthropic Messages wire: the extra has no
+// Anthropic signature, so no unsigned thinking block may be emitted either.
+// The visible assistant text still survives.
 func TestMessagesKindStripsCodexReasoningExtra(t *testing.T) {
 	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-REASON"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+		},
+	}, domain.ProviderMessages, false)
+	if len(cr.Messages) != 1 {
+		t.Fatalf("messages = %+v, want the assistant entry kept", cr.Messages)
+	}
+	for _, block := range cr.Messages[0].Blocks {
+		if rb, ok := block.(core.ReasoningBlock); ok {
+			t.Fatalf("ReasoningBlock = %#v, want unsigned reasoning dropped for messages", rb)
+		}
+	}
+	tb, ok := cr.Messages[0].Blocks[0].(core.TextBlock)
+	if !ok || tb.Text != "ok" {
+		t.Fatalf("blocks[0] = %#v, want TextBlock %q", cr.Messages[0].Blocks[0], "ok")
+	}
+}
+
+// TestMessagesKindReplaysAnthropicReasoningExtra proves an anthropic-marked
+// opaque extra survives the app boundary onto the ReasoningBlock, so the
+// wire adapter can echo a signed thinking block.
+func TestMessagesKindReplaysAnthropicReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"signature":"sig-1"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra, ReasoningExtraFor: "anthropic"},
+		},
+	}, domain.ProviderMessages, false)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if rb.Text != "think" || string(rb.Extra) != string(extra) {
+		t.Fatalf("ReasoningBlock = %#v, want text plus anthropic extra", rb)
+	}
+}
+
+// TestMessagesKindReplaysLegacyAnthropicShapedExtra proves the unmarked
+// (pre-marker) path keeps working: an extra with an Anthropic replay key is
+// still forwarded to Messages on shape alone.
+func TestMessagesKindReplaysLegacyAnthropicShapedExtra(t *testing.T) {
+	extra := json.RawMessage(`{"signature":"sig-legacy"}`)
 	cr := ToCoreRequest(ChatRequest{
 		Model: "claude-sonnet-4-6",
 		Messages: []ChatMessage{
@@ -608,8 +660,169 @@ func TestMessagesKindStripsCodexReasoningExtra(t *testing.T) {
 	if !ok {
 		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
 	}
-	if rb.Text != "think" || len(rb.Extra) != 0 {
-		t.Fatalf("ReasoningBlock = %#v, want plaintext only", rb)
+	if string(rb.Extra) != string(extra) {
+		t.Fatalf("Extra = %s, want anthropic-shaped legacy extra kept", rb.Extra)
+	}
+}
+
+// TestMessagesKindReplaysRedactedReasoningExtra proves a redacted_thinking
+// payload is treated as a valid Anthropic replay state even without a
+// signature.
+func TestMessagesKindReplaysRedactedReasoningExtra(t *testing.T) {
+	extra := json.RawMessage(`{"redacted":"opaque-data"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", ReasoningExtra: extra, ReasoningExtraFor: "anthropic"},
+		},
+	}, domain.ProviderMessages, false)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if string(rb.Extra) != string(extra) {
+		t.Fatalf("Extra = %s, want redacted payload kept", rb.Extra)
+	}
+}
+
+// TestMessagesKindDropsUnsignedReasoning proves plaintext-only persisted
+// reasoning is not emitted as an unsigned Anthropic thinking block — the
+// provider would reject it with a 400.
+func TestMessagesKindDropsUnsignedReasoning(t *testing.T) {
+	cr := ToCoreRequest(ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think"},
+		},
+	}, domain.ProviderMessages, false)
+	for _, block := range cr.Messages[0].Blocks {
+		if rb, ok := block.(core.ReasoningBlock); ok {
+			t.Fatalf("ReasoningBlock = %#v, want plaintext reasoning dropped for messages", rb)
+		}
+	}
+}
+
+// TestMessagesKindEmitsSignedReasoningWithoutText proves a signed extra
+// produces a thinking block even when the visible reasoning text is empty
+// (Anthropic display omitted); the tool-loop protocol requires an assistant
+// message to start with a thinking block.
+func TestMessagesKindEmitsSignedReasoningWithoutText(t *testing.T) {
+	extra := json.RawMessage(`{"signature":"sig-1"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", ReasoningExtra: extra, ReasoningExtraFor: "anthropic", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "run", Args: "{}"}}},
+		},
+	}, domain.ProviderMessages, false)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock from signed extra", cr.Messages[0].Blocks[0])
+	}
+	if rb.Text != "" || string(rb.Extra) != string(extra) {
+		t.Fatalf("ReasoningBlock = %#v, want empty text plus signature extra", rb)
+	}
+}
+
+// TestMessagesKindDropsForeignMarkedExtra proves the producer marker wins
+// over payload shape: an Anthropic-shaped extra recorded as coming from
+// another family is still dropped.
+func TestMessagesKindDropsForeignMarkedExtra(t *testing.T) {
+	extra := json.RawMessage(`{"signature":"sig-1"}`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "claude-sonnet-4-6",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra, ReasoningExtraFor: "codex"},
+		},
+	}, domain.ProviderMessages, false)
+	for _, block := range cr.Messages[0].Blocks {
+		if rb, ok := block.(core.ReasoningBlock); ok {
+			t.Fatalf("ReasoningBlock = %#v, want foreign-marked extra dropped", rb)
+		}
+	}
+}
+
+// TestReasoningExtraForMismatchStripsOtherKinds proves the producer marker
+// gates every wire, not just Messages: an extra whose recorded family does
+// not match the target wire family is stripped even when its shape would
+// otherwise pass the per-kind rule.
+func TestReasoningExtraForMismatchStripsOtherKinds(t *testing.T) {
+	arrayExtra := json.RawMessage(`[{"type":"reasoning.text","text":"step"}]`)
+	objectExtra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC"}`)
+	anthropicExtra := json.RawMessage(`{"signature":"sig-1"}`)
+	tests := []struct {
+		name       string
+		kind       domain.ProviderKind
+		openRouter bool
+		extra      json.RawMessage
+		extraFor   string
+	}{
+		{name: "openai-marked array on openrouter chat", kind: domain.ProviderChat, openRouter: true, extra: arrayExtra, extraFor: "openai"},
+		{name: "openrouter-marked array on responses", kind: domain.ProviderResponses, extra: arrayExtra, extraFor: "openrouter"},
+		{name: "anthropic-marked extra on responses", kind: domain.ProviderResponses, extra: anthropicExtra, extraFor: "anthropic"},
+		{name: "codex-marked extra on responses", kind: domain.ProviderResponses, extra: objectExtra, extraFor: "codex"},
+		{name: "openai-marked extra on codex", kind: domain.ProviderCodex, extra: objectExtra, extraFor: "openai"},
+		{name: "anthropic-marked extra on gemini", kind: domain.ProviderGemini, extra: anthropicExtra, extraFor: "anthropic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cr := ToCoreRequest(ChatRequest{
+				Model: "model",
+				Messages: []ChatMessage{
+					{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: tt.extra, ReasoningExtraFor: tt.extraFor},
+				},
+			}, tt.kind, tt.openRouter)
+			var rb core.ReasoningBlock
+			var found bool
+			for _, message := range cr.Messages {
+				for _, block := range message.Blocks {
+					if candidate, ok := block.(core.ReasoningBlock); ok {
+						rb = candidate
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("no ReasoningBlock converted; blocks = %+v", cr.Messages)
+			}
+			if len(rb.Extra) != 0 {
+				t.Fatalf("Extra = %s, want stripped for producer family %q on kind %s", rb.Extra, tt.extraFor, tt.kind)
+			}
+		})
+	}
+}
+
+// TestReasoningExtraForMatchingProducerKept proves a marker matching the
+// target family forwards the extra through the normal per-kind rules.
+func TestReasoningExtraForMatchingProducerKept(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       domain.ProviderKind
+		openRouter bool
+		extra      json.RawMessage
+		extraFor   string
+	}{
+		{name: "anthropic on messages", kind: domain.ProviderMessages, extra: json.RawMessage(`{"signature":"sig-1"}`), extraFor: "anthropic"},
+		{name: "openai on responses", kind: domain.ProviderResponses, extra: json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC"}`), extraFor: "openai"},
+		{name: "codex on codex", kind: domain.ProviderCodex, extra: json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC"}`), extraFor: "codex"},
+		{name: "openrouter on openrouter chat", kind: domain.ProviderChat, openRouter: true, extra: json.RawMessage(`[{"type":"reasoning.text","text":"step"}]`), extraFor: "openrouter"},
+		{name: "gemini on gemini", kind: domain.ProviderGemini, extra: json.RawMessage(`{"thought_signature":"sig"}`), extraFor: "gemini"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cr := ToCoreRequest(ChatRequest{
+				Model: "model",
+				Messages: []ChatMessage{
+					{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: tt.extra, ReasoningExtraFor: tt.extraFor},
+				},
+			}, tt.kind, tt.openRouter)
+			rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+			if !ok {
+				t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+			}
+			if string(rb.Extra) != string(tt.extra) {
+				t.Fatalf("Extra = %s, want %s for matching producer family", rb.Extra, tt.extra)
+			}
+		})
 	}
 }
 
@@ -644,6 +857,191 @@ func TestOpenRouterChatStripsCodexObjectReasoningExtra(t *testing.T) {
 	}
 	if len(rb.Extra) != 0 {
 		t.Fatalf("Extra = %s, want Codex object stripped on OpenRouter chat", rb.Extra)
+	}
+}
+
+// TestReasoningExtraProviderInstanceGate proves an opaque extra replays only
+// to the provider instance that produced it: two credentials on the same
+// wire family must not inherit each other's encrypted reasoning state.
+// Empty on either side is legacy data and never gates.
+func TestReasoningExtraProviderInstanceGate(t *testing.T) {
+	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC"}`)
+	tests := []struct {
+		name      string
+		msgProvID string
+		reqProvID string
+		wantExtra bool
+	}{
+		{name: "mismatch drops", msgProvID: "openai-a", reqProvID: "openai-b", wantExtra: false},
+		{name: "match keeps", msgProvID: "openai-a", reqProvID: "openai-a", wantExtra: true},
+		{name: "empty message id keeps legacy", msgProvID: "", reqProvID: "openai-b", wantExtra: true},
+		{name: "empty request id keeps legacy", msgProvID: "openai-a", reqProvID: "", wantExtra: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cr := ToCoreRequest(ChatRequest{
+				Model:      "gpt-5.6-sol",
+				ProviderID: tt.reqProvID,
+				Messages: []ChatMessage{
+					{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra, ReasoningExtraFor: "openai", ProviderID: tt.msgProvID},
+				},
+			}, domain.ProviderResponses, false)
+			rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+			if !ok {
+				t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+			}
+			if tt.wantExtra && string(rb.Extra) != string(extra) {
+				t.Fatalf("Extra = %s, want %s kept for matching/legacy provider ids", rb.Extra, extra)
+			}
+			if !tt.wantExtra && len(rb.Extra) != 0 {
+				t.Fatalf("Extra = %s, want dropped for provider instance %q → %q", rb.Extra, tt.msgProvID, tt.reqProvID)
+			}
+		})
+	}
+}
+
+// TestReasoningExtraUpstreamRouteGate proves a captured OpenRouter upstream
+// ("provider" field, e.g. "Nvidia") only replays when the request does not
+// pin a different provider route. Replaying another upstream's details under
+// a pinned route sends that upstream's opaque payload to a different
+// provider — which rejects or misinterprets it. Auto-routed requests and
+// extras with no recorded upstream never gate.
+func TestReasoningExtraUpstreamRouteGate(t *testing.T) {
+	extra := json.RawMessage(`[{"type":"reasoning.text","text":"step"}]`)
+	tests := []struct {
+		name     string
+		upstream string
+		route    string
+		wantKeep bool
+	}{
+		{name: "pinned route matching upstream keeps", upstream: "Nvidia", route: "Nvidia", wantKeep: true},
+		{name: "pinned route different case keeps", upstream: "Nvidia", route: "nvidia", wantKeep: true},
+		{name: "pinned route mismatch drops", upstream: "Nvidia", route: "Wafer", wantKeep: false},
+		{name: "slug spelling of display name keeps", upstream: "Amazon Bedrock", route: "amazon-bedrock", wantKeep: true},
+		{name: "route variant suffix keeps", upstream: "deepinfra", route: "deepinfra/fp4", wantKeep: true},
+		{name: "auto route keeps any upstream", upstream: "Nvidia", route: "", wantKeep: true},
+		{name: "no recorded upstream keeps pinned route", upstream: "", route: "Wafer", wantKeep: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cr := ToCoreRequest(ChatRequest{
+				Model:         "openai/gpt-5",
+				ProviderRoute: tt.route,
+				Messages: []ChatMessage{
+					{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra, ReasoningExtraFor: "openrouter", ReasoningExtraUpstream: tt.upstream},
+				},
+			}, domain.ProviderChat, true)
+			rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+			if !ok {
+				t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+			}
+			if tt.wantKeep && string(rb.Extra) != string(extra) {
+				t.Fatalf("Extra = %s, want kept for upstream %q / route %q", rb.Extra, tt.upstream, tt.route)
+			}
+			if !tt.wantKeep && len(rb.Extra) != 0 {
+				t.Fatalf("Extra = %s, want dropped for upstream %q vs pinned route %q", rb.Extra, tt.upstream, tt.route)
+			}
+		})
+	}
+}
+
+// TestOpenRouterReasoningFormatVendorMismatchDrops proves a reasoning_details
+// item whose declared format belongs to a different upstream vendor than the
+// requested model's slug prefix is dropped instead of sticky-failing the
+// upstream (open-webui#28240 pattern).
+func TestOpenRouterReasoningFormatVendorMismatchDrops(t *testing.T) {
+	extra := json.RawMessage(`[{"type":"reasoning.encrypted","data":"cipher","format":"anthropic-claude-v1"}]`)
+	cr := ToCoreRequest(ChatRequest{
+		Model: "openai/gpt-5",
+		Messages: []ChatMessage{
+			{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+		},
+	}, domain.ProviderChat, true)
+	rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+	if !ok {
+		t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+	}
+	if len(rb.Extra) != 0 {
+		t.Fatalf("Extra = %s, want anthropic-format details dropped for openai/ model", rb.Extra)
+	}
+}
+
+// TestOpenRouterReasoningFormatVendorMatchKeeps proves same-vendor formats
+// and format-less items keep replaying; vendor variants like :free and a
+// models/ prefix normalize before the comparison.
+func TestOpenRouterReasoningFormatVendorMatchKeeps(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		extra string
+	}{
+		{name: "anthropic format on anthropic model", model: "anthropic/claude-sonnet-4", extra: `[{"type":"reasoning.encrypted","data":"c","format":"anthropic-claude-v1"}]`},
+		{name: "openai format on openai model", model: "openai/gpt-5", extra: `[{"type":"reasoning.encrypted","data":"c","format":"openai-responses-v1"}]`},
+		{name: "xai format on x-ai model", model: "x-ai/grok-4-fast", extra: `[{"type":"reasoning.encrypted","data":"c","format":"xai-responses-v1"}]`},
+		{name: "gemini format on google model", model: "google/gemini-3-flash", extra: `[{"type":"reasoning.encrypted","data":"c","format":"google-gemini-v1"}]`},
+		{name: "variant suffix stripped", model: "anthropic/claude-sonnet-4:free", extra: `[{"type":"reasoning.encrypted","data":"c","format":"anthropic-claude-v1"}]`},
+		{name: "models prefix stripped", model: "models/anthropic/claude-sonnet-4", extra: `[{"type":"reasoning.encrypted","data":"c","format":"anthropic-claude-v1"}]`},
+		{name: "unknown format ignored", model: "openai/gpt-5", extra: `[{"type":"reasoning.encrypted","data":"c","format":"unknown"}]`},
+		{name: "no format ignored", model: "openai/gpt-5", extra: `[{"type":"reasoning.summary","summary":"s"}]`},
+		{name: "unmapped format ignored", model: "openai/gpt-5", extra: `[{"type":"reasoning.encrypted","data":"c","format":"future-v9"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extra := json.RawMessage(tt.extra)
+			cr := ToCoreRequest(ChatRequest{
+				Model: tt.model,
+				Messages: []ChatMessage{
+					{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+				},
+			}, domain.ProviderChat, true)
+			rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+			if !ok {
+				t.Fatalf("blocks[0] = %#v, want ReasoningBlock", cr.Messages[0].Blocks[0])
+			}
+			if string(rb.Extra) != string(extra) {
+				t.Fatalf("Extra = %s, want %s kept", rb.Extra, extra)
+			}
+		})
+	}
+}
+
+// TestOpenRouterReasoningFormatUndeterminedVendorKeeps proves routing aliases
+// and bare model names leave the extra alone: when the target vendor cannot
+// be derived there is no positive mismatch to drop on.
+func TestOpenRouterReasoningFormatUndeterminedVendorKeeps(t *testing.T) {
+	extra := json.RawMessage(`[{"type":"reasoning.encrypted","data":"cipher","format":"anthropic-claude-v1"}]`)
+	for _, model := range []string{"openrouter/auto", "openrouter/free", "gpt-5"} {
+		cr := ToCoreRequest(ChatRequest{
+			Model: model,
+			Messages: []ChatMessage{
+				{Role: "assistant", Content: "ok", Reasoning: "think", ReasoningExtra: extra},
+			},
+		}, domain.ProviderChat, true)
+		rb, ok := cr.Messages[0].Blocks[0].(core.ReasoningBlock)
+		if !ok {
+			t.Fatalf("model %q: blocks[0] = %#v, want ReasoningBlock", model, cr.Messages[0].Blocks[0])
+		}
+		if string(rb.Extra) != string(extra) {
+			t.Fatalf("model %q: Extra = %s, want forwarded unchanged", model, rb.Extra)
+		}
+	}
+}
+
+// TestFromCoreResponseCarriesModelAndUpstream proves the provider-reported
+// served model and gateway upstream flow through conversion so the agent
+// layer can persist them as provenance.
+func TestFromCoreResponseCarriesModelAndUpstream(t *testing.T) {
+	out := FromCoreResponse(&core.Response{
+		Provider: "openrouter",
+		Model:    "nvidia/nemotron-3-super-120b-a12b:free",
+		Upstream: "Nvidia",
+		Blocks:   []core.Block{core.TextBlock{Text: "ok"}},
+	})
+	if out.Model != "nvidia/nemotron-3-super-120b-a12b:free" {
+		t.Fatalf("Model = %q, want served model", out.Model)
+	}
+	if out.Upstream != "Nvidia" {
+		t.Fatalf("Upstream = %q, want gateway upstream", out.Upstream)
 	}
 }
 
@@ -683,6 +1081,7 @@ func TestReasoningExtraAbsentLeavesExtraNil(t *testing.T) {
 func TestFromCoreResponseCarriesReasoningExtra(t *testing.T) {
 	extra := json.RawMessage(`{"type":"reasoning","encrypted_content":"ENC-1"}`)
 	out := FromCoreResponse(&core.Response{
+		Provider: "openai",
 		Blocks: []core.Block{
 			core.ReasoningBlock{Text: "think", Extra: extra},
 			core.TextBlock{Text: "answer"},
@@ -694,14 +1093,75 @@ func TestFromCoreResponseCarriesReasoningExtra(t *testing.T) {
 	if string(out.ReasoningExtra) != string(extra) {
 		t.Fatalf("ReasoningExtra = %s, want %s", out.ReasoningExtra, extra)
 	}
+	if out.ReasoningExtraFor != "openai" {
+		t.Fatalf("ReasoningExtraFor = %q, want openai producer marker", out.ReasoningExtraFor)
+	}
+}
+
+// TestFromCoreResponseReasoningExtraForFallsBackToUsage proves the producer
+// marker also reads Usage.Provider when the response itself is unstamped,
+// and stays empty when neither field reports a provider.
+func TestFromCoreResponseReasoningExtraForFallsBackToUsage(t *testing.T) {
+	extra := json.RawMessage(`{"signature":"sig-1"}`)
+	out := FromCoreResponse(&core.Response{
+		Usage:  core.Usage{Provider: "anthropic"},
+		Blocks: []core.Block{core.ReasoningBlock{Extra: extra}},
+	})
+	if out.ReasoningExtraFor != "anthropic" {
+		t.Fatalf("ReasoningExtraFor = %q, want anthropic from usage stamp", out.ReasoningExtraFor)
+	}
+
+	out = FromCoreResponse(&core.Response{
+		Blocks: []core.Block{core.ReasoningBlock{Extra: extra}},
+	})
+	if out.ReasoningExtraFor != "" {
+		t.Fatalf("ReasoningExtraFor = %q, want empty for unstamped response", out.ReasoningExtraFor)
+	}
 }
 
 func TestFromCoreResponseOmitsEmptyReasoningExtra(t *testing.T) {
 	out := FromCoreResponse(&core.Response{
-		Blocks: []core.Block{core.ReasoningBlock{Text: "think"}},
+		Provider: "openai",
+		Blocks:   []core.Block{core.ReasoningBlock{Text: "think"}},
 	})
 	if len(out.ReasoningExtra) != 0 {
 		t.Fatalf("ReasoningExtra = %s, want empty", out.ReasoningExtra)
+	}
+	if out.ReasoningExtraFor != "" {
+		t.Fatalf("ReasoningExtraFor = %q, want empty when no extra was captured", out.ReasoningExtraFor)
+	}
+}
+
+// unstampedProvider returns a fixed core response without a provider stamp,
+// covering the kind-based family fallback in CompleteViaCore.
+type unstampedProvider struct {
+	resp *core.Response
+}
+
+func (p unstampedProvider) Name() string { return "test-unstamped" }
+func (p unstampedProvider) Chat(context.Context, *core.Request) (*core.Response, error) {
+	return p.resp, nil
+}
+func (p unstampedProvider) Stream(context.Context, *core.Request) (core.Stream, error) {
+	return nil, fmt.Errorf("unimplemented")
+}
+
+// TestCompleteViaCoreStampsReasoningExtraForFromKind proves the wire-kind
+// fallback: a provider whose response carries no producer stamp still gets
+// the family that interprets the target wire recorded on ReasoningExtraFor.
+func TestCompleteViaCoreStampsReasoningExtraForFromKind(t *testing.T) {
+	extra := json.RawMessage(`{"signature":"sig-1"}`)
+	out, err := CompleteViaCore(context.Background(), unstampedProvider{
+		resp: &core.Response{Blocks: []core.Block{core.ReasoningBlock{Text: "think", Extra: extra}}},
+	}, ChatRequest{
+		Model:    "claude-sonnet-4-6",
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+	}, domain.ProviderMessages, false)
+	if err != nil {
+		t.Fatalf("CompleteViaCore: %v", err)
+	}
+	if out.ReasoningExtraFor != "anthropic" {
+		t.Fatalf("ReasoningExtraFor = %q, want anthropic kind fallback", out.ReasoningExtraFor)
 	}
 }
 

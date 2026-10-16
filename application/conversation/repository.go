@@ -122,7 +122,7 @@ func (r *Repository) GetById(id string) error {
 	if err != nil {
 		return err
 	}
-	r.inner = Clone(c)
+	r.inner = c.Clone()
 	r.epochReset = false
 	r.rememberPersistedIDs()
 	return nil
@@ -202,7 +202,7 @@ func (r *Repository) Save() error {
 	}
 	// One clone per save: stores implementing SaveSnapshot take ownership of
 	// it and skip their own defensive copy; other stores clone inside Save.
-	snapshot := Clone(r.inner)
+	snapshot := r.inner.Clone()
 	var err error
 	if ss, ok := r.store.(snapshotSaver); ok {
 		err = ss.SaveSnapshot(snapshot)
@@ -265,9 +265,4 @@ func messageIDs(msgs []domain.Message) []string {
 		out[i] = m.ID
 	}
 	return out
-}
-
-// Clone returns a deep copy of a conversation; see (*domain.Conversation).Clone.
-func Clone(c *domain.Conversation) *domain.Conversation {
-	return c.Clone()
 }

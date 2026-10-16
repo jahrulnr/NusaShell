@@ -2,11 +2,8 @@ package tools
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"unicode/utf8"
-
-	"nusashell/domain/turndiff"
 )
 
 type pathText struct {
@@ -42,12 +39,4 @@ func readPathText(path string) pathText {
 		return pathText{exists: true}
 	}
 	return pathText{text: string(data), exists: true, exact: true}
-}
-
-func recordDelta(ctx context.Context, d turndiff.Delta) {
-	turndiff.Record(ctx, d)
-}
-
-func recordInexact(ctx context.Context) {
-	turndiff.Record(ctx, turndiff.Inexact())
 }

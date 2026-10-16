@@ -89,7 +89,7 @@ func main() {
 // It is explicit and opt-in: the server never reads these variables on its
 // own. Idempotent and non-destructive (see App.SeedProvidersFromEnv).
 func seedProvidersCmd() error {
-	dataDir := envOr("NUSASHELL_DATA_DIR", defaultDataDir())
+	dataDir := envOr("NUSASHELL_DATA_DIR", config.DefaultDataDir())
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func run() error {
 	configuredHost := os.Getenv("NUSASHELL_HOST")
 	host := envOr("NUSASHELL_HOST", "127.0.0.1")
 	port := envOr("NUSASHELL_PORT", "10994")
-	dataDir := envOr("NUSASHELL_DATA_DIR", defaultDataDir())
+	dataDir := envOr("NUSASHELL_DATA_DIR", config.DefaultDataDir())
 	dev := os.Getenv("NUSASHELL_DEV") != ""
 
 	level := slog.LevelInfo
@@ -541,10 +541,6 @@ func handleMCPNotification(app *application.App, autoSvc *application.Automation
 			slog.Warn("mcp notification ingest failed", "server", serverID, "event", ev.Type, "error", err)
 		}
 	})
-}
-
-func defaultDataDir() string {
-	return config.DefaultDataDir()
 }
 
 // hostHomeDir is the fallback workspace (home of the user running the

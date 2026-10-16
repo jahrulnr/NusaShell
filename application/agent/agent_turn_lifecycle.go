@@ -95,7 +95,7 @@ func (a *Service) FailStreamTurn(run *TurnRun, msgID, model string, round Stream
 	if repo, getErr := a.loadRepo(run.ConversationID); getErr == nil {
 		c := repo.Conversation()
 		a.UpdateMessage(c, msgID, func(message *domain.Message) {
-			applyStreamRound(message, model, round)
+			ApplyStreamRound(message, model, round)
 			message.Status = domain.StatusError
 			message.Error = err.Error()
 		})
@@ -122,9 +122,12 @@ func (a *Service) InterruptTurn(run *TurnRun, msgID string, round StreamedTurnRo
 		c := repo.Conversation()
 		a.UpdateMessage(c, msgID, func(m *domain.Message) {
 			if text.Visible(m.Content) == "" && text.Visible(m.Reasoning) == "" && len(m.Steps) == 0 {
-				applyStreamRound(m, model, round)
+				ApplyStreamRound(m, model, round)
 			} else if model != "" {
 				m.Model = model
+				if round.Response.Model != "" && round.Response.Model != model {
+					m.ServedModel = round.Response.Model
+				}
 			}
 			m.Status = domain.StatusInterrupted
 			if usage != (ChatUsage{}) {
@@ -158,7 +161,7 @@ func (a *Service) discardQueuedSteer(run *TurnRun) {
 	})
 }
 
-func mergeUsage(a, b ChatUsage) ChatUsage {
+func MergeUsage(a, b ChatUsage) ChatUsage {
 	return ChatUsage{
 		InputTokens:  a.InputTokens + b.InputTokens,
 		OutputTokens: a.OutputTokens + b.OutputTokens,
@@ -183,4 +186,4 @@ func toDomainUsage(u ChatUsage) *domain.Usage {
 // ModelCapabilities describes which input modalities the active chat model
 // accepts. It is resolved once per turn from the provider's model metadata
 // and threaded through the turn chain so tool dispatch (read_media)
-// and chatMessages can behave correctly without
+// and ChatMessages can behave correctly without

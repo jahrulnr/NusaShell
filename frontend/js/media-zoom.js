@@ -41,6 +41,15 @@ function captureOverlayFocus() {
   };
 }
 
+// topmostMediaOverlay reports whether the given overlay is the last
+// .media-zoom-overlay in DOM order. Nested previews and lightboxes stack, so
+// only the top one may answer Escape — a single keypress must not tear down
+// the whole chain.
+function topmostMediaOverlay(overlay) {
+  const overlays = overlay?.ownerDocument?.querySelectorAll('.media-zoom-overlay');
+  return overlays?.length ? overlays[overlays.length - 1] === overlay : true;
+}
+
 // openZoomableMedia opens a full-screen zoomable overlay.
 //   opts.src     — image URL (for raster images)
 //   opts.svgEl   — SVG element to clone (for Mermaid diagrams)
@@ -240,6 +249,7 @@ export function openZoomableMedia({ src, svgEl, alt, caption } = {}) {
   // Close handlers (Escape, click-outside, close button).
   const onKey = (e) => {
     if (e.key === 'Escape') {
+      if (!topmostMediaOverlay(overlay)) return;
       e.preventDefault();
       e.stopPropagation();
       close();
@@ -308,6 +318,7 @@ export function openArtifactPopup({ srcDoc, title, width, height } = {}) {
 
   const onKey = (e) => {
     if (e.key === 'Escape') {
+      if (!topmostMediaOverlay(overlay)) return;
       e.preventDefault();
       e.stopPropagation();
       close();
@@ -459,6 +470,7 @@ export function openAudioLightbox({ src, name, caption } = {}) {
 
   const onKey = (e) => {
     if (e.key === 'Escape') {
+      if (!topmostMediaOverlay(overlay)) return;
       e.preventDefault();
       e.stopPropagation();
       close();
@@ -528,6 +540,7 @@ export function openVideoLightbox({ src, name, caption } = {}) {
 
   const onKey = (e) => {
     if (e.key === 'Escape') {
+      if (!topmostMediaOverlay(overlay)) return;
       e.preventDefault();
       e.stopPropagation();
       close();
@@ -760,6 +773,7 @@ async function renderTextCodePreview({ contentBox, filePath, text }) {
   } catch {
     host.remove();
     contentBox.classList.remove('is-code-editor');
+    contentBox.classList.remove('is-preview-error');
     fallback();
   }
 }
@@ -803,9 +817,14 @@ function renderMediaPreview({ kind, url, fileName, preview }) {
 // popup aborts an in-flight fetch via AbortController.
 export async function openTextPreviewPopup(filePath) {
   if (!filePath) return;
-  // Strip trailing line numbers if any (e.g., /path/to/file.go:12)
-  const cleanPath = filePath.replace(/:\d+(?::\d+)?$/, '');
-  const fileName = cleanPath.split(/[\\/]/).pop() || cleanPath;
+  // Strip trailing line numbers first (/path/file.go:12). A #fragment stays
+  // on the path for now: it may be URL syntax or a literal percent-decoded
+  // character in a real filename — the fetch below tries the whole path
+  // before falling back to fragment semantics.
+  const fullPath = filePath.replace(/:\d+(?::\d+)?$/, '');
+  let cleanPath = fullPath;
+  let fragment = '';
+  let fileName = fullPath.split(/[\\/]/).pop() || fullPath;
 
   const overlay = el('div', {
     class: 'media-zoom-overlay agent-text-preview-overlay',
@@ -839,9 +858,10 @@ export async function openTextPreviewPopup(filePath) {
 
   const restoreFocus = captureOverlayFocus();
   let closed = false;
-  const controller = new AbortController();
+  let controller = new AbortController();
   const onKey = (e) => {
     if (e.key === 'Escape') {
+      if (!topmostMediaOverlay(overlay)) return;
       e.preventDefault();
       e.stopPropagation();
       close();
@@ -863,67 +883,133 @@ export async function openTextPreviewPopup(filePath) {
   document.addEventListener('keydown', onKey, true);
   closeBtn.focus();
 
-  try {
-    const res = await fetch(mediaPreviewURL(cleanPath), { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    const contentType = res.headers?.get?.('content-type') || '';
-    const contentLength = res.headers?.get?.('content-length') || '';
-    // Header-first classification: the backend sets Content-Type from magic
-    // bytes, so it wins over a deceptive suffix. Media kinds (image/audio/
-    // video/pdf) must NOT be fully downloaded for classification.
-    const headerKind = kindForContentType(cleanContentType(contentType));
-    const sizeFromHeader = contentLength ? Number.parseInt(contentLength, 10) : 0;
+  const kindBadge = bar.querySelector('.agent-text-preview-kind');
 
-    let preview;
-    let bytes = new Uint8Array();
-    if (headerKind) {
-      // A known media/text kind from the header — no body read needed for
-      // classification. Markdown/text still need the full body below.
-      preview = { kind: headerKind, source: 'content-type', contentType: cleanContentType(contentType) };
-    } else {
-      // Uninformative header: read a bounded 4 KiB sample for the magic
-      // and binary heuristic, then let classifyLocalPreview decide. Keep the
-      // original response unread because text/Markdown may need its full body
-      // below; a Response body cannot be consumed twice.
-      const sampleResponse = typeof res.clone === 'function' ? res.clone() : res;
-      bytes = await readBoundedSample(sampleResponse, 4096, controller.signal);
-      if (closed) return;
-      preview = classifyLocalPreview({ filePath: cleanPath, contentType, bytes });
-    }
-
-    const kindLabel = PREVIEW_KIND_LABEL[preview.kind] || 'File';
-    const kindBadge = bar.querySelector('.agent-text-preview-kind');
-    kindBadge.dataset.previewKind = preview.kind;
-    kindBadge.dataset.previewSource = preview.source;
-    // Prefer Content-Length for the size badge (accurate for media without
-    // downloading the body); fall back to the bytes actually read.
-    const sizeForBadge = sizeFromHeader || bytes.byteLength;
-    kindBadge.textContent = `${kindLabel}${sizeForBadge ? ` · ${formatByteSize(sizeForBadge)}` : ''}`;
-    kindBadge.title = preview.source === 'content-type' ? 'Detected from the file signature by NusaShell' : `Detected from ${preview.source}`;
-    contentBox.replaceChildren();
-
-    if (preview.kind === 'markdown') {
-      const text = await readFullText(res, controller.signal);
-      if (closed) return;
-      const mdWrapper = el('div', { class: 'agent-bubble-text agent-text-preview-md' });
-      mdWrapper.innerHTML = renderMarkdown(text);
-      contentBox.append(mdWrapper);
-      await renderPreviewMermaid(mdWrapper);
-      void highlightCode(contentBox);
-    } else if (preview.kind === 'text') {
-      const text = await readFullText(res, controller.signal);
-      if (closed) return;
-      await renderTextCodePreview({ contentBox, filePath: cleanPath, text });
-    } else if (preview.kind === 'binary') {
-      contentBox.append(renderBinaryPreview({ fileName, preview }));
-    } else {
-      contentBox.append(renderMediaPreview({ kind: preview.kind, url: mediaPreviewURL(cleanPath), fileName, preview }));
-    }
-  } catch (err) {
+  async function load() {
     if (closed) return;
-    if (err?.name === 'AbortError') return; // close aborted the fetch
-    contentBox.replaceChildren(el('div', { class: 'agent-text-preview-error', text: `Failed to load ${cleanPath}: ${err.message}` }));
+    // A retry after close must not re-use an aborted signal.
+    controller = new AbortController();
+    kindBadge.dataset.previewKind = 'loading';
+    kindBadge.textContent = 'Loading';
+    kindBadge.removeAttribute('title');
+    contentBox.classList.remove('is-code-editor');
+    contentBox.classList.remove('is-preview-error');
+    contentBox.replaceChildren(el('div', { class: 'agent-text-preview-loading', text: 'Loading…' }));
+    try {
+      let res = await fetch(mediaPreviewURL(cleanPath), { signal: controller.signal });
+      if (!res.ok && cleanPath.includes('#')) {
+        // The whole path missed, so treat the suffix as <path>#<fragment>: the
+        // document before '#' opens and the rest scrolls into view after render.
+        const hashIndex = cleanPath.indexOf('#');
+        const retryPath = cleanPath.slice(0, hashIndex);
+        const retry = await fetch(mediaPreviewURL(retryPath), { signal: controller.signal });
+        if (retry.ok) {
+          res = retry;
+          cleanPath = retryPath;
+          fragment = fullPath.slice(hashIndex + 1);
+          fileName = retryPath.split(/[\\/]/).pop() || retryPath;
+          overlay.setAttribute('aria-label', fileName);
+          bar.querySelector('.agent-text-preview-name').textContent = fileName;
+          const pathLabel = bar.querySelector('.agent-text-preview-path');
+          pathLabel.textContent = cleanPath;
+          pathLabel.title = cleanPath;
+          const download = bar.querySelector('.agent-text-preview-download');
+          download.href = mediaPreviewURL(cleanPath);
+          download.download = fileName;
+        }
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const contentType = res.headers?.get?.('content-type') || '';
+      const contentLength = res.headers?.get?.('content-length') || '';
+      // Header-first classification: the backend sets Content-Type from magic
+      // bytes, so it wins over a deceptive suffix. Media kinds (image/audio/
+      // video/pdf) must NOT be fully downloaded for classification.
+      const headerKind = kindForContentType(cleanContentType(contentType));
+      const sizeFromHeader = contentLength ? Number.parseInt(contentLength, 10) : 0;
+
+      let preview;
+      let bytes = new Uint8Array();
+      if (headerKind) {
+        // A known media/text kind from the header — no body read needed for
+        // classification. Markdown/text still need the full body below.
+        preview = { kind: headerKind, source: 'content-type', contentType: cleanContentType(contentType) };
+      } else {
+        // Uninformative header: read a bounded 4 KiB sample for the magic
+        // and binary heuristic, then let classifyLocalPreview decide. Keep the
+        // original response unread because text/Markdown may need its full body
+        // below; a Response body cannot be consumed twice.
+        const sampleResponse = typeof res.clone === 'function' ? res.clone() : res;
+        bytes = await readBoundedSample(sampleResponse, 4096, controller.signal);
+        if (closed) return;
+        preview = classifyLocalPreview({ filePath: cleanPath, contentType, bytes });
+      }
+
+      const kindLabel = PREVIEW_KIND_LABEL[preview.kind] || 'File';
+      kindBadge.dataset.previewKind = preview.kind;
+      kindBadge.dataset.previewSource = preview.source;
+      // Prefer Content-Length for the size badge (accurate for media without
+      // downloading the body); fall back to the bytes actually read.
+      const sizeForBadge = sizeFromHeader || bytes.byteLength;
+      kindBadge.textContent = `${kindLabel}${sizeForBadge ? ` · ${formatByteSize(sizeForBadge)}` : ''}`;
+      kindBadge.title = preview.source === 'content-type' ? 'Detected from the file signature by NusaShell' : `Detected from ${preview.source}`;
+      contentBox.replaceChildren();
+
+      if (preview.kind === 'markdown') {
+        const text = await readFullText(res, controller.signal);
+        if (closed) return;
+        const mdWrapper = el('div', { class: 'agent-bubble-text agent-text-preview-md' });
+        mdWrapper.innerHTML = renderMarkdown(text);
+        bindPreviewLinks(mdWrapper, cleanPath);
+        resolvePreviewMedia(mdWrapper, cleanPath);
+        contentBox.append(mdWrapper);
+        await renderPreviewMermaid(mdWrapper);
+        void highlightCode(contentBox);
+      } else if (preview.kind === 'text') {
+        const text = await readFullText(res, controller.signal);
+        if (closed) return;
+        await renderTextCodePreview({ contentBox, filePath: cleanPath, text });
+      } else if (preview.kind === 'binary') {
+        contentBox.append(renderBinaryPreview({ fileName, preview }));
+      } else {
+        contentBox.append(renderMediaPreview({ kind: preview.kind, url: mediaPreviewURL(cleanPath), fileName, preview }));
+      }
+      if (fragment) scrollToPreviewAnchor(contentBox, fragment);
+    } catch (err) {
+      if (closed) return;
+      if (err?.name === 'AbortError') return; // close aborted the fetch
+      kindBadge.dataset.previewKind = 'error';
+      kindBadge.textContent = 'Failed';
+      kindBadge.removeAttribute('title');
+      contentBox.classList.add('is-preview-error');
+      contentBox.replaceChildren(renderPreviewErrorState({ fileName, cleanPath, err, onRetry: load }));
+    }
   }
+  await load();
+}
+
+// renderPreviewErrorState keeps a load failure readable inside the same
+// preview chrome: the file label and a plain-language message carry the
+// story, the raw path + status stay available as secondary detail, and the
+// actions reuse the existing retry (re-fetch) and close seams instead of a
+// parallel popup implementation.
+function renderPreviewErrorState({ fileName, cleanPath, err, onRetry }) {
+  const status = /^HTTP (\d{3})/.exec(err?.message || '')?.[1] || '';
+  const friendly = status === '404'
+    ? 'This file is not available — it may have been moved, renamed, or deleted.'
+    : status === '403'
+      ? 'This file could not be opened — the server denied access to it.'
+      : 'This file could not be loaded for preview. Check the path and try again.';
+  const retry = el('button', { class: 'agent-text-preview-error-action', type: 'button', text: 'Retry' });
+  retry.addEventListener('click', () => { void onRetry?.(); });
+  return el('div', { class: 'agent-text-preview-error', role: 'alert' },
+    el('span', { class: 'agent-text-preview-error-mark', text: '!', 'aria-hidden': 'true' }),
+    el('div', { class: 'agent-text-preview-error-copy' },
+      el('strong', { text: `Could not preview ${fileName}` }),
+      el('span', { text: friendly }),
+      el('code', { class: 'agent-text-preview-error-detail', text: `${cleanPath} — ${err?.message || 'Unknown error'}` }),
+    ),
+    el('div', { class: 'agent-text-preview-error-actions' }, retry),
+  );
 }
 
 // Markdown previews share the chat Markdown parser, including Mermaid
@@ -938,4 +1024,130 @@ async function renderPreviewMermaid(container) {
   } catch {
     // Keep the Mermaid source placeholder as a useful fallback.
   }
+}
+
+// bindPreviewLinks keeps document links inside the preview surface instead of
+// letting them navigate the app shell. Absolute local links reuse the same
+// data-local-path seam as chat (a nested type-aware preview); relative file
+// hrefs resolve against the previewed document's directory and open the same
+// way; bare #fragments scroll inside the current document rather than leaking
+// into the app router. External links and other schemes (https:, mailto:)
+// keep their own behavior.
+function bindPreviewLinks(container, filePath) {
+  container.addEventListener('click', (event) => {
+    const link = event.target.closest?.('a');
+    if (!link || !container.contains(link)) return;
+    const localPath = link.getAttribute('data-local-path');
+    if (localPath) {
+      event.preventDefault();
+      void openTextPreviewPopup(localPath);
+      return;
+    }
+    const href = link.getAttribute('href') || '';
+    if (!href) return;
+    if (href.startsWith('#')) {
+      event.preventDefault();
+      scrollToPreviewAnchor(link.closest('.agent-text-preview-content') || container, href.slice(1));
+      return;
+    }
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) || href.startsWith('//')) return;
+    event.preventDefault();
+    void openTextPreviewPopup(resolveRelativePreviewPath(filePath, href));
+  });
+}
+
+// resolveRelativePreviewPath resolves a Markdown-relative href against the
+// previewed document's directory and keeps any trailing #fragment so the
+// caller's own fragment handling can scroll after render. .. segments walk
+// parent directories and clamp at the filesystem root for absolute bases.
+export function resolveRelativePreviewPath(filePath, href) {
+  const hashIndex = href.indexOf('#');
+  const relPath = hashIndex === -1 ? href : href.slice(0, hashIndex);
+  const fragment = hashIndex === -1 ? '' : href.slice(hashIndex);
+  let decoded = relPath;
+  try { decoded = decodeURIComponent(relPath); } catch { /* keep the raw href */ }
+  const drivePath = /^[a-zA-Z]:[\\/]/;
+  const absolute = decoded.startsWith('/') || drivePath.test(decoded) || filePath.startsWith('/') || drivePath.test(filePath);
+  const out = decoded.startsWith('/') ? [] : filePath.split(/[\\/]/).slice(0, -1);
+  for (const segment of decoded.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (out.length && out[out.length - 1] !== '..') out.pop();
+      else if (!absolute) out.push('..');
+      continue;
+    }
+    out.push(segment);
+  }
+  let resolved = out.join('/');
+  if (absolute && !resolved.startsWith('/') && !drivePath.test(resolved)) resolved = `/${resolved}`;
+  return resolved + fragment;
+}
+
+// resolveWorkspaceFilePath resolves a workspace-relative href (the shape a
+// Markdown link inside a chat widget carries, e.g. "report.md" or
+// "../docs/a.md#frag") against the conversation workspace. Absolute paths
+// pass straight through so the data-local-path seam is untouched; without a
+// workspace the raw href is returned so the preview can describe the failure
+// instead of guessing a base directory.
+export function resolveWorkspaceFilePath(path, workspace) {
+  if (!path || /^(?:[a-zA-Z]:[\\/]|\/)/.test(path)) return path;
+  const base = String(workspace || '').replace(/[\\/]+$/, '');
+  if (!base) return path;
+  return resolveRelativePreviewPath(`${base}/`, path);
+}
+
+// resolvePreviewMedia points image and video srcs inside a Markdown preview
+// at the /local-file seam. Relative srcs (./img.svg, ../up.png) otherwise
+// resolve against the page URL and 404; they resolve against the previewed
+// document's directory instead — the same resolution bindPreviewLinks gives
+// relative links. Absolute local paths map straight onto the proxy. External
+// schemes (https:, data:, blob:), protocol-relative URLs, and srcs already
+// proxied by markdown.js (file:// → /local-file?path=) keep their own URLs.
+function resolvePreviewMedia(container, filePath) {
+  const proxyPrefix = mediaPreviewURL('');
+  for (const media of container.querySelectorAll('img, video')) {
+    const src = media.getAttribute('src') || '';
+    if (!src || src.startsWith(proxyPrefix)) continue;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(src) || src.startsWith('//')) continue;
+    // A raw # is a URL fragment; strip it before resolving so a %-encoded
+    // literal # inside a real filename survives the decode in
+    // resolveRelativePreviewPath.
+    const hashIndex = src.indexOf('#');
+    const relSrc = hashIndex === -1 ? src : src.slice(0, hashIndex);
+    if (!relSrc) continue;
+    media.setAttribute('src', mediaPreviewURL(resolveRelativePreviewPath(filePath, relSrc)));
+  }
+}
+
+// scrollToPreviewAnchor scrolls a fragment target into view inside a preview.
+// The chat Markdown renderer emits no heading ids, so after exact id/name
+// matches this also tries a GitHub-style slug: #usage-notes matches the
+// "Usage notes" heading.
+function scrollToPreviewAnchor(container, fragment) {
+  if (!fragment || !container) return;
+  let target = null;
+  let id = fragment;
+  try { id = decodeURIComponent(fragment); } catch { /* keep the raw value */ }
+  const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(id) : id.replace(/["\\\]]/g, '\\$&');
+  try {
+    target = container.querySelector(`#${escaped}`)
+      || container.querySelector(`a[name="${escaped}"]`)
+      || container.querySelector(`[id="${escaped}"]`);
+  } catch { /* malformed selector — fall through to the slug match */ }
+  if (!target) {
+    const slug = slugifyPreviewAnchor(id);
+    if (slug) {
+      for (const heading of container.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+        if (slugifyPreviewAnchor(heading.textContent || '') === slug) { target = heading; break; }
+      }
+    }
+  }
+  target?.scrollIntoView?.();
+}
+
+function slugifyPreviewAnchor(text) {
+  return String(text).trim().toLowerCase()
+    .replace(/[^\p{L}\p{N}\p{M}_ -]+/gu, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }

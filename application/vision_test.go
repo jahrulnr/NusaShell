@@ -3,12 +3,14 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"nusashell/domain"
-	"nusashell/infrastructure/ai/core"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"nusashell/application/agent"
+	"nusashell/domain"
+	"nusashell/infrastructure/ai/core"
 )
 
 // --- from vision_test.go ---
@@ -32,7 +34,7 @@ func TestChatMessagesStripsImagesForNonVisionModel(t *testing.T) {
 	}}
 
 	// Non-vision model: image stripped, text attachment kept, placeholder added
-	got := chatMessages(c, "", ModelCapabilities{})
+	got := agent.ChatMessages(c, "", ModelCapabilities{})
 	if len(got) != 2 {
 		t.Fatalf("got %d messages, want 2", len(got))
 	}
@@ -84,7 +86,7 @@ func TestChatMessagesPlaceholderIncludesFilePath(t *testing.T) {
 		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone},
 	}}
 
-	got := chatMessages(c, "", ModelCapabilities{})
+	got := agent.ChatMessages(c, "", ModelCapabilities{})
 	userMsg := got[0]
 	// The placeholder must include the absolute file path so file-based
 	// tools can access the image directly.
@@ -107,7 +109,7 @@ func TestChatMessagesKeepsImagesForVisionModel(t *testing.T) {
 	}}
 
 	// Vision model: image kept, no placeholder
-	got := chatMessages(c, "", ModelCapabilities{Vision: true})
+	got := agent.ChatMessages(c, "", ModelCapabilities{Vision: true})
 	if len(got) != 2 {
 		t.Fatalf("got %d messages, want 2", len(got))
 	}
@@ -143,7 +145,7 @@ func TestChatMessagesStripsImagesFromHistoryWhenSwitchingModel(t *testing.T) {
 	}}
 
 	// Non-vision model: image from u1 stripped, but assistant response a1 preserved
-	got := chatMessages(c, "", ModelCapabilities{})
+	got := agent.ChatMessages(c, "", ModelCapabilities{})
 	if len(got) != 3 {
 		t.Fatalf("got %d messages, want 3", len(got))
 	}
@@ -198,7 +200,7 @@ func TestChatMessagesVisionModelGetsImagePathNote(t *testing.T) {
 		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone},
 	}}
 
-	got := chatMessages(c, "", ModelCapabilities{Vision: true})
+	got := agent.ChatMessages(c, "", ModelCapabilities{Vision: true})
 	userMsg := got[0]
 
 	// The image pixels must be kept visible for a vision model.
@@ -238,7 +240,7 @@ func TestChatMessagesVisionModelNoNoteWithoutPath(t *testing.T) {
 		{ID: "a1", Role: domain.RoleAssistant, Content: "a cat", Status: domain.StatusDone},
 	}}
 
-	got := chatMessages(c, "", ModelCapabilities{Vision: true})
+	got := agent.ChatMessages(c, "", ModelCapabilities{Vision: true})
 	userMsg := got[0]
 	if userMsg.Content != "What's in this image?" {
 		t.Errorf("content should be unchanged when image has no file path, got %q", userMsg.Content)
@@ -318,7 +320,7 @@ func TestDescribeImagesWithFallbackNoImages(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "hello"},
 	}
-	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 attachment (no images to describe), got %d", len(out))
 	}
@@ -330,7 +332,7 @@ func TestDescribeImagesWithFallbackNoConfig(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
 	}
-	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if len(out) != 1 {
 		t.Fatalf("expected unchanged attachments when fallback not configured, got %d", len(out))
 	}
@@ -353,7 +355,7 @@ func TestDescribeImagesWithFallbackAddsDescription(t *testing.T) {
 		{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
 		{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see image"},
 	}
-	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if len(out) != 3 {
 		t.Fatalf("expected 3 attachments (2 original + 1 description), got %d", len(out))
 	}
@@ -388,7 +390,7 @@ func TestDescribeImagesWithFallbackProviderNotFound(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
 	}
-	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if len(out) != 1 {
 		t.Fatalf("expected unchanged attachments when provider not found, got %d", len(out))
 	}
@@ -416,7 +418,7 @@ func TestDescribeImagesWithFallbackReasoningOnlyModel(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "image", Name: "sunset.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,/9j/4AAQ="},
 	}
-	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 attachments (image + description), got %d", len(out))
 	}
@@ -458,7 +460,7 @@ func TestDescribeImagesWithFallbackSkipsExistingDescription(t *testing.T) {
 		{Type: "image", Name: "image.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
 		{Type: "text", Name: "vision:image.png", MediaType: "text/plain", Content: "[Image description for image.png]\nexisting"},
 	}
-	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if len(out) != 2 {
 		t.Fatalf("expected unchanged attachments, got %d", len(out))
 	}
@@ -489,7 +491,7 @@ func TestDescribeImagesWithFallbackDescribesOnlyNewImages(t *testing.T) {
 		{Type: "text", Name: "vision:cat.png", MediaType: "text/plain", Content: "[Image description for cat.png]\nalready described"},
 		{Type: "image", Name: "dog.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
 	}
-	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	out := app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if adapter.calls != 1 {
 		t.Fatalf("vision Chat called %d times, want 1 (only the undescribed image)", adapter.calls)
 	}
@@ -561,7 +563,7 @@ func TestDescribeImagesWithFallbackUsesResolvedMaxOutput(t *testing.T) {
 	atts := []domain.Attachment{
 		{Type: "image", Name: "ui.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
 	}
-	_ = app.describeImagesWithFallback(context.Background(), settings, atts)
+	_ = app.mediaService().DescribeImagesWithFallback(context.Background(), settings, atts)
 	if adapter.lastReq == nil {
 		t.Fatal("expected vision Chat to be called")
 	}

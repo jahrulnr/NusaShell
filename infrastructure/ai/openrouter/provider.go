@@ -65,6 +65,10 @@ func New(cfg Config) (*compat.Provider, error) {
 			ContentAsInterface:        true,
 			ReasoningFields:           []string{"reasoning_details", "reasoning", "reasoning_content"},
 			HasCompletionTokenDetails: true,
+			// OpenRouter reports the upstream that served the model in the
+			// top-level "provider" field (e.g. "Nvidia"); capture it as
+			// provenance for reasoning replay and diagnostics.
+			UpstreamFromResponse: true,
 		},
 		Stream: compat.StreamSpec{
 			ReasoningFields: []string{"reasoning_details", "reasoning", "reasoning_content"},

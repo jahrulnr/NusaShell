@@ -455,7 +455,7 @@ func TestGenerateSpeechOnlineWins(t *testing.T) {
 	run, cancel := ttsRun(t)
 	defer cancel()
 
-	out, atts, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc1", Args: `{"text":"halo dunia"}`}, app.Settings.Get())
+	out, atts, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc1", Args: `{"text":"halo dunia"}`}, app.Settings.Get())
 	if err != nil {
 		t.Fatalf("online route failed: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestGenerateSpeechFallsBackToOfflineWhenCloudFails(t *testing.T) {
 	run, cancel := ttsRun(t)
 	defer cancel()
 
-	out, atts, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc1", Args: `{"text":"halo","format":"wav"}`}, app.Settings.Get())
+	out, atts, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc1", Args: `{"text":"halo","format":"wav"}`}, app.Settings.Get())
 	if err != nil {
 		t.Fatalf("offline should serve after cloud failure: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestGenerateSpeechZeroConfigOffline(t *testing.T) {
 	run, cancel := ttsRun(t)
 	defer cancel()
 
-	_, atts, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, domain.Settings{})
+	_, atts, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, domain.Settings{})
 	if err != nil {
 		t.Fatalf("zero-config offline should serve: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestGenerateSpeechNothingConfigured(t *testing.T) {
 	run, cancel := ttsRun(t)
 	defer cancel()
 
-	out, _, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, domain.Settings{})
+	out, _, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, domain.Settings{})
 	if err == nil {
 		t.Fatal("expected error when nothing is configured")
 	}
@@ -528,10 +528,10 @@ func TestGenerateSpeechValidatesInput(t *testing.T) {
 	run, cancel := ttsRun(t)
 	defer cancel()
 
-	if _, _, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc", Args: `{}`}, domain.Settings{}); err == nil {
+	if _, _, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc", Args: `{}`}, domain.Settings{}); err == nil {
 		t.Error("empty text must fail")
 	}
-	if _, _, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc", Args: `{"text":"hi","format":"flac"}`}, domain.Settings{}); err == nil {
+	if _, _, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc", Args: `{"text":"hi","format":"flac"}`}, domain.Settings{}); err == nil {
 		t.Error("unknown format must fail")
 	}
 }
@@ -605,7 +605,7 @@ func TestGenerateSpeechExplicitOfflineVoice(t *testing.T) {
 	run, cancel := ttsRun(t)
 	defer cancel()
 
-	out, atts, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, app.Settings.Get())
+	out, atts, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, app.Settings.Get())
 	if err != nil {
 		t.Fatalf("executeGenerateSpeech: %v", err)
 	}
@@ -625,7 +625,7 @@ func TestGenerateSpeechExplicitOfflineVoiceUnavailable(t *testing.T) {
 	run, cancel := ttsRun(t)
 	defer cancel()
 
-	out, _, err := app.executeGenerateSpeech(run, domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, app.Settings.Get())
+	out, _, err := app.mediaService().ExecuteGenerateSpeech(mediaCall(run), domain.ToolCall{ID: "tc1", Args: `{"text":"halo"}`}, app.Settings.Get())
 	if err == nil {
 		t.Fatal("expected error when the picked offline voice is unavailable")
 	}

@@ -255,8 +255,8 @@ func (r *TurnRun) RequeueRunDone(entries []PendingRunDone) {
 	r.runDone = append(entries, r.runDone...)
 }
 
-// newSteerEntry builds a queued steer with a persistable user message.
-func newSteerEntry(text string, attachments []domain.Attachment) *SteerEntry {
+// NewSteerEntry builds a queued steer with a persistable user message.
+func NewSteerEntry(text string, attachments []domain.Attachment) *SteerEntry {
 	return &SteerEntry{
 		ID:     domain.NewID(domain.IDPrefixSteer),
 		Text:   text,

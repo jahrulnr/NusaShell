@@ -216,6 +216,8 @@ assets changes.
 | `apps/electron/` | Cross-platform Electron wrapper, preload, packaging, and wrapper tests |
 | `testdata/` | Stable fixtures, including a fake stdio MCP server |
 
+The web shell starts at `frontend/page/conversation/app.js`; feature controllers live in `frontend/page/`, thread instruments in `frontend/widgets/`, and shared browser helpers in `frontend/js/`. The previous interface is retained locally at `.experimental/old-frontend/`.
+
 The routing matrix and static-serving policies live in
 [`docs/architecture.md`](docs/architecture.md).
 

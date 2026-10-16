@@ -78,7 +78,7 @@ func (a *App) describeOneImage(ctx context.Context, adapter ProviderContext, pro
 		},
 		MaxTokens: maxTokens,
 	}
-	resp, err := a.completeWithRetry(ctx, adapter, req)
+	resp, err := a.agentService().CompleteWithRetry(ctx, adapter, req)
 	if err != nil {
 		return "", err
 	}
@@ -108,7 +108,7 @@ func (a *App) describeOneAudio(ctx context.Context, adapter ProviderContext, mod
 		},
 		MaxTokens: 2000,
 	}
-	resp, err := a.completeWithRetry(ctx, adapter, req)
+	resp, err := a.agentService().CompleteWithRetry(ctx, adapter, req)
 	if err != nil {
 		return "", err
 	}
@@ -135,7 +135,7 @@ func (a *App) describeOneVideo(ctx context.Context, adapter ProviderContext, mod
 		},
 		MaxTokens: 1000,
 	}
-	resp, err := a.completeWithRetry(ctx, adapter, req)
+	resp, err := a.agentService().CompleteWithRetry(ctx, adapter, req)
 	if err != nil {
 		return "", err
 	}
@@ -169,7 +169,7 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 	a.log("info", "vision", "describing %d image(s) via fallback model %s/%s for non-vision chat model",
 		len(pending), a.providerNameByID(settings.VisionProviderID), settings.VisionModelID)
 
-	described := a.describeImagesWithFallback(ctx, settings, userMsg.Attachments)
+	described := a.mediaService().DescribeImagesWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {
 		return conversation
 	}
@@ -179,7 +179,7 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 		a.log("warn", "vision", "failed to load conversation for image descriptions: %v", err)
 		return conversation
 	}
-	a.updateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
+	a.agentService().UpdateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
 		msg.Attachments = described
 	})
 	if err := repo.Save(); err != nil {
@@ -214,7 +214,7 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 	a.log("info", "audio", "transcribing %d audio file(s) via fallback model %s/%s for non-audio chat model",
 		len(pending), a.providerNameByID(settings.AudioProviderID), settings.AudioModelID)
 
-	described := a.describeAudiosWithFallback(ctx, settings, userMsg.Attachments)
+	described := a.mediaService().DescribeAudiosWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {
 		return conversation
 	}
@@ -224,7 +224,7 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 		a.log("warn", "audio", "failed to load conversation for audio transcripts: %v", err)
 		return conversation
 	}
-	a.updateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
+	a.agentService().UpdateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
 		msg.Attachments = described
 	})
 	if err := repo.Save(); err != nil {
@@ -259,7 +259,7 @@ func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *dom
 	a.log("info", "video", "describing %d video file(s) via fallback model %s/%s for non-video chat model",
 		len(pending), a.providerNameByID(settings.VideoProviderID), settings.VideoModelID)
 
-	described := a.describeVideosWithFallback(ctx, settings, userMsg.Attachments)
+	described := a.mediaService().DescribeVideosWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {
 		return conversation
 	}
@@ -269,7 +269,7 @@ func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *dom
 		a.log("warn", "video", "failed to load conversation for video descriptions: %v", err)
 		return conversation
 	}
-	a.updateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
+	a.agentService().UpdateMessage(repo.Conversation(), userMsg.ID, func(msg *domain.Message) {
 		msg.Attachments = described
 	})
 	if err := repo.Save(); err != nil {

@@ -1,0 +1,25 @@
+:host {
+  position: relative;
+  display: block;
+  padding-left: 0;
+  /* The conversation surface supplies the backdrop. Keeping the host
+     transparent prevents every widget from painting a dark rectangle behind
+     its actual card. */
+  background: transparent;
+  color: var(--foam, #edf2f4);
+  font: 14px/1.55 var(--font-body, sans-serif);
+}
+
+:host, :host * { scrollbar-width: thin; scrollbar-color: rgba(88, 209, 195, .42) transparent; }
+:host *::-webkit-scrollbar { width: 7px; height: 7px; }
+:host *::-webkit-scrollbar-track { background: transparent; }
+:host *::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: rgba(88, 209, 195, .42); background-clip: padding-box; }
+:host *::-webkit-scrollbar-thumb:hover { background: rgba(121, 174, 232, .62); background-clip: padding-box; }
+
+* { box-sizing: border-box; }
+button { border: 0; color: inherit; font: inherit; }
+button:focus-visible { outline: 2px solid var(--lagoon, #58d1c3); outline-offset: 2px; }
+.widget { max-width: 720px; }
+.widget-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.widget-label { color: var(--mist, #b9c3cc); font: 600 11px var(--font-mono, monospace); }
+.widget-time { margin-left: auto; color: var(--muted, #748197); font: 9px var(--font-mono, monospace); }

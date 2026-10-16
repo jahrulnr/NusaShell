@@ -227,14 +227,7 @@ func (s *Store) writeJSON(name string, v any) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(filepath.Join(s.dir, name), b)
-}
-
-// atomicWrite writes via a unique temp file + rename so readers never see torn
-// files and concurrent writers of the same path cannot collide on a shared
-// temp name (which would race the rename and fail with "no such file").
-func atomicWrite(path string, b []byte) error {
-	return atomicfile.Write(path, b, 0o644)
+	return atomicfile.Write(filepath.Join(s.dir, name), b, 0o644)
 }
 
 // ---- generic ID-keyed collections ----
@@ -475,15 +468,15 @@ func (s *Store) SaveSnapshot(c *domain.Conversation) error {
 		return errors.New("conversation is nil")
 	}
 	conversationsDir := filepath.Join(s.dir, conversationsDirName)
-	indexPath, err := conversationIndexPath(conversationsDir, c.ID)
+	indexPath, err := conversationSubdirPath(conversationsDir, c.ID, conversationIndexName)
 	if err != nil {
 		return err
 	}
-	metaPath, err := conversationMetaPath(conversationsDir, c.ID)
+	metaPath, err := conversationSubdirPath(conversationsDir, c.ID, conversationMetaName)
 	if err != nil {
 		return err
 	}
-	pendingPath, err := conversationPendingPath(conversationsDir, c.ID)
+	pendingPath, err := conversationSubdirPath(conversationsDir, c.ID, conversationPendingName)
 	if err != nil {
 		return err
 	}
@@ -507,7 +500,7 @@ func (s *Store) SaveSnapshot(c *domain.Conversation) error {
 	if s.written == nil {
 		s.written = map[string]*convWriteState{}
 	}
-	if err := atomicWrite(metaPath, headerLine); err != nil {
+	if err := atomicfile.Write(metaPath, headerLine, 0o644); err != nil {
 		return err
 	}
 
@@ -610,7 +603,7 @@ func (s *Store) Delete(id string) error {
 func (s *Store) ArchiveChunk(id string, messages []domain.Message) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	chunkDir, err := conversationChunkDir(filepath.Join(s.dir, conversationsDirName), id)
+	chunkDir, err := conversationSubdirPath(filepath.Join(s.dir, conversationsDirName), id, chunkDirName)
 	if err != nil {
 		return 0, err
 	}
@@ -634,7 +627,7 @@ func (s *Store) ArchiveChunk(id string, messages []domain.Message) (int, error) 
 	if err != nil {
 		return 0, err
 	}
-	if err := atomicWrite(path, b); err != nil {
+	if err := atomicfile.Write(path, b, 0o644); err != nil {
 		return 0, err
 	}
 	return nextIndex, nil
@@ -645,7 +638,7 @@ func (s *Store) ArchiveChunk(id string, messages []domain.Message) (int, error) 
 func (s *Store) GetChunk(id string, index int) ([]domain.Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	chunkDir, err := conversationChunkDir(filepath.Join(s.dir, conversationsDirName), id)
+	chunkDir, err := conversationSubdirPath(filepath.Join(s.dir, conversationsDirName), id, chunkDirName)
 	if err != nil {
 		return nil, err
 	}
@@ -798,7 +791,7 @@ func (s *Store) writeJSONL(name string, v any) error {
 		sb.Write(item)
 		sb.WriteByte('\n')
 	}
-	return atomicWrite(filepath.Join(s.dir, name), []byte(sb.String()))
+	return atomicfile.Write(filepath.Join(s.dir, name), []byte(sb.String()), 0o644)
 }
 
 // ---- logs ----
@@ -828,7 +821,7 @@ func (s *Store) AppendLog(e *domain.LogEntry) {
 			sb.Write(b)
 			sb.WriteByte('\n')
 		}
-		_ = atomicWrite(filepath.Join(s.dir, "logs.jsonl"), []byte(sb.String()))
+		_ = atomicfile.Write(filepath.Join(s.dir, "logs.jsonl"), []byte(sb.String()), 0o644)
 	}
 }
 

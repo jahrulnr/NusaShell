@@ -3,8 +3,6 @@ package aiutil
 import (
 	"encoding/json"
 	"fmt"
-
-	"nusashell/domain"
 )
 
 // MustJSON marshals v to a json.RawMessage. On error it returns an empty
@@ -42,24 +40,4 @@ func Deref(s *string) string {
 func StrJSON(s string) json.RawMessage {
 	b, _ := json.Marshal(s)
 	return b
-}
-
-// SanitizeToolName delegates to domain.SanitizeToolName.
-func SanitizeToolName(name string) string {
-	return domain.SanitizeToolName(name)
-}
-
-// TextAttachmentContent delegates to domain.TextAttachmentContent.
-func TextAttachmentContent(att domain.Attachment) string {
-	return domain.TextAttachmentContent(att)
-}
-
-// DocumentAttachmentContent delegates to domain.DocumentAttachmentContent.
-func DocumentAttachmentContent(att domain.Attachment) string {
-	return domain.DocumentAttachmentContent(att)
-}
-
-// DataURLBase64 extracts the base64 payload from a data: URL.
-func DataURLBase64(dataURL string) string {
-	return domain.DataURLBase64(dataURL)
 }

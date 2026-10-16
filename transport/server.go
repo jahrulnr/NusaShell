@@ -40,13 +40,8 @@ type CoreIdentity struct {
 	StartedAt time.Time
 }
 
-// New builds a Server with all routes wired.
-func New(app *application.App, logger *slog.Logger, static http.Handler, dev bool) *Server {
-	return NewWithIdentity(app, logger, static, dev, CoreIdentity{})
-}
-
 // NewWithIdentity builds a Server and exposes its process identity through
-// GET /healthz. Existing callers may use New when identity is unavailable.
+// GET /healthz. Pass a zero CoreIdentity when identity is unavailable.
 func NewWithIdentity(app *application.App, logger *slog.Logger, static http.Handler, dev bool, identity CoreIdentity) *Server {
 	mux := http.NewServeMux()
 	s := &Server{App: app, Logger: logger, Static: static, Dev: dev, identity: identity, mux: mux}

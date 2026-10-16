@@ -1,0 +1,238 @@
+/* Shared overlay primitives from frontend/js/media-zoom.js.
+   This prototype imports the production popup code, so this sheet must track
+   its markup rather than styling an earlier text-only viewer shape. */
+.media-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: clamp(20px, 5vh, 56px) clamp(16px, 6vw, 96px);
+  overflow: hidden;
+  background: rgba(3, 6, 12, .88);
+  backdrop-filter: blur(7px);
+  color: var(--foam, #edf2f4);
+}
+
+.media-zoom-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  max-width: 100%;
+}
+.media-zoom-close,
+.media-zoom-btn,
+.media-zoom-download {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong, #2f4055);
+  border-radius: 6px;
+  background: var(--surface, #10192a);
+  color: var(--mist, #b9c3cc);
+  cursor: pointer;
+  font: 10px/1 var(--font-mono, monospace);
+  text-decoration: none;
+}
+.media-zoom-close { position: absolute; z-index: 2; top: 20px; right: 20px; }
+.media-zoom-close:focus-visible,
+.media-zoom-btn:focus-visible,
+.media-zoom-download:focus-visible,
+.agent-text-preview-download:focus-visible,
+.agent-text-preview-media-action:focus-visible { outline: 2px solid var(--aqua, #55dfcb); outline-offset: 2px; }
+.media-zoom-scale { min-width: 48px; color: var(--muted, #748197); text-align: center; font: 10px var(--font-mono, monospace); }
+.media-zoom-caption { min-width: 0; max-width: 62vw; overflow: hidden; color: var(--mist, #b9c3cc); font: 10px var(--font-mono, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.media-zoom-viewport { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; flex: 1; overflow: hidden; cursor: grab; touch-action: none; }
+.media-zoom-viewport.is-grabbing { cursor: grabbing; }
+.media-zoom-stage { display: flex; align-items: center; justify-content: center; transform-origin: center; will-change: transform; }
+.media-zoom-stage.is-vector { flex: none; width: max-content; height: max-content; }
+.media-zoom-stage img { max-width: 90vw; max-height: calc(100vh - 120px); border-radius: 8px; object-fit: contain; user-select: none; }
+.media-zoom-stage svg { display: block; max-width: 90vw; max-height: calc(100vh - 120px); user-select: none; }
+.media-zoom-stage.is-vector svg { max-width: none; max-height: none; shape-rendering: geometricPrecision; text-rendering: geometricPrecision; }
+.media-zoom-trigger { position: absolute; z-index: 1; top: 6px; right: 6px; display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; padding: 0; border: 1px solid rgba(121, 174, 232, .42); border-radius: 6px; background: rgba(5, 8, 17, .88); color: var(--mist, #b9c3cc); cursor: pointer; opacity: 0; }
+.mermaid-block:hover .media-zoom-trigger,
+.media-zoom-img-wrap:hover .media-zoom-trigger,
+.media-zoom-trigger:focus-visible { opacity: 1; }
+.media-zoom-img-wrap { position: relative; display: inline-block; }
+.media-zoom-img-wrap img { display: block; }
+
+/* Local files: the frame owns vertical space; code owns horizontal scrolling.
+   An unbroken source line can never widen the dialog or its page. */
+.agent-text-preview-overlay { gap: 0; }
+.agent-text-preview-overlay,
+.agent-text-preview-overlay * { box-sizing: border-box; }
+.agent-text-preview-frame {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: min(1024px, 100%);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong, #2f4055);
+  border-radius: 14px;
+  background: linear-gradient(145deg, #121d31, var(--surface, #10192a));
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .38);
+}
+.agent-text-preview-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line, #1f2d45);
+  background: linear-gradient(90deg, rgba(85, 223, 203, .08), transparent 42%), var(--surface, #10192a);
+}
+.agent-text-preview-file-mark { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid rgba(85, 223, 203, .4); border-radius: 8px; color: var(--aqua, #55dfcb); background: rgba(85, 223, 203, .08); font: 700 18px/1 var(--font-mono, monospace); }
+.agent-text-preview-file { display: grid; min-width: 0; gap: 2px; }
+.agent-text-preview-name,
+.agent-text-preview-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-text-preview-name { color: var(--foam, #edf2f4); font: 600 13px/1.2 var(--font-ui, sans-serif); }
+.agent-text-preview-path { color: var(--muted, #748197); font: 10px/1.25 var(--font-mono, monospace); }
+.agent-text-preview-kind { padding: 4px 7px; border: 1px solid var(--line-strong, #2f4055); border-radius: 999px; color: var(--mist, #b9c3cc); background: rgba(3, 6, 12, .42); font: 10px/1 var(--font-mono, monospace); white-space: nowrap; }
+.agent-text-preview-download { padding: 7px 10px; border: 1px solid rgba(85, 223, 203, .4); border-radius: 8px; color: var(--aqua, #55dfcb); background: rgba(85, 223, 203, .07); font: 600 11px/1 var(--font-ui, sans-serif); text-decoration: none; }
+.agent-text-preview-content { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: clamp(18px, 3vw, 34px); scrollbar-gutter: stable; }
+.agent-text-preview-content pre { width: 100%; min-width: 0; max-width: 100%; margin: 0; padding: 18px 20px; overflow: auto; border: 1px solid var(--line, #1f2d45); border-radius: 10px; color: var(--mist, #b9c3cc); background: rgba(3, 6, 12, .42); box-shadow: inset 3px 0 0 rgba(85, 223, 203, .48); }
+.agent-text-preview-content pre code { font: 11px/1.62 var(--font-mono, monospace); white-space: pre; overflow-wrap: normal; word-break: normal; }
+.agent-text-preview-content.is-code-editor { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.agent-text-preview-codemirror { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.agent-text-preview-codemirror .CodeMirror { width: 100%; height: 100%; min-height: 0; background: #282a36; color: #f8f8f2; font: 12px/1.62 var(--font-mono, monospace); }
+.agent-text-preview-codemirror .CodeMirror-gutters { border-right: 1px solid #44475a; background: #282a36; }
+.agent-text-preview-codemirror .CodeMirror-linenumber { color: #6272a4; }
+.agent-text-preview-codemirror .CodeMirror-activeline-background { background: rgba(68, 71, 90, .52); }
+.agent-text-preview-loading { display: grid; min-height: 160px; place-items: center; color: var(--muted, #748197); font: 11px var(--font-mono, monospace); }
+.agent-text-preview-error { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; max-width: 620px; min-height: 110px; margin: min(14vh, 130px) auto; padding: 18px; border: 1px solid rgba(215, 131, 131, .45); border-radius: 12px; background: rgba(215, 131, 131, .07); }
+.agent-text-preview-error-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid rgba(215, 131, 131, .52); border-radius: 9px; color: #d78383; font: 700 19px/1 var(--font-mono, monospace); }
+.agent-text-preview-error-copy { display: grid; min-width: 0; gap: 4px; }
+.agent-text-preview-error-copy strong { overflow: hidden; color: var(--foam, #edf2f4); font: 600 13px/1.2 var(--font-ui, sans-serif); text-overflow: ellipsis; white-space: nowrap; }
+.agent-text-preview-error-copy span { color: var(--mist, #b9c3cc); font: 11px/1.5 var(--font-body, sans-serif); }
+.agent-text-preview-error-detail { color: var(--muted, #748197); font: 9px/1.5 var(--font-mono, monospace); overflow-wrap: anywhere; }
+.agent-text-preview-error-actions { display: flex; gap: 6px; }
+.agent-text-preview-error-action { min-height: 30px; padding: 0 11px; border: 1px solid rgba(215, 131, 131, .45); border-radius: 7px; background: transparent; color: #d7a0a0; cursor: pointer; font: 10px/1 var(--font-mono, monospace); }
+.agent-text-preview-error-action:hover { border-color: #d78383; color: #f0d5d5; }
+.agent-text-preview-error-action:focus-visible { outline: 2px solid var(--aqua, #55dfcb); outline-offset: 2px; }
+.agent-text-preview-kind[data-preview-kind='error'] { color: #d78383; border-color: rgba(215, 131, 131, .45); }
+.agent-text-preview-binary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; max-width: 560px; min-height: 110px; margin: min(18vh, 150px) auto; padding: 18px; border: 1px solid var(--line, #1f2d45); border-radius: 12px; }
+.agent-text-preview-binary-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line-strong, #2f4055); border-radius: 9px; color: var(--mist, #b9c3cc); font: 700 19px/1 var(--font-mono, monospace); }
+.agent-text-preview-binary-copy { display: grid; min-width: 0; gap: 4px; }
+.agent-text-preview-binary-copy strong { overflow: hidden; color: var(--foam, #edf2f4); text-overflow: ellipsis; white-space: nowrap; }
+.agent-text-preview-binary-copy span,
+.agent-text-preview-binary-kind { color: var(--muted, #748197); font: 10px/1.45 var(--font-mono, monospace); }
+.agent-text-preview-media { display: grid; min-height: 100%; place-items: center; }
+.agent-text-preview-image-stage { position: relative; }
+.agent-text-preview-image { display: block; max-width: 100%; max-height: calc(100vh - 210px); border: 1px solid var(--line, #1f2d45); border-radius: 10px; object-fit: contain; }
+.agent-text-preview-media-action { position: absolute; right: 10px; bottom: 10px; padding: 6px 9px; border: 1px solid rgba(85, 223, 203, .45); border-radius: 7px; color: var(--foam, #edf2f4); background: rgba(3, 6, 12, .82); cursor: pointer; font: 600 11px/1 var(--font-ui, sans-serif); }
+.agent-text-preview-audio-stage audio { width: min(460px, 100%); }
+.agent-text-preview-video-stage video { display: block; width: min(820px, 100%); max-height: calc(100vh - 230px); border-radius: 10px; background: #000; }
+.agent-text-preview-pdf { display: block; width: 100%; min-height: 520px; height: 100%; border: 0; border-radius: 8px; background: #fff; }
+.agent-text-preview-md { min-width: 0; max-width: 100%; color: var(--mist, #b9c3cc); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.agent-text-preview-md a { color: var(--ocean, #79aee8); }
+.agent-text-preview-md .markdown-table-scroll { max-width: 100%; overflow-x: auto; padding-inline-end: 2px; scroll-padding-inline-end: 2px; }
+.agent-text-preview-md table { width: max-content; min-width: 100%; border-collapse: collapse; }
+.agent-text-preview-md th,
+.agent-text-preview-md td { max-width: 400px; padding: 6px 8px; border: 1px solid var(--line, #1f2d45); text-align: left; overflow-wrap: anywhere; }
+
+/* Interactive artifacts, audio controls, and video retain their own bounded canvas. */
+.artifact-popup-overlay { padding: 5vh 5vw; }
+.artifact-popup-bar { margin: 0 auto 8px; }
+.artifact-popup-title { color: var(--foam, #edf2f4); font: 600 13px var(--font-ui, sans-serif); }
+.artifact-popup-frame { display: flex; flex: 1; width: min(1200px, 100%); min-height: 0; overflow: hidden; border: 1px solid var(--line-strong, #2f4055); border-radius: 10px; background: #fff; }
+.artifact-popup-iframe { display: block; flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+.agent-audio-lightbox,
+.agent-video-lightbox { justify-content: center; }
+.agent-audio-bar,
+.agent-video-bar { justify-content: flex-end; width: min(960px, 100%); }
+.agent-audio-lightbox-frame,
+.agent-video-lightbox-frame { display: grid; flex: none; place-items: center; padding: 24px; border: 1px solid var(--line-strong, #2f4055); border-radius: 12px; }
+.agent-audio-lightbox-frame { width: min(640px, 100%); background: var(--surface, #10192a); }
+.agent-video-lightbox-frame { width: min(960px, 100%); max-height: 80vh; background: #000; }
+.agent-audio-lightbox-player { display: block; width: 100%; height: 44px; }
+.agent-video-lightbox-player { display: block; width: 100%; max-height: 70vh; }
+.agent-audio-lightbox-player.audio-load-error,
+.agent-video-lightbox-player.video-load-error { opacity: .5; }
+
+@media (max-width: 620px) {
+  .media-zoom-overlay { padding: 52px 10px 10px; }
+  .media-zoom-close { top: 10px; right: 10px; }
+  .agent-text-preview-frame { border-radius: 12px; }
+  .agent-text-preview-bar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; min-height: 56px; padding: 8px 10px; }
+  .agent-text-preview-kind { display: none; }
+  .agent-text-preview-content { padding: 14px; }
+  .agent-text-preview-content pre { padding: 14px; }
+  .agent-text-preview-pdf { min-height: 420px; }
+  .agent-text-preview-binary { grid-template-columns: auto minmax(0, 1fr); margin: 64px auto; }
+  .agent-text-preview-binary-kind { display: none; }
+  .agent-text-preview-error { grid-template-columns: auto minmax(0, 1fr); margin: 64px auto; }
+  .agent-text-preview-error-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .artifact-popup-overlay { padding: 52px 10px 10px; }
+}
+
+/* ── Ported overlay primitives (production global.css/plugins.css/
+   settings.css, retokenized onto the proto palette) ────────────────────── */
+
+/* Accent CTA used by the pairing-gate retry and the offline retry button. */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--lagoon);
+  border-radius: 7px;
+  background: var(--lagoon);
+  color: var(--ink);
+  font: 600 12px var(--font-mono);
+  cursor: pointer;
+  transition: background .15s, color .15s, box-shadow .15s;
+  white-space: nowrap;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .22);
+}
+.action-btn:hover, .action-btn:focus-visible { background: #43c6b5; color: var(--ink); box-shadow: 0 0 0 3px var(--lagoon-soft); outline: none; }
+.action-btn:disabled { cursor: not-allowed; opacity: .45; }
+
+/* Inline error panel inside install dialogs (production plugins.css). */
+.plugin-install-error {
+  margin: 14px 20px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(225, 125, 134, .4);
+  border-radius: 8px;
+  background: rgba(225, 125, 134, .08);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.plugin-install-error[hidden] { display: none; }
+
+/* Pet install dialog internals (production settings.css). The .ui-dialog
+   chrome itself ships with the linked production modals.css; these rules own
+   the description → checklist → progress → actions flow driven by
+   js/pet-launcher.js pets.install.* events. The indeterminate selector uses
+   the element's real class (production keyed on the id and never matched). */
+.pet-install-dialog { width: min(34rem, calc(100vw - 2rem)); }
+.pet-install-body { display: flex; flex-direction: column; gap: 0.85rem; }
+.pet-install-list { margin: 0; padding-left: 1.2rem; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+.pet-install-list code { font-size: 0.78rem; }
+.pet-install-progress { display: flex; flex-direction: column; gap: 0.4rem; }
+.pet-install-phase { font-size: 0.9rem; font-weight: 600; }
+.pet-install-bar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.pet-install-bar-fill { height: 8px; width: 0%; border-radius: 999px; background: var(--lagoon); transition: width .25s ease; }
+.pet-install-bar.indeterminate .pet-install-bar-fill { width: 100%; animation: pet-install-sweep 1.4s ease-in-out infinite; }
+@keyframes pet-install-sweep {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(20%); }
+  100% { transform: translateX(100%); }
+}
+.pet-install-bytes { font-size: 0.78rem; opacity: .7; font-variant-numeric: tabular-nums; }
+
+.agent-text-preview-content.is-preview-error { display: grid; place-items: center; }
+.is-preview-error .agent-text-preview-error { width: 100%; max-width: 620px; min-height: 0; margin: 0; padding: 24px; border: 0; border-radius: 0; background: transparent; grid-template-columns: auto minmax(0, 1fr); }
+.is-preview-error .agent-text-preview-error-actions { grid-column: 1 / -1; justify-content: center; }
+.is-preview-error .agent-text-preview-error-copy strong { white-space: normal; overflow-wrap: anywhere; }

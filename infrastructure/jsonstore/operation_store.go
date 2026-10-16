@@ -2,6 +2,7 @@ package jsonstore
 
 import (
 	"fmt"
+	"nusashell/pkg/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,7 @@ func (s *OperationStore) Path(conversationID, runID string) string {
 }
 
 func (s *OperationStore) patchPath(conversationID, runID string) (string, error) {
-	dir, err := conversationOperationDir(filepath.Join(s.dir, conversationsDirName), conversationID)
+	dir, err := conversationSubdirPath(filepath.Join(s.dir, conversationsDirName), conversationID, operationDirName)
 	if err != nil {
 		return "", err
 	}
@@ -60,5 +61,5 @@ func (s *OperationStore) Save(conversationID, runID, patch string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return atomicWrite(path, []byte(patch))
+	return atomicfile.Write(path, []byte(patch), 0o644)
 }

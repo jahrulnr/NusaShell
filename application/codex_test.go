@@ -173,3 +173,32 @@ func TestApplyUsageToCircuitClosesWhenLimitCleared(t *testing.T) {
 		t.Fatal("circuit should close when usage is no longer limited")
 	}
 }
+
+type codexWindowUsageFixture struct{}
+
+func (codexWindowUsageFixture) FetchUsage(context.Context, string) (CodexUsageResult, error) {
+	return CodexUsageResult{
+		PrimaryWindow: &CodexUsageWindow{UsedPercent: 0, LimitWindowSeconds: 18000, ResetAt: 1800000000},
+		WeeklyWindow:  &CodexUsageWindow{UsedPercent: 100, LimitWindowSeconds: 2592000, ResetAfterSeconds: 3600},
+	}, nil
+}
+
+func TestCodexUsagePreservesBothWindowDurations(t *testing.T) {
+	app := &App{
+		Providers:   &fakeProviderStore{items: map[string]*domain.Provider{"codex": {ID: "codex", Kind: domain.ProviderCodex}}},
+		Credentials: &memCreds{m: map[string]string{"codex": `{"account_id":"one"}`, accountKey("codex", "one"): `{"account_id":"one"}`}},
+		CodexUsage:  codexWindowUsageFixture{},
+	}
+	result, rpcErr := app.handleCodexUsage(contracts.CodexUsageRequest{ProviderID: "codex"})
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	accounts := result.(contracts.CodexAccountsUsageResult).Accounts
+	if len(accounts) != 1 {
+		t.Fatalf("accounts: %+v", accounts)
+	}
+	p, s := accounts[0].PrimaryWindow, accounts[0].WeeklyWindow
+	if p.LimitWindowSeconds != 18000 || p.RemainingPercent != 100 || p.ResetAt != 1800000000 || s.LimitWindowSeconds != 2592000 || s.RemainingPercent != 0 || s.ResetAfterSeconds != 3600 {
+		t.Fatalf("windows: primary=%+v secondary=%+v", p, s)
+	}
+}

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 
-import { electronDevArgs } from '../src/runtime.cjs';
+import { electronDevArgs, getFreePort, waitForCoreURL } from '../src/runtime.cjs';
 
 const runUI = process.env.NUSASHELL_ELECTRON_UI === '1';
 
@@ -18,7 +19,7 @@ const runUI = process.env.NUSASHELL_ELECTRON_UI === '1';
 async function startFakeUpstream() {
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
-    if (req.method === 'GET' && url.pathname.endsWith('/models')) {
+    if (req.method === 'GET' && url.pathname === '/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         // A wide window keeps this room far below the compaction trigger;
@@ -75,32 +76,28 @@ test('Electron loads the real web shell and preserves composer/workspace interac
   let smokeProviderID = '';
   let smokeConversationID = '';
 
-  // Cleanup mirrors the test's own fixtures: when a local core already
-  // listens on the default port the renderer talks to it instead of the
-  // staged backend, so the smoke provider/room must not be left behind.
+  const port = await getFreePort();
+  const coreURL = `http://127.0.0.1:${port}/`;
+  const coreEnvironment = { ...process.env, NUSASHELL_HOST: '127.0.0.1', NUSASHELL_PORT: String(port), NUSASHELL_DATA_DIR: dataDirectory };
+  delete coreEnvironment.NUSASHELL_DEV;
+  const core = spawn(backend, [], { cwd: repositoryRoot, env: coreEnvironment, stdio: ['ignore', 'pipe', 'pipe'] });
+  let coreOutput = '';
+  core.stdout.on('data', chunk => { coreOutput += chunk; });
+  core.stderr.on('data', chunk => { coreOutput += chunk; });
   t.after(async () => {
-    if (electronApp && page) {
-      try {
-        await page.evaluate(async ({ providerID, conversationID }) => {
-          const call = async (method, payload) => {
-            const response = await fetch(`/rpc/${method.replace(/\./g, '/')}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method, payload }),
-            });
-            if (!response.ok) throw new Error(`${method} failed (${response.status})`);
-            return response.json().catch(() => ({}));
-          };
-          if (conversationID) await call('agent.conversations.delete', { id: conversationID });
-          if (providerID) await call('ai.providers.delete', { id: providerID });
-        }, { providerID: smokeProviderID, conversationID: smokeConversationID });
-      } catch {
-        // The core may already be stopping; cleanup is best effort.
-      }
-    }
     if (electronApp) await electronApp.close();
+    if (core.exitCode === null) await new Promise(resolveStop => {
+      const timer = setTimeout(resolveStop, 3000);
+      core.once('exit', () => { clearTimeout(timer); resolveStop(); });
+      core.kill();
+    });
     await rm(temporaryDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
+  try {
+    await waitForCoreURL(coreURL, { timeoutMs: 20000 });
+  } catch (error) {
+    throw new Error(`${error.message}\n${coreOutput}`);
+  }
 
   electronApp = await electron.launch({
     executablePath: electronExecutable,
@@ -108,9 +105,9 @@ test('Electron loads the real web shell and preserves composer/workspace interac
     env: {
       ...process.env,
       NUSASHELL_ELECTRON_BACKEND: backend,
+      NUSASHELL_ELECTRON_URL: coreURL,
       NUSASHELL_DATA_DIR: dataDirectory,
       NUSASHELL_ELECTRON_USER_DATA: userDataDirectory,
-      NUSASHELL_DEV: '1',
     },
   });
 
@@ -118,7 +115,7 @@ test('Electron loads the real web shell and preserves composer/workspace interac
   const hasApplicationMenu = await electronApp.evaluate(({ Menu }) => Menu.getApplicationMenu() !== null);
   assert.equal(hasApplicationMenu, false);
   await page.waitForFunction(
-    () => document.querySelector('#conn-status')?.textContent === 'Connected',
+    () => document.querySelector('.context-meter')?.dataset.connection === 'open',
     undefined,
     { timeout: 20000 },
   );
@@ -131,10 +128,10 @@ test('Electron loads the real web shell and preserves composer/workspace interac
     window.location.hash = '#agent';
     window.dispatchEvent(new Event('hashchange'));
   });
-  await page.locator('#composer-input').waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('#message-input').waitFor({ state: 'visible', timeout: 10000 });
 
   // This is the same native composer used by the browser build.
-  const composer = page.locator('#composer-input');
+  const composer = page.locator('#message-input');
   await composer.fill('hello from the Electron renderer');
   assert.equal(await composer.inputValue(), 'hello from the Electron renderer');
 
@@ -142,16 +139,16 @@ test('Electron loads the real web shell and preserves composer/workspace interac
   // reading it. This verifies the modern Electron bridge, not the removed
   // File.path property.
   const nativePath = page.evaluate(() => new Promise((resolve) => {
-    const input = document.querySelector('#agent-file-input');
+    const input = document.querySelector('#attachment-input');
     input.addEventListener('change', () => {
       window.__electronSmokeFile = input.files[0];
       resolve(window.nusashellDesktop.getPathForFile(input.files[0]));
-    }, { once: true });
+    }, { once: true, capture: true });
   }));
-  await page.locator('#agent-file-input').setInputFiles(attachmentPath);
+  await page.locator('#attachment-input').setInputFiles(attachmentPath);
   assert.equal(await nativePath, attachmentPath);
-  await page.locator('.agent-attachment').waitFor({ state: 'visible', timeout: 10000 });
-  assert.match(await page.locator('.agent-attachment').first().textContent(), /electron-note\.txt/);
+  await page.locator('.attachment-chip').waitFor({ state: 'visible', timeout: 10000 });
+  assert.match(await page.locator('.attachment-chip').first().textContent(), /electron-note\.txt/);
 
   // Feed the same native File through the directory-entry branch used by a
   // real OS folder drop. The entry is synthetic only to avoid pointer-driven
@@ -171,16 +168,16 @@ test('Electron loads the real web shell and preserves composer/workspace interac
     };
     const event = new Event('drop', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
-    document.querySelector('#agent-conversation').dispatchEvent(event);
+    document.querySelector('#message-input').dispatchEvent(event);
   });
-  await page.waitForFunction(() => document.querySelectorAll('.agent-attachment').length === 2);
-  assert.match(await page.locator('.agent-attachment').nth(1).textContent(), /electron-project/);
+  await page.waitForFunction(() => document.querySelectorAll('.attachment-chip').length === 2);
+  assert.match(await page.locator('.attachment-chip').nth(1).textContent(), /electron-project/);
 
   // A durable room only exists after the first user turn (lazy conversation
   // creation), so create one through the renderer's own RPC against a local
   // fake upstream and open it from the room list. The workspace assertions
   // below then target a real conversation id instead of a browser-only draft.
-  await page.locator('#new-conversation-btn').click();
+  await page.locator('#new-chat').click();
   const upstream = await startFakeUpstream();
   t.after(() => new Promise((resolveClose) => upstream.server.close(resolveClose)));
   await page.evaluate(() => {
@@ -231,9 +228,11 @@ test('Electron loads the real web shell and preserves composer/workspace interac
     window.location.hash = '#agent';
     window.dispatchEvent(new Event('hashchange'));
   });
-  const room = page.locator(`#conversation-list .agent-conversation-item[data-conversation-id="${smokeConversationID}"]`);
+  const room = page.locator(`.room-list .room-item[data-conversation-id="${smokeConversationID}"]`);
   await room.waitFor({ state: 'visible', timeout: 20000 });
-  await room.locator('.agent-conversation-open').click();
+  await room.locator('.room-item-main').click();
+  await page.waitForFunction(() => document.querySelector('#model-select')?.value.endsWith(':tiny-model'));
+  assert.equal(await page.locator('#model-select').isDisabled(), false, 'returning to Agent refreshes newly imported models');
 
   // The in-app workspace browser replaced the native zenity call. Both RPCs
   // are intercepted here so the renderer interaction can be tested
@@ -273,15 +272,11 @@ test('Electron loads the real web shell and preserves composer/workspace interac
       }),
     });
   });
-  await page.locator('#agent-workspace-btn').click();
-  // The picker popup lists the folder, then enables "Use this folder".
-  await page.waitForFunction(() => {
-    const buttons = [...document.querySelectorAll('.ui-dialog-actions button')];
-    const select = buttons[buttons.length - 1];
-    return select && !select.disabled;
-  });
-  await page.locator('.ui-dialog-actions button').last().click();
-  await page.waitForFunction(() => document.querySelector('#agent-workspace-label')?.textContent === 'electron-workspace');
+  await page.locator('#model-config-trigger').click();
+  await page.locator('#workspace-browser-trigger').click();
+  await page.waitForFunction(() => !document.querySelector('#workspace-use-folder')?.disabled);
+  await page.locator('#workspace-use-folder').click();
+  await page.waitForFunction(() => document.querySelector('.workspace-trigger-copy strong')?.textContent === 'electron-workspace');
   assert.equal(workspaceRPCs[0]?.method, 'agent.workspace.list-dirs');
   assert.equal(workspaceRPCs[1]?.method, 'agent.conversations.set-workspace');
   assert.equal(workspaceRPCs[1]?.payload?.path, '/tmp/electron-workspace');
@@ -297,4 +292,7 @@ test('Electron loads the real web shell and preserves composer/workspace interac
   assert.equal(bridgeState.rendererHasNodeRequire, false);
   assert.deepEqual(bridgeState.bridgeKeys, ['getPathForFile']);
   assert.equal(bridgeState.syntheticFilePath, null);
+  const screenshotDirectory = join(repositoryRoot, '.playwright-mcp');
+  await mkdir(screenshotDirectory, { recursive: true });
+  await page.screenshot({ path: join(screenshotDirectory, 'electron-integration.png') });
 });

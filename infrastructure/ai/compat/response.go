@@ -17,6 +17,9 @@ func (p *Provider) convertResponse(resp *chatResponse, req *core.Request) (*core
 		out.Model = resp.Model
 		out.Usage.Model = resp.Model
 	}
+	if p.spec.Response.UpstreamFromResponse {
+		out.Upstream = resp.Provider
+	}
 	if len(resp.Choices) == 0 {
 		return out, nil
 	}

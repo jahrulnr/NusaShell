@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"nusashell/application"
 )
@@ -49,14 +50,14 @@ func (t *Toolbox) legacySubagentToolEntries() []toolEntry {
 
 func (t *Toolbox) execDelegate(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Delegate == nil {
-		return "", depMissing("delegation is not available in this build")
+		return "", errors.New("delegation is not available in this build")
 	}
 	return t.Delegate.SpawnDelegate(ctx, argsJSON)
 }
 
 func (t *Toolbox) execSubagent(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Acp == nil {
-		return "", depMissing("no subagent support configured")
+		return "", errors.New("no subagent support configured")
 	}
 	return t.Acp.Subagent(ctx, argsJSON)
 }
@@ -66,21 +67,21 @@ func (t *Toolbox) execSubagent(ctx context.Context, argsJSON []byte) (string, er
 // agent_id=internal (SpawnDelegate forces it).
 func (t *Toolbox) execSubagentSteer(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Acp == nil {
-		return "", depMissing("no subagent support configured")
+		return "", errors.New("no subagent support configured")
 	}
 	return t.Acp.Subagent(ctx, mergeOp(argsJSON, "steer"))
 }
 
 func (t *Toolbox) execSubagentStop(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Acp == nil {
-		return "", depMissing("no subagent support configured")
+		return "", errors.New("no subagent support configured")
 	}
 	return t.Acp.Subagent(ctx, mergeOp(argsJSON, "stop"))
 }
 
 func (t *Toolbox) execSubagentWait(ctx context.Context, argsJSON []byte) (string, error) {
 	if t.Acp == nil {
-		return "", depMissing("no subagent support configured")
+		return "", errors.New("no subagent support configured")
 	}
 	return t.Acp.Subagent(ctx, mergeOp(argsJSON, "wait"))
 }

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"nusashell/application"
-	"nusashell/pkg/atomicfile"
 )
 
 const (
@@ -108,12 +107,8 @@ func fileToolInfos() []application.ToolInfo {
 	}
 }
 
-// executeFileTool handles the file_* built-ins. Returns handled=false for
+// executeFileToolCtx handles the file_* built-ins. Returns handled=false for
 // names it does not own so the caller can fall through to other handlers.
-func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
-	return executeFileToolCtx(context.Background(), name, argsJSON)
-}
-
 func executeFileToolCtx(ctx context.Context, name string, argsJSON []byte) (bool, string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -586,14 +581,6 @@ func isTransientRenameErr(err error) bool {
 	default:
 		return false
 	}
-}
-
-// writeFileAtomic writes data to a temp file in the target directory and
-// renames it into place, so a crash never leaves a partial file. The rename
-// goes through renameWithRetry so transient Windows sharing violations
-// (antivirus/indexer holds on the just-closed temp file) are absorbed.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	return atomicfile.WriteWithRename(path, data, perm, renameWithRetry)
 }
 
 // copyTree copies a file or directory recursively (regular files only;

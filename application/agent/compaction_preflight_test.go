@@ -98,14 +98,14 @@ func TestConversationRulesRequestEstimateMatchesProviderVisibleShape(t *testing.
 	request := ChatRequest{
 		Model:                    "model",
 		System:                   buildSystemPromptForRun(run, conversation, settings.UserPrompt),
-		Messages:                 chatMessages(conversation, "assistant", ModelCapabilities{}),
+		Messages:                 ChatMessages(conversation, "assistant", ModelCapabilities{}),
 		Tools:                    tools,
 		PromptCaching:            settings.PromptCaching,
 		MaxTokens:                1024,
 		ReasoningSummary:         adapter.ReasoningSummary,
 		CompactionBlob:           conversation.CompactionBlob,
 		CompactionPrefixMessages: 0,
-		ContextManagement:        serverCompactionContextManagementForKind("model", adapter.Kind),
+		ContextManagement:        ServerCompactionContextManagementForKind("model", adapter.Kind),
 	}
 	want := provider.EstimateRequestTokens(request, adapter.Kind, adapter.OpenRouter)
 	got := rules.requestEstimate(nil)

@@ -3,10 +3,14 @@ package compat
 import "encoding/json"
 
 type chatResponse struct {
-	ID      string   `json:"id"`
-	Model   string   `json:"model"`
-	Choices []choice `json:"choices"`
-	Usage   usage    `json:"usage"`
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	// Provider is the gateway-reported upstream name (OpenRouter's
+	// top-level "provider" field); unused unless the spec opts in via
+	// ResponseSpec.UpstreamFromResponse.
+	Provider string   `json:"provider,omitempty"`
+	Choices  []choice `json:"choices"`
+	Usage    usage    `json:"usage"`
 }
 
 type choice struct {
@@ -60,10 +64,14 @@ type completionTokensDetails struct {
 }
 
 type streamChunk struct {
-	ID      string          `json:"id"`
-	Model   string          `json:"model"`
-	Choices []streamChoice  `json:"choices"`
-	Usage   json.RawMessage `json:"usage,omitempty"`
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	// Provider is the gateway-reported upstream name carried on each chunk
+	// (OpenRouter); unused unless the spec opts in via
+	// ResponseSpec.UpstreamFromResponse.
+	Provider string          `json:"provider,omitempty"`
+	Choices  []streamChoice  `json:"choices"`
+	Usage    json.RawMessage `json:"usage,omitempty"`
 	// Error carries an in-stream error payload. Providers report failures
 	// inside an HTTP 200 SSE body ("error" alongside or instead of a
 	// choice); see streamPayloadError in stream.go.

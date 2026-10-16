@@ -25,7 +25,9 @@ type streamIdleWatchdog struct {
 	stopped atomic.Bool
 }
 
-func newStreamIdleWatchdog(inner Stream, cancel context.CancelFunc, timeout time.Duration, provider string) Stream {
+// WithStreamIdleWatchdog wraps inner with a per-event idle timeout. It returns
+// inner unchanged when timeout <= 0 or inner is nil.
+func WithStreamIdleWatchdog(inner Stream, cancel context.CancelFunc, timeout time.Duration, provider string) Stream {
 	if inner == nil || timeout <= 0 {
 		return inner
 	}
@@ -37,12 +39,6 @@ func newStreamIdleWatchdog(inner Stream, cancel context.CancelFunc, timeout time
 	}
 	w.timer = time.AfterFunc(timeout, w.fire)
 	return w
-}
-
-// WithStreamIdleWatchdog wraps inner with a per-event idle timeout. It returns
-// inner unchanged when timeout <= 0 or inner is nil.
-func WithStreamIdleWatchdog(inner Stream, cancel context.CancelFunc, timeout time.Duration, provider string) Stream {
-	return newStreamIdleWatchdog(inner, cancel, timeout, provider)
 }
 
 func (w *streamIdleWatchdog) Next() (Event, error) {

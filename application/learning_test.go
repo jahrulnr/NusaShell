@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"nusashell/application/agent"
 	"nusashell/application/learn"
 	"nusashell/application/memory"
 	"nusashell/application/service/textsim"
@@ -398,7 +399,7 @@ func TestHandleSkillsPromoteEmitsPromoteOp(t *testing.T) {
 	t.Cleanup(unsub)
 	app := &App{Skills: skills, Bus: bus, Trajectory: NewTrajectoryRecorder(dir)}
 	t.Cleanup(func() { _ = app.Trajectory.Close() })
-	if _, err := app.handleSkillsPromote(contracts.SkillPromoteRequest{ID: "learned-flow"}); err != nil {
+	if _, err := app.skillsService().HandlePromote(contracts.SkillPromoteRequest{ID: "learned-flow"}); err != nil {
 		t.Fatal(err)
 	}
 	ev := waitBusEvent(t, ch, contracts.EventSkillUpdated)
@@ -1051,16 +1052,16 @@ func TestHandleLearningLogLiftsLLMConversationID(t *testing.T) {
 // learning ones are the ones the Learning log opens.
 func TestHeadlessConversationTypeByAgentKind(t *testing.T) {
 	for _, kind := range []AgentKind{AgentLearner, AgentMemoryConsolidator, AgentSkillEvolver, AgentSkillEvaluator} {
-		if got := headlessConversationType(kind); got != domain.ConversationTypeBackground {
-			t.Errorf("headlessConversationType(%q) = %q, want %q", kind, got, domain.ConversationTypeBackground)
+		if got := agent.HeadlessConversationType(kind); got != domain.ConversationTypeBackground {
+			t.Errorf("agent.HeadlessConversationType(%q) = %q, want %q", kind, got, domain.ConversationTypeBackground)
 		}
 	}
 	for _, kind := range []AgentKind{AgentAutomation, AgentDelegate} {
-		if got := headlessConversationType(kind); got != domain.ConversationTypeAutomation {
-			t.Errorf("headlessConversationType(%q) = %q, want %q", kind, got, domain.ConversationTypeAutomation)
+		if got := agent.HeadlessConversationType(kind); got != domain.ConversationTypeAutomation {
+			t.Errorf("agent.HeadlessConversationType(%q) = %q, want %q", kind, got, domain.ConversationTypeAutomation)
 		}
 	}
-	if title := headlessTurnTitle(AgentMemoryConsolidator, "anything"); !strings.Contains(title, "learning") {
+	if title := agent.HeadlessTurnTitle(AgentMemoryConsolidator, "anything"); !strings.Contains(title, "learning") {
 		t.Errorf("learning turn title = %q, want a readable learning label", title)
 	}
 }
@@ -2502,9 +2503,9 @@ func TestRecordLearningTurnNodesConnectsAcrossToolRounds(t *testing.T) {
 	app := &App{LearningEdges: store}
 	run := &TurnRun{}
 
-	app.recordLearningTurnNodes(run, []string{"frag_1"})
-	app.recordLearningTurnNodes(run, []string{"skill_1"})
-	app.recordLearningTurnNodes(run, []string{"frag_1", "skill_1"})
+	app.agentService().RecordLearningTurnNodes(run, []string{"frag_1"})
+	app.agentService().RecordLearningTurnNodes(run, []string{"skill_1"})
+	app.agentService().RecordLearningTurnNodes(run, []string{"frag_1", "skill_1"})
 
 	if got := len(store.edges); got != 1 {
 		t.Fatalf("edge count = %d, want one edge after repeated observations", got)

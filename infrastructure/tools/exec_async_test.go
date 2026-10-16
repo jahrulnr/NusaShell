@@ -11,7 +11,7 @@ import (
 	"nusashell/application"
 )
 
-// yamlField extracts a `key: value` line from a yamlMD front-matter block.
+// yamlField extracts a `key: value` line from a yamlmd.MD front-matter block.
 func yamlField(t *testing.T, out, key string) string {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {

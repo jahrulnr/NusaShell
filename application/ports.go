@@ -382,9 +382,20 @@ type CodexRuntimeStatus struct {
 	DownloadError string
 }
 
-// CodexOAuth performs the Codex ChatGPT OAuth PKCE login flow. The
-// implementation opens a browser and blocks until the callback completes.
+// CodexDeviceCode is a short-lived authorization challenge for remote browsers.
+type CodexDeviceCode struct {
+	DeviceAuthID    string
+	UserCode        string
+	VerificationURL string
+	IntervalSeconds int
+	ExpiresAt       int64
+}
+
+// CodexOAuth supports browser PKCE and bounded device-code authorization.
 type CodexOAuth interface {
+	StartDeviceLogin(ctx context.Context) (CodexDeviceCode, error)
+	// A nil token means authorization is still pending.
+	PollDeviceLogin(ctx context.Context, deviceAuthID, userCode string) (*CodexToken, error)
 	Login(ctx context.Context) (CodexToken, error)
 	// ExtractProfile decodes a stored token JSON and returns the email
 	// and name. Used to enrich old tokens that lack email/name fields by
@@ -421,11 +432,12 @@ type CodexUsageResult struct {
 	ResetCreditsAvailable int
 }
 
-// CodexUsageWindow is one rate-limit window (session or weekly).
+// CodexUsageWindow is one rate-limit window; its duration is supplied by the provider.
 type CodexUsageWindow struct {
-	UsedPercent       int   // 0-100
-	ResetAt           int64 // unix seconds
-	ResetAfterSeconds int64
+	UsedPercent        int   // 0-100
+	ResetAt            int64 // unix seconds
+	ResetAfterSeconds  int64
+	LimitWindowSeconds int64
 }
 
 // CodexToken is the result of a successful OAuth login.
