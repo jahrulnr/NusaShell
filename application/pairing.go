@@ -433,6 +433,23 @@ func (s *PairingService) ValidateSession(tokenHash string) (*domain.PairingSessi
 	return sess, true
 }
 
+// SessionExpired reports whether a token hash names a persisted session that
+// is past its expiry. Revoked sessions are deleted from the store, so a
+// persisted-but-expired row is the only invalid state that still resolves —
+// a missing row means the token was never issued (or was revoked) and is not
+// "expired". The transport auth middleware uses this to give a previously
+// paired device a distinct re-pair response instead of PAIRING_REQUIRED.
+func (s *PairingService) SessionExpired(tokenHash string) bool {
+	if s.store == nil || tokenHash == "" {
+		return false
+	}
+	sess, err := s.store.GetSessionByTokenHash(tokenHash)
+	if err != nil || sess == nil {
+		return false
+	}
+	return !s.now().Before(sess.ExpiresAt)
+}
+
 // ListSessions returns all sessions as DTOs.
 func (s *PairingService) ListSessions() (*contracts.PairingSessionsListResult, *contracts.RPCError) {
 	if s.store == nil {

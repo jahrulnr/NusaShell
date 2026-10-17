@@ -345,6 +345,79 @@ test('revoked sessions are omitted from the paired devices list', async () => {
   }
 });
 
+// An expired session no longer authenticates, but its row persists until
+// revoked — it must be listed dimmed and badged, not mistaken for a live
+// pairing or silently dropped.
+test('expired sessions are listed dimmed with an Expired badge', async () => {
+  // expires_at relative to Date.now() so the row is expired at any wall clock.
+  const past = new Date(Date.now() - 60 * 1000).toISOString();
+  const restore = mockFetch((url) => {
+    if (url === '/rpc/pairing/sessions/list') {
+      return okResponse({ sessions: [
+        {
+          id: 'sess_dead',
+          device_label: 'Old tablet',
+          created_at: '2026-09-14T00:00:00Z',
+          last_seen_at: '2026-10-14T00:00:00Z',
+          expires_at: past,
+          revoked: false,
+        },
+      ] });
+    }
+    return okResponse({});
+  });
+  try {
+    await withDom(SETTINGS_HTML, 'http://127.0.0.1:10994/', async () => {
+      await refreshPairingPanel();
+      const row = document.querySelector('#pairing-sessions-list .pairing-session-row');
+      assert.ok(row, 'the expired session must still be listed');
+      assert.ok(row.classList.contains('expired'), 'expired row must carry the dimming class');
+      const badge = row.querySelector('.pairing-session-badge');
+      assert.ok(badge, 'expired row must carry an Expired badge');
+      assert.match(badge.textContent, /Expired/);
+      assert.match(row.querySelector('.pairing-session-meta').textContent, /Expired/);
+      // Revoke stays available: it is how the host cleans up dead sessions.
+      assert.ok(row.querySelector('.pairing-session-actions button'));
+      assert.equal(document.getElementById('pairing-sessions-empty').hidden, true);
+      assert.equal(document.getElementById('pairing-revoke-all-btn').hidden, false,
+        'expired rows still count for revoke-all (the bulk cleanup path)');
+    });
+  } finally {
+    restore();
+  }
+});
+
+test('live sessions render without the expired treatment', async () => {
+  const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const restore = mockFetch((url) => {
+    if (url === '/rpc/pairing/sessions/list') {
+      return okResponse({ sessions: [
+        {
+          id: 'sess_live',
+          device_label: 'Laptop',
+          created_at: '2026-09-14T00:00:00Z',
+          last_seen_at: '2026-10-14T00:00:00Z',
+          expires_at: future,
+          revoked: false,
+        },
+      ] });
+    }
+    return okResponse({});
+  });
+  try {
+    await withDom(SETTINGS_HTML, 'http://127.0.0.1:10994/', async () => {
+      await refreshPairingPanel();
+      const row = document.querySelector('#pairing-sessions-list .pairing-session-row');
+      assert.ok(row);
+      assert.equal(row.classList.contains('expired'), false, 'a live session must not be dimmed');
+      assert.equal(row.querySelector('.pairing-session-badge'), null, 'a live session carries no badge');
+      assert.doesNotMatch(row.querySelector('.pairing-session-meta').textContent, /Expired/);
+    });
+  } finally {
+    restore();
+  }
+});
+
 // Regression: a LAN address typed while the listener is loopback-only used
 // to produce a QR/link that silently timed out on the remote device.
 test('LAN address warns when the listener is loopback-only', async () => {

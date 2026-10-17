@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import { emit } from '../js/rpc.js';
+import { refreshPairingPanel } from '../js/pairing.js';
 import { createSettingsPage } from '../page/settings/app.js';
 
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
@@ -69,7 +70,10 @@ function harness(options = {}) {
   };
   const dom = new JSDOM(html, { url: 'http://127.0.0.1:8766/' });
   const restore = installDOMGlobals(dom.window);
-  const page = createSettingsPage(dom.window.document.querySelector('#settings-view'), { rpcClient });
+  const page = createSettingsPage(dom.window.document.querySelector('#settings-view'), {
+    rpcClient,
+    pairingRefresh: options.pairingRefresh,
+  });
   page.init();
   return {
     calls,
@@ -509,5 +513,163 @@ test('the review bar masks staged secrets instead of printing them', async () =>
     assert.ok(review.querySelector('[data-revert-secret]'));
   } finally {
     env.restore();
+  }
+});
+
+// The settings page is mounted with a wrapped rpc client in production, so the
+// pairing panel refresh is injected: load() hands it the saved remote flag,
+// and without an injection no pairing management call may fire (the refresh
+// uses the real rpc transport, which would hit fetch in tests).
+test('load hands the saved remote flag to the injected pairing refresh', async () => {
+  for (const enabled of [true, false]) {
+    const calls = [];
+    const env = harness({
+      settings: { remote_access_enabled: enabled },
+      pairingRefresh: (options) => {
+        calls.push(options);
+        return Promise.resolve();
+      },
+    });
+    try {
+      await env.activate();
+      assert.deepEqual(calls, [{ enabled }]);
+    } finally {
+      env.restore();
+    }
+  }
+});
+
+test('load without an injected pairing refresh makes no pairing calls', async () => {
+  const requested = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    requested.push(String(url));
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: {} }) };
+  };
+  const env = harness({ settings: { remote_access_enabled: true } });
+  try {
+    await env.activate();
+    assert.equal(
+      requested.filter((url) => url.includes('/rpc/pairing/')).length,
+      0,
+      `pairing management must stay quiet without an injected refresh, got: ${requested.join(', ')}`,
+    );
+  } finally {
+    env.restore();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('enabling remote access reveals a wired pairing panel without a sessions query', async () => {
+  const calls = [];
+  const env = harness({
+    pairingRefresh: (options) => {
+      calls.push(options);
+      return Promise.resolve();
+    },
+  });
+  try {
+    await env.activate();
+    assert.deepEqual(calls, [{ enabled: false }]);
+    assert.equal(env.document.querySelector('#pairing-panel').hidden, true);
+    const box = env.document.querySelector('#settings-remote-access-enabled');
+    box.checked = true;
+    box.dispatchEvent(new env.document.defaultView.Event('change', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Scope to dialog overlays — the plugins view has a 'Restart' button and a
+    // static pet overlay with 'Install'/'Cancel' lives in index.html too.
+    const restart = [...env.document.querySelectorAll('.ui-dialog-overlay button')]
+      .find((button) => button.textContent === 'Restart');
+    assert.ok(restart, 'the restart confirm dialog must be open');
+    restart.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(env.calls.filter((call) => call.method === 'settings.set').length, 1);
+    assert.equal(env.document.querySelector('#pairing-panel').hidden, false);
+    // Toggling remote access restarts the backend, so the toggle reveals the
+    // panel and refreshes it with populate:false — wiring buttons and the
+    // address default without querying pairing.sessions.list mid-shutdown.
+    // The next Settings activation re-runs load().
+    assert.deepEqual(calls, [{ enabled: false }, { enabled: true, populate: false }]);
+  } finally {
+    env.restore();
+  }
+});
+
+test('enabling remote access unhides the pairing panel even without an injected refresh', async () => {
+  const env = harness();
+  try {
+    await env.activate();
+    assert.equal(env.document.querySelector('#pairing-panel').hidden, true);
+    const box = env.document.querySelector('#settings-remote-access-enabled');
+    box.checked = true;
+    box.dispatchEvent(new env.document.defaultView.Event('change', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const restart = [...env.document.querySelectorAll('.ui-dialog-overlay button')]
+      .find((button) => button.textContent === 'Restart');
+    assert.ok(restart, 'the restart confirm dialog must be open');
+    restart.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(env.document.querySelector('#pairing-panel').hidden, false);
+  } finally {
+    env.restore();
+  }
+});
+
+test('typing a remote address stages remote_access_addresses in the save patch', async () => {
+  const env = harness();
+  try {
+    await env.activate();
+    const input = env.document.querySelector('#pairing-remote-address');
+    input.value = 'https://192.168.1.10:10994';
+    input.dispatchEvent(new env.document.defaultView.Event('input', { bubbles: true }));
+    env.document.querySelector('#settings-save').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const saved = env.calls.filter((call) => call.method === 'settings.set');
+    assert.equal(saved.length, 1);
+    assert.deepEqual(saved[0].params, { remote_access_addresses: ['https://192.168.1.10:10994'] });
+  } finally {
+    env.restore();
+  }
+});
+
+// This test flips pairing.js module-level pairingHostOnly — keep it last.
+test('a paired remote client keeps the Remote access section hidden across renders', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url) === '/rpc/pairing/sessions/list') {
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({ error: { code: 'PAIRING_UNAUTHORIZED', message: 'pairing management is local-only' } }),
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: {} }) };
+  };
+  const env = harness({
+    settings: { remote_access_enabled: true },
+    pairingRefresh: (options) => refreshPairingPanel(options),
+  });
+  try {
+    await env.activate();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const group = env.document.querySelector('#settings-remote-group');
+    assert.equal(group.hidden, true, 'PAIRING_UNAUTHORIZED must hide the remote section');
+    assert.equal(env.document.querySelector('#settings-jump-remote').hidden, true);
+    // A search keystroke re-runs updateChrome; the group must stay hidden
+    // instead of flickering back with controls that would only 403.
+    const search = env.document.querySelector('#settings-search');
+    search.value = 'remote';
+    search.dispatchEvent(new env.document.defaultView.Event('input', { bubbles: true }));
+    assert.equal(group.hidden, true, 'updateChrome must not resurrect a host-only section');
+    // A full re-render (e.g. discard) re-runs renderAll; same expectation.
+    env.document.querySelector('#settings-discard').click();
+    assert.equal(group.hidden, true, 'renderAll must not resurrect a host-only section');
+    assert.equal(env.document.querySelector('#settings-jump-remote').hidden, true);
+  } finally {
+    env.restore();
+    globalThis.fetch = originalFetch;
   }
 });

@@ -216,6 +216,10 @@ type SessionValidator interface {
 // for the public pairing routes. Implemented by *application.PairingService.
 type PairingHandler interface {
 	SessionValidator
+	// SessionExpired reports whether a token hash names a persisted session
+	// that is past its expiry, so the auth middleware can answer
+	// PAIRING_SESSION_EXPIRED instead of the generic PAIRING_REQUIRED.
+	SessionExpired(tokenHash string) bool
 	CreateChallenge(source string) (*contracts.PairingChallengeCreateResult, *contracts.RPCError)
 	GetChallengeStatus(challengeID string) (*contracts.PairingChallengeStatusResult, *contracts.RPCError)
 	ExchangeChallenge(req contracts.PairingChallengeExchangeRequest, source string) (*contracts.PairingChallengeExchangeResult, *contracts.RPCError)
@@ -262,8 +266,16 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			writePairingRequired(w)
 			return
 		}
-		sess, ok := s.Pairing.ValidateSession(hashToken(cookie.Value))
+		tokenHash := hashToken(cookie.Value)
+		sess, ok := s.Pairing.ValidateSession(tokenHash)
 		if !ok || sess == nil {
+			// A cookie whose session row persists past expiry belongs to a
+			// previously paired device: tell it to re-pair instead of showing
+			// the generic never-paired copy.
+			if s.Pairing.SessionExpired(tokenHash) {
+				writePairingSessionExpired(w)
+				return
+			}
 			writePairingRequired(w)
 			return
 		}
@@ -280,6 +292,19 @@ func writePairingRequired(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(contracts.Response{
 		OK:    false,
 		Error: &contracts.RPCError{Code: contracts.CodePairingRequired, Message: "Device pairing required. Pair this device from the host NusaShell instance."},
+	})
+}
+
+// writePairingSessionExpired sends a 401 JSON response for a device whose
+// pairing session row exists but is past its expiry. The distinct
+// PAIRING_SESSION_EXPIRED code lets the frontend show a re-pair gate message
+// instead of the never-paired PAIRING_REQUIRED copy.
+func writePairingSessionExpired(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(contracts.Response{
+		OK:    false,
+		Error: &contracts.RPCError{Code: contracts.CodePairingSessionExpired, Message: "This device's pairing session has expired. Pair again using a new link from the host."},
 	})
 }
 

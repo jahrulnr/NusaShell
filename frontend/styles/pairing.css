@@ -371,6 +371,23 @@
   color: var(--text-muted);
   margin-top: 2px;
 }
+/* An expired session no longer authenticates; its row stays listed — dimmed
+ * and badged — until the host revokes it, so dead pairings are visible but
+ * visually distinct from live ones. */
+.pairing-session-row.expired {
+  opacity: 0.55;
+}
+.pairing-session-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger, #c62828) 14%, transparent);
+  color: var(--danger, #c62828);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
 .pairing-sessions-empty {
   color: var(--text-muted);
   font-size: 12px;

@@ -44,7 +44,7 @@ const PRECACHE = [
   './index.html',
   './manifest.webmanifest',
   './shell-init.js?v=5',
-  './page/conversation/app.js?v=104',
+  './page/conversation/app.js?v=107',
   './page/conversation/room-menu.js?v=1',
   './page/conversation/context-inspector.js?v=3',
   './js/views/agent/subagent-prompt.js?v=1',

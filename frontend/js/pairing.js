@@ -40,10 +40,15 @@ export function initPairingGate() {
   gateEl = document.getElementById('pairing-gate');
   if (!gateEl) return;
 
-  // Listen for PAIRING_REQUIRED errors on the RPC layer.
+  // Listen for pairing-gate errors on the RPC layer: PAIRING_REQUIRED for a
+  // device that was never paired (or lost its session row),
+  // PAIRING_SESSION_EXPIRED for a previously paired device past its TTL, and
+  // REMOTE_ACCESS_DISABLED for a host with remote access off.
   on('rpc:error', (detail) => {
     if (detail?.code === 'PAIRING_REQUIRED') {
       showPairingGate();
+    } else if (detail?.code === 'PAIRING_SESSION_EXPIRED') {
+      showSessionExpiredGate();
     } else if (detail?.code === 'REMOTE_ACCESS_DISABLED') {
       showRemoteAccessDisabledGate();
     }
@@ -120,6 +125,22 @@ function showRemoteAccessDisabledGate() {
   const pending = document.getElementById('pairing-pending');
   if (pending) pending.hidden = true;
   showGateError('The host has not enabled remote access yet.', { retry: false });
+}
+
+// showSessionExpiredGate is the PAIRING_SESSION_EXPIRED variant of the gate:
+// this device was paired before but the session is past its TTL, so the copy
+// tells the user to re-pair from a fresh host link instead of presenting the
+// never-paired flow. Retry stays hidden — it only re-reads URL params, which
+// cannot mint a new session.
+function showSessionExpiredGate() {
+  showPairingGate();
+  const title = document.getElementById('pairing-gate-title');
+  const intro = document.getElementById('pairing-gate-intro');
+  if (title) title.textContent = 'Pairing session expired';
+  if (intro) intro.textContent = 'This device was paired before, but the session expired. Ask the host to generate a new pairing link (Settings → Remote access).';
+  const pending = document.getElementById('pairing-pending');
+  if (pending) pending.hidden = true;
+  showGateError('Your pairing session expired. Re-pair this device with a new link.', { retry: false });
 }
 
 function hidePairingGate() {
@@ -341,7 +362,14 @@ function markPairingHostOnly() {
   if (navBtn) navBtn.hidden = true;
 }
 
-export async function refreshPairingPanel({ enabled = true } = {}) {
+// isPairingHostOnly lets the settings view keep the Remote access section
+// suppressed across re-renders and search passes once a PAIRING_UNAUTHORIZED
+// answer marked this client as a paired remote device.
+export function isPairingHostOnly() {
+  return pairingHostOnly;
+}
+
+export async function refreshPairingPanel({ enabled = true, populate = true } = {}) {
   const panel = document.getElementById('pairing-panel');
   if (!panel) return;
   panel.hidden = !enabled;
@@ -384,7 +412,10 @@ export async function refreshPairingPanel({ enabled = true } = {}) {
     }
   }
 
-  await loadSessions();
+  // populate:false wires the panel without any management RPC — used right
+  // after the remote-access toggle, when the backend is mid-restart and
+  // pairing.sessions.list would only fail.
+  if (populate) await loadSessions();
 }
 
 function wireCopyButton(id, getText) {
@@ -840,6 +871,7 @@ async function decideChallenge(challengeId, decision) {
 async function loadSessions() {
   const listEl = document.getElementById('pairing-sessions-list');
   const emptyEl = document.getElementById('pairing-sessions-empty');
+  const revokeAllBtn = document.getElementById('pairing-revoke-all-btn');
   if (!listEl) return;
   try {
     const result = await rpc('pairing.sessions.list');
@@ -847,6 +879,9 @@ async function loadSessions() {
     // Revoked sessions are terminal and should not remain visible even if a
     // response comes from an older backend that still retains those rows.
     const sessions = (result.sessions || []).filter((sess) => !sess.revoked);
+    // Revoke-all starts hidden in markup and only makes sense while at least
+    // one paired session is listed.
+    if (revokeAllBtn) revokeAllBtn.hidden = sessions.length === 0;
     if (sessions.length === 0) {
       if (emptyEl) emptyEl.hidden = false;
       return;
@@ -856,24 +891,33 @@ async function loadSessions() {
       listEl.append(renderSessionRow(sess));
     }
   } catch (err) {
+    if (revokeAllBtn) revokeAllBtn.hidden = true;
     if (err?.code === 'PAIRING_UNAUTHORIZED') {
       // Paired remote device: pairing administration is host-only. Hide the
       // section instead of toasting a permission error on every refresh.
       markPairingHostOnly();
       return;
     }
-    if (err.code !== 'PAIRING_REQUIRED' && err.code !== 'REMOTE_ACCESS_DISABLED') {
-      toast(err.message || 'Failed to load sessions', 'error');
+    if (err?.code !== 'PAIRING_REQUIRED' && err?.code !== 'PAIRING_SESSION_EXPIRED' && err?.code !== 'REMOTE_ACCESS_DISABLED') {
+      toast(err?.message || 'Failed to load sessions', 'error');
     }
   }
 }
 
 function renderSessionRow(sess) {
-  return el('div', { class: 'pairing-session-row', dataset: { id: sess.id } },
+  // Sessions past expires_at no longer authenticate but keep their row until
+  // revoked — list them dimmed and badged so the host can tell dead pairings
+  // from live ones (and still clean them up via Revoke).
+  const expired = sess.expires_at ? Date.parse(sess.expires_at) <= Date.now() : false;
+  const meta = `Created ${new Date(sess.created_at).toLocaleDateString()} · Last seen ${new Date(sess.last_seen_at).toLocaleDateString()}`;
+  return el('div', { class: expired ? 'pairing-session-row expired' : 'pairing-session-row', dataset: { id: sess.id } },
     el('div', { class: 'pairing-session-info' },
-      el('div', { class: 'pairing-session-label', text: sess.device_label || 'Remote device' }),
+      el('div', { class: 'pairing-session-label' },
+        sess.device_label || 'Remote device',
+        expired ? el('span', { class: 'pairing-session-badge', text: 'Expired' }) : null,
+      ),
       el('div', { class: 'pairing-session-meta' },
-        `Created ${new Date(sess.created_at).toLocaleDateString()} · Last seen ${new Date(sess.last_seen_at).toLocaleDateString()}`),
+        expired ? `${meta} · Expired ${new Date(sess.expires_at).toLocaleDateString()}` : meta),
     ),
     el('div', { class: 'pairing-session-actions' },
       el('button', {

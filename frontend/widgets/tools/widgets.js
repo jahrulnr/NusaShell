@@ -403,6 +403,21 @@ class QuestionToolWidget extends ToolElement {
   }
 }
 
+// /local-file only serves real files, so targets that can never resolve —
+// directories (file_list, file_mkdir) and removed paths (file_delete) — get
+// no preview action instead of a guaranteed 404.
+const FILE_PREVIEWLESS_TOOLS = new Set(['file_list', 'file_mkdir', 'file_delete']);
+
+function filePreviewable(event) {
+  if (FILE_PREVIEWLESS_TOOLS.has(event?.tool)) return false;
+  // file_info targets may be files or directories; its yamlmd result block
+  // reports the stat flags, so a missing path or a directory is filtered
+  // by the same rule.
+  if (event?.tool !== 'file_info') return true;
+  const result = detailText(event);
+  return !/^exists:\s*false\s*$/m.test(result) && !/^dir:\s*true\s*$/m.test(result);
+}
+
 class FileToolWidget extends ToolElement {
   render() {
     if (!this._event) return;
@@ -410,9 +425,12 @@ class FileToolWidget extends ToolElement {
     const article = shell(this, 'file', this._event);
     const body = replaceBody(article, make('code', 'tool-file-path', path || 'Workspace'));
     if (args.source && args.destination) body.append(make('span', 'file-route', `${args.source} → ${args.destination}`));
-    const open = make('button', 'instrument-action', 'Preview file'); open.type = 'button'; open.dataset.primaryAction = '';
-    open.addEventListener('click', () => emit(this, 'artifact-open', { path }));
-    body.append(open); addDetails(article, this._event);
+    if (filePreviewable(this._event)) {
+      const open = make('button', 'instrument-action', 'Preview file'); open.type = 'button'; open.dataset.primaryAction = '';
+      open.addEventListener('click', () => emit(this, 'artifact-open', { path }));
+      body.append(open);
+    }
+    addDetails(article, this._event);
   }
 }
 
@@ -476,6 +494,24 @@ class TaskToolWidget extends ToolElement {
   }
 }
 
+// The child run id never appears in the tool call args — it only exists in
+// the tool RESULT: the spawn result yamlmd block (`runs:` → `- id: …`, see
+// FormatSpawnResult) while the call is fresh, or the brief terminal line
+// "Subagent run <id> completed." (SubagentBriefResult) once the run settles.
+// event.runId is the PARENT round id and must not be used here. Priority:
+// explicit args.id (subagent_result synthetic calls), then the first `id:`
+// scalar in the result text, then an acprun_*/run_* token in the brief text.
+// detailText shadows event.output behind presentation.result.text, so the
+// haystack names all three surfaces explicitly.
+function subagentRunID(event) {
+  const args = argsOf(event);
+  if (args.id) return args.id;
+  const haystack = `${detailText(event)}\n${text(event?.presentation?.result?.text)}\n${text(event?.output)}`;
+  return haystack.match(/\bid:\s*([a-z]+_[A-Za-z0-9]+)\b/)?.[1]
+    || haystack.match(/\b((?:acprun|run)_[A-Za-z0-9]+)\b/)?.[1]
+    || '';
+}
+
 class SubagentToolWidget extends ToolElement {
   render() {
     if (!this._event) return;
@@ -491,7 +527,7 @@ class SubagentToolWidget extends ToolElement {
       body.append(prompt);
     }
     const open = make('button', 'instrument-action', 'Open subagents'); open.type = 'button'; open.dataset.primaryAction = '';
-    open.addEventListener('click', () => emit(this, 'subagent-open', { id: args.id })); body.append(open); addDetails(article, this._event);
+    open.addEventListener('click', () => emit(this, 'subagent-open', { id: subagentRunID(this._event) })); body.append(open); addDetails(article, this._event);
   }
 }
 

@@ -174,6 +174,91 @@ func TestAuthMiddleware_RemoteWithInvalidSession(t *testing.T) {
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", res.Code)
 	}
+	var body contracts.Response
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error == nil || body.Error.Code != contracts.CodePairingRequired {
+		t.Fatalf("error = %+v, want PAIRING_REQUIRED for an unknown cookie", body.Error)
+	}
+}
+
+// TestAuthMiddleware_SessionExpiryResponses verifies the auth middleware
+// distinguishes a cookie for a persisted-but-expired session (a previously
+// paired device → PAIRING_SESSION_EXPIRED) from a missing cookie and from a
+// cookie with no matching row (both → PAIRING_REQUIRED).
+func TestAuthMiddleware_SessionExpiryResponses(t *testing.T) {
+	srv, svc := newPairingServer(t)
+	createRes, rpcErr := svc.CreateChallenge("")
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	if rpcErr := svc.ApproveChallenge(createRes.ChallengeID, "Phone"); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	exchangeRes, rpcErr := svc.ExchangeChallenge(contracts.PairingChallengeExchangeRequest{
+		ChallengeID: createRes.ChallengeID,
+		Code:        createRes.Code,
+	}, "")
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	srv.mux.HandleFunc("POST /rpc/test", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("protected handler should not be called")
+	})
+	// The fixture clock sits at 2026-01-02; push it past the 30-day session
+	// TTL so the session row persists but no longer validates.
+	svc.SetClock(func() time.Time { return time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) })
+
+	t.Run("cookie for an expired session gets PAIRING_SESSION_EXPIRED", func(t *testing.T) {
+		req := remoteRequest("POST", "/rpc/test", nil)
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: exchangeRes.Token})
+		res := httptest.NewRecorder()
+		srv.AuthMiddleware(srv.mux).ServeHTTP(res, req)
+		if res.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", res.Code)
+		}
+		var body contracts.Response
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Error == nil || body.Error.Code != contracts.CodePairingSessionExpired {
+			t.Fatalf("error = %+v, want PAIRING_SESSION_EXPIRED", body.Error)
+		}
+	})
+
+	t.Run("missing cookie stays PAIRING_REQUIRED", func(t *testing.T) {
+		req := remoteRequest("POST", "/rpc/test", nil)
+		res := httptest.NewRecorder()
+		srv.AuthMiddleware(srv.mux).ServeHTTP(res, req)
+		if res.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", res.Code)
+		}
+		var body contracts.Response
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Error == nil || body.Error.Code != contracts.CodePairingRequired {
+			t.Fatalf("error = %+v, want PAIRING_REQUIRED", body.Error)
+		}
+	})
+
+	t.Run("cookie with no session row stays PAIRING_REQUIRED", func(t *testing.T) {
+		req := remoteRequest("POST", "/rpc/test", nil)
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "garbage-token"})
+		res := httptest.NewRecorder()
+		srv.AuthMiddleware(srv.mux).ServeHTTP(res, req)
+		if res.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", res.Code)
+		}
+		var body contracts.Response
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Error == nil || body.Error.Code != contracts.CodePairingRequired {
+			t.Fatalf("error = %+v, want PAIRING_REQUIRED", body.Error)
+		}
+	})
 }
 
 func TestPairingChallengeCreate_Loopback(t *testing.T) {

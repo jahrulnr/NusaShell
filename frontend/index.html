@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/agent-tools.css?v=1">
   <link rel="stylesheet" href="styles/acp.css?v=2">
   <link rel="stylesheet" href="styles/modals.css?v=3">
-  <link rel="stylesheet" href="styles/pairing.css?v=1">
+  <link rel="stylesheet" href="styles/pairing.css?v=2">
   <link rel="stylesheet" href="./shell.css?v=62">
   <link rel="stylesheet" href="./home.css?v=4">
   <link rel="stylesheet" href="./skills.css?v=7">
@@ -33,7 +33,7 @@
   <link rel="stylesheet" href="vendor/codemirror/theme/dracula.min.css">
   <link rel="stylesheet" href="./code-surface.css?v=1">
   <script defer src="./vendor/lucide.min.js"></script>
-  <script type="module" src="./page/conversation/app.js?v=104"></script>
+  <script type="module" src="./page/conversation/app.js?v=107"></script>
   <script type="module" src="./shell-init.js?v=5"></script>
 </head>
 <body>
@@ -1080,7 +1080,7 @@
                 <button class="settings-quiet-button" id="pairing-show-qr-btn" type="button" hidden>Show pairing QR</button>
               </div>
               <label class="settings-field" for="pairing-remote-address">Address remote devices can reach
-                <textarea id="pairing-remote-address" rows="3" placeholder="https://host.example:10994&#10;https://tunnel.example/nusashell" autocomplete="off"></textarea>
+                <textarea id="pairing-remote-address" rows="3" data-setting="remote_access_addresses" placeholder="https://host.example:10994&#10;https://tunnel.example/nusashell" autocomplete="off"></textarea>
                 <span class="settings-field-error" id="pairing-address-error" role="alert" hidden></span>
                 <small class="settings-hint">Use one absolute HTTP(S) address per line. The QR does not create reachability; these addresses only determine the URLs encoded in generated links. This does not change where NusaShell listens. When remote access is enabled, loopback binds are promoted automatically; an explicit non-loopback <code>NUSASHELL_HOST</code> remains authoritative.</small>
               </label>

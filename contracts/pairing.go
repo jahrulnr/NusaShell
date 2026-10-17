@@ -5,15 +5,21 @@ import "time"
 // Pairing error codes. These extend the base ErrorCode set so the frontend
 // can map each pairing failure to a specific, actionable message.
 const (
-	CodePairingRequired      ErrorCode = "PAIRING_REQUIRED"
-	CodePairingExpired       ErrorCode = "PAIRING_EXPIRED"
-	CodePairingRejected      ErrorCode = "PAIRING_REJECTED"
-	CodePairingUsed          ErrorCode = "PAIRING_ALREADY_USED"
-	CodePairingRevoked       ErrorCode = "PAIRING_REVOKED"
-	CodePairingRateLimit     ErrorCode = "PAIRING_RATE_LIMITED"
-	CodePairingNotFound      ErrorCode = "PAIRING_NOT_FOUND"
-	CodePairingUnauthorized  ErrorCode = "PAIRING_UNAUTHORIZED"
-	CodeRemoteAccessDisabled ErrorCode = "REMOTE_ACCESS_DISABLED"
+	CodePairingRequired     ErrorCode = "PAIRING_REQUIRED"
+	CodePairingExpired      ErrorCode = "PAIRING_EXPIRED"
+	CodePairingRejected     ErrorCode = "PAIRING_REJECTED"
+	CodePairingUsed         ErrorCode = "PAIRING_ALREADY_USED"
+	CodePairingRevoked      ErrorCode = "PAIRING_REVOKED"
+	CodePairingRateLimit    ErrorCode = "PAIRING_RATE_LIMITED"
+	CodePairingNotFound     ErrorCode = "PAIRING_NOT_FOUND"
+	CodePairingUnauthorized ErrorCode = "PAIRING_UNAUTHORIZED"
+	// CodePairingSessionExpired marks a presented session cookie whose pairing
+	// session row still exists but is past its expiry — distinct from
+	// CodePairingExpired, which reports a stale pairing *challenge* (the
+	// waiting-flow link), and from CodePairingRequired, which covers a missing
+	// or unknown session cookie.
+	CodePairingSessionExpired ErrorCode = "PAIRING_SESSION_EXPIRED"
+	CodeRemoteAccessDisabled  ErrorCode = "REMOTE_ACCESS_DISABLED"
 )
 
 // PairingChallengeCreateResult is returned by pairing.challenge.create.

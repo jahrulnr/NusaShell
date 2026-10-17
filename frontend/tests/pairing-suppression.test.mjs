@@ -36,6 +36,7 @@ const OVERLAY_HTML = `
 <div class="pairing-gate" id="pairing-gate" role="dialog" aria-modal="true" aria-labelledby="pairing-gate-title" hidden>
   <div class="pairing-gate-card">
     <h2 id="pairing-gate-title" tabindex="-1">Device pairing required</h2>
+    <p class="pairing-gate-intro" id="pairing-gate-intro">This NusaShell instance only allows paired remote devices.</p>
     <div id="pairing-pending" hidden>
       <div class="pairing-status" id="pairing-status" data-state="pending" role="status" aria-live="polite">Waiting</div>
       <p class="pairing-countdown" id="pairing-countdown" aria-live="polite"></p>
@@ -70,6 +71,16 @@ function remoteAccessDisabledResponse() {
     ok: false,
     status: 403,
     json: async () => ({ error: { code: 'REMOTE_ACCESS_DISABLED', message: 'Remote access is disabled' } }),
+  };
+}
+
+// A PAIRING_SESSION_EXPIRED HTTP 401 response: the cookie named a persisted
+// session row that is past its expiry.
+function pairingSessionExpiredResponse() {
+  return {
+    ok: false,
+    status: 401,
+    json: async () => ({ error: { code: 'PAIRING_SESSION_EXPIRED', message: "This device's pairing session has expired." } }),
   };
 }
 
@@ -398,4 +409,49 @@ test('invalid challenge shows a clear error inside the gate, not the offline ove
     timers.restore();
     clearPairingRequired();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Expired pairing session: distinct gate copy, offline overlay stays hidden
+// ---------------------------------------------------------------------------
+
+test('PAIRING_SESSION_EXPIRED shows the expired-session gate and suppresses the offline overlay', async () => {
+  clearPairingRequired();
+  await withDom(OVERLAY_HTML, 'https://localhost/', async (window) => {
+    initOfflineScreen();
+    initPairingGate();
+    const gate = document.getElementById('pairing-gate');
+    const title = document.getElementById('pairing-gate-title');
+    const intro = document.getElementById('pairing-gate-intro');
+    const errorEl = document.getElementById('pairing-error');
+    const errorMsg = document.getElementById('pairing-error-message');
+    const retryBtn = document.getElementById('pairing-retry-btn');
+    assert.equal(gate.hidden, true, 'gate starts hidden');
+
+    const restore = mockFetch(() => pairingSessionExpiredResponse());
+    try {
+      await assert.rejects(() => rpc('app.info'), (err) => {
+        assert.equal(err.code, 'PAIRING_SESSION_EXPIRED');
+        return true;
+      });
+    } finally {
+      restore();
+    }
+
+    // The gate is the dominant UI with the re-pair copy, not the generic
+    // never-paired text and not the offline overlay.
+    assert.equal(gate.hidden, false, 'gate must be shown on PAIRING_SESSION_EXPIRED');
+    assert.match(title.textContent, /expired/i, 'gate title must name the expired session');
+    assert.match(intro.textContent, /paired before/i);
+    assert.equal(errorEl.hidden, false, 'the gate must explain the expiry');
+    assert.match(errorMsg.textContent, /expired/i);
+    assert.equal(retryBtn.hidden, true, 're-reading URL params cannot re-pair — no retry');
+    // The shared pairing flag is set so the offline overlay stays suppressed.
+    assert.equal(isPairingRequired(), true);
+    dispatchStatus(window, 'offline');
+    assert.equal(document.getElementById('offline-screen').hidden, true);
+    // Let the gate's focus setTimeout settle before teardown.
+    await new Promise((r) => setTimeout(r, 80));
+  });
+  clearPairingRequired();
 });

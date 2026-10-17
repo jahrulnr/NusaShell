@@ -452,7 +452,7 @@ The remote panel toggles remote access and drives device pairing: generate a lin
 - **Paired devices** (`#pairing-sessions-list`):
   - Section: Settings — Remote access
   - Type: list
-  - Notes: Active pairing sessions with per-device revoke; revoked sessions are omitted.
+  - Notes: Active pairing sessions with per-device revoke; revoked sessions are omitted, while expired sessions stay listed dimmed with an Expired badge until revoked.
 
 - **No paired devices** (`#pairing-sessions-empty`):
   - Section: Settings — Remote access

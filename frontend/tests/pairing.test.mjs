@@ -60,7 +60,7 @@ test('settings section nav includes remote access jump link', () => {
 });
 
 test('pairing CSS is linked in index.html', () => {
-  assert.match(html, /<link[^>]+href="styles\/pairing.css\?v=1"/);
+  assert.match(html, /<link[^>]+href="styles\/pairing.css\?v=2"/);
 });
 
 test('pairing gate has keyboard-accessible buttons with type=button', () => {

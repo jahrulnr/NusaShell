@@ -1,7 +1,7 @@
 import { on, rpc as defaultRPC } from '../../js/rpc.js';
 import { confirmDialog, createSelect, el, toast } from '../../js/ui.js';
 import { FONT_OPTIONS, readFontPreference, setFontPreference } from '../../js/font-preferences.js';
-import { refreshPairingPanel, revokeAllSessions } from '../../js/pairing.js';
+import { isPairingHostOnly, revokeAllSessions } from '../../js/pairing.js';
 import {
   SETTINGS_FIELDS,
   SETTINGS_SECTIONS,
@@ -73,7 +73,7 @@ function typingTarget(target) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable;
 }
 
-export function createSettingsPage(root = document, { rpcClient = defaultRPC } = {}) {
+export function createSettingsPage(root = document, { rpcClient = defaultRPC, pairingRefresh = null } = {}) {
   let saved = settingsFormValues({});
   let draft = settingsFormValues({});
   let secrets = {};
@@ -556,7 +556,9 @@ export function createSettingsPage(root = document, { rpcClient = defaultRPC } =
     disconnectSectionSpy();
     destroySelects();
     const remote = find('settings-remote-group');
-    if (remote) remote.hidden = false;
+    // A paired remote client got PAIRING_UNAUTHORIZED: keep the section
+    // suppressed instead of resurrecting dead controls on every render.
+    if (remote) remote.hidden = isPairingHostOnly();
     panels.replaceChildren(
       el('section', {
         class: 'settings-section',
@@ -737,7 +739,7 @@ export function createSettingsPage(root = document, { rpcClient = defaultRPC } =
       panel.hidden = ![...panel.querySelectorAll('[data-setting-field], [data-search-text]')].some((node) => !node.hidden);
     });
     const remote = find('settings-remote-group');
-    if (remote) remote.hidden = searching && !matches.has('remote_access_enabled') && !matches.has('remote_access_addresses');
+    if (remote) remote.hidden = isPairingHostOnly() || (searching && !matches.has('remote_access_enabled') && !matches.has('remote_access_addresses'));
     const empty = find('settings-search-empty');
     if (empty) {
       const panels = [...(root.querySelectorAll?.('[data-settings-panel]') || [])];
@@ -991,8 +993,8 @@ export function createSettingsPage(root = document, { rpcClient = defaultRPC } =
     state.tts = ttsResult.status === 'fulfilled' ? ttsResult.value : state.tts;
     state.pets = petsResult.status === 'fulfilled' ? petsResult.value : state.pets;
     renderAll();
-    if (rpcClient === defaultRPC) {
-      void refreshPairingPanel({ enabled: draft.remote_access_enabled === true }).catch(() => {});
+    if (pairingRefresh) {
+      void pairingRefresh({ enabled: draft.remote_access_enabled === true }).catch(() => {});
     }
     if (state.stt?.running) startSttPoll();
   }
@@ -1033,7 +1035,14 @@ export function createSettingsPage(root = document, { rpcClient = defaultRPC } =
       draft.remote_access_enabled = desired;
       if (desired) saved.remote_access_addresses = draft.remote_access_addresses;
       toast(desired ? 'Remote access enabled' : 'Remote access disabled', 'success');
-      if (rpcClient === defaultRPC) void refreshPairingPanel({ enabled: desired }).catch(() => {});
+      // Do not query pairing management while the old process is still
+      // shutting down — pairing.sessions.list would fail mid-restart and
+      // toast a bogus error. The panel is revealed directly and refreshed with
+      // populate:false so its controls are wired without network calls; the
+      // next Settings activation re-runs load().
+      const panel = find('pairing-panel');
+      if (panel) panel.hidden = !desired;
+      void pairingRefresh?.({ enabled: desired, populate: false }).catch(() => {});
       updateChrome();
     } catch (error) {
       box.checked = !desired;

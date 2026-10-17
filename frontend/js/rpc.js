@@ -73,12 +73,13 @@ export function clearRemoteAccessDisabled() {
   remoteAccessDisabled = false;
 }
 
-// isPairingRequiredError reports whether an error is a PAIRING_REQUIRED
-// rejection from the backend. Used by view catches to suppress the expected
-// error toast while the pairing gate is the dominant UI, without hiding
-// genuine `unavailable` or unexpected errors.
+// isPairingRequiredError reports whether an error is a pairing-gate rejection
+// from the backend — PAIRING_REQUIRED (never paired / unknown session) or
+// PAIRING_SESSION_EXPIRED (a previously paired device past its session TTL).
+// Both keep the pairing gate dominant, so view catches suppress the expected
+// error while still surfacing genuine `unavailable` or unexpected errors.
 export function isPairingRequiredError(err) {
-	return err != null && err.code === 'PAIRING_REQUIRED';
+	return err != null && (err.code === 'PAIRING_REQUIRED' || err.code === 'PAIRING_SESSION_EXPIRED');
 }
 
 export function isRemoteAccessDisabledError(err) {
@@ -113,6 +114,11 @@ export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
 			pairingRequired = true;
 			emit('rpc:error', { code: 'PAIRING_REQUIRED', method });
 		}
+		if (err.code === 'PAIRING_SESSION_EXPIRED') {
+			// Same gate-owning state as PAIRING_REQUIRED, distinct copy.
+			pairingRequired = true;
+			emit('rpc:error', { code: 'PAIRING_SESSION_EXPIRED', method });
+		}
 		if (err.code === 'REMOTE_ACCESS_DISABLED') {
 			remoteAccessDisabled = true;
 			emit('rpc:error', { code: 'REMOTE_ACCESS_DISABLED', method });
@@ -125,6 +131,10 @@ export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
 		if (rpcErr.code === 'PAIRING_REQUIRED') {
 			pairingRequired = true;
 			emit('rpc:error', { code: 'PAIRING_REQUIRED', method });
+		}
+		if (rpcErr.code === 'PAIRING_SESSION_EXPIRED') {
+			pairingRequired = true;
+			emit('rpc:error', { code: 'PAIRING_SESSION_EXPIRED', method });
 		}
 		if (rpcErr.code === 'REMOTE_ACCESS_DISABLED') {
 			remoteAccessDisabled = true;

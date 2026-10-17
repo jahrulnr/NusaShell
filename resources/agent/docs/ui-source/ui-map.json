@@ -1146,7 +1146,7 @@
       "label": "Device pairing gate",
       "section": "Navigation — Overlays",
       "type": "dialog",
-      "notes": "Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED."
+      "notes": "Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED or PAIRING_SESSION_EXPIRED (the latter shows re-pair copy for a previously paired device)."
     },
     "pairing-gate-title": {
       "label": "Pairing gate title",
@@ -3608,7 +3608,7 @@
       "label": "Paired devices",
       "section": "Settings — Remote access",
       "type": "list",
-      "notes": "Active pairing sessions with per-device revoke; revoked sessions are omitted."
+      "notes": "Active pairing sessions with per-device revoke; revoked sessions are omitted, while expired sessions stay listed dimmed with an Expired badge until revoked."
     },
     "pairing-sessions-empty": {
       "label": "No paired devices",

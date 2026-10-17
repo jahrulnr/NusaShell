@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-16
+
+### Fixed
+
+- Settings → Remote access never populated the pairing panel: the settings page was mounted with a wrapped RPC client that defeated the `rpcClient === defaultRPC` guard, so `refreshPairingPanel` never ran. The refresh is now injected (`pairingRefresh` option); the remote-access toggle reveals the panel and wires its controls via `populate: false` without querying sessions mid-restart; typed remote addresses now stage as `remote_access_addresses` edits; a paired remote client keeps the section suppressed across re-renders once `PAIRING_UNAUTHORIZED` marks it host-only; and "Revoke all sessions" unhides while paired sessions exist.
+
+- Expired pairing sessions are no longer invisible state: Paired devices lists them dimmed with an "Expired" badge (revoking is still the cleanup path), and a remote device whose session lapsed now gets `PAIRING_SESSION_EXPIRED` with a distinct re-pair gate message instead of the generic `PAIRING_REQUIRED` copy shown to never-paired devices.
+
+- File tool cards no longer offer a "Preview file" action for targets that can never resolve in `/local-file`: directory tools (`file_list`, `file_mkdir`), deleted paths (`file_delete`), and `file_info` results reporting `exists: false` or `dir: true` — the button was a guaranteed 404.
+
+- "Open subagents" on a delegation card now selects that run in the dock — the card emits the child run id recovered from the spawn result (yamlmd `runs:` block or the brief terminal line) instead of an args `id` that never exists — instead of just opening the panel on whatever run was already active.
+
 ## [0.10.0] - 2026-10-16
 
 ### Changed

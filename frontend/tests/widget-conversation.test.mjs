@@ -3055,7 +3055,10 @@ test('file, search, task, and subagent tools expose actions matching their domai
       ['file-tool-widget', { id: 'f', tool: 'file_patch', args: { path: '/workspace/app.js' }, status: 'ok' }, '.tool-file-path', '/workspace/app.js', 'artifact-open'],
       ['search-tool-widget', { id: 's', tool: 'grep', args: { pattern: 'widget', path: '/workspace' }, status: 'ok' }, '.search-query', 'widget', null],
       ['task-tool-widget', { id: 't', tool: 'todo', args: { mode: 'add', items: [{ id: 'a', content: 'Map tools' }] }, status: 'ok' }, '.task-count', '1 item', 'task-open'],
-      ['subagent-tool-widget', { id: 'a', tool: 'subagent', args: { title: 'Widget audit', agent_id: 'cursor' }, status: 'running' }, '.subagent-title', 'Widget audit', 'subagent-open'],
+      ['subagent-tool-widget', {
+        id: 'a', tool: 'subagent', args: { title: 'Widget audit', agent_id: 'cursor' }, status: 'running',
+        output: '---\nruns:\n  - id: acprun_abc123\n    title: Widget audit\n    status: running\nasync: true\ncount: 1\n---',
+      }, '.subagent-title', 'Widget audit', 'subagent-open'],
       ['automation-tool-widget', { id: 'pause', tool: 'sleep', args: { seconds: 90 }, status: 'running' }, '.simple-primary', 'Pause · 1m 30s', null],
     ];
     for (const [tag, event, selector, text, emitted] of cases) {
@@ -3071,10 +3074,111 @@ test('file, search, task, and subagent tools expose actions matching their domai
       if (emitted) {
         const action = new Promise((resolve) => widget.addEventListener(emitted, resolve, { once: true }));
         widget.shadowRoot.querySelector('[data-primary-action]').click();
-        assert.ok(await action);
+        const emission = await action;
+        assert.ok(emission);
+        if (tag === 'subagent-tool-widget') assert.equal(emission.detail.id, 'acprun_abc123');
       }
       widget.remove();
     }
+  } finally {
+    restoreDOMGlobals(previous);
+  }
+});
+
+test('subagent open action deep-links the child run id carried by the tool result', async () => {
+  const dom = new JSDOM('<body></body>', { url: 'http://localhost/' });
+  const previous = installDOMGlobals(dom.window);
+  try {
+    await import(`../widgets/tools/widgets.js?subagent-open-id=${Date.now()}`);
+    const open = async (event) => {
+      const widget = document.createElement('subagent-tool-widget');
+      widget.event = event;
+      document.body.append(widget);
+      const action = new Promise((resolve) => widget.addEventListener('subagent-open', resolve, { once: true }));
+      widget.shadowRoot.querySelector('[data-primary-action]').click();
+      const emission = await action;
+      widget.remove();
+      return emission.detail.id;
+    };
+
+    // The spawn result yamlmd block is the surface that carries the child run
+    // id — never the args. A multi-run spawn targets the first listed run.
+    assert.equal(await open({
+      id: 's1', tool: 'subagent', args: { title: 'Audit', agent_id: 'cursor' }, status: 'ok',
+      output: '---\nruns:\n  - id: acprun_abc123\n    title: Audit\n    status: running\n  - id: acprun_def456\n    title: Second\n    status: running\nasync: true\ncount: 2\n---',
+    }), 'acprun_abc123');
+
+    // Internal delegate runs use the run_* prefix; a completed call carries
+    // only the brief terminal line in presentation.result.text.
+    assert.equal(await open({
+      id: 's2', tool: 'delegate', args: { title: 'Summarize' }, status: 'ok',
+      presentation: { result: { text: 'Subagent run run_9f2 completed. Full result delivered in the subagent_result tool call.' } },
+    }), 'run_9f2');
+
+    // A synthetic subagent_result call keeps its explicit args.id priority.
+    assert.equal(await open({
+      id: 's3', tool: 'subagent_result', args: { id: 'acprun_result1' }, status: 'ok',
+      output: '---\nstatus: done\n---',
+    }), 'acprun_result1');
+
+    // No result at all: nothing to deep-link, the handler just opens the dock.
+    assert.equal(await open({
+      id: 's4', tool: 'subagent', args: { title: 'Audit', agent_id: 'cursor' }, status: 'running',
+    }), '');
+  } finally {
+    restoreDOMGlobals(previous);
+  }
+});
+
+test('file tool cards only offer file preview when the target can resolve in /local-file', async () => {
+  const dom = new JSDOM('<body></body>', { url: 'http://localhost/' });
+  const previous = installDOMGlobals(dom.window);
+  try {
+    await import(`../widgets/tools/widgets.js?test=${Date.now()}`);
+    const mount = (event) => {
+      const widget = document.createElement('file-tool-widget');
+      widget.event = event;
+      document.body.append(widget);
+      return widget;
+    };
+    const previewButton = (widget) =>
+      [...widget.shadowRoot.querySelectorAll('button')].find((button) => button.textContent === 'Preview file');
+
+    // Directory targets and deleted paths can never resolve in /local-file.
+    for (const tool of ['file_list', 'file_mkdir', 'file_delete']) {
+      const widget = mount({ id: `f-${tool}`, tool, args: { path: '/workspace/docs' }, status: 'ok' });
+      assert.equal(widget.shadowRoot.querySelector('[data-primary-action]'), null, `${tool} must not expose a primary action`);
+      assert.equal(previewButton(widget), undefined, `${tool} must not render a Preview file button`);
+      widget.remove();
+    }
+
+    // file_info reports the stat flags in its yamlmd result block.
+    for (const result of ['exists: true\nname: docs\ndir: true\nmode: drwxr-xr-x', 'exists: false']) {
+      const widget = mount({
+        id: 'f-info-skip', tool: 'file_info', args: { path: '/workspace/docs' }, status: 'ok',
+        presentation: { result: { text: result } },
+      });
+      assert.equal(widget.shadowRoot.querySelector('[data-primary-action]'), null, `file_info must not preview: ${result}`);
+      assert.equal(previewButton(widget), undefined);
+      widget.remove();
+    }
+    const info = mount({
+      id: 'f-info-file', tool: 'file_info', args: { path: '/workspace/app.js' }, status: 'ok',
+      presentation: { result: { text: 'exists: true\nname: app.js\ndir: false\nmode: -rw-r--r--' } },
+    });
+    const infoOpen = new Promise((resolve) => info.addEventListener('artifact-open', resolve, { once: true }));
+    info.shadowRoot.querySelector('[data-primary-action]').click();
+    assert.equal((await infoOpen).detail.path, '/workspace/app.js');
+    info.remove();
+
+    // Real file targets keep the preview action.
+    const reader = mount({ id: 'f-read', tool: 'file_read', args: { path: '/workspace/app.js' }, status: 'ok' });
+    const action = reader.shadowRoot.querySelector('[data-primary-action]');
+    assert.equal(action.textContent, 'Preview file');
+    const readOpen = new Promise((resolve) => reader.addEventListener('artifact-open', resolve, { once: true }));
+    action.click();
+    assert.equal((await readOpen).detail.path, '/workspace/app.js');
+    reader.remove();
   } finally {
     restoreDOMGlobals(previous);
   }

@@ -108,7 +108,7 @@ Full-window dialog shown when the backend requires device pairing (an unpaired n
 - **Device pairing gate** (`#pairing-gate`):
   - Section: Navigation — Overlays
   - Type: dialog
-  - Notes: Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED.
+  - Notes: Full-window dialog shown when the backend requires device pairing; owns the screen while PAIRING_REQUIRED or PAIRING_SESSION_EXPIRED (the latter shows re-pair copy for a previously paired device).
 
 - **Pairing gate title** (`#pairing-gate-title`):
   - Section: Navigation — Overlays

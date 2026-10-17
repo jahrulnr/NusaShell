@@ -24,6 +24,7 @@ import { confirmDialog, dismissOpenDialogs, registerOverlayDismiss, toast } from
 import { initInstallPrompt } from '../../js/pwa-install.js?v=1';
 import { initOfflineScreen } from '../../js/offline-screen.js';
 import { applyFontPreference, readFontPreference } from '../../js/font-preferences.js';
+import { refreshPairingPanel } from '../../js/pairing.js';
 import { mergeConversationEvents, selectConversationTurnMessages } from './conversation-sync.js?v=3';
 import { contextInspectorModel, renderContextInspector } from './context-inspector.js?v=3';
 import { closeRoomMenu, isRoomMenuOpenFor, openRoomActionsMenu } from './room-menu.js?v=1';
@@ -52,7 +53,7 @@ import {
 } from '../home/mcp.js';
 import '../../widgets/user-message.js?v=6';
 import '../../widgets/reasoning.js?v=9';
-import '../../widgets/tools/widgets.js?v=17';
+import '../../widgets/tools/widgets.js?v=19';
 import '../../widgets/agent-message.js?v=13';
 
 applyFontPreference(readFontPreference());
@@ -128,7 +129,7 @@ function rpcWithSoundRefresh(method, payload, options) {
 }
 import('../settings/app.js').then((mod) => {
   if (!settingsView || !mod.createSettingsPage) return;
-  settingsPage = mod.createSettingsPage(settingsView, { rpcClient: rpcWithSoundRefresh });
+  settingsPage = mod.createSettingsPage(settingsView, { rpcClient: rpcWithSoundRefresh, pairingRefresh: refreshPairingPanel });
   settingsPage.init();
   if (!settingsView.hidden) settingsPage.activate?.();
 }).catch((error) => {
