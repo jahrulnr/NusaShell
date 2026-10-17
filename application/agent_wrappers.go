@@ -165,6 +165,10 @@ func (a *App) agentDeps() agent.Deps {
 
 func (a *App) dispatchAgent(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {
 	switch {
+	case method == contracts.MethodConversationsCompact:
+		// Compaction lives on the turn engine (lock, provider, events). The
+		// conversations prefix otherwise stays on the conversation service.
+		return a.agentService().Dispatch(ctx, method, payload)
 	case strings.HasPrefix(method, "agent.conversations."),
 		method == contracts.MethodWorkspaceListDirs,
 		strings.HasPrefix(method, "agent.todos."):

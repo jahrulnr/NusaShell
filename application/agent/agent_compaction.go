@@ -645,9 +645,43 @@ func AppendCompactionHandoffUser(msgs []ChatMessage) []ChatMessage {
 	return append(msgs, ChatMessage{Role: "user", Content: closer})
 }
 
+// keepLiveCompactHeader copies room fields another handler can change while
+// the compaction model call is in flight. Saving the pre-call clone would
+// recreate a deleted room and drop a rename, route, workspace, or queued
+// announcement that landed during that call.
+func (a *Service) keepLiveCompactHeader(c *domain.Conversation) error {
+	if c == nil {
+		return fmt.Errorf("conversation is required")
+	}
+	if a == nil || a.Conversations == nil {
+		return fmt.Errorf("conversation store is required")
+	}
+	fresh, err := a.Conversations.Get(c.ID)
+	if err != nil || fresh == nil {
+		if err == nil {
+			err = fmt.Errorf("conversation %s was deleted", c.ID)
+		}
+		return fmt.Errorf("compaction skipped, room is gone: %w", err)
+	}
+	c.Title = fresh.Title
+	c.Model = fresh.Model
+	c.Effort = fresh.Effort
+	c.ProviderRoute = fresh.ProviderRoute
+	c.Workspace = fresh.Workspace
+	c.Origin = fresh.Origin
+	c.Type = fresh.Type
+	c.PendingWorkspaceAnnouncement = fresh.PendingWorkspaceAnnouncement
+	c.WorkspaceSwitchFrom = fresh.WorkspaceSwitchFrom
+	c.PendingAnnouncements = fresh.PendingAnnouncements
+	return nil
+}
+
 func (a *Service) PersistCompactedConversation(c *domain.Conversation, summary string, keepBudget int) error {
 	if c == nil {
 		return fmt.Errorf("conversation is required")
+	}
+	if err := a.keepLiveCompactHeader(c); err != nil {
+		return err
 	}
 	repo := bindConversation(a.Conversations, c)
 	tmp := c.Clone()
@@ -704,6 +738,9 @@ func (a *Service) PersistCompactedConversation(c *domain.Conversation, summary s
 func (a *Service) PersistCodexCompactedConversation(c *domain.Conversation, blob string, keepBudget int) error {
 	if c == nil {
 		return fmt.Errorf("conversation is required")
+	}
+	if err := a.keepLiveCompactHeader(c); err != nil {
+		return err
 	}
 	repo := bindConversation(a.Conversations, c)
 	tmp := c.Clone()

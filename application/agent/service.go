@@ -44,6 +44,8 @@ type Service struct {
 	runsMu              sync.Mutex
 	runs                map[string]*TurnRun
 	startMu             sync.Mutex
+	manualMu            sync.Mutex
+	manualCompacting    map[string]struct{}
 	conversationTurnsMu sync.Mutex
 	conversationTurns   map[string]*sync.Mutex
 	pendingRunsMu       sync.Mutex

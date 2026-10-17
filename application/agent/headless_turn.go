@@ -99,7 +99,7 @@ func (a *Service) RunHeadlessTurnKindObserved(ctx context.Context, prompt, model
 		if existing.Type != domain.ConversationTypeAutomation {
 			return nil, "", fmt.Errorf("headless turn reuse: conversation %s is not an automation conversation", conversationID)
 		}
-		if existing.Status == "running" {
+		if existing.Status == "running" || a.manualCompactionActive(conversationID) {
 			return nil, "", fmt.Errorf("headless turn reuse: conversation %s is busy", conversationID)
 		}
 		repo = bindConversation(a.Conversations, existing)

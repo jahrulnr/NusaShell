@@ -78,6 +78,8 @@ func (a *Service) HandleTurnsStart(ctx context.Context, req contracts.TurnStartR
 		}
 	} else if a.ActiveRunForConversation(conversationID) != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+	} else if a.manualCompactionActive(conversationID) {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is compacting"}
 	}
 	unlockTurn := func() {}
 	if !isNewConversation {
@@ -177,6 +179,9 @@ func (a *Service) HandleTurnsRetry(ctx context.Context, req contracts.TurnRetryR
 	defer a.startMu.Unlock()
 	if a.ActiveRunForConversation(req.ConversationID) != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+	}
+	if a.manualCompactionActive(req.ConversationID) {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is compacting"}
 	}
 	turnLock := a.ConversationTurnLock(req.ConversationID)
 	turnLock.Lock()

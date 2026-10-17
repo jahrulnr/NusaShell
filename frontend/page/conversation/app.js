@@ -29,7 +29,7 @@ import { mergeConversationEvents, selectConversationTurnMessages } from './conve
 import { contextInspectorModel, renderContextInspector } from './context-inspector.js?v=3';
 import { closeRoomMenu, isRoomMenuOpenFor, openRoomActionsMenu } from './room-menu.js?v=1';
 import { updateRoomInfo } from '../../js/views/agent/room-info.js';
-import { createCompactionStatus, createSteerQueue, createToolJobStrip, mountPipAliases, mountRoomInfo } from './strips.js?v=2';
+import { createCompactionStatus, createSteerQueue, createToolJobStrip, mountPipAliases, mountRoomInfo } from './strips.js?v=3';
 import { renderMarkdownBody } from '../../shared/markdown-body.js?v=7';
 import { createSkillsPage } from '../skills/app.js?v=2';
 import { createPluginsPage } from '../plugins/app.js?v=1';
@@ -174,6 +174,7 @@ let askPopover;
 let toolJobStrip;
 let steerQueue;
 let compactionStatus;
+const compactingRooms = new Set();
 let visibleEventCount = 48;
 let visibleEventEnd = null;
 let loadingOlderEvents = false;
@@ -555,7 +556,63 @@ function syncComposerAction() {
   stopTurnButton.hidden = !steering;
   stopTurnButton.disabled = !steering || stoppingTurn;
   stopTurnButton.setAttribute('aria-busy', String(stoppingTurn));
-  composer.placeholder = steering ? 'Steer the active turn…' : 'Ask, edit, or run a command…';
+  const compacting = Boolean(activeConversation?.id && compactingRooms.has(activeConversation.id));
+  composer.placeholder = steering
+    ? 'Steer the active turn…'
+    : compacting
+      ? 'Compacting context…'
+      : 'Ask, edit, or run a command…';
+}
+
+function syncCompactAffordances() {
+  const button = document.querySelector('#context-compact');
+  if (!button) return;
+  const id = activeConversation?.id || '';
+  const running = activeConversation?.status === 'running';
+  const compacting = Boolean(id && compactingRooms.has(id));
+  button.disabled = !id || running || compacting;
+  button.setAttribute('aria-busy', String(compacting));
+  if (!id) button.title = 'Open a conversation to compact it';
+  else if (running) button.title = 'Wait for the running turn to finish';
+  else if (compacting) button.title = 'Compaction in progress';
+  else button.title = 'Summarize older messages and keep the recent tail';
+}
+
+function releaseCompactingRoom(id) {
+  if (!id) return;
+  compactingRooms.delete(id);
+  syncCompactAffordances();
+  if (id === activeConversation?.id) syncComposerAction();
+}
+
+async function compactConversation(id) {
+  if (!id || compactingRooms.has(id)) return;
+  const room = conversations.find((candidate) => candidate.id === id);
+  const running = room?.status === 'running' || (activeConversation?.id === id && activeConversation.status === 'running');
+  if (running) {
+    toast('Stop the running turn before compacting.', 'info');
+    return;
+  }
+  compactingRooms.add(id);
+  syncCompactAffordances();
+  if (id === activeConversation?.id) syncComposerAction();
+  try {
+    const result = await rpc('agent.conversations.compact', { id });
+    if (result?.status === 'nothing_to_compact') {
+      releaseCompactingRoom(id);
+      toast('Nothing older to compact in this conversation.', 'info');
+    } else if (result?.status === 'server_managed') {
+      releaseCompactingRoom(id);
+      toast('This model compacts on the provider during the next turn.', 'info');
+    } else if (result?.status !== 'started') {
+      releaseCompactingRoom(id);
+    }
+  } catch (error) {
+    releaseCompactingRoom(id);
+    toast(error.message || 'Could not compact conversation', 'error');
+  }
+  syncCompactAffordances();
+  if (id === activeConversation?.id) syncComposerAction();
 }
 
 async function stopActiveTurn() {
@@ -1533,6 +1590,9 @@ function renderContextDock() {
   const panel = document.querySelector('#panel-context');
   if (!panel) return;
   panel.innerHTML = `
+    <div class="context-compact-row">
+      <button class="action-btn" id="context-compact" type="button">Compact</button>
+    </div>
     <ul class="context-list">
       <li><span class="context-key">Room ID</span><code class="context-value context-room-id"></code></li>
       <li><span class="context-key">Tool calls</span><span class="context-value context-tool-count"></span></li>
@@ -1550,6 +1610,10 @@ function renderContextDock() {
   renderContextInspector(panel, model);
   syncContextMeter(model);
   syncRoomInfo();
+  panel.querySelector('#context-compact')?.addEventListener('click', () => {
+    void compactConversation(activeConversation?.id || '');
+  });
+  syncCompactAffordances();
 }
 
 function updateContextToolCount() {
@@ -1665,6 +1729,7 @@ function renderRooms() {
         restoreTarget: actionsButton,
         items: [
           { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => startRoomRename(row, conversation) },
+          { id: 'compact', label: 'Compact', icon: 'fold-vertical', onSelect: () => void compactConversation(conversation.id) },
           { id: 'delete', label: 'Delete', icon: 'trash-2', danger: true, onSelect: () => void deleteConversation(conversation.id) },
         ],
         onClose: () => {
@@ -2874,6 +2939,10 @@ messageForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const content = composer.value;
   if (!content.trim() && !attachments.length) return;
+  if (activeConversation?.status !== 'running' && activeConversation?.id && compactingRooms.has(activeConversation.id)) {
+    toast('This conversation is compacting. Wait for it to finish first.', 'info');
+    return;
+  }
   const button = event.currentTarget.querySelector('.send-button');
   button.disabled = true;
   try {
@@ -3246,17 +3315,22 @@ on('agent.context.estimate', (payload) => {
   renderContextDock();
 });
 on('agent.compacting', (payload) => {
+  if (payload?.conversation_id) compactingRooms.add(payload.conversation_id);
+  syncCompactAffordances();
+  if (payload?.conversation_id === activeConversation?.id) syncComposerAction();
   if (payload?.conversation_id !== activeConversation?.id) return;
   compactionStatus.show(payload?.run_id || '');
 });
 on('agent.compacted', (payload) => {
   if (!payload?.conversation_id) return;
+  releaseCompactingRoom(payload.conversation_id);
   compactionStatus.clear(payload?.run_id || '');
   if (payload.conversation_id !== activeConversation?.id) return;
   void refreshConversationSnapshot(payload.conversation_id, { preserveStream: true, preserveRunning: true });
 });
 on('agent.compaction.failed', (payload) => {
   if (!payload?.conversation_id) return;
+  releaseCompactingRoom(payload.conversation_id);
   compactionStatus.clear(payload?.run_id || '');
   // Compaction failed but the turn continues with the un-compacted
   // conversation. Warn so the user knows context may fill up soon.

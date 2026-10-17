@@ -148,7 +148,7 @@ func TestPWAServing(t *testing.T) {
 		t.Fatalf("sw.js content type = %q", ct)
 	}
 	swBody, _ := io.ReadAll(resp.Body)
-	for _, needle := range []string{"nusashell-shell-v19", "'fetch'", "/rpc/", "/plugins/", "./js/pip.js"} {
+	for _, needle := range []string{"nusashell-shell-v20", "'fetch'", "/rpc/", "/plugins/", "./js/pip.js"} {
 		if !strings.Contains(string(swBody), needle) {
 			t.Fatalf("sw.js missing %s", needle)
 		}

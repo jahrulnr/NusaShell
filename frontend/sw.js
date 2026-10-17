@@ -17,7 +17,7 @@
 // "./" paths below always resolve to the shell root in both layouts. Same rule
 // as production: cache assets exactly as requested, "?v=" query included.
 
-const CACHE = 'nusashell-shell-v19';
+const CACHE = 'nusashell-shell-v20';
 
 const NEVER_CACHE = [
   '/rpc/',
@@ -44,14 +44,14 @@ const PRECACHE = [
   './index.html',
   './manifest.webmanifest',
   './shell-init.js?v=5',
-  './page/conversation/app.js?v=107',
+  './page/conversation/app.js?v=108',
   './page/conversation/room-menu.js?v=1',
   './page/conversation/context-inspector.js?v=3',
   './js/views/agent/subagent-prompt.js?v=1',
-  './shell.css?v=62',
+  './shell.css?v=63',
   './loading-layer.css?v=1',
   './overlays.css?v=5',
-  './dock.css?v=27',
+  './dock.css?v=28',
   './home.css?v=4',
   './skills.css?v=7',
   './plugins.css?v=8',

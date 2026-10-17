@@ -284,7 +284,7 @@ export function renderCompactionStatus() {
     'aria-atomic': 'true',
   },
   el('span', { class: 'agent-compaction-status-mark', text: '↻', 'aria-hidden': 'true' }),
-  el('span', { class: 'agent-compaction-status-text', text: 'Context automatically compacting' }),
+  el('span', { class: 'agent-compaction-status-text', text: 'Compacting context' }),
   el('span', { class: 'agent-compaction-status-dots', 'aria-hidden': 'true' },
     el('span'), el('span'), el('span'),
   ),

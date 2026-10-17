@@ -67,6 +67,9 @@ const (
 	// The in-flight assistant message is retained verbatim with the rest of
 	// the keep suffix so the round's outputs land in the live tail.
 	CompactionTriggerMidTool CompactionTrigger = "mid_tool"
+	// CompactionTriggerManual runs because the user asked to compact this
+	// conversation, independent of the token watermark.
+	CompactionTriggerManual CompactionTrigger = "manual"
 )
 
 // CompactionTriggerTokens is the estimated-token watermark that starts

@@ -28,8 +28,11 @@ func (s *Service) Dispatch(ctx context.Context, method string, payload json.RawM
 		}),
 		contracts.MethodTurnsCancelSteer: rpcdispatch.DecodeReq(s.HandleTurnsCancelSteer),
 		contracts.MethodTurnsActive:      rpcdispatch.DecodeReq(s.HandleTurnsActive),
-		contracts.MethodAskAnswer:        rpcdispatch.DecodeReq(s.HandleAskAnswer),
-		contracts.MethodAskCancel:        rpcdispatch.DecodeReq(s.HandleAskCancel),
-		contracts.MethodAskPending:       rpcdispatch.DecodeReq(s.HandleAskPendingList),
+		contracts.MethodConversationsCompact: rpcdispatch.DecodeReq(func(req contracts.ConversationIDRequest) (any, *contracts.RPCError) {
+			return s.HandleConversationsCompact(ctx, req)
+		}),
+		contracts.MethodAskAnswer:  rpcdispatch.DecodeReq(s.HandleAskAnswer),
+		contracts.MethodAskCancel:  rpcdispatch.DecodeReq(s.HandleAskCancel),
+		contracts.MethodAskPending: rpcdispatch.DecodeReq(s.HandleAskPendingList),
 	}, "agent")(method, payload)
 }

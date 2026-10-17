@@ -6,7 +6,7 @@ The agent conversation view: a scrollable event stream of user and assistant rou
 
 ## Room drawer (conversations)
 
-The left drawer lists every conversation room with search and a New chat action. On narrow widths it becomes an off-canvas panel toggled from the top bar; each row offers inline rename via the pencil affordance and a context meter dot. Deleted rooms disappear from the list and clear their per-room state.
+The left drawer lists every conversation room with search and a New chat action. On narrow widths it becomes an off-canvas panel toggled from the top bar; each row's action menu renames, compacts, or deletes the room. Deleted rooms disappear from the list and clear their per-room state.
 
 - **Room drawer** (`#room-drawer`):
   - Type: container
@@ -26,7 +26,7 @@ The left drawer lists every conversation room with search and a New chat action.
 
 - **Conversation list** (`#room-list`):
   - Type: list
-  - Notes: Interactive Agent rooms only; each row exposes inline rename and delete affordances.
+  - Notes: Interactive Agent rooms only; each row's action menu renames, compacts, or deletes the room.
 
 - **New chat** (`#new-chat`):
   - Type: button
@@ -118,7 +118,7 @@ A queued steering message waits for a safe boundary before joining the active tu
 
 ## Context dock
 
-The right dock groups three panels behind tabs. Tasks shows the plan checklist with per-item delete; Subagents lists background ACP and delegate runs with an inline transcript; Context shows the live context-usage meter for the room. The dock collapses into an overlay on narrow widths.
+The right dock groups three panels behind tabs. Tasks shows the plan checklist with per-item delete; Subagents lists background ACP and delegate runs with an inline transcript; Context shows the live context-usage meter for the room and a Compact action that summarizes older messages while keeping the recent tail. The dock collapses into an overlay on narrow widths.
 
 Parity note: the old acp-dock strip and acp-drawer live view are folded into this panel — subagent runs and their transcripts open inline here. The acp-popup peek overlay is not folded in: it survives as the single-run transcript reader (see 'Subagent transcript reader' below), opened by delegation cards rendered inside transcripts such as the Learning job view.
 
@@ -172,6 +172,11 @@ Parity note: the old acp-dock strip and acp-drawer live view are folded into thi
 - **Context panel** (`#panel-context`):
   - Type: panel
   - Notes: Context-usage detail for the active room, synced with the top-bar context meter.
+
+- **Compact context** (`#context-compact`):
+  - Type: button
+  - Action: Starts manual compaction for the active conversation via agent.conversations.compact.
+  - Notes: Disabled while the room has no conversation, a turn is running, or compaction is already in progress. The same action is in each room's action menu. A room with nothing older to summarize, or a model that compacts on the provider, finishes with a status message instead of a summary pass.
 
 ## Subagent transcript reader
 

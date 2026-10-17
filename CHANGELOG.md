@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Conversations can be compacted on demand from the room menu or the Context dock. The request uses the existing compaction pass, refuses while a turn is running, and reports when a model compacts on the provider instead of through a separate summary call. A room deleted during that pass is not written back, a rename made while the summary runs is kept, and a panic still emits `agent.compaction.failed` so the composer does not stay stuck.
+
 ## [0.10.1] - 2026-10-16
 
 ### Fixed

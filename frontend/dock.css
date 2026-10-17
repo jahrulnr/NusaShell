@@ -34,6 +34,8 @@
 .context-key { color: var(--muted); font: 9px var(--font-mono); }
 .context-value { overflow: hidden; color: var(--mist); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .context-room-id { min-width: 0; overflow-wrap: anywhere; color: var(--mist); font: 9px/1.45 var(--font-mono); white-space: normal; word-break: break-word; }
+.context-compact-row { display: flex; justify-content: flex-end; margin: 0 0 10px; }
+.context-compact-row .action-btn { min-height: 28px; padding: 0 10px; font-size: 11px; }
 .context-usage { margin-top: 15px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: rgba(5, 8, 17, .30); }
 .context-usage-line { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--mist); font: 9px var(--font-mono); }
 .context-usage-track { height: 3px; border-radius: 4px; background: var(--line); }

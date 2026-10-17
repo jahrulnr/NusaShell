@@ -213,7 +213,7 @@ test('changed stylesheet URLs match the service worker cache manifest', async ()
   const html = await source('index.html');
   const sw = await source('sw.js');
   for (const asset of [
-    'shell.css?v=62',
+    'shell.css?v=63',
     'skills.css?v=7',
     'plugins.css?v=8',
     'providers.css?v=12',

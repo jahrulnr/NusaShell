@@ -523,6 +523,20 @@ func TestLogsArePublishedToLiveSubscribers(t *testing.T) {
 	}
 }
 
+func TestManualCompactRPC(t *testing.T) {
+	h := newHarness(t, nil)
+
+	res := h.rpc(t, "agent.conversations.compact", map[string]any{})
+	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("empty id must be a validation error, got %+v", res)
+	}
+
+	res = h.rpc(t, "agent.conversations.compact", map[string]any{"id": "missing"})
+	if res.OK || res.Error == nil || res.Error.Code != "NOT_FOUND" {
+		t.Fatalf("missing conversation must be NOT_FOUND, got %+v", res)
+	}
+}
+
 func TestConversationValidation(t *testing.T) {
 	h := newHarness(t, nil)
 

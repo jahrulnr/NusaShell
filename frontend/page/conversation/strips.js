@@ -306,7 +306,7 @@ export function createCompactionStatus({ doc = globalThis.document, stream = nul
     mark.textContent = '↻';
     const text = d.createElement('span');
     text.className = 'agent-compaction-status-text';
-    text.textContent = 'Context automatically compacting';
+    text.textContent = 'Compacting context';
     const dots = d.createElement('span');
     dots.className = 'agent-compaction-status-dots';
     dots.setAttribute('aria-hidden', 'true');

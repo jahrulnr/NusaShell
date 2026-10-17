@@ -29,6 +29,9 @@ type compactionChatAdapter struct {
 	toolCallSummaries []string
 	err               error
 	calls             int
+	// before runs at the start of Chat, without the adapter lock, so a test
+	// can delete or edit the stored room while the summary call is in flight.
+	before func()
 }
 
 func (a *compactionChatAdapter) Name() string { return "compaction-chat" }
@@ -36,6 +39,9 @@ func (a *compactionChatAdapter) Stream(context.Context, *core.Request) (core.Str
 	return nil, fmt.Errorf("stream not used")
 }
 func (a *compactionChatAdapter) Chat(_ context.Context, _ *core.Request) (*core.Response, error) {
+	if a.before != nil {
+		a.before()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls++

@@ -224,7 +224,7 @@ test('desktop viewports keep both persistent panels', async () => {
 
 // --- Comment 5: one local menu for ellipsis + right-click -----------------
 
-test('room rows collapse rename/delete into one action menu for click and right-click', async () => {
+test('room rows collapse rename, compact, and delete into one action menu for click and right-click', async () => {
   const dom = await conversationDom();
   const { document } = dom.window;
   const code = await extractFunctions(['renderRooms']);
@@ -265,11 +265,11 @@ test('room rows collapse rename/delete into one action menu for click and right-
   assert.equal(opens.length, 1);
   assert.equal(opens[0].anchor, actions, 'ellipsis opens the menu anchored to itself');
   assert.equal(actions.getAttribute('aria-expanded'), 'true');
-  assert.deepEqual(Array.from(opens[0].items, (item) => item.id), ['rename', 'delete']);
+  assert.deepEqual(Array.from(opens[0].items, (item) => item.id), ['rename', 'compact', 'delete']);
 
   row.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
   assert.equal(opens.length, 2, 'right-click opens a menu too');
-  assert.deepEqual(Array.from(opens[1].items, (item) => item.id), ['rename', 'delete'], 'both gestures build the same menu');
+  assert.deepEqual(Array.from(opens[1].items, (item) => item.id), ['rename', 'compact', 'delete'], 'both gestures build the same menu');
   assert.ok(opens[1].point, 'right-click positions from the pointer');
 
   // The menu actions still run the existing flows — including the delete fix.
@@ -277,7 +277,7 @@ test('room rows collapse rename/delete into one action menu for click and right-
   assert.equal(calls.rename.length, 1);
   assert.equal(calls.rename[0][0], row);
   assert.equal(calls.rename[0][1].id, 'c1');
-  opens[0].items[1].onSelect();
+  opens[0].items.find((item) => item.id === 'delete').onSelect();
   assert.equal(calls.remove.length, 1);
   assert.equal(calls.remove[0][0], 'c1');
 

@@ -44,7 +44,7 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodAppInfo,
 		MethodConversationsList, MethodConversationsCreate, MethodConversationsGet,
 		MethodConversationsRename, MethodConversationsDelete, MethodConversationsSetWorkspace, MethodConversationsSetProvider,
-		MethodConversationsChunk, MethodWorkspaceListDirs, MethodTurnsStart, MethodTurnsStop, MethodToolStop,
+		MethodConversationsChunk, MethodConversationsCompact, MethodWorkspaceListDirs, MethodTurnsStart, MethodTurnsStop, MethodToolStop,
 		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
 		MethodToolContracts,
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,
@@ -154,6 +154,10 @@ func TestTurnErrorEventCarriesMessageID(t *testing.T) {
 }
 
 func TestGoldenDTOs(t *testing.T) {
+	assertGolden(t, "conversation-compact.json", ConversationCompactResult{
+		ConversationID: "conv_1",
+		Status:         CompactStatusStarted,
+	})
 	assertGolden(t, "conversation.json", ConversationDTO{
 		ID: "conv_1", Title: "Hello", CreatedAt: "2026-08-12T00:00:00Z",
 		UpdatedAt: "2026-08-12T00:01:00Z", MessageCount: 3, Model: "claude-3-5-haiku", Workspace: "/home/nusa/project",

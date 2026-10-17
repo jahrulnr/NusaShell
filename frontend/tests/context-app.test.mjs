@@ -158,6 +158,8 @@ async function viewHarness() {
     events: [],
     liveEventIds: new Set(),
     anchoredAfterLiveHost: new Set(),
+    compactingRooms: new Set(),
+    compactConversation() {},
   };
   context.window.__widgetModels = [];
   runInNewContext([
@@ -168,6 +170,7 @@ async function viewHarness() {
     extractFn(app, 'syncContextMeter'),
     extractFn(app, 'historicalEvents'),
     extractFn(app, 'displayEvents'),
+    extractFn(app, 'syncCompactAffordances'),
     extractFn(app, 'renderContextDock'),
   ].join('\n\n'), context);
   return { context, dom };
@@ -376,6 +379,7 @@ test('context dock keeps room rows and renders the inspector groups', async () =
   assert.equal(panel.querySelector('.context-tool-count').textContent, '1');
   const inspector = panel.querySelector('.context-inspector');
   assert.ok(inspector, 'the inspector mounts inside the existing dock panel');
+  assert.equal(panel.querySelector('#context-compact')?.textContent, 'Compact');
   const labels = [...inspector.querySelectorAll('.context-group-label')].map((el) => el.textContent);
   assert.deepEqual(labels, ['Context fill', 'Next request · estimated', 'Latest usage · measured']);
   const keys = [...inspector.querySelectorAll('.context-key')].map((el) => el.textContent);

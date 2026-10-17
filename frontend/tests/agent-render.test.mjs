@@ -132,7 +132,7 @@ test('compaction status is an accessible animated inline status', () => {
     assert.equal(status.classList.contains('agent-compaction-status'), true);
     assert.equal(status.getAttribute('role'), 'status');
     assert.equal(status.getAttribute('aria-live'), 'polite');
-    assert.match(status.textContent, /Context automatically compacting/);
+    assert.match(status.textContent, /Compacting context/);
   } finally {
     globalThis.document = previousDocument;
   }

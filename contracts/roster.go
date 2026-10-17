@@ -20,6 +20,7 @@ const (
 	MethodConversationsSetWorkspace = "agent.conversations.set-workspace"
 	MethodConversationsSetProvider  = "agent.conversations.set-provider"
 	MethodConversationsChunk        = "agent.conversations.chunk"
+	MethodConversationsCompact      = "agent.conversations.compact"
 	MethodWorkspaceListDirs         = "agent.workspace.list-dirs"
 	MethodTurnsStart                = "agent.turns.start"
 	MethodTurnsStop                 = "agent.turns.stop"
@@ -360,6 +361,21 @@ type ConversationGetResult struct {
 type ConversationIDRequest struct {
 	ID string `json:"id"`
 }
+
+// ConversationCompactResult is the immediate answer for a manual compaction
+// request. Started means the summary pass is running and will finish on
+// agent.compacting / agent.compacted / agent.compaction.failed. The other
+// statuses finish in this response because no summary pass was started.
+type ConversationCompactResult struct {
+	ConversationID string `json:"conversation_id"`
+	Status         string `json:"status"`
+}
+
+const (
+	CompactStatusStarted          = "started"
+	CompactStatusNothingToCompact = "nothing_to_compact"
+	CompactStatusServerManaged    = "server_managed"
+)
 
 // ConversationSetWorkspaceRequest persists an explicit absolute workspace
 // path. The path comes from the in-app folder browser (agent.workspace

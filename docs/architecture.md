@@ -296,6 +296,16 @@ When the conversation's estimated tokens exceed the lesser of
 model's available input budget) and 80% of that budget, a new epoch is written
 onto the **same conversation ID** (todos, chunks, and the open room stay
 attached) via `ResetTranscript` then `Add`. `agent.compacted` is emitted.
+`agent.conversations.compact` runs that same pass on demand. It refuses while
+a turn is in progress, returns immediately with `nothing_to_compact` when the
+room has no older prefix, and returns `server_managed` for models whose
+provider compacts during the normal stream instead of a separate summary call.
+An accepted pass returns `started` and finishes on `agent.compacting`,
+`agent.compacted`, or `agent.compaction.failed`. Before that pass saves, it
+re-reads the room: a deleted room is not written back, and a title, route,
+workspace, or queued announcement changed during the model call is kept. A
+panic on the pass still emits `agent.compaction.failed`, which releases the
+composer.
 Client-side compaction summarizes history with a non-streaming request. Codex
 instead sends a separate streaming remote-v2 request ending in
 `compaction_trigger`, then starts a new epoch with a chronological retained

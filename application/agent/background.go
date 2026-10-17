@@ -119,7 +119,7 @@ func (a *Service) startIdleConversationTurn(conversationID string, requirePeerMe
 	// turn: a peer `conversation send` tool call would hold startMu for
 	// that duration (stalling every other turn start), and two rooms
 	// sending each other deadlock on startMu ↔ turnLock.
-	if a.ActiveRunForConversation(conversationID) != nil {
+	if a.ActiveRunForConversation(conversationID) != nil || a.manualCompactionActive(conversationID) {
 		return
 	}
 	turnLock := a.ConversationTurnLock(conversationID)
