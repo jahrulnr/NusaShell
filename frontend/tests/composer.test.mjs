@@ -173,6 +173,28 @@ test('a real user route pick still emits one set-provider write', async () => {
   }
 });
 
+test('model search matches the model id, not only the display name', async () => {
+  const env = harness();
+  try {
+    env.selects.setModels(CATALOG, 'openrouter:anthropic/claude-sonnet-4.5');
+    await flush();
+
+    // The same store.search(term, events.searchFilter) path SlimSelect uses
+    // for its search input.
+    const matches = (term) => env.selects.model.store
+      .search(term, env.selects.model.events.searchFilter)
+      .flatMap((entry) => entry.options || [entry])
+      .map((option) => option.value);
+
+    assert.deepEqual(matches('gemini-3.1'), ['openrouter:google/gemini-3.1-pro'], 'an id-only term still finds the model');
+    assert.deepEqual(matches('openrouter:anthropic'), ['openrouter:anthropic/claude-sonnet-4.5']);
+    assert.deepEqual(matches('sonnet'), ['openrouter:anthropic/claude-sonnet-4.5'], 'display-name terms keep matching');
+    assert.deepEqual(matches('no-such-model'), []);
+  } finally {
+    env.restore();
+  }
+});
+
 test('a stale route response cannot replace a newer Codex account list', async () => {
   const dom = new JSDOM(MARKUP, { url: 'http://localhost/' });
   const restore = installDOMGlobals(dom.window);

@@ -32,6 +32,7 @@ import {
   reconcileVisibleWidgets,
   shiftWindowOlder,
   transcriptWindow,
+  upsertLiveTurnWidget,
   upsertVisibleWidget,
 } from '../page/conversation/transcript-window.js';
 
@@ -185,6 +186,20 @@ test('turn errors patch a live answer in place and create one when no text arriv
   assert.equal(created.id, 'live-m2-answer');
   assert.equal(created.status, 'error');
   assert.equal(created.canRetry, true);
+
+  // A repeated lifecycle error for the same message folds into the row it
+  // already owns — live dedup must match the single persisted row a reload
+  // renders.
+  const again = applyTurnError(events, {
+    conversation_id: 'c1', run_id: 'run-1', message_id: 'm1', message: 'provider failed again',
+  });
+  assert.equal(again, events[0]);
+  assert.equal(events.filter((event) => event.messageId === 'm1' || event.id === 'live-m1-answer').length, 1);
+  const repeated = applyTurnError(empty, {
+    conversation_id: 'c1', run_id: 'run-3', message_id: 'm2', message: 'no provider configured',
+  });
+  assert.equal(repeated, empty[0]);
+  assert.equal(empty.length, 1);
 });
 
 test('model labels share provider/model format across catalog and fallback values', () => {
@@ -711,8 +726,76 @@ test('live rounds use one stable host instead of appending deltas to the transcr
   assert.match(app, /const liveEventIds = new Set\(\)/);
   assert.match(app, /function ensureLiveTurnHost\(\)/);
   assert.match(app, /function commitLiveTurn\(\)/);
-  assert.match(app, /upsertVisibleWidget\(ensureLiveTurnHost\(\), event, eventWidgetTag/);
+  assert.match(app, /upsertLiveTurnWidget\(stream, ensureLiveTurnHost\(\), event, eventWidgetTag/);
   assert.match(app, /commitLiveTurn\(\);[\s\S]*refreshConversationSnapshot/);
+});
+
+test('a committed live round joins the visible tail instead of inventing older history', async () => {
+  const app = await readFile(new URL('page/conversation/app.js', root), 'utf8');
+  const extract = (name) => {
+    const start = app.indexOf(`function ${name}(`);
+    assert.ok(start >= 0, `app.js must define ${name}`);
+    return app.slice(start, app.indexOf('\n}', start) + 2);
+  };
+  const liveAnswer = { id: 'live-m1-answer', messageId: 'm1', type: 'agent.message', status: 'done' };
+  const context = {
+    liveTurnHost: null,
+    liveEventIds: new Set([liveAnswer.id]),
+    anchoredAfterLiveHost: new Set(),
+    liveTurnKey: 'm1',
+    liveTurnGeneration: 0,
+    followState: { pinned: true },
+    // appendVisibleCount collapses the window to total when the first message
+    // sends — on a fresh room that leaves the tail one row short once the
+    // live answer commits into history.
+    events: [{ id: 'm1-user', type: 'user.message' }, liveAnswer],
+    filterEvents,
+    activeFilter: 'all',
+    visibleEventCount: 1,
+    visibleEventEnd: 1,
+    MAX_MOUNTED_EVENTS: 120,
+    commitLiveHost: () => {},
+  };
+  runInNewContext(`${extract('historicalEvents')}\n\n${extract('commitLiveTurn')}`, context);
+
+  assert.equal(transcriptWindow(1, context.visibleEventCount, 120, context.visibleEventEnd).hidden, 0);
+  context.commitLiveTurn();
+  assert.equal(context.visibleEventEnd, 2, 'the window end follows history once the live row joins it');
+  assert.deepEqual(
+    transcriptWindow(2, context.visibleEventCount, 120, context.visibleEventEnd),
+    { start: 0, end: 2, hidden: 0 },
+    'no phantom Load older rows after the first exchange',
+  );
+
+  // A detached reader keeps their window: committing below the fold must not
+  // move the rows they are reading.
+  context.followState.pinned = false;
+  context.events.push(
+    { id: 'm2-user', type: 'user.message' },
+    { id: 'live-m2-answer', messageId: 'm2', type: 'agent.message', status: 'done' },
+  );
+  context.liveEventIds.add('live-m2-answer');
+  context.commitLiveTurn();
+  assert.equal(context.visibleEventCount, 2);
+  assert.equal(context.visibleEventEnd, 2);
+});
+
+test('a live error row re-queued after commit adopts its mounted widget instead of duplicating it', () => {
+  const dom = new JSDOM('<section id="stream"><x-widget data-event-id="u1"></x-widget><x-widget data-event-id="live-m1-answer"></x-widget><div class="live-turn-host"></div></section>');
+  const stream = dom.window.document.querySelector('#stream');
+  const host = stream.querySelector('.live-turn-host');
+  const committed = stream.querySelector('[data-event-id="live-m1-answer"]');
+
+  // round.done committed the card to the stream; a late agent.turn.error
+  // re-queues the same event id. The row must move into the fresh host, not
+  // clone — reload dedups by message id, so live must not render two rows.
+  const errorEvent = { id: 'live-m1-answer', messageId: 'm1', type: 'agent.message', status: 'error', error: 'boom' };
+  const widget = upsertLiveTurnWidget(stream, host, errorEvent, () => 'x-widget', 120);
+
+  assert.equal(widget, committed, 'the committed row is adopted, keeping its shadow state');
+  assert.equal(widget.event.status, 'error');
+  assert.equal(widget.parentNode, host);
+  assert.equal(stream.querySelectorAll('[data-event-id="live-m1-answer"]').length, 1);
 });
 
 test('commitLiveHost keeps a finished round in place above a later steer bubble', () => {

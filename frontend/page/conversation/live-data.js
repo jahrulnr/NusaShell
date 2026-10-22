@@ -370,6 +370,18 @@ export function modelOptions(models = []) {
   return [...groups].map(([label, options]) => ({ label, options }));
 }
 
+// SlimSelect only searches option.text by default, so a model id like
+// "deepseek-v4.1-flash-free" would never match unless the display name
+// repeats it. The option value is "provider_id:model_id" — searching it too
+// makes id fragments (and provider prefixes) resolve to the right model.
+export function modelOptionMatches(option, term) {
+  const needle = String(term || '').trim().toLowerCase();
+  if (!needle) return true;
+  return [option?.text, option?.value]
+    .filter(Boolean)
+    .some((haystack) => String(haystack).toLowerCase().includes(needle));
+}
+
 export function workspaceName(path) {
   const normalized = String(path || '').replace(/[\\/]+$/, '');
   return normalized.split(/[\\/]/).filter(Boolean).at(-1) || path || 'Home';

@@ -1,5 +1,5 @@
 import { createSelect } from '../../js/ui.js';
-import { formatModelLabel, modelOptions } from './live-data.js?v=6';
+import { formatModelLabel, modelOptionMatches, modelOptions } from './live-data.js?v=6';
 
 const providerLabels = {
   '9router': '9Router',
@@ -193,6 +193,7 @@ export function initComposerSelects(root, { rpc, onRouteChange } = {}) {
     data: selectData(modelSelect),
     value: modelSelect.value,
     search: true,
+    searchFilter: modelOptionMatches,
     onChange: syncModel,
   });
 

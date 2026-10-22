@@ -80,12 +80,12 @@ The list shows provider connections; the inspector renders connection fields, en
 
 - **Model list** (`#providers-model-list`):
 
-- **Prompt cache TTL** (`.provider-cache-ttl-chip`):
+- **Prompt cache TTL** (`provider-cache-ttl`):
   - Type: chip-group
   - Action: Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.
-  - Notes: Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.
+  - Notes: Buttons inside the provider detail pane (element id provider-cache-ttl). The last chip is off. Empty stored TTL still defaults to the first duration.
 
-- **Thinking summary** (`.provider-cache-ttl-chip`):
+- **Thinking summary** (`provider-reasoning-summary`):
   - Type: chip-group
   - Action: Selects how verbose the visible Codex thinking summary should be: auto, concise, detailed, or none.
   - Notes: Available only for Codex-kind providers. The selected value is stored per provider and applies on the next turn; none suppresses the visible summary without disabling model reasoning.

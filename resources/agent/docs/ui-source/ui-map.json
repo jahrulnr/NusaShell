@@ -2219,8 +2219,8 @@
       "section": "Providers",
       "type": "chip-group",
       "action": "Selects the prompt-cache duration sent to this provider when Settings prompt caching is on, or off to skip caching for this provider. Messages and OpenRouter chat offer 5m/1h/off; Responses and other Chat hosts offer 30m/off.",
-      "notes": "Buttons inside the provider detail pane (class provider-cache-ttl-chip). The last chip is off. Empty stored TTL still defaults to the first duration. The registry card shows the selected value only.",
-      "selector": ".provider-cache-ttl-chip"
+      "notes": "Buttons inside the provider detail pane (element id provider-cache-ttl). The last chip is off. Empty stored TTL still defaults to the first duration.",
+      "selector": "provider-cache-ttl"
     },
     "provider-reasoning-summary": {
       "label": "Thinking summary",
@@ -2228,7 +2228,7 @@
       "type": "chip-group",
       "action": "Selects how verbose the visible Codex thinking summary should be: auto, concise, detailed, or none.",
       "notes": "Available only for Codex-kind providers. The selected value is stored per provider and applies on the next turn; none suppresses the visible summary without disabling model reasoning.",
-      "selector": ".provider-cache-ttl-chip"
+      "selector": "provider-reasoning-summary"
     },
     "providers-detail-note": {
       "label": "Provider note",

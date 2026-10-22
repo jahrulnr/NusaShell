@@ -70,6 +70,20 @@ export function attachLiveHost(stream, host, beforeWidget = null) {
   return host;
 }
 
+// A live event can already own a mounted row outside the freshly created
+// host — a turn lifecycle event may re-queue one that commitLiveHost just
+// promoted to the stream (e.g. round.done and agent.turn.error both settle
+// the same live-<messageId>-answer). Adopt that node before upserting so one
+// event can never render two rows.
+export function upsertLiveTurnWidget(stream, host, event, resolveTag, maximum) {
+  if (stream && host && event?.id) {
+    const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(event.id) : String(event.id).replace(/["\\]/g, '\\$&');
+    const stray = stream.querySelector(`[data-event-id="${escaped}"]`);
+    if (stray && stray.parentNode !== host) host.append(stray);
+  }
+  return upsertVisibleWidget(host, event, resolveTag, maximum);
+}
+
 export function upsertVisibleWidget(stream, event, resolveTag, maximum) {
   if (!stream || !event?.id) return null;
   const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(event.id) : String(event.id).replace(/["\\]/g, '\\$&');

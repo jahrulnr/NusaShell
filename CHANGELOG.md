@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-16
+
+### Removed
+
+- The pre-0.10.0 providers view (`initProviders` and its render tree in `js/views/providers.js`, plus the orphaned `styles/providers.css`) was deleted — unreachable since the widget-shell rewrite; the file now only holds the cache-TTL/reasoning-summary helpers the live page imports.
+
+### Fixed
+
+- The conversation transcript no longer shows a phantom "Load older · N" sentinel after the first exchange: the tail window now grows by the live and steer rows that commit into history instead of counting them as hidden.
+
+- Turn-failed cards no longer duplicate when the round stream and the turn-error lifecycle event both settle the same round — the second mount adopts the already-committed row instead of appending a twin.
+
+- The composer model picker search now matches the model id (and provider prefix), not only the display name — an id fragment like `gemini-3.1` finds `Gemini 3.1 Pro`.
+
+- Provider cache TTL surfaces no longer append a "via upstream" qualifier to the sendable value.
+
 ## [0.10.1] - 2026-10-16
 
 ### Added

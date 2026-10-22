@@ -663,8 +663,8 @@ export function createSettingsPage(root = document, { rpcClient = defaultRPC, pa
       el('button', { type: 'button', class: 'settings-quiet-button', dataset: { revert: change.key }, text: 'Revert' }),
     ));
     for (const [key, value] of Object.entries(secrets)) {
-      // Never render the raw secret — mirror production's masked display
-      // (frontend/js/views/providers.js uses bullets for stored keys).
+      // Never render the raw secret — stored keys show as bullets in the
+      // provider views.
       const shown = value === '' ? 'Stored key will be cleared' : '••••••••';
       rows.push(el('div', { class: 'settings-review-row' },
         el('span', { text: `${fieldByKey(key)?.label || key}: ${shown}` }),

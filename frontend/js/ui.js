@@ -106,7 +106,7 @@ function setSelectPortalExpanded(selectEl, expanded) {
   portal.toggleAttribute('inert', !expanded);
 }
 
-export function createSelect(selectEl, { data = [], value = '', placeholder = '', search = null, onChange } = {}) {
+export function createSelect(selectEl, { data = [], value = '', placeholder = '', search = null, searchFilter, onChange } = {}) {
   const ss = new SlimSelect({
     select: selectEl,
     data,
@@ -117,6 +117,7 @@ export function createSelect(selectEl, { data = [], value = '', placeholder = ''
       closeOnSelect: true,
     },
     events: {
+      ...(searchFilter ? { searchFilter } : {}),
       afterChange: (selected) => {
         if (onChange) onChange(selected[0]?.value ?? '');
       },

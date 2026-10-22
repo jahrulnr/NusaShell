@@ -10,7 +10,6 @@ import {
   providerStatusLabel,
 } from '../page/providers/model.js';
 import {
-  BUILTIN_PROVIDERS,
   cacheTTLsFor,
   effectiveCacheTTL,
   effectiveReasoningSummary,
@@ -182,13 +181,17 @@ test('ACP detail aligns model preference actions and authentication card', async
 // Ported from production frontend/tests/providers.test.mjs — these helpers
 // stay live through page/providers/app.js imports; built-in-card and Codex
 // detail markup assertions were dropped (the new page has no default cards).
-test('gemini built-in and kind expose no cache TTL chips', () => {
-  const gemini = BUILTIN_PROVIDERS.find((provider) => provider.id === 'gemini');
-  assert.ok(gemini, 'gemini built-in card exists');
-  assert.equal(gemini.kind, 'gemini');
-  assert.equal(gemini.driver, 'gemini');
+test('gemini kind exposes no cache TTL chips', () => {
   assert.deepEqual(cacheTTLsFor({ kind: 'gemini', driver: 'gemini' }), []);
   assert.equal(effectiveCacheTTL({ kind: 'gemini', driver: 'gemini', cache_ttl: '30m' }), '');
+});
+
+test('provider cache TTL surfaces show the sendable value without an upstream qualifier', async () => {
+  for (const path of ['js/views/providers.js', 'page/providers/app.js', 'providers.css']) {
+    const source = await readFile(new URL(path, root), 'utf8');
+    assert.doesNotMatch(source, /via upstream/, `${path} dropped the upstream qualifier`);
+    assert.doesNotMatch(source, /provider-cache-ttl-note/, `${path} dropped the upstream note style`);
+  }
 });
 
 test('cache TTL chips use sendable values and keep a selected default', () => {

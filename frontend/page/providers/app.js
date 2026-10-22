@@ -381,9 +381,7 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
     return rows;
   }
 
-  // Cache TTL and thinking-summary picks mirror the production detail grid
-  // (frontend/js/views/providers.js renderCacheTTLPicks /
-  // renderReasoningSummaryPicks): chip buttons that persist through
+  // Cache TTL and thinking-summary picks: chip buttons that persist through
   // ai.providers.save and mark the effective value.
   function renderPreferencePicks(provider) {
     const nodes = [];
@@ -403,7 +401,6 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
         chip.addEventListener('click', () => { void saveProviderPreference(provider, { cache_ttl: ttl }); });
         return chip;
       });
-      if (provider.id === 'openrouter') chips.push(el('span', { class: 'providers-list-empty-copy', text: 'via upstream' }));
       nodes.push(el('dt', { text: 'Cache TTL' }), el('dd', { class: 'providers-chip-list', id: 'provider-cache-ttl' }, chips));
     }
     const summaries = reasoningSummariesFor(provider);

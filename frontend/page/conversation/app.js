@@ -7,7 +7,7 @@ import { agentTurnSound } from './turn-sound.js?v=1';
 import { createThreadFollow, stickThreadToBottom } from '../../js/thread-follow.js';
 import { effectiveContextWindow, formatContextUsage, inspectAttachmentContent, isNestedScrollerEvent, isThreadAtBottom, toDataURL, updateScrollPin } from '../../js/agent-ui.js';
 import { eventWidgetTag } from '../../widgets/registry.js';
-import { appendVisibleCount, attachLiveHost, commitLiveHost, growVisibleCount, mountWidgetAfterLiveHost, reconcileVisibleWidgets, shiftWindowOlder, transcriptWindow, upsertVisibleWidget } from './transcript-window.js';
+import { appendVisibleCount, attachLiveHost, commitLiveHost, growVisibleCount, mountWidgetAfterLiveHost, reconcileVisibleWidgets, shiftWindowOlder, transcriptWindow, upsertLiveTurnWidget, upsertVisibleWidget } from './transcript-window.js';
 import { mountSubagentPanel, selectSubagentRun } from './subagent-dock.js?v=22';
 import { acceptSubagentStreamFrame, enrichSubagentToolEvent, toSubagentView } from './subagent-state.js?v=5';
 import { filterConversations, isConversationActive, normalizeConversationStatus, selectInitialConversation } from './room-state.js?v=2';
@@ -796,16 +796,29 @@ function mountLiveTurnEvents() {
     return;
   }
   const host = ensureLiveTurnHost();
-  for (const event of visible) upsertVisibleWidget(host, event, eventWidgetTag, MAX_MOUNTED_EVENTS);
+  for (const event of visible) upsertLiveTurnWidget(stream, host, event, eventWidgetTag, MAX_MOUNTED_EVENTS);
 }
 
 function commitLiveTurn() {
   if (liveTurnHost?.isConnected) commitLiveHost(liveTurnHost);
+  const joiningIds = new Set([...liveEventIds, ...anchoredAfterLiveHost]);
   liveTurnHost = null;
   liveEventIds.clear();
   liveTurnKey = '';
   liveTurnGeneration += 1;
   anchoredAfterLiveHost.clear();
+  // Live and steer-anchored rows stay out of historicalEvents() until they
+  // commit here, so the tail window never counted them at birth. Grow it by
+  // the number that just joined history — otherwise a pinned transcript
+  // invents "Load older" rows for events the reader is already looking at.
+  if (followState.pinned && joiningIds.size) {
+    const filtered = filterEvents(historicalEvents(), activeFilter);
+    const joined = filterEvents(events.filter((event) => joiningIds.has(event?.id)), activeFilter).length;
+    if (joined) {
+      visibleEventCount = Math.min(filtered.length, MAX_MOUNTED_EVENTS, Math.max(1, visibleEventCount + joined));
+      visibleEventEnd = filtered.length;
+    }
+  }
 }
 
 function resetLiveTurnHost() {
@@ -2419,7 +2432,7 @@ function flushLiveWidgets() {
   const visibleIds = new Set(visibleEvents().visible.map(({ id }) => id));
   for (const { event } of matchingUpdates) {
     if (liveEventIds.has(event.id)) {
-      upsertVisibleWidget(ensureLiveTurnHost(), event, eventWidgetTag, MAX_MOUNTED_EVENTS);
+      upsertLiveTurnWidget(stream, ensureLiveTurnHost(), event, eventWidgetTag, MAX_MOUNTED_EVENTS);
       continue;
     }
     if (!followState.pinned && !visibleIds.has(event.id)) continue;
