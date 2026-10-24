@@ -40,7 +40,7 @@ func TestFrontendAssets(t *testing.T) {
 	checks := map[string][]string{
 		"/page/conversation/app.js": {"text/javascript", "application/javascript"},
 		"/shell.css":                {"text/css"},
-		"/styles/global.css":        {"text/css"},
+		"/styles/agent.css":         {"text/css"},
 		"/nusashell-mark.png":       {"image/png"},
 		"/agent-offline-mascot.png": {"image/png"},
 	}
