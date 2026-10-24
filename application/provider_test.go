@@ -382,7 +382,7 @@ func TestHandleProvidersSavePersistsCacheTTL(t *testing.T) {
 func TestHandleProvidersSavePersistsCodexReasoningSummary(t *testing.T) {
 	app, providers, _ := newSeedTestApp()
 	res, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
-		Driver: "codex", Kind: "codex", Name: "Codex",
+		Kind: "codex", Name: "Codex",
 		BaseURL: "https://chatgpt.com/backend-api/codex", Enabled: true,
 		ReasoningSummary: strPtr("detailed"),
 	})
@@ -409,7 +409,7 @@ func TestHandleProvidersSavePersistsCodexReasoningSummary(t *testing.T) {
 func TestHandleProvidersSaveRejectsInvalidCodexReasoningSummary(t *testing.T) {
 	app, _, _ := newSeedTestApp()
 	_, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
-		Driver: "codex", Kind: "codex", Name: "Codex",
+		Kind: "codex", Name: "Codex",
 		BaseURL: "https://chatgpt.com/backend-api/codex", Enabled: true,
 		ReasoningSummary: strPtr("verbose"),
 	})
@@ -419,11 +419,45 @@ func TestHandleProvidersSaveRejectsInvalidCodexReasoningSummary(t *testing.T) {
 	}
 }
 
-func TestHandleProvidersSaveAcceptsCodexDriver(t *testing.T) {
+func TestHandleProvidersSaveDerivesDriverFromKindAndBaseURL(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		kind       string
+		baseURL    string
+		wantDriver domain.ProviderDriver
+	}{
+		{name: "chat custom host uses openrouter wire", kind: "chat", baseURL: "http://localhost:20128/v1", wantDriver: domain.ProviderDriverOpenRouter},
+		{name: "messages custom host uses anthropic", kind: "messages", baseURL: "http://localhost:20128/v1", wantDriver: domain.ProviderDriverAnthropic},
+		{name: "messages anthropic host uses anthropic", kind: "messages", baseURL: "https://api.anthropic.com", wantDriver: domain.ProviderDriverAnthropic},
+		{name: "responses openrouter host uses openrouter", kind: "responses", baseURL: "https://openrouter.ai/api/v1", wantDriver: domain.ProviderDriverOpenRouter},
+		{name: "responses openai host uses openai", kind: "responses", baseURL: "https://api.openai.com/v1", wantDriver: domain.ProviderDriverOpenAI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, providers, _ := newSeedTestApp()
+			res, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
+				Kind:    tc.kind,
+				Name:    tc.name,
+				BaseURL: tc.baseURL,
+				Enabled: true,
+			})
+			if rpcErr != nil {
+				t.Fatalf("save: %+v", rpcErr)
+			}
+			stored, err := providers.Get(res.(contracts.ProvidersListResult).Providers[0].ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Driver != tc.wantDriver {
+				t.Fatalf("stored driver = %q, want %q", stored.Driver, tc.wantDriver)
+			}
+		})
+	}
+}
+
+func TestHandleProvidersSaveAcceptsCodexProtocol(t *testing.T) {
 	app, providers, credentials := newSeedTestApp()
 
 	res, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
-		Driver:  "codex",
 		Kind:    "codex",
 		Name:    "Codex",
 		BaseURL: "https://chatgpt.com/backend-api/codex",
@@ -503,7 +537,6 @@ func TestHandleProvidersSavePreservesCacheTTLWhenOmitted(t *testing.T) {
 func TestHandleProvidersSaveClearsInvalidTTLOnKindChange(t *testing.T) {
 	app, providers, _ := newSeedTestApp()
 	created, rpcErr := app.providerService().HandleSave(contracts.ProviderSaveRequest{
-		Driver:   "openrouter",
 		Kind:     "chat",
 		Name:     "Gateway",
 		BaseURL:  "https://openrouter.ai/api/v1",
@@ -518,7 +551,6 @@ func TestHandleProvidersSaveClearsInvalidTTLOnKindChange(t *testing.T) {
 
 	_, rpcErr = app.providerService().HandleSave(contracts.ProviderSaveRequest{
 		ID:      id,
-		Driver:  "openrouter",
 		Kind:    "responses",
 		Name:    "Gateway",
 		BaseURL: "https://openrouter.ai/api/v1",

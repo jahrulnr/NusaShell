@@ -605,7 +605,7 @@
                 <button class="providers-mobile-back" id="providers-mobile-back" type="button" aria-label="Back to connections"><i data-lucide="arrow-left" aria-hidden="true"></i><span>Connections</span></button>
                 <div class="providers-detail-identity">
                   <div class="providers-detail-mark" id="providers-detail-mark" aria-hidden="true"></div>
-                  <div class="providers-detail-heading"><span id="providers-detail-driver">Provider</span><h2 id="providers-detail-title">Provider</h2><p id="providers-detail-id"></p></div>
+                  <div class="providers-detail-heading"><span id="providers-detail-protocol">Provider</span><h2 id="providers-detail-title">Provider</h2><p id="providers-detail-id"></p></div>
                 </div>
                 <div class="providers-detail-actions">
                   <button class="providers-action" id="providers-edit" type="button">Edit</button>
@@ -669,33 +669,35 @@
     </section>
 
     <section class="view logs-view logs-page" id="logs-view" data-view="logs" aria-label="Logs workspace" hidden>
-      <header class="logs-topbar">
+      <div class="logs-toolbar">
         <h1 class="sr-only">Logs</h1>
-        <div class="logs-topbar-actions">
-          <span id="logs-count">0 entries</span>
-          <span class="logs-sync-state" id="logs-sync-state" role="status">Not loaded</span>
-          <button class="logs-quiet-button" id="logs-refresh" type="button">Refresh</button>
-          <button class="logs-danger-button" id="logs-clear" type="button" disabled>Clear logs</button>
+        <div class="logs-controls">
+          <label class="logs-search-field">
+            <i data-lucide="search" aria-hidden="true"></i>
+            <span class="sr-only">Search logs</span>
+            <input id="logs-search" type="search" placeholder="Search source or message…" autocomplete="off" aria-controls="logs-list">
+            <kbd>/</kbd>
+          </label>
+          <label class="logs-level-field">
+            <span>Level</span>
+            <select class="slim-select" id="logs-level" aria-label="Filter log level"></select>
+          </label>
+          <label class="logs-follow-row">
+            <span>Follow new entries</span>
+            <input id="logs-follow" type="checkbox" checked>
+            <i aria-hidden="true"></i>
+          </label>
+          <button class="logs-latest-button" id="logs-latest" type="button" hidden><span id="logs-pending-count">Latest</span></button>
         </div>
-      </header>
 
-      <div class="logs-controls">
-        <label class="logs-search-field">
-          <i data-lucide="search" aria-hidden="true"></i>
-          <span class="sr-only">Search logs</span>
-          <input id="logs-search" type="search" placeholder="Search source or message…" autocomplete="off" aria-controls="logs-list">
-          <kbd>/</kbd>
-        </label>
-        <label class="logs-level-field">
-          <span>Level</span>
-          <select class="slim-select" id="logs-level" aria-label="Filter log level"></select>
-        </label>
-        <label class="logs-follow-row">
-          <span>Follow new entries</span>
-          <input id="logs-follow" type="checkbox" checked>
-          <i aria-hidden="true"></i>
-        </label>
-        <button class="logs-latest-button" id="logs-latest" type="button" hidden><span id="logs-pending-count">Latest</span></button>
+        <header class="logs-topbar">
+          <div class="logs-topbar-actions">
+            <span id="logs-count">0 entries</span>
+            <span class="logs-sync-state" id="logs-sync-state" role="status">Not loaded</span>
+            <button class="logs-quiet-button" id="logs-refresh" type="button">Refresh</button>
+            <button class="logs-danger-button" id="logs-clear" type="button" disabled>Clear logs</button>
+          </div>
+        </header>
       </div>
 
       <div class="logs-error" id="logs-error" role="alert" hidden>
@@ -808,12 +810,14 @@
         </section>
 
         <section class="learning-panel" id="learning-panel-memory" data-learning-panel="memory" role="tabpanel" aria-labelledby="learning-tab-memory" hidden>
-          <form class="learning-search-form" id="learning-search-form" role="search"><i data-lucide="search" aria-hidden="true"></i><label class="sr-only" for="learning-search-input">Search learning</label><input type="search" id="learning-search-input" placeholder="Search skills, facts, preferences…" autocomplete="off"><kbd>/</kbd><button type="submit">Search</button></form>
-          <div class="learning-kind-filter" role="group" aria-label="Filter memory atlas">
-            <button class="learning-kind-button is-active" type="button" data-learning-kind="" aria-pressed="true">Everything</button>
-            <button class="learning-kind-button" type="button" data-learning-kind="memory" aria-pressed="false">Memory</button>
-            <button class="learning-kind-button" type="button" data-learning-kind="skills" aria-pressed="false">Skills</button>
-            <span class="learning-panel-count" id="learning-results-count">0 results</span>
+          <div class="learning-atlas-bar">
+            <form class="learning-search-form" id="learning-search-form" role="search"><i data-lucide="search" aria-hidden="true"></i><label class="sr-only" for="learning-search-input">Search learning</label><input type="search" id="learning-search-input" placeholder="Search skills, facts, preferences…" autocomplete="off"><kbd>/</kbd><button type="submit">Search</button></form>
+            <div class="learning-kind-filter" role="group" aria-label="Filter memory atlas">
+              <button class="learning-kind-button is-active" type="button" data-learning-kind="" aria-pressed="true">Everything</button>
+              <button class="learning-kind-button" type="button" data-learning-kind="memory" aria-pressed="false">Memory</button>
+              <button class="learning-kind-button" type="button" data-learning-kind="skills" aria-pressed="false">Skills</button>
+              <span class="learning-panel-count" id="learning-results-count">0 results</span>
+            </div>
           </div>
           <div class="learning-atlas-layout">
             <section class="learning-results-panel" aria-labelledby="learning-results-title"><header class="learning-list-header"><h3 id="learning-results-title">Results</h3><span id="learning-results-hint">Start with a phrase</span></header><div class="learning-results" id="learning-results" role="list" aria-live="polite"><p class="learning-empty">Loading the atlas…</p></div></section>

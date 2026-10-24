@@ -272,19 +272,33 @@ func TestProviderDrivers(t *testing.T) {
 	}
 
 	tests := []struct {
-		id   string
-		want ProviderDriver
+		name    string
+		kind    ProviderKind
+		baseURL string
+		want    ProviderDriver
 	}{
-		{id: "anthropic", want: ProviderDriverAnthropic},
-		{id: "openai", want: ProviderDriverOpenAI},
-		{id: "openrouter", want: ProviderDriverOpenRouter},
-		{id: "gemini", want: ProviderDriverGemini},
-		{id: "custom", want: ProviderDriverAuto},
+		{name: "chat always openrouter", kind: ProviderChat, baseURL: "https://api.anthropic.com", want: ProviderDriverOpenRouter},
+		{name: "chat custom gateway", kind: ProviderChat, baseURL: "http://localhost:20128/v1", want: ProviderDriverOpenRouter},
+		{name: "messages direct anthropic", kind: ProviderMessages, baseURL: "https://api.anthropic.com", want: ProviderDriverAnthropic},
+		{name: "messages openrouter host", kind: ProviderMessages, baseURL: "https://openrouter.ai/api/v1", want: ProviderDriverOpenRouter},
+		{name: "responses direct openai", kind: ProviderResponses, baseURL: "https://api.openai.com/v1", want: ProviderDriverOpenAI},
+		{name: "responses openrouter host", kind: ProviderResponses, baseURL: "https://openrouter.ai/api/v1", want: ProviderDriverOpenRouter},
+		{name: "gemini", kind: ProviderGemini, baseURL: "https://generativelanguage.googleapis.com", want: ProviderDriverGemini},
+		{name: "codex", kind: ProviderCodex, baseURL: "https://chatgpt.com/backend-api/codex", want: ProviderDriverCodex},
+		{name: "unknown", kind: "", baseURL: "", want: ProviderDriverAuto},
 	}
 	for _, tc := range tests {
-		p := &Provider{ID: tc.id}
+		if got := DriverForKind(tc.kind, tc.baseURL); got != tc.want {
+			t.Errorf("DriverForKind(%q, %q) = %q, want %q", tc.kind, tc.baseURL, got, tc.want)
+		}
+		p := &Provider{ID: "x", Kind: tc.kind, BaseURL: tc.baseURL}
 		if got := p.EffectiveDriver(); got != tc.want {
-			t.Errorf("EffectiveDriver(%q) = %q, want %q", tc.id, got, tc.want)
+			t.Errorf("EffectiveDriver(%s) = %q, want %q", tc.name, got, tc.want)
+		}
+		// A stored driver still wins over derivation.
+		stored := &Provider{ID: "x", Kind: tc.kind, BaseURL: tc.baseURL, Driver: ProviderDriverAnthropic}
+		if got := stored.EffectiveDriver(); got != ProviderDriverAnthropic {
+			t.Errorf("EffectiveDriver(%s) with stored driver = %q, want anthropic", tc.name, got)
 		}
 	}
 }

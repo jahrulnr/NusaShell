@@ -27,9 +27,10 @@ const (
 	ProviderCodex ProviderKind = "codex"
 )
 
-// ProviderDriver selects the implementation package behind a provider.
-// ProviderKind remains the wire API shape so a driver can expose more than
-// one API kind.
+// ProviderDriver selects the implementation package behind a provider. It is
+// an internal routing detail derived from ProviderKind plus the base URL (see
+// DriverForKind); clients never send or read it directly. ProviderKind
+// remains the wire API shape so a driver can expose more than one API kind.
 type ProviderDriver string
 
 const (
@@ -61,8 +62,9 @@ const (
 	ReasoningSummaryNone     = "none"
 )
 
-// ValidDriver reports whether driver is supported. The empty driver keeps the
-// legacy host-detected routing for providers created before explicit drivers.
+// ValidDriver reports whether driver is a supported implementation package.
+// The empty driver means "derive from kind + base URL" and is the stored
+// form for providers created before explicit drivers existed.
 func ValidDriver(driver ProviderDriver) bool {
 	switch driver {
 	case ProviderDriverAuto, ProviderDriverAnthropic, ProviderDriverOpenAI, ProviderDriverOpenRouter, ProviderDriverGemini, ProviderDriverCodex:
@@ -428,9 +430,38 @@ type Provider struct {
 	UpdatedAt        time.Time
 }
 
-// EffectiveDriver returns the explicit driver when present. The stable
-// built-in IDs also identify their driver for records created by older
-// versions that predate the Driver field.
+// DriverForKind derives the implementation driver for a provider from its
+// wire API kind and base URL. Chat always uses the OpenRouter-compatible
+// profile; Messages and Responses use the direct Anthropic/OpenAI drivers
+// unless the base URL points at a genuine OpenRouter host, which speaks the
+// same gateway profile for every kind. Gemini and Codex map one-to-one. An
+// unknown kind stays automatic.
+func DriverForKind(kind ProviderKind, baseURL string) ProviderDriver {
+	switch kind {
+	case ProviderCodex:
+		return ProviderDriverCodex
+	case ProviderGemini:
+		return ProviderDriverGemini
+	case ProviderChat:
+		return ProviderDriverOpenRouter
+	case ProviderMessages:
+		if isOpenRouterBaseURL(baseURL) {
+			return ProviderDriverOpenRouter
+		}
+		return ProviderDriverAnthropic
+	case ProviderResponses:
+		if isOpenRouterBaseURL(baseURL) {
+			return ProviderDriverOpenRouter
+		}
+		return ProviderDriverOpenAI
+	default:
+		return ProviderDriverAuto
+	}
+}
+
+// EffectiveDriver returns the stored driver when present, otherwise the
+// driver derived from kind + base URL. Records created by older versions
+// predate the Driver field and resolve through the same rule.
 func (p *Provider) EffectiveDriver() ProviderDriver {
 	if p == nil {
 		return ProviderDriverAuto
@@ -438,18 +469,7 @@ func (p *Provider) EffectiveDriver() ProviderDriver {
 	if p.Driver != ProviderDriverAuto {
 		return p.Driver
 	}
-	switch p.ID {
-	case "anthropic":
-		return ProviderDriverAnthropic
-	case "openai":
-		return ProviderDriverOpenAI
-	case "openrouter":
-		return ProviderDriverOpenRouter
-	case "gemini":
-		return ProviderDriverGemini
-	default:
-		return ProviderDriverAuto
-	}
+	return DriverForKind(p.Kind, p.BaseURL)
 }
 
 func (p *Provider) HasModel(id string) bool {

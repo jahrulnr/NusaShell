@@ -14,7 +14,7 @@ import {
   reasoningSummariesFor,
 } from '../../js/views/providers.js';
 import {
-  PROVIDER_PROFILES,
+  PROVIDER_PROTOCOLS,
   acpAgentModeCount,
   acpAgentModelCount,
   acpAgentStatusLabel,
@@ -24,11 +24,10 @@ import {
   filterProviders,
   formatModelContext,
   providerCredentialLabel,
-  providerDriverLabel,
   providerKindLabel,
   providerModelsCount,
-  providerProfile,
-  providerProfileByValue,
+  providerProtocol,
+  providerProtocolByValue,
   providerStatusLabel,
   providerStatusTone,
 } from './model.js';
@@ -54,15 +53,25 @@ function list(value) {
 }
 
 function providerMark(provider) {
-  const driver = String(provider?.driver || '').toLowerCase();
-  const kind = String(provider?.kind || '').toLowerCase();
-  const marks = { anthropic: 'AN', openai: 'OA', openrouter: 'OR', gemini: 'GM', codex: 'CX' };
-  return marks[driver] || marks[kind] || 'AI';
+  const words = String(provider?.name || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  const name = words.join('');
+  return name ? name.slice(0, 2).toUpperCase() : 'AI';
+}
+
+function providerProtocolHeading(provider) {
+  const label = providerKindLabel(provider);
+  try {
+    const host = new URL(provider?.base_url || '').hostname;
+    return host ? `${label} · ${host}` : label;
+  } catch {
+    return label;
+  }
 }
 
 function providerAccent(provider) {
-  const value = String(provider?.driver || provider?.kind || 'automatic').toLowerCase();
-  return ['anthropic', 'openai', 'openrouter', 'gemini', 'codex'].includes(value) ? value : 'automatic';
+  const kind = String(provider?.kind || '').toLowerCase();
+  return ['chat', 'responses', 'messages', 'gemini', 'codex'].includes(kind) ? kind : 'chat';
 }
 
 function modelLabel(model) {
@@ -123,7 +132,6 @@ function formatEpoch(seconds) {
 function providerSavePayload(provider, fields = {}) {
   const payload = {
     id: provider?.id || undefined,
-    driver: (fields.driver ?? provider?.driver) || undefined,
     kind: (fields.kind ?? provider?.kind) || undefined,
     name: (fields.name ?? provider?.name) || '',
     base_url: (fields.base_url ?? provider?.base_url) || '',
@@ -310,7 +318,6 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
       ]),
       el('span', { class: 'providers-row-id', text: text(provider.id) }),
       el('span', { class: 'providers-row-meta' }, [
-        el('span', { text: providerDriverLabel(provider) }),
         el('span', { text: provider.base_url || 'Base URL not set' }),
         el('span', { dataset: { providerField: 'models' }, text: `${providerModelsCount(provider)} models` }),
       ]),
@@ -372,7 +379,6 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
 
   function connectionRows(provider) {
     const rows = [
-      ['Driver', providerDriverLabel(provider)],
       ['Protocol', providerKindLabel(provider)],
       ['Endpoint', text(provider.base_url, 'Not set')],
       ['Credentials', providerCredentialLabel(provider)],
@@ -692,7 +698,7 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
       mark.className = `providers-detail-mark providers-mark-${providerAccent(provider)}`;
       mark.textContent = providerMark(provider);
     }
-    setText('providers-detail-driver', `${providerDriverLabel(provider)} · ${providerKindLabel(provider)}`);
+    setText('providers-detail-protocol', providerProtocolHeading(provider));
     setText('providers-detail-title', text(provider.name, provider.id));
     setText('providers-detail-id', text(provider.id));
     const probe = providerProbeState(provider);
@@ -867,20 +873,20 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
 
   async function openProviderDialog(provider = null) {
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const profile = providerProfile(provider);
-    let suggestedBaseURL = profile.baseURL;
-    let baseURLCustomized = Boolean(provider?.base_url && provider.base_url !== profile.baseURL);
+    const protocol = providerProtocol(provider);
+    let suggestedBaseURL = protocol.baseURL;
+    let baseURLCustomized = Boolean(provider?.base_url && provider.base_url !== protocol.baseURL);
     const result = await dialog({
       title: provider ? 'Edit provider' : 'Add provider',
       message: 'Only configured connections are listed. API keys are stored by the backend and never returned to this form.',
       fields: [
-        { name: 'profile', label: 'Profile', tag: 'select', value: profile.value, options: PROVIDER_PROFILES.map((item) => ({ value: item.value, label: item.label })), onChange: (input, values) => {
-          const next = providerProfileByValue(input.value);
+        { name: 'protocol', label: 'Protocol', tag: 'select', value: protocol.value, options: PROVIDER_PROTOCOLS.map((item) => ({ value: item.value, label: item.label })), onChange: (input, values) => {
+          const next = providerProtocolByValue(input.value);
           if (!baseURLCustomized && values.base_url) values.base_url.value = next.baseURL;
           suggestedBaseURL = next.baseURL;
         } },
         { name: 'name', label: 'Name', value: provider?.name || '', placeholder: 'e.g. Personal OpenAI' },
-        { name: 'base_url', label: 'Base URL', value: provider?.base_url || profile.baseURL, placeholder: 'https://api.example.com/v1', onChange: (input) => {
+        { name: 'base_url', label: 'Base URL', value: provider?.base_url || protocol.baseURL, placeholder: 'https://api.example.com/v1', onChange: (input) => {
           if (input.value !== suggestedBaseURL) baseURLCustomized = true;
         } },
         { name: 'api_key', label: 'API key', type: 'password', value: '', placeholder: provider?.has_api_key ? 'Leave blank to keep stored key' : 'Optional for OAuth / local gateways' },
@@ -893,15 +899,14 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
     if (returnFocus?.isConnected && !root.hidden) returnFocus.focus();
     if (result.value !== 'save') return;
     const fields = result.fields || {};
-    const selectedProfile = providerProfileByValue(fields.profile);
+    const selectedProtocol = providerProtocolByValue(fields.protocol);
     const name = String(fields.name || '').trim();
     const baseURL = String(fields.base_url || '').trim();
     if (!name) return toast('Provider name is required', 'error');
     if (!/^https?:\/\//i.test(baseURL)) return toast('Base URL must start with http:// or https://', 'error');
     try {
       const saved = await rpcClient('ai.providers.save', providerSavePayload(provider, {
-        driver: selectedProfile.driver,
-        kind: selectedProfile.kind,
+        kind: selectedProtocol.kind,
         name,
         base_url: baseURL,
         api_key: fields.api_key,

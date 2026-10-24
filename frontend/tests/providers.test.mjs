@@ -5,7 +5,6 @@ import { JSDOM } from 'jsdom';
 
 import {
   filterProviders,
-  providerDriverLabel,
   providerKindLabel,
   providerStatusLabel,
 } from '../page/providers/model.js';
@@ -49,7 +48,6 @@ function installDOMGlobals(window) {
 
 const configured = {
   id: 'prov_tokenrouter',
-  driver: 'openrouter',
   kind: 'chat',
   name: 'TokenRouter',
   base_url: 'https://api.tokenrouter.example/v1',
@@ -60,8 +58,7 @@ const configured = {
 };
 
 test('provider model labels keep configured-only semantics', () => {
-  const phantom = { id: 'anthropic', name: 'Anthropic', configured: false, kind: 'messages', driver: 'anthropic' };
-  assert.equal(providerDriverLabel(configured), 'OpenRouter');
+  const phantom = { id: 'anthropic', name: 'Anthropic', configured: false, kind: 'messages' };
   assert.equal(providerKindLabel(configured), 'Chat');
   assert.equal(providerStatusLabel(configured), 'Ready');
   assert.equal(providerStatusLabel(phantom), 'Needs setup');
@@ -107,7 +104,7 @@ test('Providers page renders only backend records and patches a provider test in
     calls.push({ method, payload });
     if (method === 'ai.providers.list') return {
       providers: [
-        { id: 'anthropic', driver: 'anthropic', kind: 'messages', name: 'Anthropic', configured: false, enabled: true, models: [] },
+        { id: 'anthropic', kind: 'messages', name: 'Anthropic', configured: false, enabled: true, models: [] },
         configured,
       ],
     };
@@ -182,8 +179,8 @@ test('ACP detail aligns model preference actions and authentication card', async
 // stay live through page/providers/app.js imports; built-in-card and Codex
 // detail markup assertions were dropped (the new page has no default cards).
 test('gemini kind exposes no cache TTL chips', () => {
-  assert.deepEqual(cacheTTLsFor({ kind: 'gemini', driver: 'gemini' }), []);
-  assert.equal(effectiveCacheTTL({ kind: 'gemini', driver: 'gemini', cache_ttl: '30m' }), '');
+  assert.deepEqual(cacheTTLsFor({ kind: 'gemini' }), []);
+  assert.equal(effectiveCacheTTL({ kind: 'gemini', cache_ttl: '30m' }), '');
 });
 
 test('provider cache TTL surfaces show the sendable value without an upstream qualifier', async () => {
@@ -195,16 +192,15 @@ test('provider cache TTL surfaces show the sendable value without an upstream qu
 });
 
 test('cache TTL chips use sendable values and keep a selected default', () => {
-  assert.deepEqual(cacheTTLsFor({ kind: 'messages', driver: 'anthropic' }), ['5m', '1h', 'off']);
-  assert.deepEqual(cacheTTLsFor({ kind: 'responses', driver: 'openai' }), ['30m', 'off']);
-  assert.deepEqual(cacheTTLsFor({ kind: 'codex', driver: 'codex' }), ['30m', 'off']);
-  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openrouter' }), ['5m', '1h', 'off']);
-  assert.deepEqual(cacheTTLsFor({ kind: 'chat', driver: 'openai' }), ['30m', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'messages' }), ['5m', '1h', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'responses' }), ['30m', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'codex' }), ['30m', 'off']);
+  assert.deepEqual(cacheTTLsFor({ kind: 'chat' }), ['5m', '1h', 'off']);
   assert.deepEqual(cacheTTLsFor({ kind: 'messages', cache_ttls: ['5m', '1h'] }), ['5m', '1h', 'off']);
-  assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic' }), '5m');
-  assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic', cache_ttl: '1h' }), '1h');
-  assert.equal(effectiveCacheTTL({ kind: 'messages', driver: 'anthropic', cache_ttl: 'off' }), 'off');
-  assert.equal(effectiveCacheTTL({ kind: 'responses', driver: 'openai' }), '30m');
+  assert.equal(effectiveCacheTTL({ kind: 'messages' }), '5m');
+  assert.equal(effectiveCacheTTL({ kind: 'messages', cache_ttl: '1h' }), '1h');
+  assert.equal(effectiveCacheTTL({ kind: 'messages', cache_ttl: 'off' }), 'off');
+  assert.equal(effectiveCacheTTL({ kind: 'responses' }), '30m');
 });
 
 test('Codex reasoning summary chips expose supported verbosity levels', () => {

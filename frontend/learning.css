@@ -311,6 +311,10 @@
 .learning-recent-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font: 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .learning-recent-time { color: var(--muted); font: 8px var(--font-mono); white-space: nowrap; }
 
+/* On mobile the atlas search row and kind filter keep their stacked layout:
+   the bar only becomes a real box in the desktop workbench block below. */
+.learning-atlas-bar { display: contents; }
+
 .learning-panel-tools { display: flex; min-height: 28px; flex: none; align-items: center; justify-content: flex-end; margin-bottom: 8px; }
 .learning-panel-tools-activity { min-height: 31px; }
 .learning-panel-count { flex: none; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--mist); font: 9px var(--font-mono); white-space: nowrap; }
@@ -721,3 +725,138 @@
 }
 
 .learning-panel-tools-activity:has(.learning-running-pill[hidden]) { display: none; }
+
+/* Desktop workbench — matches skills/plugins: the tab row becomes the band and
+   every panel runs edge to edge as flush split panes. Placed after the
+   mid-range blocks so it wins between 761–1020px too; mobile (<=760px) rules
+   above are untouched. */
+@media (min-width: 761px) {
+  .learning-navigation-row {
+    width: auto;
+    min-height: 48px;
+    margin: 0;
+    padding: 0 max(28px, calc((100% - 1180px) / 2));
+    border-bottom: 1px solid rgba(31, 45, 69, .78);
+    background: rgba(10, 16, 29, .72);
+  }
+  .learning-navigation-actions { align-self: center; padding-bottom: 0; }
+  .learning-navigation-row .learning-refresh { min-height: 34px; font-size: 10px; }
+  .learning-navigation-row .learning-tabs { min-height: 40px; align-items: stretch; gap: 0; }
+  .learning-navigation-row .learning-tab {
+    min-height: 40px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 0;
+  }
+  .learning-navigation-row .learning-tab:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--lagoon);
+  }
+  .learning-navigation-row .learning-tab.is-active,
+  .learning-navigation-row .learning-tab[aria-selected="true"] {
+    background: transparent;
+    color: var(--foam);
+  }
+
+  .learning-panels { border-top: 0; background: transparent; }
+  .learning-panel { padding: 0; scrollbar-gutter: auto; }
+
+  /* Overview: edge-to-edge panes separated by 1px lines at every desktop
+     width; >=1021px fills the panel height with the map beside the column. */
+  .learning-overview-grid { gap: 1px; background: var(--line); }
+  .learning-overview-grid > .learning-card {
+    border: 0;
+    border-radius: 0;
+    background: rgba(13, 20, 37, .92);
+    box-shadow: none;
+  }
+  @media (min-width: 1021px) {
+    .learning-overview-grid {
+      flex: 1 1 auto;
+      min-height: 0;
+      grid-template-columns: minmax(0, 1.18fr) minmax(360px, .82fr);
+      grid-template-rows: auto minmax(180px, 1fr);
+    }
+    .learning-context-card { grid-row: 1; }
+    .learning-recent-card {
+      grid-row: 2;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+    }
+    .learning-recent-list { flex: 1 1 auto; min-height: 0; align-content: start; overflow: auto; }
+    .learning-map-card {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+    }
+    .learning-map-card .learning-graph-frame { flex: 1 1 auto; min-height: 295px; }
+  }
+
+  /* Memory atlas: search + kind filter merge into a sub-band over flush panes
+     split by a hairline drag handle. */
+  .learning-atlas-bar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 12px;
+    padding: 10px max(28px, calc((100% - 1180px) / 2));
+    border-bottom: 1px solid var(--line);
+    background: rgba(10, 16, 29, .52);
+  }
+  .learning-atlas-bar .learning-search-form { flex: 1 1 auto; max-width: 620px; }
+  .learning-atlas-bar .learning-kind-filter { flex: 1 1 auto; margin: 0; }
+  .learning-atlas-layout { flex: 1 1 auto; gap: 0; }
+  .learning-atlas-layout .learning-results-panel,
+  .learning-atlas-layout .learning-selection {
+    border: 0;
+    border-radius: 0;
+    background: rgba(13, 20, 37, .92);
+  }
+  .learning-splitter {
+    border-radius: 0;
+    background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat;
+  }
+  .learning-splitter:hover {
+    background: linear-gradient(var(--line-strong), var(--line-strong)) center / 1px 100% no-repeat;
+  }
+  .learning-splitter:active,
+  .learning-splitter:focus-visible {
+    background: var(--line-strong);
+    outline: none;
+  }
+
+  /* Experiences + Activity: the tools row becomes a sub-band, panes sit flush,
+     and pagination docks as a footer strip. */
+  .learning-panel-tools {
+    min-height: 44px;
+    align-items: center;
+    margin: 0;
+    padding: 0 max(28px, calc((100% - 1180px) / 2));
+    border-bottom: 1px solid var(--line);
+    background: rgba(10, 16, 29, .52);
+  }
+  .learning-experiences-layout { flex: 1 1 auto; gap: 0; }
+  .learning-experiences-layout .learning-experience-list,
+  .learning-experiences-layout .learning-experience-detail,
+  .learning-log-shell {
+    border: 0;
+    border-radius: 0;
+    background: rgba(13, 20, 37, .92);
+  }
+  .learning-pagination {
+    padding: 8px;
+    border-top: 1px solid var(--line);
+    background: rgba(10, 16, 29, .72);
+  }
+
+  /* 761–860px: the two split layouts already stack — keep a hairline between
+     the stacked panes and drop the side border meant for side-by-side. */
+  @media (max-width: 860px) {
+    .learning-atlas-layout,
+    .learning-experiences-layout { gap: 1px; background: var(--line); }
+  }
+  @media (min-width: 861px) {
+    .learning-experiences-layout .learning-experience-list { border-right: 1px solid var(--line); }
+  }
+}

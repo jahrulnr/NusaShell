@@ -50,7 +50,6 @@ func (s *Service) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	ttls := domain.SelectableCacheTTLs(p.Kind, cacheDriver)
 	dto := contracts.ProviderDTO{
 		ID:         p.ID,
-		Driver:     string(driver),
 		Kind:       string(p.Kind),
 		Name:       p.Name,
 		BaseURL:    p.BaseURL,
@@ -91,7 +90,6 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 	case "anthropic":
 		return &domain.Provider{
 			ID:      id,
-			Driver:  domain.ProviderDriverAnthropic,
 			Kind:    domain.ProviderMessages,
 			Name:    "Anthropic",
 			BaseURL: "https://api.anthropic.com",
@@ -100,7 +98,6 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 	case "openai":
 		return &domain.Provider{
 			ID:      id,
-			Driver:  domain.ProviderDriverOpenAI,
 			Kind:    domain.ProviderResponses,
 			Name:    "OpenAI",
 			BaseURL: "https://api.openai.com/v1",
@@ -109,7 +106,6 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 	case "openrouter":
 		return &domain.Provider{
 			ID:      id,
-			Driver:  domain.ProviderDriverOpenRouter,
 			Kind:    domain.ProviderChat,
 			Name:    "OpenRouter",
 			BaseURL: "https://openrouter.ai/api/v1",
@@ -118,7 +114,6 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 	case "gemini":
 		return &domain.Provider{
 			ID:      id,
-			Driver:  domain.ProviderDriverGemini,
 			Kind:    domain.ProviderGemini,
 			Name:    "Gemini",
 			BaseURL: "https://generativelanguage.googleapis.com",
@@ -127,7 +122,6 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 	case "codex":
 		return &domain.Provider{
 			ID:      id,
-			Driver:  domain.ProviderDriverCodex,
 			Kind:    domain.ProviderCodex,
 			Name:    "Codex",
 			BaseURL: "https://chatgpt.com/backend-api/codex",
@@ -136,35 +130,6 @@ func builtInProvider(id string) (*domain.Provider, bool) {
 	default:
 		return nil, false
 	}
-}
-
-func validateProviderDriver(driver domain.ProviderDriver, kind domain.ProviderKind) error {
-	if !domain.ValidDriver(driver) {
-		return fmt.Errorf("unsupported provider driver %q", driver)
-	}
-	switch driver {
-	case domain.ProviderDriverAnthropic:
-		if kind != domain.ProviderMessages {
-			return fmt.Errorf("anthropic driver only supports messages kind")
-		}
-	case domain.ProviderDriverOpenAI:
-		if kind != domain.ProviderResponses {
-			return fmt.Errorf("openai driver only supports responses kind")
-		}
-	case domain.ProviderDriverGemini:
-		if kind != domain.ProviderGemini {
-			return fmt.Errorf("gemini driver only supports gemini kind")
-		}
-	case domain.ProviderDriverOpenRouter:
-		if kind == domain.ProviderGemini {
-			return fmt.Errorf("openrouter driver does not support gemini kind; use the gemini driver")
-		}
-	case domain.ProviderDriverCodex:
-		if kind != domain.ProviderCodex {
-			return fmt.Errorf("codex driver only supports codex kind")
-		}
-	}
-	return nil
 }
 
 func (s *Service) HandleList() (any, *contracts.RPCError) {
@@ -189,7 +154,6 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, gemini, or codex"}
 	}
 	baseURL := strings.TrimSpace(req.BaseURL)
-	driver := domain.ProviderDriver(strings.ToLower(strings.TrimSpace(req.Driver)))
 
 	var p *domain.Provider
 	wasEnabled := false
@@ -217,24 +181,19 @@ func (s *Service) HandleSave(req contracts.ProviderSaveRequest) (any, *contracts
 		}
 	}
 
-	if driver == domain.ProviderDriverAuto {
-		driver = p.EffectiveDriver()
-	}
-	if err := validateProviderDriver(driver, kind); err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
-	}
-
 	// Every supported kind requires a base URL.
 	if baseURL == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
 	}
-	p.Driver = driver
+	// The driver is an internal detail: it is derived from the protocol kind
+	// and base URL, never taken from the client.
+	p.Driver = domain.DriverForKind(kind, baseURL)
 	p.Kind = kind
 	p.Name = name
 	p.BaseURL = baseURL
 	p.Enabled = req.Enabled
 	p.UpdatedAt = clock.NewTime().Time()
-	cacheDriver := domain.WireCacheDriver(kind, driver, baseURL)
+	cacheDriver := domain.WireCacheDriver(kind, p.Driver, baseURL)
 	if req.CacheTTL != nil {
 		ttl := strings.TrimSpace(*req.CacheTTL)
 		if !domain.ValidCacheTTL(kind, cacheDriver, ttl) {

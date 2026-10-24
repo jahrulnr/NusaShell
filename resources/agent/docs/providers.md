@@ -4,48 +4,41 @@ Providers are the LLM backends the agent chats through. A provider is
 defined by its **API wire format**, not by a vendor: **Messages**,
 **Responses**, **Chat**, **Gemini**, or the **Codex** backend.
 
-## Drivers
+## Protocols and wire implementation
 
-The provider driver selects the wire implementation while the provider kind
-selects the wire format:
+A provider is configured with a **protocol** (its wire format) plus a Base
+URL. The editor's Protocol select offers exactly five choices: **Chat**,
+**Responses**, **Messages**, **Gemini**, and **Codex · ChatGPT OAuth**. The
+implementation behind each provider is derived from the protocol and Base
+URL — there is no separate vendor or driver choice:
 
-- The persistent **Anthropic** card uses the `anthropic` driver (`messages`).
-- The persistent **OpenAI** card uses the `openai` driver (`responses`).
-- The persistent **OpenRouter** card uses the `openrouter` driver; its editor
-  supports `responses`, `chat`, and `messages`.
-- The persistent **Gemini** card uses the `gemini` driver with `gemini`:
-  Google AI Studio's `generateContent` / `streamGenerateContent` wire
-  (`https://generativelanguage.googleapis.com`, `x-goog-api-key` auth).
-- A **Codex** provider uses the ChatGPT Codex Responses endpoint with the
-  `codex` driver and ChatGPT OAuth (see API keys). Tokens are stored in the
-  local credential store. Codex also owns its remote v2 compaction: the
-  compacted checkpoint is kept separately, real user turns are retained for
-  the next request, and the replaced transcript stays visible for room
-  scroll-back.
-- Custom `messages`, `responses`, and `chat` providers default to the
-  `openrouter` compatibility/profile driver; custom `codex` and `gemini`
-  entries use their dedicated wire adapters. The editor supports all five
-  kinds and there is no custom-provider count limit. The OpenRouter profile
-  is applied against the custom Base URL even when that URL is not hosted at
-  `openrouter.ai`, so the endpoint-specific OpenRouter mappings stay
-  available to unpredictable gateways (`video_url` on Chat, `input_video` on
-  delegated Responses, video rejected on delegated Messages). A custom
-  record with an explicit direct driver still opts into that driver's wire
-  behavior.
+- **Chat** always speaks the OpenRouter-compatible profile (reasoning
+  object, `reasoning_details`, `cache_retention`, `provider.order`) against
+  the configured Base URL — whether that is `openrouter.ai` itself or a
+  custom gateway such as TokenRouter, 9Router, one-api, LiteLLM, LM Studio,
+  or vLLM. Applying that profile to a custom Base URL keeps the
+  endpoint-specific OpenRouter mappings available to unpredictable gateways
+  (`video_url` on Chat, `input_video` on delegated Responses, video
+  rejected on delegated Messages). The gateway must accept the selected
+  request shape — NusaShell does not silently retry the same request
+  through vanilla Chat, Responses, or Messages. OpenCode hosts
+  (`opencode.ai`) are the one exception: their thinking-mode contract needs
+  the vanilla Chat `reasoning_content` replay, so they keep that wire.
+- **Messages** and **Responses** use the direct Anthropic/OpenAI wire, or
+  the OpenRouter profile when the Base URL is `openrouter.ai`.
+- **Gemini** uses Google AI Studio's `generateContent` /
+  `streamGenerateContent` wire (`https://generativelanguage.googleapis.com`,
+  `x-goog-api-key` auth).
+- **Codex** uses the ChatGPT Codex Responses endpoint and ChatGPT OAuth
+  (see API keys). Tokens are stored in the local credential store. Codex
+  also owns its remote v2 compaction: the compacted checkpoint is kept
+  separately, real user turns are retained for the next request, and the
+  replaced transcript stays visible for room scroll-back.
 
 The built-in cards remain visible before they are configured. Configure a
 card with its base URL and credential, then import models when the provider
-supports model listing. Built-in cards keep their dedicated wire adapters;
-custom providers use the OpenRouter compatibility/profile parent by default.
-OpenRouter, Gemini, and custom providers can each use a different API kind
-and base URL.
-
-**Chat routing:** a provider whose driver is `openrouter` uses the
-OpenRouter compatibility/profile even when its Base URL is a custom gateway
-such as TokenRouter, 9Router, OpenCode, one-api, LiteLLM, LM Studio, or
-vLLM. The gateway must accept the selected request shape — NusaShell does
-not silently retry the same request through vanilla Chat, Responses, or
-Messages.
+supports model listing. The editor supports all five protocols and there is
+no custom-provider count limit.
 
 ## Kinds
 
@@ -53,11 +46,11 @@ Messages.
   prompt caching via `cache_control`.
 - `responses` — the OpenAI Responses wire format (`/v1/responses`); supports
   function calling and reports cached input tokens.
-- `chat` — the Chat Completions wire format (`/chat/completions`). Built-in
-  OpenRouter and `openrouter`-driver customs use the OpenRouter
-  compatibility/profile against the configured Base URL (the gateway must
-  accept that profile). Direct/automatic Chat providers use the vanilla
-  OpenAI Chat wire (`reasoning_effort`, `reasoning_content`, `max_tokens`).
+- `chat` — the Chat Completions wire format (`/chat/completions`). Every
+  Chat provider speaks the OpenRouter compatibility profile against its
+  configured Base URL (the gateway must accept that profile), except
+  OpenCode hosts, which use the vanilla OpenAI Chat wire
+  (`reasoning_effort`, `reasoning_content`, `max_tokens`).
 - `gemini` — Google's `generateContent` wire format
   (`POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent`
   with `alt=sse`). Messages become `contents` parts with an optional
@@ -150,10 +143,9 @@ off for that provider only:
 - `codex`: `30m` or `off`. The Codex wire only sends `prompt_cache_key` — no
   TTL value is transmitted, so `30m` simply enables the cache key and `off`
   disables prompt caching for the provider.
-- `chat` using the OpenRouter profile, including custom gateways with the
-  `openrouter` driver (`cache_control`): `5m` or `1h`. Default `5m`;
-  OpenRouter's profile does not accept `30m` as a `cache_control` TTL.
-- direct/automatic vanilla `chat` hosts (`prompt_cache_key` plus
+- `chat` (OpenRouter profile, `cache_control`): `5m` or `1h`. Default `5m`;
+  the OpenRouter profile does not accept `30m` as a `cache_control` TTL.
+- OpenCode Chat hosts (vanilla Chat wire, `prompt_cache_key` plus
   `prompt_cache_options`): `30m`. Putting 5m/1h on a Chat system breakpoint
   is rejected locally.
 - `off` skips prompt-cache markers for this provider even when the Settings
@@ -184,8 +176,8 @@ turns, `nusashell_bg_` for headless/background turns.
 The key is sent through the wire only where the selected adapter has a useful
 path:
 
-- OpenAI Responses and direct/automatic vanilla OpenAI Chat:
-  `prompt_cache_key` in the request body.
+- OpenAI Responses and OpenCode vanilla Chat: `prompt_cache_key` in the
+  request body.
 - Anthropic Messages: none — caching stays native `cache_control`
   breakpoints; the Messages API has no caller-supplied cache-key field.
 - OpenRouter-profile Chat, including custom Chat gateways: `prompt_cache_key`
@@ -224,15 +216,14 @@ Model lists: `GET https://opencode.ai/zen/go/v1/models` (Go) and
 `GET https://opencode.ai/zen/v1/models` (Zen). There is no
 `/models/{id}/endpoints` route picker.
 
-Custom OpenCode entries use the OpenRouter compatibility/profile path, so
-Chat requests use the OpenRouter-style `reasoning` and provider-option shape
-rather than a downgrade to `reasoning_content`. A deployment that accepts
-only the vanilla Chat shape surfaces a provider error — there is no retry
+OpenCode hosts use the vanilla Chat `reasoning_content` replay rather than
+the OpenRouter-style `reasoning` shape. A deployment that accepts a
+different request shape surfaces a provider error — there is no retry
 through another API kind or wire profile. The `x-opencode-session` header is
 still attached from the conversation prompt-cache key. Cache TTL chips are
-`5m`, `1h`, or `off`; Console Go rejects `prompt_cache_options.ttl=30m`, but
-the selected OpenRouter profile may also send cache fields that the gateway
-must support.
+`5m`, `1h`, or `off`; Console Go rejects `prompt_cache_options.ttl=30m`, so
+the OpenRouter cache enum stays selected and the gateway must support those
+values.
 
 **Base URL is required for all three kinds.** The UI suggests a per-kind
 default (`https://api.anthropic.com` for Messages, `https://api.openai.com/v1`

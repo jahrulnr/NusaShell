@@ -44,7 +44,7 @@ The list shows provider connections; the inspector renders connection fields, en
 
 - **Provider mark** (`#providers-detail-mark`):
 
-- **Provider driver** (`#providers-detail-driver`):
+- **Provider protocol and host** (`#providers-detail-protocol`):
 
 - **Provider name** (`#providers-detail-title`):
 

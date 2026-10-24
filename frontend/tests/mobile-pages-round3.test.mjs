@@ -186,7 +186,7 @@ test('Providers and ACP Back preserve each tab selection and search query across
   dom.window.innerWidth = 374;
   const restore = installDOMGlobals(dom.window);
   const provider = {
-    id: 'provider-fixture', driver: 'openrouter', kind: 'chat', name: 'Fixture Router',
+    id: 'provider-fixture', kind: 'chat', name: 'Fixture Router',
     base_url: 'https://router.example/v1', configured: true, enabled: true,
     has_api_key: true, models: [{ id: 'fixture-model', provider_id: 'provider-fixture', context: 32000 }],
   };
@@ -328,4 +328,35 @@ test('Logs Back restores the in-card list scroll and follow-tail state', async (
     page?.destroy();
     restore();
   }
+});
+
+test('desktop workbench blocks sit behind a min-width seam with transparent mobile wrappers', async () => {
+  const [html, logsCss, learningCss, providersCss] = await Promise.all([
+    readFile(new URL('index.html', root), 'utf8'),
+    readFile(new URL('logs.css', root), 'utf8'),
+    readFile(new URL('learning.css', root), 'utf8'),
+    readFile(new URL('providers.css', root), 'utf8'),
+  ]);
+  const { document } = new JSDOM(html).window;
+
+  // Wrappers added for the desktop band/sub-band must generate no box on
+  // mobile, where the pre-workbench layout is pinned.
+  assert.match(logsCss, /\.logs-toolbar\s*\{\s*display:\s*contents;\s*\}/);
+  assert.match(learningCss, /\.learning-atlas-bar\s*\{\s*display:\s*contents;\s*\}/);
+
+  // The workbench overrides live in a single desktop media block per sheet.
+  for (const [name, css] of [['logs', logsCss], ['learning', learningCss], ['providers', providersCss]]) {
+    assert.match(css, /@media \(min-width: 761px\)/, `${name}.css must gate desktop overrides on @media (min-width: 761px)`);
+  }
+
+  // Desktop focus order runs filters before actions: inside .logs-toolbar the
+  // controls precede the topbar in DOM order (mobile reorders visually via
+  // .logs-topbar { order: -1 }).
+  const toolbar = document.querySelector('#logs-view .logs-toolbar');
+  assert.ok(toolbar, 'logs page must wrap controls + topbar in .logs-toolbar');
+  const controls = toolbar.querySelector('.logs-controls');
+  const topbar = toolbar.querySelector('.logs-topbar');
+  assert.ok(controls && topbar, '.logs-toolbar must contain .logs-controls and .logs-topbar');
+  assert.ok(controls.compareDocumentPosition(topbar) & document.defaultView.Node.DOCUMENT_POSITION_FOLLOWING,
+    '.logs-controls must come before .logs-topbar inside .logs-toolbar');
 });

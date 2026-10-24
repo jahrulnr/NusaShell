@@ -15,7 +15,6 @@ import (
 // without manual UI entry. The server itself never reads these variables.
 type envProviderSpec struct {
 	ID      string
-	Driver  domain.ProviderDriver
 	EnvVar  string
 	Kind    domain.ProviderKind
 	Name    string
@@ -29,7 +28,6 @@ type envProviderSpec struct {
 var envProviderSpecs = []envProviderSpec{
 	{
 		ID:      "openrouter",
-		Driver:  domain.ProviderDriverOpenRouter,
 		EnvVar:  "OPENROUTER_API_KEY",
 		Kind:    domain.ProviderChat,
 		Name:    "OpenRouter",
@@ -67,7 +65,7 @@ func (s *Service) SeedFromEnv(getenv func(string) string) []string {
 			}
 			p := &domain.Provider{
 				ID:        spec.ID,
-				Driver:    spec.Driver,
+				Driver:    domain.DriverForKind(spec.Kind, spec.BaseURL),
 				Kind:      spec.Kind,
 				Name:      spec.Name,
 				BaseURL:   spec.BaseURL,

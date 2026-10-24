@@ -436,7 +436,7 @@
             "providers-detail",
             "providers-mobile-back",
             "providers-detail-mark",
-            "providers-detail-driver",
+            "providers-detail-protocol",
             "providers-detail-title",
             "providers-detail-id",
             "providers-edit",
@@ -2142,8 +2142,8 @@
       "label": "Provider mark",
       "section": "Providers"
     },
-    "providers-detail-driver": {
-      "label": "Provider driver",
+    "providers-detail-protocol": {
+      "label": "Provider protocol and host",
       "section": "Providers"
     },
     "providers-detail-title": {

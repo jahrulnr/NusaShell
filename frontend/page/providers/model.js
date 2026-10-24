@@ -1,14 +1,6 @@
 // Pure provider/ACP presentation helpers. The experimental surface consumes
 // only records returned by the backend; it never invents unconfigured cards.
 
-const DRIVER_LABELS = Object.freeze({
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  openrouter: 'OpenRouter',
-  gemini: 'Gemini',
-  codex: 'Codex',
-});
-
 const KIND_LABELS = Object.freeze({
   messages: 'Messages',
   responses: 'Responses',
@@ -17,24 +9,13 @@ const KIND_LABELS = Object.freeze({
   codex: 'Codex',
 });
 
-export const PROVIDER_PROFILES = Object.freeze([
-  { value: 'automatic-chat', label: 'Automatic · Chat', driver: '', kind: 'chat', baseURL: '' },
-  { value: 'automatic-responses', label: 'Automatic · Responses', driver: '', kind: 'responses', baseURL: '' },
-  { value: 'automatic-messages', label: 'Automatic · Messages', driver: '', kind: 'messages', baseURL: '' },
-  { value: 'anthropic', label: 'Anthropic · Messages', driver: 'anthropic', kind: 'messages', baseURL: 'https://api.anthropic.com' },
-  { value: 'openai', label: 'OpenAI · Responses', driver: 'openai', kind: 'responses', baseURL: 'https://api.openai.com/v1' },
-  { value: 'openrouter', label: 'OpenRouter · Chat', driver: 'openrouter', kind: 'chat', baseURL: 'https://openrouter.ai/api/v1' },
-  { value: 'gemini', label: 'Gemini · native API', driver: 'gemini', kind: 'gemini', baseURL: 'https://generativelanguage.googleapis.com' },
-  { value: 'codex', label: 'Codex · ChatGPT OAuth', driver: 'codex', kind: 'codex', baseURL: 'https://chatgpt.com/backend-api/codex' },
-  { value: 'custom-chat', label: 'Custom gateway · Chat', driver: 'openrouter', kind: 'chat', baseURL: 'https://gateway.example/v1' },
-  { value: 'custom-responses', label: 'Custom gateway · Responses', driver: 'openrouter', kind: 'responses', baseURL: 'https://gateway.example/v1' },
-  { value: 'custom-messages', label: 'Custom gateway · Messages', driver: 'openrouter', kind: 'messages', baseURL: 'https://gateway.example' },
+export const PROVIDER_PROTOCOLS = Object.freeze([
+  { value: 'chat', label: 'Chat', kind: 'chat', baseURL: 'https://openrouter.ai/api/v1' },
+  { value: 'responses', label: 'Responses', kind: 'responses', baseURL: 'https://api.openai.com/v1' },
+  { value: 'messages', label: 'Messages', kind: 'messages', baseURL: 'https://api.anthropic.com' },
+  { value: 'gemini', label: 'Gemini', kind: 'gemini', baseURL: 'https://generativelanguage.googleapis.com' },
+  { value: 'codex', label: 'Codex · ChatGPT OAuth', kind: 'codex', baseURL: 'https://chatgpt.com/backend-api/codex' },
 ]);
-
-export function providerDriverLabel(provider) {
-  const driver = String(provider?.driver || '').trim().toLowerCase();
-  return DRIVER_LABELS[driver] || (driver ? driver : 'Automatic');
-}
 
 export function providerKindLabel(provider) {
   const kind = String(provider?.kind || '').trim().toLowerCase();
@@ -64,17 +45,13 @@ export function providerCredentialLabel(provider) {
   return provider?.has_api_key ? 'API key stored' : provider?.configured ? 'No key required' : 'API key not set';
 }
 
-export function providerProfile(provider) {
-  const driver = String(provider?.driver || '').trim().toLowerCase();
+export function providerProtocol(provider) {
   const kind = String(provider?.kind || '').trim().toLowerCase();
-  if (!driver && !kind) return PROVIDER_PROFILES.find((profile) => profile.value === 'openrouter') || PROVIDER_PROFILES[0];
-  const exact = PROVIDER_PROFILES.find((profile) => profile.driver === driver && profile.kind === kind);
-  if (exact && exact.value !== 'custom-chat' && exact.value !== 'custom-responses' && exact.value !== 'custom-messages') return exact;
-  return PROVIDER_PROFILES.find((profile) => profile.value === `custom-${kind}`) || PROVIDER_PROFILES[0];
+  return PROVIDER_PROTOCOLS.find((protocol) => protocol.kind === kind) || PROVIDER_PROTOCOLS[0];
 }
 
-export function providerProfileByValue(value) {
-  return PROVIDER_PROFILES.find((profile) => profile.value === value) || PROVIDER_PROFILES[0];
+export function providerProtocolByValue(value) {
+  return PROVIDER_PROTOCOLS.find((protocol) => protocol.value === value) || PROVIDER_PROTOCOLS[0];
 }
 
 export function filterProviders(providers = [], query = '', filter = 'all') {
@@ -85,8 +62,8 @@ export function filterProviders(providers = [], query = '', filter = 'all') {
     if (normalizedFilter !== 'all' && normalizedFilter !== tone) return false;
     if (!normalizedQuery) return true;
     return [
-      provider?.id, provider?.name, provider?.driver, provider?.kind,
-      provider?.base_url, providerKindLabel(provider), providerDriverLabel(provider),
+      provider?.id, provider?.name, provider?.kind,
+      provider?.base_url, providerKindLabel(provider),
     ].filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedQuery);
   });
 }

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-25
+
+### Changed
+
+- The provider editor now asks only for a protocol (Chat, Responses, Messages, Gemini, Codex) instead of vendor × protocol profiles; the implementation driver is derived from the protocol and base URL (Chat always uses the OpenRouter-compatible wire; Messages/Responses use the direct Anthropic/OpenAI wire unless the base URL is openrouter.ai); the `driver` field is removed from `ai.providers.save` and the provider DTO.
+
+- Providers, Logs, and Learning now use the same desktop workbench layout as Skills and Plugins: a single toolbar band and edge-to-edge split panes that fill the window. Logs merges its filter and action strips into one band, Learning's overview fills the full height with the knowledge map beside the brief and recent learning, and Providers and Learning share one tab style. Mobile layouts are unchanged.
+
 ### Fixed
 
 - Opening a room, starting a new chat, or opening the model picker no longer stalls for seconds on large catalogs and transcripts — the model select renders options lazily in a capped window that grows on scroll (instead of rebuilding ~2,900 option nodes on every room/lifecycle sync), room rows reconcile in place with the icon pass scoped to the list, tool-call arguments parse lazily when a widget actually reads them, model labels resolve through a cached catalog index instead of a per-event linear scan, and the transcript mounts its first widgets immediately while the rest of the window appends across frames.

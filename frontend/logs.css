@@ -24,6 +24,13 @@
 .logs-controls,
 .logs-error,
 .logs-workspace { width: min(1180px, calc(100% - 56px)); margin-inline: auto; }
+/* The desktop band merges filters and actions into .logs-toolbar; as
+   display:contents it disappears on mobile, where .logs-topbar keeps its
+   historic spot above the controls via the negative order. The mobile visual
+   order intentionally differs from DOM order (filters first for desktop focus
+   order) to preserve the existing mobile layout. */
+.logs-toolbar { display: contents; }
+.logs-topbar { order: -1; }
 /* The shell topbar already carries the active route name, so the page header
    stays a single compact strip: entry count + sync state on the left, actions
    on the right, wrapping cleanly on narrow viewports. */
@@ -249,4 +256,97 @@
   .logs-inline-action,
   .logs-follow-row i,
   .logs-follow-row i::after { transition: none; }
+}
+
+/* Desktop workbench — matches skills/plugins: filters and actions merge into
+   one band above full-bleed split panes. Placed after the mid-range blocks so
+   it wins between 761–1040px; mobile (<=760px) rules above are untouched. */
+@media (min-width: 761px) {
+  .logs-toolbar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px;
+    min-height: 58px;
+    padding: 10px max(28px, calc((100% - 1180px) / 2));
+    border-bottom: 1px solid rgba(31, 45, 69, .78);
+    background: rgba(10, 16, 29, .72);
+  }
+  .logs-controls {
+    flex: 1 1 auto;
+    width: auto;
+    min-height: auto;
+    grid-template-columns: minmax(0, 1fr) 150px auto auto;
+    gap: 8px;
+    margin: 0;
+    padding-block: 0;
+  }
+  .logs-topbar {
+    order: 0;
+    flex: none;
+    width: auto;
+    min-height: auto;
+    margin: 0 0 0 auto;
+    border-bottom: 0;
+  }
+  .logs-topbar-actions { width: auto; flex-wrap: nowrap; font-size: 10px; }
+  .logs-topbar-actions > .logs-sync-state { margin-right: 0; }
+  .logs-search-field,
+  .logs-level-field,
+  .logs-follow-row { min-height: 37px; border-radius: 7px; }
+  .logs-search-field input { font-size: 11px; }
+  .logs-search-field kbd,
+  .logs-follow-row { font-size: 10px; }
+  .logs-latest-button { min-height: 37px; font-size: 10px; }
+  .logs-toolbar .logs-quiet-button,
+  .logs-toolbar .logs-danger-button { min-height: 34px; padding: 0 10px; font-size: 10px; }
+
+  /* 761–1040px: the band wraps — filters keep the first row, actions align
+     right on the second. */
+  @media (max-width: 1040px) {
+    .logs-controls { flex: 1 1 100%; }
+  }
+
+  /* 761–980px: the clamped detail pane leaves a narrow list — drop the source
+     column (same compaction as <=430px) so messages stay readable. */
+  @media (max-width: 980px) {
+    .logs-entry { grid-template-columns: 96px 50px minmax(0, 1fr); }
+    .logs-entry-source { display: none; }
+    .logs-entry-level { min-width: 42px; }
+  }
+
+  .logs-error {
+    width: auto;
+    margin: 0;
+    padding: 8px max(28px, calc((100% - 1180px) / 2));
+    border: 0;
+    border-bottom: 1px solid rgba(225, 125, 134, .36);
+    border-radius: 0;
+  }
+
+  .logs-workspace {
+    width: auto;
+    grid-template-columns: minmax(0, 1fr) clamp(300px, 30%, 440px);
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .logs-list-panel,
+  .logs-detail-panel { background: rgba(13, 20, 37, .92); }
+  .logs-panel-header {
+    min-height: 0;
+    padding: 18px 18px 15px;
+    background: rgba(10, 16, 29, .52);
+  }
+  .logs-panel-kicker { color: var(--ocean); font-size: 8px; letter-spacing: .15em; }
+  .logs-panel-header h2 { color: var(--mist); letter-spacing: -.01em; }
+  #logs-visible-count {
+    min-width: 28px;
+    padding: 4px 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-size: 9px;
+    text-align: center;
+  }
 }

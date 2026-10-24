@@ -8,8 +8,7 @@ export function cacheTTLsFor(provider = {}) {
   } else if (provider.kind === 'messages') ttls = ['5m', '1h'];
   else if (provider.kind === 'responses') ttls = ['30m'];
   else if (provider.kind === 'codex') ttls = ['30m'];
-  else if (provider.driver === 'openrouter') ttls = ['5m', '1h'];
-  else if (provider.kind === 'chat') ttls = ['30m'];
+  else if (provider.kind === 'chat') ttls = ['5m', '1h'];
   if (!ttls.length) return ttls;
   return ttls.includes('off') ? ttls : [...ttls, 'off'];
 }
