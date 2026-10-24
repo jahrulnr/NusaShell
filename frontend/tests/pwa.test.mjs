@@ -162,7 +162,7 @@ test('mini window falls back to a popup when Document PiP is unavailable', () =>
 
 test('pwa.js boots side-effect free in a jsdom context (no service worker required)', () =>
   withDom(
-    `<link rel="stylesheet" href="styles/global.css">
+    `<link rel="stylesheet" href="shell.css">
      <script src="js/app.js"></script>`,
     async () => {
       const { collectAssetUrls } = await import(`../js/pwa.js?boot=${Date.now()}`);
@@ -173,14 +173,14 @@ test('pwa.js boots side-effect free in a jsdom context (no service worker requir
 
 test('cache warming collects stylesheets, scripts, icons, and font urls from the page', () =>
   withDom(
-    `<link rel="stylesheet" href="styles/global.css">
+    `<link rel="stylesheet" href="shell.css">
      <link rel="icon" href="nusashell-mark.png">
      <script src="vendor/chartjs/chart.umd.min.js"></script>
      <script type="module" src="js/app.js"></script>`,
     async (window) => {
       const { collectAssetUrls, extractFontUrls } = await import('../js/pwa.js?warm=' + Date.now());
       const urls = collectAssetUrls();
-      for (const want of ['styles/global.css', 'nusashell-mark.png', 'vendor/chartjs/chart.umd.min.js', 'js/app.js']) {
+      for (const want of ['shell.css', 'nusashell-mark.png', 'vendor/chartjs/chart.umd.min.js', 'js/app.js']) {
         assert.ok(urls.includes(want), `missing ${want} in ${JSON.stringify(urls)}`);
       }
 

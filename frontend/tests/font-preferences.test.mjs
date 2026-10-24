@@ -3,7 +3,7 @@ import { access, readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const moduleURL = new URL('../js/font-preferences.js', import.meta.url);
-const globalCSS = await readFile(new URL('../styles/global.css', import.meta.url), 'utf8');
+const shellCSS = await readFile(new URL('../shell.css', import.meta.url), 'utf8');
 const fontsCSS = await readFile(new URL('../fonts/fonts.css', import.meta.url), 'utf8');
 
 test('font preference module exposes validated local font options', async () => {
@@ -38,10 +38,10 @@ test('font preference module exposes validated local font options', async () => 
 });
 
 test('font stack bundles local symbol and color emoji coverage', async () => {
-  assert.match(globalCSS, /--font-symbols: 'Noto Sans Symbols 2'/);
-  assert.match(globalCSS, /--font-emoji: 'Noto Color Emoji'/);
-  assert.match(globalCSS, /data-font="inter"/);
-  assert.doesNotMatch(globalCSS, /Segoe UI|JetBrains Mono|Cascadia Code/);
+  assert.match(shellCSS, /Noto Sans Symbols 2/);
+  assert.match(shellCSS, /Noto Color Emoji/);
+  assert.match(shellCSS, /data-font="inter"/);
+  assert.doesNotMatch(shellCSS, /Segoe UI|JetBrains Mono|Cascadia Code/);
   assert.match(fontsCSS, /font-family: 'Noto Sans Symbols 2'/);
   assert.match(fontsCSS, /font-family: 'Noto Color Emoji'/);
   assert.match(fontsCSS, /tech\(color-COLRv1\)/);

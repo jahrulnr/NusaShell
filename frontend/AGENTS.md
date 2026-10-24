@@ -22,8 +22,11 @@ adding a component or state container. Start with:
   state, and cross-view lifecycle.
 - `page/` for owning feature controllers, `widgets/` for thread instruments,
   and the retained `js/views/agent/` modules for shared agent helpers.
-- `shell.css`, root feature styles, and `styles/global.css` for design tokens and
-  responsive patterns.
+- `shell.css` (design tokens + shell chrome) and the root per-view stylesheets
+  (`skills.css`, `plugins.css`, …). `styles/` holds only the five ported legacy
+  sheets still linked by `index.html` (`agent.css`, `agent-tools.css`,
+  `acp.css`, `modals.css`, `pairing.css`) — do not add files there; nothing
+  else in it is loaded.
 - `frontend/tests/` for jsdom fixtures, DOM helpers, regression patterns, and
   accessibility assertions.
 

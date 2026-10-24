@@ -26,8 +26,8 @@
   --font-mono: "IBM Plex Mono", monospace;
 }
 
-/* These beat the unconditional token block above. Family names match
-   frontend/styles/global.css. Plex keeps this prototype's current pairing. */
+/* These beat the unconditional token block above. The ported legacy sheets
+   under styles/ reuse these same family names. Plex keeps the current pairing. */
 :root[data-font="inter"] {
   --font-display: "Inter", "Noto Color Emoji", "Noto Sans Symbols 2", sans-serif;
   --font-body: "Inter", "Noto Color Emoji", "Noto Sans Symbols 2", sans-serif;
