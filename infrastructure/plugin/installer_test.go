@@ -7,12 +7,15 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -357,5 +360,95 @@ func TestNewerVersion(t *testing.T) {
 		// (different strings) counts as newer per fallback rule; this is
 		// by design for tags that are not semver (e.g. "v2").
 		t.Fatal("expected non-semver to compare by string")
+	}
+}
+
+func TestReleaseAssetNames(t *testing.T) {
+	cases := []struct {
+		goos   string
+		goarch string
+		want   []string
+	}{
+		{"linux", "amd64", []string{"notes-2.0.3-linux-amd64.tar.gz", "notes-2.0.3.tar.gz"}},
+		{"linux", "arm64", []string{"notes-2.0.3-linux-arm64.tar.gz"}},
+		{"darwin", "arm64", []string{"notes-2.0.3-darwin-arm64.tar.gz"}},
+		{"windows", "amd64", []string{"notes-2.0.3-windows-amd64.tar.gz"}},
+	}
+	for _, tc := range cases {
+		got := releaseAssetNames(tc.goos, tc.goarch, "notes", "2.0.3")
+		if !slices.Equal(got, tc.want) {
+			t.Fatalf("%s/%s asset names = %v, want %v", tc.goos, tc.goarch, got, tc.want)
+		}
+	}
+}
+
+func TestInstallFromCatalogUsesPlatformAsset(t *testing.T) {
+	versions := map[string]any{
+		"notes": map[string]any{"version": "2.0.3", "tag": "notes-v2.0.3", "releasedAt": "2026-08-16T00:00:00Z"},
+	}
+	asset := fmt.Sprintf("notes-2.0.3-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	tarball := writeTarGz(t, map[string]string{
+		"manifest.json": validManifest(),
+		"mcp/":          "",
+	})
+
+	var requested []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Path)
+		switch r.URL.Path {
+		case "/versions.json":
+			_ = json.NewEncoder(w).Encode(versions)
+		case "/notes-v2.0.3/" + asset:
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := newTestInstaller(t, store)
+	i.rawBaseURL = srv.URL
+	i.releaseBase = srv.URL
+
+	if _, err := i.Install(context.Background(), domain.PluginInstallRequest{
+		Source: domain.InstallSourceCatalog,
+		ID:     "notes",
+	}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := store.Get("test.plugin"); err != nil {
+		t.Fatalf("expected installed plugin: %v", err)
+	}
+
+	found := false
+	for _, p := range requested {
+		if strings.HasSuffix(p, "/"+asset) {
+			found = true
+		}
+		if strings.HasSuffix(p, "/notes-2.0.3.tar.gz") {
+			t.Fatalf("installer fell back to the legacy arch-less asset: %v", requested)
+		}
+	}
+	if !found {
+		t.Fatalf("platform asset %q was never requested, got %v", asset, requested)
+	}
+}
+
+func TestValidateServerPlatformSkipsNonELF(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(validManifest()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// "node" is a PATH lookup, so nothing local can be inspected.
+	if err := newTestInstaller(t, store).validateServerPlatform(dir); err != nil {
+		t.Fatalf("PATH command must be accepted as-is: %v", err)
 	}
 }

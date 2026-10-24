@@ -173,8 +173,8 @@ case "$(uname -s)" in
   *) fail 'Linux and macOS are supported by install.sh; use install.ps1 on Windows.' ;;
 esac
 case "$(uname -m)" in
-  x86_64|amd64) arch=x64 ;;
-  arm64|aarch64) arch=arm64 ;;
+  x86_64|amd64) arch=x64; goarch=amd64 ;;
+  arm64|aarch64) arch=arm64; goarch=arm64 ;;
   *) fail "Unsupported CPU architecture: $(uname -m)" ;;
 esac
 
@@ -624,12 +624,32 @@ extract_plugin_source() {
   dirname "$manifest_path"
 }
 
+# elf_arch prints the Go architecture of an ELF binary (amd64, arm64, or
+# "machine-<n>" for anything else) and fails for non-ELF files. A binary built
+# for another architecture is executable in mode but not runnable: the kernel
+# returns ENOENT for its missing loader, so the host reports the misleading
+# "fork/exec mcp/server: no such file or directory".
+elf_arch() {
+  local bin="$1" magic machine
+  [[ -f "$bin" ]] || return 1
+  magic="$(od -An -c -N4 "$bin" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$magic" == '177ELF' ]] || return 1
+  machine="$(od -An -tu2 -j18 -N2 "$bin" 2>/dev/null | tr -d '[:space:]')"
+  case "$machine" in
+    62) printf 'amd64\n' ;;
+    183) printf 'arm64\n' ;;
+    *) printf 'machine-%s\n' "$machine" ;;
+  esac
+}
+
 install_mcp_unix() {
   local mcp_repo="${NUSASHELL_MCP_REPOSITORY:-${NUSASHELL_MCP_REPO:-jahrulnr/NusaShell-mcp}}"
   local raw_base="${NUSASHELL_MCP_RAW_BASE:-https://raw.githubusercontent.com/${mcp_repo}/master}"
   local release_base_mcp="${NUSASHELL_MCP_RELEASE_BASE:-https://github.com/${mcp_repo}/releases/download}"
   local archive_base="${NUSASHELL_MCP_ARCHIVE_BASE:-https://github.com/${mcp_repo}/archive/refs/tags}"
   local catalog="$tmp_dir/mcp-versions.json" plugin_keys plugin version tag asset archive stage source plugin_id data_dir destination
+  local -a candidates
+  local released_arch
   download "${raw_base}/versions.json" "$catalog" || fail 'Could not download NusaShell-mcp versions.json.'
   plugin_keys="${NUSASHELL_MCP_PLUGINS:-kanban notes whatsapp telegram}"
   plugin_keys="${plugin_keys//,/ }"
@@ -646,16 +666,26 @@ install_mcp_unix() {
     mkdir -p "$stage"
     source=''
 
-    # Existing NusaShell-mcp releases contain Linux binaries. Use them on
-    # Linux, and build from the tagged source on macOS/Windows-compatible
-    # Unix environments so the installed stdio server matches the host.
+    # Releases are published per platform as
+    # <plugin>-<version>-<goos>-<goarch>.tar.gz; the arch-less name is the
+    # legacy linux/amd64 alias. Ask for the asset that matches this host and
+    # check the ELF machine before trusting it, because an un-runnable binary
+    # otherwise surfaces much later as "failed to start mcp/server".
     if [[ "$os" == linux ]]; then
-      asset="${plugin}-${version}.tar.gz"
-      archive="$tmp_dir/$asset"
-      if download "${release_base_mcp}/${tag}/${asset}" "$archive"; then
+      candidates=("${plugin}-${version}-${os}-${goarch}.tar.gz")
+      [[ "$goarch" == amd64 ]] && candidates+=("${plugin}-${version}.tar.gz")
+      for asset in "${candidates[@]}"; do
+        archive="$tmp_dir/$asset"
+        download "${release_base_mcp}/${tag}/${asset}" "$archive" || continue
         safe_extract_tar "$archive" "$stage/release"
         source="$(extract_plugin_source "$stage/release" "$plugin")"
-      fi
+        released_arch="$(elf_arch "$source/mcp/server" || true)"
+        if [[ "$released_arch" == "$goarch" ]]; then
+          break
+        fi
+        echo "MCP plugin $plugin: asset $asset is ${released_arch:-not an ELF binary}, host is ${os}/${goarch}; ignoring it." >&2
+        source=''
+      done
     fi
     if [[ -z "$source" ]]; then
       command -v go >/dev/null 2>&1 || fail "MCP plugin $plugin has no native release for $os; install Go or use a NusaShell-mcp release with native assets."

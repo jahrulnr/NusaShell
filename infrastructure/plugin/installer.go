@@ -3,6 +3,7 @@ package plugin
 import (
 	"archive/zip"
 	"context"
+	"debug/elf"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -242,7 +244,76 @@ func (i *Installer) Install(ctx context.Context, req domain.PluginInstallRequest
 		return nil, fmt.Errorf("plugin install: no manifest.json in %s", sourceDir)
 	}
 
+	if err := i.validateServerPlatform(sourceDir); err != nil {
+		return nil, err
+	}
+
 	return i.store.Install(sourceDir)
+}
+
+// releaseAssetNames lists the release assets to try for a catalog plugin,
+// most specific first. Releases are published per platform as
+// <id>-<version>-<goos>-<goarch>.tar.gz; the arch-less name is the legacy
+// linux/amd64 alias kept for hosts that predate per-platform assets.
+func releaseAssetNames(goos, goarch, id, version string) []string {
+	names := []string{fmt.Sprintf("%s-%s-%s-%s.tar.gz", id, version, goos, goarch)}
+	if goos == "linux" && goarch == "amd64" {
+		names = append(names, fmt.Sprintf("%s-%s.tar.gz", id, version))
+	}
+	return names
+}
+
+// validateServerPlatform rejects a stdio MCP server that cannot execute on
+// this host. A binary built for another architecture is executable in mode but
+// not runnable: exec fails with ENOENT, which surfaces later as the misleading
+// "fork/exec mcp/server: no such file or directory". Better to fail the
+// install with the real reason.
+func (i *Installer) validateServerPlatform(sourceDir string) error {
+	if runtime.GOOS != "linux" {
+		return nil // only ELF headers are inspected; other hosts resolve their own binaries
+	}
+	manifest, err := i.store.loadManifest(sourceDir)
+	if err != nil {
+		return err
+	}
+	if manifest.MCP.Transport != domain.PluginTransportStdio {
+		return nil
+	}
+	command := strings.TrimSpace(manifest.MCP.Command)
+	if command == "" || filepath.IsAbs(command) {
+		return nil // absolute paths and PATH lookups are the host's business
+	}
+	bin := filepath.Join(sourceDir, filepath.FromSlash(command))
+	f, err := elf.Open(bin)
+	if err != nil {
+		return nil // not an ELF (shell wrapper, node entry point): nothing to compare
+	}
+	defer f.Close()
+
+	want, ok := elfMachines[runtime.GOARCH]
+	if !ok || f.Machine == want {
+		return nil
+	}
+	return fmt.Errorf(
+		"plugin install: %s serves %s but this host is %s/%s; no release asset matches, build the plugin from source instead",
+		filepath.ToSlash(command), elfMachineName(f.Machine), runtime.GOOS, runtime.GOARCH,
+	)
+}
+
+var elfMachines = map[string]elf.Machine{
+	"amd64": elf.EM_X86_64,
+	"arm64": elf.EM_AARCH64,
+	"386":   elf.EM_386,
+	"arm":   elf.EM_ARM,
+}
+
+func elfMachineName(m elf.Machine) string {
+	for goarch, machine := range elfMachines {
+		if machine == m {
+			return goarch
+		}
+	}
+	return fmt.Sprintf("machine-%d", m)
 }
 
 func (i *Installer) installFromCatalog(ctx context.Context, id, stage string) (string, error) {
@@ -262,20 +333,26 @@ func (i *Installer) installFromCatalog(ctx context.Context, id, stage string) (s
 		return "", fmt.Errorf("plugin install: the mail plugin is not supported by the Go port")
 	}
 
-	assetName := fmt.Sprintf("%s-%s.tar.gz", id, info.Version)
-	assetURL := fmt.Sprintf("%s/%s/%s", i.releaseBase, info.Tag, assetName)
-
-	body, err := i.fetch(ctx, assetURL)
-	if err != nil {
-		return "", fmt.Errorf("plugin install: download release: %w", err)
+	var lastErr error
+	for _, assetName := range releaseAssetNames(runtime.GOOS, runtime.GOARCH, id, info.Version) {
+		assetURL := fmt.Sprintf("%s/%s/%s", i.releaseBase, info.Tag, assetName)
+		body, err := i.fetch(ctx, assetURL)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		extractErr := archive.UntarGz(body, stage, nil)
+		body.Close()
+		if extractErr != nil {
+			return "", fmt.Errorf("plugin install: extract release: %w", extractErr)
+		}
+		return findUniqueManifestDir(stage)
 	}
-	defer body.Close()
 
-	if err := archive.UntarGz(body, stage, nil); err != nil {
-		return "", fmt.Errorf("plugin install: extract release: %w", err)
-	}
-
-	return findUniqueManifestDir(stage)
+	return "", fmt.Errorf(
+		"plugin install: no release asset for %s/%s in %s: %w",
+		runtime.GOOS, runtime.GOARCH, info.Tag, lastErr,
+	)
 }
 
 func (i *Installer) installFromGitHub(ctx context.Context, rawURL, subdir, ref, stage string) (string, error) {
