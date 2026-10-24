@@ -831,17 +831,44 @@ function resetLiveTurnHost() {
   steerAnchorGenerations.length = 0;
 }
 
+// Mounting the full window in one task stalls the main thread for the whole
+// markdown parse pass (worst on mobile). Paint a first batch immediately,
+// then append the rest across frames; any later render bumps the token and
+// cancels pending batches.
+const EVENT_MOUNT_FIRST_BATCH = 12;
+const EVENT_MOUNT_BATCH = 16;
+let renderEventsToken = 0;
+
 function renderEvents({ forceBottom = false, preserveExisting = false } = {}) {
   if (forceBottom) visibleEventEnd = filterEvents(historicalEvents(), activeFilter).length;
   const { window, visible } = visibleEvents();
+  const token = ++renderEventsToken;
   if (preserveExisting) {
     reconcileVisibleWidgets(stream, visible, eventWidgetTag);
     syncOlderEventsButton();
   } else {
     const fragment = document.createDocumentFragment();
     if (window.hidden || nextChunkIndex >= 0) fragment.append(olderEventsButton(window.hidden));
-    for (const event of visible) fragment.append(createEventWidget(event));
+    // Historic batches insert before this anchor — even when a live turn
+    // commits mid-mount and its widgets are promoted into the stream tail,
+    // the rest of the window still lands above the live zone.
+    const anchor = document.createComment('events-tail');
+    fragment.append(anchor);
     stream.replaceChildren(fragment);
+    const schedule = stream.ownerDocument?.defaultView?.requestAnimationFrame
+      || ((step) => setTimeout(step, 16));
+    const mountBatch = (index) => {
+      if (token !== renderEventsToken) return;
+      const take = index === 0 ? EVENT_MOUNT_FIRST_BATCH : EVENT_MOUNT_BATCH;
+      const batch = visible.slice(index, index + take);
+      if (!batch.length) return;
+      const chunk = document.createDocumentFragment();
+      for (const event of batch) chunk.append(createEventWidget(event));
+      stream.insertBefore(chunk, anchor);
+      if (followState.pinned) stickThreadToBottom(stream);
+      if (index + batch.length < visible.length) schedule(() => mountBatch(index + batch.length));
+    };
+    mountBatch(0);
   }
   mountLiveTurnEvents();
   mountAnchoredSteerWidgets();
@@ -1712,6 +1739,56 @@ function syncSubagentToolIdentities(runs = []) {
   return changed;
 }
 
+function buildRoomRow(conversation) {
+  const row = document.createElement('div');
+  row.className = 'room-item';
+  row.role = 'listitem';
+  row.dataset.conversationId = conversation.id;
+  // Rows are reused across refreshes; handlers must read the current record
+  // rather than a conversation captured at mount time.
+  row._conversation = conversation;
+  row.innerHTML = '<button class="room-item-main" type="button"><span class="room-title-line"><span class="room-title"></span><span class="room-activity" aria-hidden="true" hidden></span></span><span class="room-meta"></span></button><span class="room-item-actions"><button class="room-actions" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical" aria-hidden="true"></i></button></span>';
+  syncRoomItem(row, conversation);
+  const actionsButton = row.querySelector('.room-actions');
+  // One local menu for both gestures: the ellipsis button anchors it,
+  // right-click positions it at the pointer. Both build identical items.
+  const openRoomMenu = (origin = {}) => {
+    const current = row._conversation;
+    let unregisterDismiss = () => {};
+    const menu = openRoomActionsMenu({
+      ...origin,
+      restoreTarget: actionsButton,
+      items: [
+        { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => startRoomRename(row, current) },
+        { id: 'compact', label: 'Compact', icon: 'fold-vertical', onSelect: () => void compactConversation(current.id) },
+        { id: 'delete', label: 'Delete', icon: 'trash-2', danger: true, onSelect: () => void deleteConversation(current.id) },
+      ],
+      onClose: () => {
+        actionsButton.setAttribute('aria-expanded', 'false');
+        unregisterDismiss();
+      },
+    });
+    if (!menu) return;
+    actionsButton.setAttribute('aria-expanded', 'true');
+    unregisterDismiss = registerOverlayDismiss(() => menu.close({ restoreFocus: false }));
+  };
+  actionsButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (isRoomMenuOpenFor(actionsButton)) closeRoomMenu();
+    else openRoomMenu({ anchor: actionsButton });
+  });
+  row.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    openRoomMenu({ point: { x: event.clientX, y: event.clientY } });
+  });
+  row.querySelector('.room-title').addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    startRoomRename(row, row._conversation);
+  });
+  row.querySelector('.room-item-main').addEventListener('click', () => void openConversation(row.dataset.conversationId));
+  return row;
+}
+
 function renderRooms() {
   // Re-rendered rows orphan any open action menu — dismiss it first.
   closeRoomMenu();
@@ -1725,52 +1802,31 @@ function renderRooms() {
     list.replaceChildren(empty);
     return;
   }
-  list.replaceChildren(...visibleConversations.map((conversation) => {
-    const row = document.createElement('div');
-    row.className = `room-item${conversation.id === activeConversation?.id ? ' is-active' : ''}`;
-    row.role = 'listitem';
-    row.dataset.conversationId = conversation.id;
-    row.innerHTML = '<button class="room-item-main" type="button"><span class="room-title-line"><span class="room-title"></span><span class="room-activity" aria-hidden="true" hidden></span></span><span class="room-meta"></span></button><span class="room-item-actions"><button class="room-actions" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical" aria-hidden="true"></i></button></span>';
-    syncRoomItem(row, conversation);
-    const actionsButton = row.querySelector('.room-actions');
-    // One local menu for both gestures: the ellipsis button anchors it,
-    // right-click positions it at the pointer. Both build identical items.
-    const openRoomMenu = (origin = {}) => {
-      let unregisterDismiss = () => {};
-      const menu = openRoomActionsMenu({
-        ...origin,
-        restoreTarget: actionsButton,
-        items: [
-          { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => startRoomRename(row, conversation) },
-          { id: 'compact', label: 'Compact', icon: 'fold-vertical', onSelect: () => void compactConversation(conversation.id) },
-          { id: 'delete', label: 'Delete', icon: 'trash-2', danger: true, onSelect: () => void deleteConversation(conversation.id) },
-        ],
-        onClose: () => {
-          actionsButton.setAttribute('aria-expanded', 'false');
-          unregisterDismiss();
-        },
-      });
-      if (!menu) return;
-      actionsButton.setAttribute('aria-expanded', 'true');
-      unregisterDismiss = registerOverlayDismiss(() => menu.close({ restoreFocus: false }));
-    };
-    actionsButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (isRoomMenuOpenFor(actionsButton)) closeRoomMenu();
-      else openRoomMenu({ anchor: actionsButton });
-    });
-    row.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      openRoomMenu({ point: { x: event.clientX, y: event.clientY } });
-    });
-    row.querySelector('.room-title').addEventListener('dblclick', (event) => {
-      event.preventDefault();
-      startRoomRename(row, conversation);
-    });
-    row.querySelector('.room-item-main').addEventListener('click', () => void openConversation(conversation.id));
-    return row;
-  }));
-  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.7 } });
+  list.querySelector('.room-list-empty')?.remove();
+  // Reconcile rows in place: routine refreshes only patch text/status, and a
+  // keystroke or room switch never re-mounts rows that did not change.
+  const existing = new Map([...list.querySelectorAll(':scope > .room-item')]
+    .map((row) => [row.dataset.conversationId, row]));
+  const keep = new Set();
+  let cursor = list.firstChild;
+  for (const conversation of visibleConversations) {
+    let row = existing.get(conversation.id);
+    if (row) {
+      row._conversation = conversation;
+      // A mid-rename row has no .room-title — leave it alone rather than
+      // clobbering the in-progress input (and crashing on the missing node).
+      if (row.dataset.renaming !== '1') syncRoomItem(row, conversation);
+    } else {
+      row = buildRoomRow(conversation);
+    }
+    keep.add(conversation.id);
+    if (row !== cursor) list.insertBefore(row, cursor);
+    cursor = row.nextSibling;
+  }
+  for (const [id, row] of existing) {
+    if (!keep.has(id)) row.remove();
+  }
+  window.lucide?.createIcons({ attrs: { 'stroke-width': 1.7 }, root: list });
 }
 
 async function startNewChat() {

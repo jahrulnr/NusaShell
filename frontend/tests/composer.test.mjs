@@ -179,11 +179,9 @@ test('model search matches the model id, not only the display name', async () =>
     env.selects.setModels(CATALOG, 'openrouter:anthropic/claude-sonnet-4.5');
     await flush();
 
-    // The same store.search(term, events.searchFilter) path SlimSelect uses
-    // for its search input.
-    const matches = (term) => env.selects.model.store
-      .search(term, env.selects.model.events.searchFilter)
-      .flatMap((entry) => entry.options || [entry])
+    // The lazy model select searches across the full catalog, not only the
+    // options currently mounted in the SlimSelect window.
+    const matches = (term) => env.selects.model.queryOptions(term)
       .map((option) => option.value);
 
     assert.deepEqual(matches('gemini-3.1'), ['openrouter:google/gemini-3.1-pro'], 'an id-only term still finds the model');

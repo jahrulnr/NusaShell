@@ -1,4 +1,4 @@
-import { createSelect } from '../../js/ui.js';
+import { createLazySelect, createSelect } from '../../js/ui.js';
 import { formatModelLabel, modelOptionMatches, modelOptions } from './live-data.js?v=6';
 
 const providerLabels = {
@@ -101,6 +101,10 @@ export function initComposerSelects(root, { rpc, onRouteChange } = {}) {
   let catalog = [];
   let routeGeneration = 0;
   let desiredRoute = '';
+  // null so the first setModels call — even with an empty catalog — counts
+  // as a change and applies enable/disable.
+  let lastCatalogSignature = null;
+  let lastSyncedModel;
 
   const effort = createSelect(effortSelect, {
     data: selectData(effortSelect),
@@ -189,10 +193,9 @@ export function initComposerSelects(root, { rpc, onRouteChange } = {}) {
     }
   }
 
-  const model = createSelect(modelSelect, {
+  const model = createLazySelect(modelSelect, {
     data: selectData(modelSelect),
     value: modelSelect.value,
-    search: true,
     searchFilter: modelOptionMatches,
     onChange: syncModel,
   });
@@ -226,25 +229,34 @@ export function initComposerSelects(root, { rpc, onRouteChange } = {}) {
       catalog = Array.isArray(models) ? models : [];
       const options = modelOptions(catalog);
       const values = options.flatMap(group => group.options.map(option => option.value));
-      model.setData(options.length ? options : [{ text: 'No chat models available', value: '', placeholder: true }]);
-      if (options.length) model.enable();
-      else model.disable();
+      // The catalog refreshes on every Agent-view entry; rebuilding the option
+      // window when nothing changed is pure DOM churn.
+      const signature = values.join('\u0000');
+      const catalogChanged = signature !== lastCatalogSignature;
+      if (catalogChanged) {
+        lastCatalogSignature = signature;
+        model.setData(options.length ? options : [{ text: 'No chat models available', value: '', placeholder: true }]);
+        if (options.length) model.enable();
+        else model.disable();
+      }
       const value = [selected, storedModelPreference(), values[0]].find(candidate => values.includes(candidate)) || '';
-      model.setSelected(value ? [value] : []);
-      void syncModel(value);
+      if (value !== (model.getSelected()[0] || '')) model.setSelected(value ? [value] : []);
+      if (catalogChanged || value !== lastSyncedModel) {
+        lastSyncedModel = value;
+        void syncModel(value);
+      }
       if (!value) modelConfigSummary.textContent = 'No chat models available';
     },
     setConversation(conversation = {}) {
       desiredRoute = conversation.provider_route || '';
-      if (conversation.model) model.setSelected([conversation.model]);
-      else if (!conversation.id) {
-        const stored = storedModelPreference();
-        if (stored) model.setSelected([stored]);
-      }
-      if (conversation.effort) effort.setSelected([conversation.effort]);
+      // SlimSelect re-renders the option window even when the selection does
+      // not change, so every programmatic sync must first prove it is needed.
+      const wanted = conversation.model || (!conversation.id ? storedModelPreference() : '');
+      if (wanted && wanted !== (model.getSelected()[0] || '')) model.setSelected([wanted]);
+      if (conversation.effort && conversation.effort !== (effort.getSelected()[0] || '')) effort.setSelected([conversation.effort]);
       // Rooms without a saved route fall back to Auto — leaving the previous
       // room's selection visible would silently misroute the next turn.
-      setRouteSelected(desiredRoute);
+      if (desiredRoute !== (route.getSelected()[0] || '')) setRouteSelected(desiredRoute);
     },
     getConfig() {
       return {

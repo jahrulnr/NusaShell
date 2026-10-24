@@ -40,7 +40,10 @@ function sameRenderedEvent(current, incoming) {
   // handled separately so it still gets one intentional update.
   const ignored = new Set(['id', 'sourceId', 'optimistic']);
   const keys = new Set([...Object.keys(current || {}), ...Object.keys(incoming || {})]);
-  return [...keys].filter((key) => !ignored.has(key)).every((key) => sameValue(current?.[key], incoming?.[key]));
+  // `_`-prefixed fields are render-time caches (lazy parsed/pretty tool args)
+  // that materialize only after a widget reads them — they never describe
+  // visible content on their own.
+  return [...keys].filter((key) => !ignored.has(key) && !key.startsWith('_')).every((key) => sameValue(current?.[key], incoming?.[key]));
 }
 
 function terminalStatus(value) {

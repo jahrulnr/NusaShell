@@ -106,6 +106,19 @@ function setSelectPortalExpanded(selectEl, expanded) {
   portal.toggleAttribute('inert', !expanded);
 }
 
+function bindSelectPortalObserver(selectEl, ss) {
+  const trigger = selectEl.nextElementSibling;
+  const syncPortal = () => setSelectPortalExpanded(selectEl, trigger?.getAttribute('aria-expanded') === 'true');
+  const observer = new MutationObserver(syncPortal);
+  if (trigger) observer.observe(trigger, { attributes: true, attributeFilter: ['aria-expanded'] });
+  const destroy = ss.destroy.bind(ss);
+  ss.destroy = () => {
+    observer.disconnect();
+    destroy();
+  };
+  syncPortal();
+}
+
 export function createSelect(selectEl, { data = [], value = '', placeholder = '', search = null, searchFilter, onChange } = {}) {
   const ss = new SlimSelect({
     select: selectEl,
@@ -123,18 +136,183 @@ export function createSelect(selectEl, { data = [], value = '', placeholder = ''
       },
     },
   });
-  const trigger = selectEl.nextElementSibling;
-  const syncPortal = () => setSelectPortalExpanded(selectEl, trigger?.getAttribute('aria-expanded') === 'true');
-  const observer = new MutationObserver(syncPortal);
-  if (trigger) observer.observe(trigger, { attributes: true, attributeFilter: ['aria-expanded'] });
-  const destroy = ss.destroy.bind(ss);
-  ss.destroy = () => {
-    observer.disconnect();
-    destroy();
-  };
-  syncPortal();
+  bindSelectPortalObserver(selectEl, ss);
   if (value !== undefined && value !== '') ss.setSelected([value]);
   return ss;
+}
+
+// Normalized entries keep the input's two shapes: `{label, options}` for
+// optgroups and a bare option object for flat data (marked by label === null
+// so windowData can emit it without a phantom empty optgroup label row).
+function normalizeSelectGroups(data) {
+  return (Array.isArray(data) ? data : []).flatMap((entry) => {
+    if (entry?.options) {
+      const options = entry.options.filter(Boolean);
+      return options.length ? [{ label: entry.label, options }] : [];
+    }
+    return entry ? [{ label: null, options: [entry] }] : [];
+  });
+}
+
+// SlimSelect rebuilds every option node on each setData/setSelected call,
+// which freezes the main thread once a catalog reaches thousands of entries.
+// This wrapper keeps the complete grouped dataset outside SlimSelect and only
+// hands it a capped window: the first page of the current filter plus the
+// selected options. Scrolling near the list end appends the next page, and
+// the search box filters the full dataset instead of only mounted nodes.
+// The internal couplings (render.content.list, store.setSelectedBy's
+// no-fallback flag, the debounced events.search contract) follow the vendored
+// SlimSelect implementation — re-verify them on a vendor upgrade.
+export function createLazySelect(selectEl, { data = [], value = '', placeholder = '', searchFilter, onChange, pageSize = 60 } = {}) {
+  const page = Math.max(10, Math.floor(Number(pageSize) || 60));
+  let allData = normalizeSelectGroups(data);
+  let term = '';
+  let shown = page;
+
+  const matchingGroups = (needle = term) => {
+    const query = String(needle || '').trim().toLowerCase();
+    const pool = query
+      ? allData.map((group) => ({
+          label: group.label,
+          options: group.options.filter((option) => (searchFilter
+            ? searchFilter(option, query)
+            : String(option?.text || option?.value || '').toLowerCase().includes(query))),
+        }))
+      : allData;
+    return pool.filter((group) => group.options.length);
+  };
+
+  const emitEntry = (group, options) => (group.label === null ? options[0] : { label: group.label, options });
+
+  const windowData = (extraValues = []) => {
+    const groups = [];
+    let count = 0;
+    for (const group of matchingGroups()) {
+      if (count >= shown) break;
+      const take = group.options.slice(0, shown - count);
+      count += take.length;
+      groups.push(emitEntry(group, take));
+    }
+    // SlimSelect falls back to the first option when setSelected cannot find
+    // the wanted value, so every selected value must exist in the window even
+    // when it sits beyond the current page.
+    const present = new Set(groups.flatMap((entry) => (entry.options || [entry]).map((option) => String(option.value))));
+    for (const wanted of extraValues.map(String).filter(Boolean)) {
+      if (present.has(wanted)) continue;
+      let injected = false;
+      for (const group of allData) {
+        const found = group.options.find((option) => String(option.value) === wanted);
+        if (!found) continue;
+        if (group.label === null) groups.push(found);
+        else {
+          const existing = groups.find((entry) => entry.label === group.label);
+          if (existing) existing.options.push(found);
+          else groups.push({ label: group.label, options: [found] });
+        }
+        injected = true;
+        break;
+      }
+      if (!injected) groups.unshift({ text: wanted, value: wanted });
+      present.add(wanted);
+    }
+    return groups;
+  };
+
+  const ss = new SlimSelect({
+    select: selectEl,
+    data: windowData(),
+    settings: {
+      showSearch: true,
+      placeholderText: placeholder,
+      contentPosition: 'absolute',
+      closeOnSelect: true,
+    },
+    events: {
+      search: (needle) => {
+        term = needle;
+        shown = page;
+        return windowData();
+      },
+      afterChange: (selected) => {
+        if (onChange) onChange(selected[0]?.value ?? '');
+      },
+    },
+  });
+  bindSelectPortalObserver(selectEl, ss);
+
+  // Programmatic window updates must never go through ss.setData: it resets
+  // every option's selected flag, then its single-select fallback force-picks
+  // the first option and fires afterChange — silently changing the user's
+  // model on a scroll. Write the store directly, reselect by value with the
+  // no-fallback flag, and repaint. No afterChange fires on this path.
+  function applyWindow(extraValues = []) {
+    const selected = ss.store.getSelectedValues().map(String);
+    ss.store.setData(windowData([...selected, ...extraValues]));
+    ss.store.setSelectedBy('value', selected, true);
+    const rendered = ss.store.getData();
+    ss.select.updateOptions(rendered);
+    ss.render.renderValues();
+    ss.render.renderOptions(rendered);
+  }
+
+  // Scrolling near the rendered tail grows the window by one page; the next
+  // re-render is still cheap because it only ever sees the window.
+  const list = ss.render?.content?.list;
+  list?.addEventListener('scroll', () => {
+    if (list.scrollTop + list.clientHeight < list.scrollHeight - 32) return;
+    const total = matchingGroups().reduce((sum, group) => sum + group.options.length, 0);
+    if (shown >= total) return;
+    shown = Math.min(total, shown + page);
+    const scrollTop = list.scrollTop;
+    applyWindow();
+    list.scrollTop = scrollTop;
+  });
+  // Clearing the search input restores the unfiltered first page — SlimSelect
+  // would otherwise keep rendering the last (possibly stale) search subset.
+  const searchInput = ss.render?.content?.search?.input;
+  searchInput?.addEventListener('input', () => {
+    if (searchInput.value !== '' || !term) return;
+    term = '';
+    shown = page;
+    applyWindow();
+  });
+  // Closing drops the active search term; without this the next open renders
+  // the stale filtered window while the input reads empty.
+  const afterClose = ss.events.afterClose;
+  ss.events.afterClose = (...args) => {
+    term = '';
+    shown = page;
+    applyWindow();
+    if (typeof afterClose === 'function') afterClose(...args);
+  };
+
+  const api = {
+    inner: ss,
+    setData(groups) {
+      allData = normalizeSelectGroups(groups);
+      term = '';
+      shown = page;
+      // Replacing the dataset keeps SlimSelect's original semantics: the
+      // selection resets and the first window option wins. The preservation
+      // path (applyWindow) is only for window growth, not new data.
+      ss.setData(windowData());
+    },
+    setSelected(values) {
+      const wanted = (Array.isArray(values) ? values : [values]).filter((item) => item != null && item !== '').map(String);
+      const inStore = new Set(ss.store.getDataOptions().map((option) => String(option.value)));
+      if (wanted.some((item) => !inStore.has(item))) applyWindow(wanted);
+      ss.setSelected(wanted);
+    },
+    getSelected: () => ss.getSelected(),
+    queryOptions: (needle) => matchingGroups(needle).flatMap((group) => group.options),
+    enable: () => ss.enable(),
+    disable: () => ss.disable(),
+    open: () => ss.open(),
+    close: () => ss.close(),
+    destroy: () => ss.destroy(),
+  };
+  if (value !== undefined && value !== '') api.setSelected([value]);
+  return api;
 }
 
 export function bindTablistKeyboard(tablist) {

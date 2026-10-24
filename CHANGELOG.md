@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening a room, starting a new chat, or opening the model picker no longer stalls for seconds on large catalogs and transcripts — the model select renders options lazily in a capped window that grows on scroll (instead of rebuilding ~2,900 option nodes on every room/lifecycle sync), room rows reconcile in place with the icon pass scoped to the list, tool-call arguments parse lazily when a widget actually reads them, model labels resolve through a cached catalog index instead of a per-event linear scan, and the transcript mounts its first widgets immediately while the rest of the window appends across frames.
+
 ## [0.10.2] - 2026-10-16
 
 ### Removed

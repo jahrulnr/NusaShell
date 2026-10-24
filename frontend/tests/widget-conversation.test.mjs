@@ -2472,7 +2472,9 @@ test('composer selects use the shared Slim Select integration instead of a custo
   assert.match(html, /vendor\/slim-select\/slimselect\.css/);
   assert.match(source, /js\/ui\.js/);
   assert.match(source, /createSelect\(/);
-  assert.match(source, /search:\s*true/);
+  // The model catalog runs into the thousands, so the composer uses the
+  // windowed variant; search stays enabled inside createLazySelect.
+  assert.match(source, /createLazySelect\(/);
   assert.match(app, /initComposerSelects/);
   assert.doesNotMatch(app, /initComposerPickers/);
   assert.equal(document.querySelector('#provider-select'), null, 'the selected model already owns provider identity');

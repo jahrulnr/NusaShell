@@ -227,7 +227,7 @@ test('desktop viewports keep both persistent panels', async () => {
 test('room rows collapse rename, compact, and delete into one action menu for click and right-click', async () => {
   const dom = await conversationDom();
   const { document } = dom.window;
-  const code = await extractFunctions(['renderRooms']);
+  const code = await extractFunctions(['renderRooms', 'buildRoomRow']);
   const opens = [];
   const calls = { rename: [], remove: [], open: [], close: 0 };
   const context = {
@@ -288,6 +288,43 @@ test('room rows collapse rename, compact, and delete into one action menu for cl
   row.querySelector('.room-item-main').click();
   assert.equal(calls.open.length, 1);
   assert.equal(calls.open[0][0], 'c1');
+});
+
+test('renderRooms leaves a mid-rename row untouched', async () => {
+  const dom = await conversationDom();
+  const { document } = dom.window;
+  const code = await extractFunctions(['renderRooms', 'buildRoomRow']);
+  const context = {
+    document,
+    window: dom.window,
+    conversations: [{ id: 'c1', title: 'Room one', status: 'idle', updated_at: '2026-10-13T08:00:00Z' }],
+    roomSearchQuery: '',
+    activeConversation: null,
+    filterConversations,
+    syncRoomItem() {},
+    openRoomActionsMenu: () => null,
+    isRoomMenuOpenFor: () => false,
+    closeRoomMenu: () => true,
+    registerOverlayDismiss: () => () => {},
+    startRoomRename: () => {},
+    deleteConversation: () => {},
+    openConversation: () => {},
+  };
+  runInNewContext(code, context);
+
+  context.renderRooms();
+  const row = document.querySelector('.room-item');
+  // An in-progress rename swaps .room-title for an input — the row then has
+  // no title node, which a naive full-row refresh would dereference.
+  row.dataset.renaming = '1';
+  row.querySelector('.room-title').replaceWith(
+    Object.assign(document.createElement('input'), { className: 'room-rename-input' }),
+  );
+
+  context.conversations[0].title = 'Changed elsewhere';
+  context.renderRooms();
+  assert.ok(row.querySelector('.room-rename-input'), 'rename input survives a background refresh');
+  assert.equal(row.dataset.conversationId, 'c1');
 });
 
 function menuHarness({ items } = {}) {

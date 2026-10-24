@@ -94,6 +94,7 @@ export function upsertVisibleWidget(stream, event, resolveTag, maximum) {
     stream.append(widget);
   }
   widget.event = event;
+  widget._mountedEvent = event;
 
   const limit = Math.max(1, Math.floor(Number(maximum) || 1));
   const mounted = [...stream.querySelectorAll('[data-event-id]')];
@@ -121,7 +122,15 @@ export function reconcileVisibleWidgets(stream, visible, resolveTag) {
       widget = stream.ownerDocument.createElement(resolveTag(event.type, event));
       widget.dataset.eventId = event.id;
     }
-    widget.event = event;
+    // Re-assigning an identical event object still re-runs the widget's full
+    // render (markdown re-parse included). Reconcile only reorders/reuses
+    // rows — real content changes arrive through upsertVisibleWidget with a
+    // new or mutated event before this ever runs. _mountedEvent tracks what
+    // was last assigned; widgets do not expose an `event` getter.
+    if (widget._mountedEvent !== event) {
+      widget.event = event;
+      widget._mountedEvent = event;
+    }
     keep.add(event.id);
     if (widget !== cursor) stream.insertBefore(widget, cursor);
     cursor = widget.nextSibling;

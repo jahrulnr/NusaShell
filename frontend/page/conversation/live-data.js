@@ -27,6 +27,28 @@ function usageTitle(usage) {
   return parts.join(' · ');
 }
 
+// formatModelLabel runs once per assistant event against a catalog of
+// thousands — build lookup maps once per catalog array instead of scanning
+// (and allocating a qualified key per candidate) on every call.
+const modelLookupCache = new WeakMap();
+
+function modelLookup(catalog) {
+  let lookup = modelLookupCache.get(catalog);
+  if (lookup) return lookup;
+  lookup = { qualified: new Map(), id: new Map(), name: new Map() };
+  const models = Array.isArray(catalog) ? catalog : [];
+  for (const [index, candidate] of models.entries()) {
+    const qualified = candidate?.provider_id && candidate?.id
+      ? `${candidate.provider_id}:${candidate.id}`
+      : '';
+    if (qualified && !lookup.qualified.has(qualified)) lookup.qualified.set(qualified, index);
+    if (candidate?.id && !lookup.id.has(candidate.id)) lookup.id.set(candidate.id, index);
+    if (candidate?.display_name && !lookup.name.has(candidate.display_name)) lookup.name.set(candidate.display_name, index);
+  }
+  modelLookupCache.set(catalog, lookup);
+  return lookup;
+}
+
 export function formatModelLabel(model, catalog = []) {
   const source = model && typeof model === 'object' ? model : { id: String(model || '').trim() };
   const rawID = String(source.id || source.model || '').trim();
@@ -34,21 +56,19 @@ export function formatModelLabel(model, catalog = []) {
   const qualified = providerID && rawID
     ? `${providerID}:${rawID}`
     : rawID;
-  const entry = Array.isArray(catalog)
-    ? catalog.find((candidate) => {
-      const candidateQualified = candidate?.provider_id && candidate?.id
-        ? `${candidate.provider_id}:${candidate.id}`
-        : '';
-      // A bare model id is not globally unique (OpenAI and Codex both expose
-      // gpt-5.6-sol). Once the source carries a provider, only the qualified
-      // key is authoritative; falling back to the first bare-id match silently
-      // rewrites the selected provider in the composer label.
-      if (providerID) return candidateQualified === qualified;
-      return candidateQualified === qualified
-        || candidate?.id === rawID
-        || candidate?.display_name === rawID;
-    })
-    : null;
+  const lookup = modelLookup(catalog);
+  // A bare model id is not globally unique (OpenAI and Codex both expose
+  // gpt-5.6-sol). Once the source carries a provider, only the qualified
+  // key is authoritative; falling back to the first bare-id match silently
+  // rewrites the selected provider in the composer label.
+  const match = providerID
+    ? lookup.qualified.get(qualified)
+    : Math.min(
+        lookup.qualified.get(qualified) ?? Infinity,
+        lookup.id.get(rawID) ?? Infinity,
+        lookup.name.get(rawID) ?? Infinity,
+      );
+  const entry = match === undefined || match === Infinity ? null : catalog[match];
   const provider = String(entry?.provider_name || source.provider_name || source.provider_id || qualified.split(':', 1)[0] || '').trim();
   const name = String(entry?.id || (qualified.includes(':') ? qualified.slice(qualified.indexOf(':') + 1) : rawID)).trim();
   if (!provider) return name;
@@ -124,20 +144,40 @@ function reasoningEvent(message, content, suffix = 'reasoning') {
 }
 
 function toolEvent(message, tool, index) {
-  return {
+  const event = {
     id: `${message.id}-tool-${tool.id || index}`,
     messageId: message.id,
     type: 'tool.run',
     tool: tool.name || 'tool',
     toolCallId: tool.id || '',
     runId: message.run_id || message.runId || '',
-    args: parsedArgs(tool.args),
-    command: argsText(tool.args),
     output: tool.output || '',
     status: tool.status || 'complete',
     duration: '',
     presentation: tool.presentation || null,
+    _rawArgs: tool.args,
+    _parsedArgs: undefined,
+    _prettyArgs: undefined,
   };
+  // messageEvents walks every persisted tool call, but only mounted widgets
+  // ever read args/command — keep the raw payload and pay the JSON
+  // parse/pretty-print once, on first access, instead of three times per
+  // call up front.
+  Object.defineProperties(event, {
+    args: {
+      enumerable: true,
+      get() { return this._parsedArgs ?? (this._parsedArgs = parsedArgs(this._rawArgs)); },
+      // Snapshot merges Object.assign onto this event — a setter keeps that
+      // write legal and just refreshes the cache.
+      set(value) { this._parsedArgs = value; },
+    },
+    command: {
+      enumerable: true,
+      get() { return this._prettyArgs ?? (this._prettyArgs = argsText(this._rawArgs)); },
+      set(value) { this._prettyArgs = value; },
+    },
+  });
+  return event;
 }
 
 // A re-attached round stream replays the round's deltas, so each persisted
