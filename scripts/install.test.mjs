@@ -636,34 +636,44 @@ esac
 
 test('release Linux installer installs an opted-in NusaShell-mcp plugin into Go app data', async () => {
   if (process.platform !== 'linux') return;
+  // Release payload keys use x64/arm64; MCP release assets use Go arch names.
+  const releaseArch = process.arch === 'x64' ? 'x64' : process.arch;
+  const goArch = process.arch === 'x64' ? 'amd64' : process.arch;
   const root = await mkdtemp(join(tmpdir(), 'nusashell-release-mcp-'));
   temporaryDirectories.push(root);
   const home = join(root, 'home');
   const fakeBin = join(root, 'bin');
   const payload = join(root, 'payload');
   const mcpPayload = join(root, 'mcp-payload');
+  const mcpLegacyPayload = join(root, 'mcp-legacy-payload');
   const releaseRoot = join(root, 'release');
   const installRoot = join(root, 'program');
   const dataRoot = join(root, 'data');
-  const coreName = 'nusashell-0.1.0-linux-x64.tar.gz';
-  const mcpName = 'notes-2.0.2.tar.gz';
+  const coreName = `nusashell-0.1.0-linux-${releaseArch}.tar.gz`;
+  const mcpPlatformName = `notes-2.0.2-linux-${goArch}.tar.gz`;
+  const mcpLegacyName = 'notes-2.0.2.tar.gz';
   await mkdir(home, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await mkdir(payload, { recursive: true });
   await mkdir(join(mcpPayload, 'mcp'), { recursive: true });
+  await mkdir(join(mcpLegacyPayload, 'mcp'), { recursive: true });
   await mkdir(releaseRoot, { recursive: true });
   await writeFile(join(payload, 'nusashell'), '#!/usr/bin/env sh\nexit 0\n');
   await chmod(join(payload, 'nusashell'), 0o755);
   await writeFile(join(mcpPayload, 'manifest.json'), `${JSON.stringify({ id: 'nusashell.notes', name: 'Notes', version: '2.0.2' }, null, 2)}\n`);
-  await writeFile(join(mcpPayload, 'mcp', 'server'), '#!/usr/bin/env sh\nexit 0\n');
+  await writeFile(join(mcpPayload, 'mcp', 'server'), `#!/usr/bin/env sh\n# asset: ${mcpPlatformName}\nexit 0\n`);
   await chmod(join(mcpPayload, 'mcp', 'server'), 0o755);
+  await writeFile(join(mcpLegacyPayload, 'manifest.json'), `${JSON.stringify({ id: 'nusashell.notes', name: 'Notes', version: '2.0.2' }, null, 2)}\n`);
+  await writeFile(join(mcpLegacyPayload, 'mcp', 'server'), `#!/usr/bin/env sh\n# asset: ${mcpLegacyName}\nexit 0\n`);
+  await chmod(join(mcpLegacyPayload, 'mcp', 'server'), 0o755);
   await execFileAsync('tar', ['-C', payload, '-czf', join(releaseRoot, coreName), 'nusashell']);
-  await execFileAsync('tar', ['-C', mcpPayload, '-czf', join(releaseRoot, mcpName), '.']);
+  await execFileAsync('tar', ['-C', mcpPayload, '-czf', join(releaseRoot, mcpPlatformName), '.']);
+  await execFileAsync('tar', ['-C', mcpLegacyPayload, '-czf', join(releaseRoot, mcpLegacyName), '.']);
   const coreSha = createHash('sha256').update(await readFile(join(releaseRoot, coreName))).digest('hex');
   await writeFile(join(releaseRoot, 'latest.json'), `${JSON.stringify({
     product: 'go',
     version: '0.1.0',
-    files: { 'linux-x64': { name: coreName, sha256: coreSha } },
+    files: { [`linux-${releaseArch}`]: { name: coreName, sha256: coreSha } },
   }, null, 2)}\n`);
   await writeFile(join(releaseRoot, 'release-versions.json'), `${JSON.stringify({
     schemaVersion: 1,
@@ -687,7 +697,9 @@ done
 case "$url" in
   */release-versions.json) cp '${releaseRoot}/release-versions.json' "$destination" ;;
   */versions.json) cp '${releaseRoot}/versions.json' "$destination" ;;
-  */notes-2.0.2.tar.gz) cp '${releaseRoot}/${mcpName}' "$destination" ;;
+  */${mcpPlatformName}) cp '${releaseRoot}/${mcpPlatformName}' "$destination" ;;
+  */${mcpLegacyName}) cp '${releaseRoot}/${mcpLegacyName}' "$destination" ;;
+  */NusaShell-mcp/*) exit 1 ;;
   */latest.json) cp '${releaseRoot}/latest.json' "$destination" ;;
   *) cp '${releaseRoot}/${coreName}' "$destination" ;;
 esac
@@ -713,6 +725,11 @@ esac
 
   assert.equal(await fileExists(join(dataRoot, 'plugins', 'nusashell.notes', 'manifest.json')), true);
   assert.equal(await fileExists(join(dataRoot, 'plugins', 'nusashell.notes', 'mcp', 'server')), true);
+  const installedServer = await readFile(join(dataRoot, 'plugins', 'nusashell.notes', 'mcp', 'server'), 'utf8');
+  assert.ok(
+    installedServer.includes(`asset: ${mcpPlatformName}`),
+    `expected the platform asset (${mcpPlatformName}) to be installed, got: ${installedServer}`,
+  );
 });
 
 async function fileExists(path) {

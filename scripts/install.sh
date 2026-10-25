@@ -680,7 +680,9 @@ install_mcp_unix() {
         safe_extract_tar "$archive" "$stage/release"
         source="$(extract_plugin_source "$stage/release" "$plugin")"
         released_arch="$(elf_arch "$source/mcp/server" || true)"
-        if [[ "$released_arch" == "$goarch" ]]; then
+        # Only a real ELF for another machine is a mismatch. Non-ELF commands
+        # (shell wrappers, node entry points) cannot be checked from here.
+        if [[ -z "$released_arch" || "$released_arch" == "$goarch" ]]; then
           break
         fi
         echo "MCP plugin $plugin: asset $asset is ${released_arch:-not an ELF binary}, host is ${os}/${goarch}; ignoring it." >&2
