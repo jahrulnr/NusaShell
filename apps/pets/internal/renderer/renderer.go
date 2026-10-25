@@ -186,9 +186,13 @@ func (re *Renderer) SetRunDirection(dir int) {
 	re.holdLast = false
 }
 
-// Render draws the current frame and advances the animation clock. Callers
-// should call Render at roughly the returned delay. The active decoded image
-// is returned so the native window shape can follow silhouette changes.
+// Render draws the current frame to the back buffer and advances the
+// animation clock. Callers should call Render at roughly the returned delay,
+// then update the native bounding shape for the returned frame and call
+// Present. Present is kept separate because the X server repaints a shaped
+// window's exposed areas when its shape changes; presenting before the new
+// shape would leave the new frame clipped by the old silhouette and flash the
+// server-side background fill until the expose repaint arrives.
 func (re *Renderer) Render() FrameResult {
 	re.mu.Lock()
 	defer re.mu.Unlock()
@@ -248,7 +252,6 @@ func (re *Renderer) Render() FrameResult {
 			re.log.Warn("renderer: copy", "err", err)
 		}
 	}
-	re.r.Present()
 
 	// Look cells are still frames in the atlas, but direction selection is a
 	// stable one-cell pose rather than a looping animation.
@@ -283,6 +286,15 @@ func (re *Renderer) Render() FrameResult {
 		LookIndex: activeLookIndex(re.lookIndex, look),
 		Finished:  finished,
 	}
+}
+
+// Present pushes the back buffer drawn by Render to the window. Call it after
+// the frame's bounding shape has been applied so the clip and the pixels are
+// delivered in one order: shape first, pixels second.
+func (re *Renderer) Present() {
+	re.mu.Lock()
+	defer re.mu.Unlock()
+	re.r.Present()
 }
 
 // Destroy frees all cached textures.

@@ -413,7 +413,10 @@ jobs:
           cache: true
           cache-dependency-path: apps/pets/go.sum
       - name: Install SDL2 and X11 development headers
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libsdl2-dev libx11-dev libxext-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libsdl2-dev libx11-dev libxext-dev libxcomposite-dev pkg-config xvfb xauth
+      - name: Test native Pet rendering and X11 cleanup
+        working-directory: apps/pets
+        run: PETS_X11_INTEGRATION=1 xvfb-run -a make test-sdl2 vet-sdl2
       - name: Build and package pets
         shell: bash
         run: |

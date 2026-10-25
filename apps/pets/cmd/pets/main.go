@@ -216,7 +216,13 @@ func start(c *cli.Context) error {
 	if wx, wy := win.Position(); wy >= bubble.AreaHeight/2 {
 		win.MoveTo(wx, wy-bubble.AreaHeight/2)
 	}
+	// Retain live underlay pixels rather than mutating other clients' backgrounds.
+	if err := platform.EnableAutomaticCompositing(dpy); err != nil {
+		return err
+	}
+	defer platform.DisableAutomaticCompositing(dpy)
 	_ = ren.Render()
+	ren.Present()
 	win.Show()
 	if err := platform.RaiseWindow(dpy, xwin); err != nil {
 		log.Warn("pets: initial X11 restack failed", "err", err)
@@ -405,6 +411,10 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 		st.ElectronInstalled = installed
 		switch launcher.Choose(st) {
 		case launcher.ActionOpenElectron:
+			if platform.FocusElectronWindow(dpy) {
+				log.Info("pets: click activates existing electron window")
+				return
+			}
 			if installed {
 				if spawnErr := launcher.Spawn(spec.Path, spec.Args...); spawnErr == nil {
 					log.Info("pets: click opens electron", "path", spec.Path, "args", spec.Args, "already_running", st.ElectronRunning)
@@ -524,7 +534,11 @@ func eventLoop(ctx context.Context, win *app.Window, ren *renderer.Renderer, cfg
 		if nextAnim.IsZero() || !now.Before(nextAnim) {
 			ren.SetBubble(activity.Text(now))
 			rendered := ren.Render()
+			// Shape first, Present after: a bounding-region change repaints
+			// exposed areas server-side, so the new frame's pixels must land
+			// only after the new clip is in place to avoid a visible fill.
 			applyRenderedShape(rendered)
+			ren.Present()
 			if rendered.Finished && (machine.Current() == state.StateDone || machine.Current() == state.StateError) {
 				applyState(state.Event{State: state.StateIdle})
 				rendered.Delay = 0

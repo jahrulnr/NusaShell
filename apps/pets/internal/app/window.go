@@ -5,6 +5,23 @@
 // window has been created.
 package app
 
+// #cgo pkg-config: sdl2
+// #include <stdint.h>
+// #include <SDL.h>
+// #include <SDL_syswm.h>
+//
+// static int pet_x11_handles(Uint32 id, uintptr_t *display, uintptr_t *window) {
+//     SDL_Window *w = SDL_GetWindowFromID(id);
+//     SDL_SysWMinfo info;
+//     SDL_VERSION(&info.version);
+//     if (!w || !SDL_GetWindowWMInfo(w, &info)) return -1;
+//     if (info.subsystem != SDL_SYSWM_X11) return -2;
+//     *display = (uintptr_t)info.info.x11.display;
+//     *window = (uintptr_t)info.info.x11.window;
+//     return 0;
+// }
+import "C"
+
 import (
 	"fmt"
 	"log/slog"
@@ -129,13 +146,20 @@ func (w *Window) X11Handles() (display, win uintptr, err error) {
 	if w == nil || w.Window == nil {
 		return 0, 0, fmt.Errorf("app: window is nil")
 	}
-	info, err := w.Window.GetWMInfo()
+	// go-sdl2's SysWMInfo union is smaller than SDL_SysWMinfo on some
+	// builds. Let C allocate the exact native structure; only integers cross
+	// this boundary, with no Go allocation reinterpreted as the larger union.
+	id, err := w.Window.GetID()
 	if err != nil {
-		return 0, 0, fmt.Errorf("app: GetWMInfo: %w", err)
+		return 0, 0, fmt.Errorf("app: window ID: %w", err)
 	}
-	if info.Subsystem != sdl.SYSWM_X11 {
-		return 0, 0, fmt.Errorf("app: not an X11 window (subsystem %v)", info.Subsystem)
+	var dpy, xwin C.uintptr_t
+	switch result := C.pet_x11_handles(C.Uint32(id), &dpy, &xwin); result {
+	case 0:
+		return uintptr(dpy), uintptr(xwin), nil
+	case -2:
+		return 0, 0, fmt.Errorf("app: not an X11 window")
+	default:
+		return 0, 0, fmt.Errorf("app: GetWMInfo: %s", sdl.GetError())
 	}
-	x11 := info.GetX11Info()
-	return uintptr(x11.Display), uintptr(x11.Window), nil
 }

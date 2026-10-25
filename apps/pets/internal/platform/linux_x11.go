@@ -5,13 +5,14 @@
 // SDL owns the window creation, rendering, and always-on-top behavior.
 package platform
 
-// #cgo pkg-config: x11 xext
+// #cgo pkg-config: x11 xext xcomposite
 //
 // #include <stdint.h>
 // #include <stdlib.h>
 // #include <string.h>
 // #include <X11/Xlib.h>
 // #include <X11/extensions/shape.h>
+// #include <X11/extensions/Xcomposite.h>
 //
 // // Keep native pointer casts in C. The Go API only passes opaque handles,
 // // which avoids unsafe.Pointer conversions at the cgo boundary.
@@ -76,7 +77,11 @@ package platform
 //     }
 //     XShapeCombineMask(dpy, win, ShapeBounding, 0, 0, shapemask, ShapeSet);
 //     XFreePixmap(dpy, shapemask);
-//     XSync(dpy, False);
+//     // Flush, but do not round-trip: the caller presents the matching frame
+//     // right after this, and a sync would leave the server's background fill
+//     // of newly exposed shape areas visible in the framebuffer until it
+//     // replies and the frame's pixels arrive.
+//     XFlush(dpy);
 //     return 0;
 // }
 //
@@ -135,6 +140,21 @@ package platform
 //     // pet, which is important for a click-through desktop overlay.
 //     XRaiseWindow(dpy, win);
 //     XFlush(dpy);
+//     return 0;
+// }
+//
+// static int automatic_composite_uintptr(uintptr_t display_value, int enable) {
+//     Display *dpy = (Display *)(uintptr_t)display_value;
+//     int event_base, error_base, major, minor;
+//     if (dpy == NULL) return -1;
+//     if (!XCompositeQueryExtension(dpy, &event_base, &error_base) ||
+//         !XCompositeQueryVersion(dpy, &major, &minor)) return -2;
+//     if (enable) {
+//         XCompositeRedirectSubwindows(dpy, DefaultRootWindow(dpy), CompositeRedirectAutomatic);
+//     } else {
+//         XCompositeUnredirectSubwindows(dpy, DefaultRootWindow(dpy), CompositeRedirectAutomatic);
+//     }
+//     XSync(dpy, False);
 //     return 0;
 // }
 //
@@ -241,6 +261,32 @@ func RaiseWindow(display, win uintptr) error {
 		return fmt.Errorf("platform: raise X11 window failed")
 	}
 	return nil
+}
+
+// EnableAutomaticCompositing retains the screen's window hierarchies in X
+// server pixmaps, including windows mapped later. Automatic updates reveal
+// their current pixels when the pet shape shrinks, without changing client
+// backgrounds, suppressing redraw requests, or taking manual compositor
+// ownership. Call DisableAutomaticCompositing before closing the SDL display.
+// The server also releases this connection's request on disconnect/crash.
+// Off-screen storage costs memory proportional to viewable window contents.
+func EnableAutomaticCompositing(display uintptr) error {
+	if display == 0 {
+		return fmt.Errorf("platform: nil X11 display")
+	}
+	if result := C.automatic_composite_uintptr(C.uintptr_t(display), 1); result != 0 {
+		return fmt.Errorf("platform: X11 Composite extension is required for retained window pixels (code %d)", result)
+	}
+	return nil
+}
+
+// DisableAutomaticCompositing releases this client's successful enable request.
+// Other compositing clients retain their own independent redirection requests.
+// Call once, on the SDL thread, while the display is still alive.
+func DisableAutomaticCompositing(display uintptr) {
+	if display != 0 {
+		C.automatic_composite_uintptr(C.uintptr_t(display), 0)
+	}
 }
 
 func boolInt(value bool) int {

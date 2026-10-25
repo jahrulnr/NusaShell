@@ -67,6 +67,7 @@ func TestBubbleSDLRenderAndShapeComposite(t *testing.T) {
 			t.Fatal("unchanged copy invalidated the shape cache")
 		}
 		frame := re.Render()
+		re.Present()
 		composite := re.WindowImage(frame.Image).(*image.RGBA)
 		cached := re.bubbleImage
 		re.WindowImage(frame.Image)
@@ -99,6 +100,7 @@ func TestBubbleSDLRenderAndShapeComposite(t *testing.T) {
 	}
 	re.SetBubble("", "")
 	frame := re.Render()
+	re.Present()
 	if re.WindowImage(frame.Image).(*image.RGBA).RGBAAt(width/2, 40).A != 0 {
 		t.Fatal("cleared bubble still occupies window shape")
 	}

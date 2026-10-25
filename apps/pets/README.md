@@ -150,7 +150,7 @@ window atau berada di deadzone, pet kembali ke idle normal.
 ## Build dan test
 
 ```bash
-sudo apt-get install libsdl2-dev libx11-dev libxext-dev
+sudo apt-get install libsdl2-dev libx11-dev libxext-dev libxcomposite-dev
 make build
 make test
 make test-race
@@ -187,8 +187,9 @@ TCP ke host WebSocket (`ws_url`), electron dicek lewat proses
 `nusashell-desktop` di procfs. Perilaku klik:
 
 - klik kiri single (tanpa drag) pada bagian mascot → **electron first**:
-  jika wrapper electron sudah jalan, launcher single-instance mem-focus
-  window-nya; jika terinstall tapi belum jalan, wrapper dibuka (electron
+  jika window utama electron sudah ada, pet mengirim request aktivasi EWMH
+  ke window manager (termasuk restore window yang diminimalkan), tanpa membuka
+  proses Electron kedua; jika terinstall tapi belum ada window, wrapper dibuka (electron
   ikut membawa backend miliknya sendiri);
 - jika electron tidak terinstall dan backend golang sedang jalan → fallback
   **web**: browser default dibuka ke frontend (`ws_url` dikonversi ke
@@ -244,8 +245,30 @@ tetap best-effort karena native Wayland tidak memiliki kontrak stacking yang
 sama.
 
 Shape window diperbarui ketika cell/frame berubah, sehingga area transparan
-tetap meneruskan event dan silhouette animasi tidak menjadi kotak hitam. Saat
-drag dimulai, runtime mem-poll root pointer X11, bukan mengandalkan pointer
+tetap meneruskan event dan silhouette animasi tidak menjadi kotak hitam.
+Perubahan shape meng-expose area di bawah pet dan server mengisinya dengan
+background window tersebut sebelum repaint Expose tiba — terlihat sebagai
+kotak terang di framebuffer opaque. Shape dipasang sebelum frame
+dipresentasikan. Selama pet hidup, XComposite automatic redirection menyimpan
+isi hierarchy window dalam pixmap server dan otomatis menampilkannya kembali
+saat shape mengecil. Piksel yang berubah ketika tertutup pet tetap diperbarui;
+background warna/pixmap dan operasi clear milik aplikasi lain tidak diubah.
+Request mencakup window yang sudah ada maupun yang map kemudian, dilepas saat
+pet keluar, dan otomatis dibersihkan server ketika koneksi/proses pet mati.
+Ini memerlukan extension Composite dan libXcomposite (lisensi MIT/X11;
+libXcomposite 0.4.5 diuji), bukan compositor eksternal atau akselerasi GPU
+aplikasi guest. Penyimpanan off-screen menambah penggunaan memori sesuai isi
+window viewable. Server tanpa Composite melaporkan error saat startup.
+Workaround menyapu `background=None` di window lain sudah dihapus karena
+merusak semantik clear dan tidak bisa mengembalikan atribut aslinya.
+
+Jalankan regresi X11 terisolasi dengan
+`PETS_X11_INTEGRATION=1 xvfb-run -a make test-sdl2` (butuh Xvfb, xauth, cc).
+Test memeriksa piksel terbaru di balik shape, background warna dan pixmap,
+serta pelepasan request normal dan saat proses dimatikan paksa. Lihat
+[kontrak XComposite](https://xorg.freedesktop.org/archive/X11R7.5/doc/man/man3/Xcomposite.3.html).
+
+Saat drag dimulai, runtime mem-poll root pointer X11, bukan mengandalkan pointer
 capture atau event window. Ini membuat posisi pet tetap melekat pada cursor
 meski pointer meninggalkan silhouette, dan state tombol kiri menghentikan drag
 meski event release tidak kembali ke pet. Cadence polling memakai refresh rate

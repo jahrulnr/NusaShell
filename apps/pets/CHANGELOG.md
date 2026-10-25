@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-26
+
+### Fixed
+
+- **Retain live underlay pixels while the desktop pet animates.** Draw,
+  shape update, and present run in that order. XComposite automatic redirection
+  keeps current pixels even while obscured, avoiding flat background flashes
+  when the bounding shape shrinks. The previous global `background=None`
+  sweep is removed: other clients keep their pixel/pixmap backgrounds and
+  clear behavior. Redirection is released on exit or connection loss.
+  Building now requires `libxcomposite-dev`; runtime requires libXcomposite
+  and an X server with Composite. Off-screen window storage costs memory.
+
+- **Pet click restores an existing NusaShell window through EWMH.** Match the
+  main window's class and UTF-8 title, including minimized clients; skip popup,
+  unrelated, and stale window entries. Starting another Electron process is
+  only needed when no main window is available. This avoids duplicate windows
+  when Chromium's singleton IPC does not reach the original guest process.
+- **Read SDL native handles using SDL's actual C structure.** The pinned Go
+  binding's smaller union triggered Go's pointer checker under real X11 race
+  tests. No pointer checks are disabled.
+
 ## Earlier entries
 
 ### Changed
