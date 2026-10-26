@@ -1293,7 +1293,7 @@ export function createProvidersPage(root = document, { rpcClient = defaultRPC } 
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const result = await dialog({
       title: agent ? 'Edit ACP agent' : 'Add ACP agent',
-      message: agent ? 'The registered command is immutable. Update the label, transport details, args, or workspace.' : 'Register a spawn-only worker. Probe it after saving to discover modes, models, and auth methods.',
+      message: agent ? 'The registered command is immutable. Update the label, transport details, args, or workspace.' : 'Register a spawn-only worker. Probe it after saving to check connectivity and auth methods; Refresh catalog discovers modes and models.',
       fields: [
         { name: 'name', label: 'Name', value: agent?.name || '', placeholder: 'e.g. Cursor CLI' },
         { name: 'transport', label: 'Transport', tag: 'select', value: acpTransport(agent), options: ACP_TRANSPORT_OPTIONS, onChange: (input, values) => {

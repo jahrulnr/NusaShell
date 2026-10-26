@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-10-27
+
+### Fixed
+
+- ACP agents that migrated to configOptions-only `session/new` responses (Devin's `sessionDefaultConfigOptions` generation sends `modes: null`/`models: null`) had their mode/model catalogs frozen at whatever was cached before the migration: Refresh catalog ran but the configOptions gap-fill was skipped by the stale non-empty cache. The guard now compares the current session's payloads, so Refresh catalog replaces the catalog (e.g. Devin's `swe-2-*` models appear again). Mode/model selection also follows the advertised shape — `session/set_config_option` for configOptions-only sessions (Devin no longer serves `session/set_model`), legacy `session/set_mode`/`session/set_model` otherwise — and `config_option_update` notifications now update a live run's mode/model.
+
 ## [0.10.3] - 2026-10-25
 
 ### Changed

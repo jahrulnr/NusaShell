@@ -362,3 +362,11 @@ func (c *Conn) SetModel(ctx context.Context, sessionID, modelID string) (SetMode
 	err := c.call(ctx, "session/set_model", SetModelParams{SessionID: sessionID, ModelID: modelID}, &out)
 	return out, err
 }
+
+func (c *Conn) SetConfigOption(ctx context.Context, sessionID, configID, value string) (SetConfigOptionResult, error) {
+	var out SetConfigOptionResult
+	err := c.call(ctx, "session/set_config_option", SetConfigOptionParams{
+		SessionID: sessionID, ConfigID: configID, Value: value,
+	}, &out)
+	return out, err
+}

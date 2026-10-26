@@ -41,14 +41,15 @@ type rpcErr struct {
 }
 
 var (
-	mu         sync.Mutex
-	authed     bool
-	reAuthed   bool
-	sessions   = map[string]string{}
-	cancels    = map[string]chan struct{}{}
-	rpcWait    = map[any]chan request{}
-	permSeq    int
-	sessionSeq atomic.Uint64
+	mu          sync.Mutex
+	authed      bool
+	reAuthed    bool
+	sessions    = map[string]string{}
+	cancels     = map[string]chan struct{}{}
+	rpcWait     = map[any]chan request{}
+	permSeq     int
+	sessionSeq  atomic.Uint64
+	configState = map[string]map[string]string{}
 )
 
 func main() {
@@ -118,31 +119,12 @@ func handle(req request) {
 		// FAKEACP_CONFIG_OPTIONS simulates OpenCode-generation agents whose
 		// session/new returns v1 configOptions instead of legacy modes/models.
 		if os.Getenv("FAKEACP_CONFIG_OPTIONS") == "1" {
+			mu.Lock()
+			configState[id] = map[string]string{"model": "prov/alpha", "mode": "build"}
+			mu.Unlock()
 			reply(req.ID, map[string]any{
-				"sessionId": id,
-				"configOptions": []any{
-					map[string]any{
-						"id": "model", "name": "Model", "category": "model", "type": "select",
-						"currentValue": "prov/alpha",
-						"options": []any{
-							map[string]any{"value": "prov/alpha", "name": "Prov/Alpha"},
-							map[string]any{"value": "prov/beta", "name": "Prov/Beta"},
-						},
-					},
-					map[string]any{
-						"id": "mode", "name": "Session Mode", "category": "mode", "type": "select",
-						"currentValue": "build",
-						"options": []any{
-							map[string]any{"value": "build", "name": "Build"},
-							map[string]any{"value": "plan", "name": "Plan", "description": "Read-only planning"},
-						},
-					},
-					// Boolean options exercise the raw-JSON current value path.
-					map[string]any{
-						"id": "flag", "name": "Flag", "category": "_custom", "type": "boolean",
-						"currentValue": false,
-					},
-				},
+				"sessionId":     id,
+				"configOptions": configOptionsReply(id),
 			})
 			return
 		}
@@ -185,6 +167,14 @@ func handle(req request) {
 			}
 		}
 	case "session/set_mode":
+		// FAKEACP_NO_LEGACY_SET models agents that removed the legacy
+		// set_mode/set_model methods (current Devin answers -32601 for
+		// session/set_model); such sessions accept only
+		// session/set_config_option.
+		if os.Getenv("FAKEACP_NO_LEGACY_SET") == "1" {
+			failCode(req.ID, -32601, "method not found")
+			return
+		}
 		if os.Getenv("FAKEACP_REJECT_MODE") == "1" {
 			fail(req.ID, "mode switch rejected")
 			return
@@ -203,6 +193,10 @@ func handle(req request) {
 		})
 		reply(req.ID, map[string]any{})
 	case "session/set_model":
+		if os.Getenv("FAKEACP_NO_LEGACY_SET") == "1" {
+			failCode(req.ID, -32601, "method not found")
+			return
+		}
 		var p struct {
 			ModelID string `json:"modelId"`
 		}
@@ -210,6 +204,36 @@ func handle(req request) {
 		reply(req.ID, map[string]any{
 			"models": map[string]any{"currentModelId": p.ModelID, "availableModels": []any{}},
 		})
+	case "session/set_config_option":
+		var p struct {
+			SessionID string `json:"sessionId"`
+			ConfigID  string `json:"configId"`
+			Value     string `json:"value"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		mu.Lock()
+		st := configState[p.SessionID]
+		if st == nil {
+			st = map[string]string{}
+			configState[p.SessionID] = st
+		}
+		st[p.ConfigID] = p.Value
+		if p.ConfigID == "mode" {
+			sessions[p.SessionID] = p.Value
+		}
+		mu.Unlock()
+		opts := configOptionsReply(p.SessionID)
+		notify("session/update", map[string]any{
+			"sessionId": p.SessionID,
+			"update":    map[string]any{"sessionUpdate": "config_option_update", "configOptions": opts},
+		})
+		if p.ConfigID == "mode" {
+			notify("session/update", map[string]any{
+				"sessionId": p.SessionID,
+				"update":    map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": p.Value},
+			})
+		}
+		reply(req.ID, map[string]any{"configOptions": opts})
 	default:
 		if req.ID != nil {
 			fail(req.ID, "method not found")
@@ -341,13 +365,56 @@ func handlePrompt(req request) {
 	}
 }
 
+// configOptionsReply renders the current v1 selector list for a session
+// created under FAKEACP_CONFIG_OPTIONS. Unknown sessions fall back to the
+// initial currentValues.
+func configOptionsReply(sessionID string) []any {
+	mu.Lock()
+	st := configState[sessionID]
+	model, mode := st["model"], st["mode"]
+	mu.Unlock()
+	if model == "" {
+		model = "prov/alpha"
+	}
+	if mode == "" {
+		mode = "build"
+	}
+	return []any{
+		map[string]any{
+			"id": "model", "name": "Model", "category": "model", "type": "select",
+			"currentValue": model,
+			"options": []any{
+				map[string]any{"value": "prov/alpha", "name": "Prov/Alpha"},
+				map[string]any{"value": "prov/beta", "name": "Prov/Beta"},
+			},
+		},
+		map[string]any{
+			"id": "mode", "name": "Session Mode", "category": "mode", "type": "select",
+			"currentValue": mode,
+			"options": []any{
+				map[string]any{"value": "build", "name": "Build"},
+				map[string]any{"value": "plan", "name": "Plan", "description": "Read-only planning"},
+			},
+		},
+		// Boolean options exercise the raw-JSON current value path.
+		map[string]any{
+			"id": "flag", "name": "Flag", "category": "_custom", "type": "boolean",
+			"currentValue": false,
+		},
+	}
+}
+
 func reply(id any, result any) {
 	body, _ := json.Marshal(response{JSONRPC: "2.0", ID: id, Result: result})
 	writeFrame(body)
 }
 
 func fail(id any, msg string) {
-	body, _ := json.Marshal(response{JSONRPC: "2.0", ID: id, Error: &rpcErr{Code: -32000, Message: msg}})
+	failCode(id, -32000, msg)
+}
+
+func failCode(id any, code int, msg string) {
+	body, _ := json.Marshal(response{JSONRPC: "2.0", ID: id, Error: &rpcErr{Code: code, Message: msg}})
 	writeFrame(body)
 }
 

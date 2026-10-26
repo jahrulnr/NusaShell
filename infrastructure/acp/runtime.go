@@ -57,6 +57,10 @@ type liveRun struct {
 	sessionAllow bool
 	done         chan struct{}
 	closed       bool
+	// modeConfigID is non-empty when the session advertised modes only via
+	// v1 configOptions; live mode switches then go through
+	// session/set_config_option instead of legacy session/set_mode.
+	modeConfigID string
 	// emitDirty/emitTimer coalesce session/update emits: every notification
 	// marks the snapshot dirty and one lazy timer publishes the latest
 	// clone per sessionUpdateEmitInterval, instead of cloning the whole
@@ -250,7 +254,8 @@ func applyInitialize(agent *domain.AcpAgent, init acpclient.InitializeResult) {
 }
 
 func applySession(agent *domain.AcpAgent, sess acpclient.NewSessionResult) {
-	if sess.Modes != nil && len(sess.Modes.AvailableModes) > 0 {
+	legacyModes := legacyModesAdvertised(sess)
+	if legacyModes {
 		agent.CachedCapabilities.HasModes = true
 		agent.CachedModes = nil
 		for _, m := range sess.Modes.AvailableModes {
@@ -267,26 +272,53 @@ func applySession(agent *domain.AcpAgent, sess acpclient.NewSessionResult) {
 			})
 		}
 	}
-	applyConfigOptions(agent, sess.ConfigOptions)
+	legacyModels := legacyModelsAdvertised(sess)
+	applyConfigOptions(agent, sess.ConfigOptions, legacyModes, legacyModels)
+}
+
+// legacyModesAdvertised / legacyModelsAdvertised report whether this
+// session's legacy payload carries a usable selector list. A present-but-
+// empty payload (modes:{...availableModes:[]}) does not count — the
+// configOptions gap-fill and the set_config_option switch routing both key
+// on these so degenerate sessions cannot strand the catalog or route a
+// switch to an unimplemented legacy method.
+func legacyModesAdvertised(sess acpclient.NewSessionResult) bool {
+	return sess.Modes != nil && len(sess.Modes.AvailableModes) > 0
+}
+
+func legacyModelsAdvertised(sess acpclient.NewSessionResult) bool {
+	return sess.Models != nil && len(sess.Models.AvailableModels) > 0
 }
 
 // applyConfigOptions folds v1 session configuration selectors onto the
-// legacy mode/model caches when the agent did not advertise those legacy
-// payloads (OpenCode-generation agents return configOptions only). Filling
-// gaps keeps agents that send both shapes deterministic. Switching still
-// goes through legacy set_mode/set_model, which such agents keep serving.
-func applyConfigOptions(agent *domain.AcpAgent, opts []acpclient.ConfigOption) {
+// legacy mode/model caches when this session did not advertise the matching
+// legacy payload. Agents that migrated to configOptions-only session/new
+// responses (Devin's sessionDefaultConfigOptions generation, OpenCode)
+// send modes:null/models:null, so the gap-fill guard must compare the
+// current session's payloads — keying it on a non-empty persisted cache
+// froze the catalog permanently. When both shapes carry a category, the
+// legacy payload wins deterministically. Mode/model switching follows the
+// advertised shape: setSessionMode and the model path in Spawn use
+// session/set_config_option when the session exposed the selector through
+// configOptions only, since such agents may not serve legacy set_mode or
+// set_model at all.
+func applyConfigOptions(agent *domain.AcpAgent, opts []acpclient.ConfigOption, legacyModes, legacyModels bool) {
 	for _, opt := range opts {
 		if !isSelectOption(opt) || len(opt.Options) == 0 {
 			continue
 		}
 		switch opt.Category {
 		case "mode":
-			if len(agent.CachedModes) > 0 {
+			if legacyModes {
 				continue
 			}
 			modes := make([]domain.AcpMode, 0, len(opt.Options))
 			for _, choice := range opt.Options {
+				if choice.Value == "" {
+					// Spec-legal option groups decode as a header entry with
+					// no value; skip it rather than cataloguing an empty id.
+					continue
+				}
 				modes = append(modes, domain.AcpMode{
 					ID: choice.Value, Name: choice.Name, Description: choice.Description,
 				})
@@ -295,11 +327,14 @@ func applyConfigOptions(agent *domain.AcpAgent, opts []acpclient.ConfigOption) {
 			agent.CachedModes = modes
 			agent.ModeRiskMappings = domain.SeedModeRiskMappings(modes, agent.ModeRiskMappings)
 		case "model":
-			if len(agent.CachedModels) > 0 {
+			if legacyModels {
 				continue
 			}
 			models := make([]domain.AcpModelInfo, 0, len(opt.Options))
 			for _, choice := range opt.Options {
+				if choice.Value == "" {
+					continue
+				}
 				models = append(models, domain.AcpModelInfo{
 					ID: choice.Value, Name: choice.Name, Description: choice.Description,
 					Tier: domain.ClassifyModelTier(choice.Value, choice.Name),
@@ -308,6 +343,47 @@ func applyConfigOptions(agent *domain.AcpAgent, opts []acpclient.ConfigOption) {
 			agent.CachedModels = models
 		}
 	}
+}
+
+// configSelectID returns the id of the select config option for the given
+// category ("mode", "model"), or "" when the session does not advertise one.
+func configSelectID(opts []acpclient.ConfigOption, category string) string {
+	for _, opt := range opts {
+		if opt.Category == category && isSelectOption(opt) && len(opt.Options) > 0 {
+			return opt.ID
+		}
+	}
+	return ""
+}
+
+// configOptionValueByID returns the current value of the config option with
+// the given id, or "" when absent or non-string.
+func configOptionValueByID(opts []acpclient.ConfigOption, id string) string {
+	for _, opt := range opts {
+		if opt.ID == id {
+			return opt.StringValue()
+		}
+	}
+	return ""
+}
+
+// setSessionMode applies a mode switch using the protocol the session
+// advertised: configOptions-only sessions (legacy modes payload absent) go
+// through session/set_config_option, otherwise legacy session/set_mode.
+func setSessionMode(ctx context.Context, conn *acpclient.Conn, sessionID, modeConfigID, modeID string) error {
+	if modeConfigID != "" {
+		res, err := conn.SetConfigOption(ctx, sessionID, modeConfigID, modeID)
+		if err != nil {
+			return err
+		}
+		// Verify by the selector id just set: a session may carry more than
+		// one same-category option, so first-by-category is ambiguous.
+		if cur := configOptionValueByID(res.ConfigOptions, modeConfigID); cur != "" && cur != modeID {
+			return fmt.Errorf("agent kept mode %q", cur)
+		}
+		return nil
+	}
+	return conn.SetMode(ctx, sessionID, modeID)
 }
 
 func isSelectOption(opt acpclient.ConfigOption) bool {
@@ -341,7 +417,7 @@ func hasModeSelector(sess acpclient.NewSessionResult) bool {
 		return true
 	}
 	for _, opt := range sess.ConfigOptions {
-		if opt.Category == "mode" && isSelectOption(opt) {
+		if opt.Category == "mode" && isSelectOption(opt) && len(opt.Options) > 0 {
 			return true
 		}
 	}
@@ -394,8 +470,15 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 		modeID = domain.StrictestAvailableMode(req.Agent.CachedModes, req.Agent.ModeRiskMappings)
 	}
 	currentMode := sessionCurrentMode(sess)
+	// configOptions-only sessions (legacy payloads absent) switch selectors
+	// through session/set_config_option; remember the mode selector id for
+	// later switches on the live run.
+	modeConfigID := ""
+	if !legacyModesAdvertised(sess) {
+		modeConfigID = configSelectID(sess.ConfigOptions, "mode")
+	}
 	if modeID != "" && hasModeSelector(sess) && modeID != currentMode {
-		if err := pc.conn.SetMode(ctx, sess.SessionID, modeID); err != nil {
+		if err := setSessionMode(ctx, pc.conn, sess.SessionID, modeConfigID, modeID); err != nil {
 			slog.Error("acp mode selection failed", "agent", req.Agent.ID, "session", sess.SessionID, "mode", modeID, "error", err)
 			return nil, fmt.Errorf("set ACP mode %q: %w", modeID, err)
 		}
@@ -417,18 +500,34 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 		currentModel = cur
 	}
 	if modelID != "" {
-		res, err := pc.conn.SetModel(ctx, sess.SessionID, modelID)
-		if err != nil {
-			modelStatus = domain.ModelSelectionRejected
-		} else if res.Models == nil || res.Models.CurrentModelID == "" {
-			modelStatus = domain.ModelSelectionUnverified
-			currentModel = modelID
-		} else if res.Models.CurrentModelID == modelID {
-			modelStatus = domain.ModelSelectionConfirmed
-			currentModel = modelID
+		if modelConfigID := configSelectID(sess.ConfigOptions, "model"); !legacyModelsAdvertised(sess) && modelConfigID != "" {
+			res, err := pc.conn.SetConfigOption(ctx, sess.SessionID, modelConfigID, modelID)
+			if err != nil {
+				modelStatus = domain.ModelSelectionRejected
+			} else if cur := configOptionValueByID(res.ConfigOptions, modelConfigID); cur == "" {
+				modelStatus = domain.ModelSelectionUnverified
+				currentModel = modelID
+			} else if cur == modelID {
+				modelStatus = domain.ModelSelectionConfirmed
+				currentModel = modelID
+			} else {
+				modelStatus = domain.ModelSelectionRejected
+				currentModel = cur
+			}
 		} else {
-			modelStatus = domain.ModelSelectionRejected
-			currentModel = res.Models.CurrentModelID
+			res, err := pc.conn.SetModel(ctx, sess.SessionID, modelID)
+			if err != nil {
+				modelStatus = domain.ModelSelectionRejected
+			} else if res.Models == nil || res.Models.CurrentModelID == "" {
+				modelStatus = domain.ModelSelectionUnverified
+				currentModel = modelID
+			} else if res.Models.CurrentModelID == modelID {
+				modelStatus = domain.ModelSelectionConfirmed
+				currentModel = modelID
+			} else {
+				modelStatus = domain.ModelSelectionRejected
+				currentModel = res.Models.CurrentModelID
+			}
 		}
 	}
 
@@ -456,9 +555,10 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 		UpdatedAt:            now,
 	}
 	lr := &liveRun{
-		run:  run,
-		conn: pc,
-		done: make(chan struct{}),
+		run:          run,
+		conn:         pc,
+		done:         make(chan struct{}),
+		modeConfigID: modeConfigID,
 	}
 	rt.mu.Lock()
 	rt.runs[run.ID] = lr
@@ -565,9 +665,21 @@ func (pc *pooledConn) SessionUpdate(params acpclient.SessionUpdateParams) {
 	if chunk.Kind != "" {
 		lr.run.AppendTranscript(chunk)
 	}
-	if params.Update.SessionUpdate == "current_mode_update" && params.Update.CurrentModeID != "" {
-		lr.run.CurrentModeID = params.Update.CurrentModeID
-		lr.run.RiskTier = domain.InferRiskTier(params.Update.CurrentModeID, pc.agent.ModeRiskMappings)
+	modeChange := ""
+	if u.SessionUpdate == "current_mode_update" {
+		modeChange = u.CurrentModeID
+	} else if u.SessionUpdate == "config_option_update" {
+		// v1 agents report selector changes as config_option_update carrying
+		// the full selector list; Devin emits a legacy current_mode_update
+		// twin afterwards, which the equality guard below deduplicates.
+		if cur := sessionConfigValue(u.ConfigOptions, "model"); cur != "" {
+			lr.run.CurrentModelID = cur
+		}
+		modeChange = sessionConfigValue(u.ConfigOptions, "mode")
+	}
+	if modeChange != "" && modeChange != lr.run.CurrentModeID {
+		lr.run.CurrentModeID = modeChange
+		lr.run.RiskTier = domain.InferRiskTier(modeChange, pc.agent.ModeRiskMappings)
 		lr.run.UpdatedAt = clock.NewTime().Time()
 		lr.disarmEmitLocked()
 		run := cloneRun(lr.run)
@@ -1065,7 +1177,7 @@ func (rt *Runtime) SetMode(ctx context.Context, runID, modeID string) error {
 	if err != nil {
 		return err
 	}
-	if err := lr.conn.conn.SetMode(ctx, lr.run.SessionID, modeID); err != nil {
+	if err := setSessionMode(ctx, lr.conn.conn, lr.run.SessionID, lr.modeConfigID, modeID); err != nil {
 		return err
 	}
 	lr.mu.Lock()

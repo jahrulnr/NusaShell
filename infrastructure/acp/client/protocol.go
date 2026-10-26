@@ -113,8 +113,9 @@ type NewSessionResult struct {
 	// ConfigOptions is the v1 session-configuration selector list. Agents
 	// in the OpenCode generation replaced the legacy modes/models payload
 	// with these selectors; NusaShell folds select-type mode/model options
-	// onto its existing caches and keeps driving them through the still
-	// supported legacy set_mode/set_model methods.
+	// onto its existing caches and switches them through
+	// session/set_config_option when the legacy payload is absent — such
+	// agents may not serve legacy set_mode/set_model at all.
 	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
 }
 
@@ -203,6 +204,20 @@ type SetModelResult struct {
 	Models *SessionModels `json:"models,omitempty"`
 }
 
+// SetConfigOptionParams is the v1 selector switch: sessions that advertise
+// modes/models through configOptions instead of the legacy payloads accept
+// changes through session/set_config_option (Devin's
+// sessionDefaultConfigOptions generation no longer serves set_model).
+type SetConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
+type SetConfigOptionResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+
 type SessionUpdateParams struct {
 	SessionID string        `json:"sessionId"`
 	Update    SessionUpdate `json:"update"`
@@ -222,6 +237,9 @@ type SessionUpdate struct {
 	Entries       []PlanEntry     `json:"entries,omitempty"`
 	Used          int             `json:"used,omitempty"`
 	Size          int             `json:"size,omitempty"`
+	// ConfigOptions carries the full selector list on config_option_update
+	// notifications (v1 agents report mode/model changes this way).
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
 }
 
 // UpdateContent is the `content` field of one session/update entry. Message

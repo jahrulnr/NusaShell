@@ -628,8 +628,9 @@ func TestSpawnWithConfigOptionsAgent(t *testing.T) {
 }
 
 // TestSpawnWithConfigOptionsAppliesPreferredMode verifies that PreferredModeID
-// reaches config-options-only agents through legacy set_mode: fakeacp replies
-// to session/set_mode with a current_mode_update notification.
+// reaches config-options-only agents through session/set_config_option:
+// fakeacp replies with the updated selector list plus a current_mode_update
+// notification.
 func TestSpawnWithConfigOptionsAppliesPreferredMode(t *testing.T) {
 	rt := New()
 	defer rt.Close()
@@ -646,10 +647,140 @@ func TestSpawnWithConfigOptionsAppliesPreferredMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	if run.CurrentModeID != "plan" {
-		t.Fatalf("mode after preferred set_mode = %q, want plan", run.CurrentModeID)
+		t.Fatalf("mode after preferred mode switch = %q, want plan", run.CurrentModeID)
 	}
 	if got := domain.InferRiskTier(run.CurrentModeID, agent.ModeRiskMappings); got != domain.RiskReadOnly {
 		t.Fatalf("risk tier for plan = %s", got)
+	}
+}
+
+// TestApplySessionConfigOptionsReplaceStaleCatalog pins the reported
+// regression: once an agent migrates to configOptions-only session/new
+// payloads (Devin's sessionDefaultConfigOptions generation sends
+// modes:null/models:null), a previously cached catalog must be replaced.
+// The gap-fill guard compares this session's payloads, not the persisted
+// cache — keying it on a non-empty stale cache froze the catalog forever.
+func TestApplySessionConfigOptionsReplaceStaleCatalog(t *testing.T) {
+	agent := &domain.AcpAgent{
+		CachedModes:  []domain.AcpMode{{ID: "stale-mode"}},
+		CachedModels: []domain.AcpModelInfo{{ID: "stale-model"}},
+	}
+	applySession(agent, client.NewSessionResult{
+		ConfigOptions: []client.ConfigOption{
+			{
+				ID: "mode", Category: "mode",
+				Options: []client.ConfigChoiceOption{{Value: "build", Name: "Build"}},
+			},
+			{
+				ID: "model", Category: "model",
+				Options: []client.ConfigChoiceOption{{Value: "swe-2-high", Name: "SWE-2"}},
+			},
+		},
+	})
+	if len(agent.CachedModels) != 1 || agent.CachedModels[0].ID != "swe-2-high" {
+		t.Fatalf("stale models must be replaced by config options, got %+v", agent.CachedModels)
+	}
+	if len(agent.CachedModes) != 1 || agent.CachedModes[0].ID != "build" {
+		t.Fatalf("stale modes must be replaced by config options, got %+v", agent.CachedModes)
+	}
+	if !agent.CachedCapabilities.HasModes {
+		t.Fatal("HasModes must be set when config options supply modes")
+	}
+}
+
+// TestApplySessionLegacyPayloadWinsOverConfigOptions keeps both-shape agents
+// deterministic: when session/new advertises the same category in the legacy
+// payload AND in configOptions, the legacy list wins.
+func TestApplySessionLegacyPayloadWinsOverConfigOptions(t *testing.T) {
+	agent := &domain.AcpAgent{}
+	applySession(agent, client.NewSessionResult{
+		Models: &client.SessionModels{
+			CurrentModelID:  "legacy-model",
+			AvailableModels: []client.ModelInfo{{ModelID: "legacy-model", Name: "Legacy"}},
+		},
+		ConfigOptions: []client.ConfigOption{
+			{
+				ID: "model", Category: "model",
+				Options: []client.ConfigChoiceOption{{Value: "cfg-model", Name: "Cfg"}},
+			},
+		},
+	})
+	if len(agent.CachedModels) != 1 || agent.CachedModels[0].ID != "legacy-model" {
+		t.Fatalf("legacy models payload must win, got %+v", agent.CachedModels)
+	}
+}
+
+// TestRefreshCatalogReplacesStaleConfigOptionsCatalog exercises the full
+// refresh path: an agent whose persisted catalog is stale gets it replaced
+// by the configOptions selectors the current session advertises.
+func TestRefreshCatalogReplacesStaleConfigOptionsCatalog(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	agent := testAgent(ws)
+	agent.Env = map[string]string{"FAKEACP_CONFIG_OPTIONS": "1"}
+	agent.CachedModels = []domain.AcpModelInfo{{ID: "stale-model"}}
+	agent.CachedModes = []domain.AcpMode{{ID: "stale-mode"}}
+	updated, err := rt.RefreshCatalog(ctx, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.CachedModels) != 2 || updated.CachedModels[0].ID != "prov/alpha" {
+		t.Fatalf("stale models must be replaced by config options, got %+v", updated.CachedModels)
+	}
+	if len(updated.CachedModes) != 2 || updated.CachedModes[0].ID != "build" {
+		t.Fatalf("stale modes must be replaced by config options, got %+v", updated.CachedModes)
+	}
+}
+
+// TestSpawnConfigOptionsOnlyAgentSelectsModelAndMode exercises agents that
+// dropped the legacy set_mode/set_model methods entirely (current Devin
+// returns -32601 for session/set_model): selection must go through
+// session/set_config_option. FAKEACP_NO_LEGACY_SET makes fakeacp answer
+// method-not-found for the legacy calls, so a passing run proves the v1
+// path was taken.
+func TestSpawnConfigOptionsOnlyAgentSelectsModelAndMode(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	agent := testAgent(ws)
+	agent.Env = map[string]string{"FAKEACP_CONFIG_OPTIONS": "1", "FAKEACP_NO_LEGACY_SET": "1"}
+	agent.PreferredModeID = "plan"
+	agent.PreferredModelID = "prov/beta"
+	run, err := rt.Spawn(ctx, application.AcpSpawnRequest{
+		Agent: agent, Prompt: "hello v1", Workspace: ws,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.CurrentModeID != "plan" {
+		t.Fatalf("mode after config-option switch = %q, want plan", run.CurrentModeID)
+	}
+	if run.ModelSelectionStatus != domain.ModelSelectionConfirmed || run.CurrentModelID != "prov/beta" {
+		t.Fatalf("model = %q status %q, want prov/beta confirmed", run.CurrentModelID, run.ModelSelectionStatus)
+	}
+	// A live mode switch must reuse the config-option channel too; legacy
+	// session/set_mode does not exist on this agent.
+	if err := rt.SetMode(ctx, run.ID, "build"); err != nil {
+		t.Fatalf("live SetMode via config option: %v", err)
+	}
+	if got := run.CurrentModeID; got != "build" {
+		// SetMode mutates the stored run; fetch the live copy.
+		live, ok := rt.Get(run.ID)
+		if !ok || live.CurrentModeID != "build" {
+			t.Fatalf("mode after live SetMode = %q (live %v), want build", got, ok)
+		}
+	}
+	finished, err := rt.Wait(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished.Status != domain.AcpRunCompleted {
+		t.Fatalf("status = %s error=%s", finished.Status, finished.Error)
 	}
 }
 
