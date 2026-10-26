@@ -13,9 +13,9 @@
     "releasedAt": "2026-09-20T22:30:55.962Z"
   },
   "pets": {
-    "version": "0.2.3",
-    "tag": "pets-v0.2.3",
+    "version": "0.2.4",
+    "tag": "pets-v0.2.4",
     "manifest": "pets-latest.json",
-    "releasedAt": "2026-09-15T17:26:02.693Z"
+    "releasedAt": "2026-10-25T18:54:58.417Z"
   }
 }
