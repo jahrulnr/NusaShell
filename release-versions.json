@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "go": {
-    "version": "0.10.3",
-    "tag": "go-v0.10.3",
+    "version": "0.10.4",
+    "tag": "go-v0.10.4",
     "manifest": "latest.json",
-    "releasedAt": "2026-10-24T19:36:30.095Z"
+    "releasedAt": "2026-10-26T20:22:01.227Z"
   },
   "electron": {
     "version": "0.2.1",
