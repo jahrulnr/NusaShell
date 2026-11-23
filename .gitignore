@@ -1,0 +1,11 @@
+.env
+bin/
+site/
+.venv-docs/
+data/
+tasks/
+.playwright-mcp
+.claude/
+
+# Playwright run output
+web/test-results/

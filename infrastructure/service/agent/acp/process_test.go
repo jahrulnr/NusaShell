@@ -1,0 +1,291 @@
+package acp
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"runtime"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+type blockingHandler struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (h *blockingHandler) OnNotification(string, string, json.RawMessage) {
+	close(h.started)
+	<-h.release
+}
+func (*blockingHandler) OnRequest(context.Context, string, json.RawMessage) (any, *RPCError) {
+	return nil, nil
+}
+func (*blockingHandler) OnStderr(string) {}
+func (*blockingHandler) OnExit(error)    {}
+
+func TestPromptResponseWaitsForEarlierUpdates(t *testing.T) {
+	h := &blockingHandler{started: make(chan struct{}), release: make(chan struct{})}
+	p := NewProcess(ProcessConfig{}, h)
+	p.pending["1"] = &pendingCall{method: "session/prompt", ch: make(chan callResult, 1)}
+	result := p.pending["1"].ch
+	go p.notificationLoop()
+	defer func() { close(p.done); <-p.notifDone }()
+	p.handleMessage(rpcMessage{Method: "session/update", Params: json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk"}}`)})
+	<-h.started
+	p.handleMessage(rpcMessage{ID: json.RawMessage(`1`), Result: json.RawMessage(`{"stopReason":"end_turn"}`)})
+	select {
+	case <-result:
+		t.Fatal("prompt completed before update was handled")
+	default:
+	}
+	close(h.release)
+	select {
+	case <-result:
+	case <-time.After(time.Second):
+		t.Fatal("prompt response did not arrive")
+	}
+}
+
+// orderHandler blocks its first notification and reports requests.
+type orderHandler struct {
+	blockingHandler
+	requested chan struct{}
+}
+
+func (h *orderHandler) OnRequest(context.Context, string, json.RawMessage) (any, *RPCError) {
+	close(h.requested)
+	return map[string]any{}, nil
+}
+
+// An agent request (a permission question, a form) starts only after the
+// updates the agent sent before it are handled.
+func TestRequestWaitsForEarlierUpdates(t *testing.T) {
+	h := &orderHandler{started: make(chan struct{}), release: make(chan struct{}), requested: make(chan struct{})}
+	p := NewProcess(ProcessConfig{}, h)
+	go p.notificationLoop()
+	defer func() { close(p.done); <-p.notifDone }()
+	p.handleMessage(rpcMessage{Method: "session/update", Params: json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk"}}`)})
+	<-h.started
+	p.handleMessage(rpcMessage{ID: json.RawMessage(`7`), Method: "session/request_permission", Params: json.RawMessage(`{"sessionId":"s"}`)})
+	select {
+	case <-h.requested:
+		t.Fatal("the request overtook an earlier update")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(h.release)
+	select {
+	case <-h.requested:
+	case <-time.After(time.Second):
+		t.Fatal("the request never started")
+	}
+}
+
+type ownerHandler struct{ got chan string }
+
+func (h *ownerHandler) OnNotification(string, string, json.RawMessage) {}
+func (h *ownerHandler) OnRequest(ctx context.Context, _ string, _ json.RawMessage) (any, *RPCError) {
+	h.got <- RequestOwner(ctx)
+	return map[string]any{}, nil
+}
+func (*ownerHandler) OnStderr(string) {}
+func (*ownerHandler) OnExit(error)    {}
+
+func TestRequestScopedInputUsesOriginatingConversation(t *testing.T) {
+	h := &ownerHandler{got: make(chan string, 1)}
+	p := NewProcess(ProcessConfig{}, h)
+	p.pending["12"] = &pendingCall{method: "session/new", ch: make(chan callResult, 1), ctx: WithRequestOwner(context.Background(), "conversation-1")}
+	p.handleRequest(rpcMessage{ID: json.RawMessage(`"question"`), Method: "elicitation/create", Params: json.RawMessage(`{"requestId":12,"mode":"form"}`)})
+	if got := <-h.got; got != "conversation-1" {
+		t.Fatalf("owner = %q", got)
+	}
+}
+
+type silentHandler struct{}
+
+func (silentHandler) OnNotification(string, string, json.RawMessage) {}
+func (silentHandler) OnRequest(context.Context, string, json.RawMessage) (any, *RPCError) {
+	return map[string]any{}, nil
+}
+func (silentHandler) OnStderr(string) {}
+func (silentHandler) OnExit(error)    {}
+
+func TestStartIncludesStderrWhenProcessExits(t *testing.T) {
+	requirePosixShell(t)
+	_, err := Start(context.Background(), ClientConfig{ClientInfo: Implementation{Name: "test", Version: "0"},
+		Command: "sh", Args: []string{"-c", "echo 'TERM is dumb' >&2; exit 1"},
+	}, silentHandler{})
+	if err == nil || !strings.Contains(err.Error(), "TERM is dumb") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A write to a dead agent's stdin can fail before the exit path has drained
+// stderr, so the start error used to come back as a bare "ACP process exited"
+// whenever that race lost. Call now waits for the exit before returning the
+// sentinel; a handful of iterations is enough to catch a regression because
+// the unfixed code failed roughly one run in ten.
+func TestStartIncludesStderrRepeatedly(t *testing.T) {
+	requirePosixShell(t)
+	for i := range 50 {
+		_, err := Start(context.Background(), ClientConfig{ClientInfo: Implementation{Name: "test", Version: "0"},
+			Command: "sh", Args: []string{"-c", "echo 'TERM is dumb' >&2; exit 1"},
+		}, silentHandler{})
+		if err == nil || !strings.Contains(err.Error(), "TERM is dumb") {
+			t.Fatalf("iteration %d: err = %v", i, err)
+		}
+	}
+}
+
+// The exit path drains stderr before reporting the death, so lines written
+// right up to the process exit always land in the ring.
+func TestStderrWrittenBeforeExitIsCaptured(t *testing.T) {
+	requirePosixShell(t)
+	p := NewProcess(ProcessConfig{
+		Command: "sh",
+		Args:    []string{"-c", "printf 'first line\\nlast line\\n' >&2; exit 1"},
+	}, silentHandler{})
+	if err := p.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-p.Done()
+	got := strings.Join(p.StderrLog(), "\n")
+	if !strings.Contains(got, "first line") || !strings.Contains(got, "last line") {
+		t.Fatalf("stderr = %q", got)
+	}
+}
+
+// A Call racing the process exit must get the normalized error — either
+// ErrProcessExited or the RPC error the exit path fails pending calls with —
+// never a raw os.PathError like `write |1: file already closed`.
+func TestCallRacingProcessExitNeverReturnsPipeError(t *testing.T) {
+	requirePosixShell(t)
+	for range 20 {
+		p := NewProcess(ProcessConfig{
+			Command: "sh",
+			Args:    []string{"-c", "exit 1"},
+		}, silentHandler{})
+		if err := p.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		err := p.Call(context.Background(), "initialize", map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("call succeeded against an exiting process")
+		}
+		var rpcErr *RPCError
+		if !errors.Is(err, ErrProcessExited) && !errors.As(err, &rpcErr) {
+			t.Fatalf("call returned %T: %v", err, err)
+		}
+		<-p.Done()
+	}
+}
+
+type failWriter struct{ err error }
+
+func (w *failWriter) Write([]byte) (int, error) { return 0, w.err }
+func (*failWriter) Close() error                { return nil }
+
+// Pipe write failures after the far end went away surface as
+// ErrProcessExited, not the os.PathError the os.Pipe produced.
+func TestWriteErrorIsNormalized(t *testing.T) {
+	p := NewProcess(ProcessConfig{}, silentHandler{})
+	for _, pipeErr := range []error{
+		&os.PathError{Op: "write", Path: "|1", Err: syscall.EPIPE},
+		&os.PathError{Op: "write", Path: "|1", Err: os.ErrClosed},
+	} {
+		p.stdin = &failWriter{err: pipeErr}
+		if err := p.Notify("test/ping", nil); !errors.Is(err, ErrProcessExited) {
+			t.Fatalf("pipeErr %v: Notify = %v", pipeErr, err)
+		}
+	}
+}
+
+// An agent that closes stdout but keeps running has closed the protocol
+// connection: a call waiting for its answer must fail promptly instead of
+// parking the turn until the client gives up.
+func TestStdoutCloseFailsPendingCall(t *testing.T) {
+	requirePosixShell(t)
+	p := NewProcess(ProcessConfig{
+		Command: "sh",
+		Args:    []string{"-c", "sleep 0.1; exec 1>&-; exec sleep 30"},
+	}, silentHandler{})
+	if err := p.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Call(ctx, "session/prompt", map[string]any{}, nil) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("call against a closed stdout returned nil")
+		}
+		if !errors.Is(err, ErrProcessExited) {
+			if _, ok := errors.AsType[*RPCError](err); !ok {
+				t.Fatalf("call returned %T: %v", err, err)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("call never failed after the agent closed stdout")
+	}
+	select {
+	case <-p.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("process survived a closed stdout")
+	}
+}
+
+// Closing with a call in flight resolves the call and lets every process
+// goroutine wind down.
+func TestCloseDuringInflightCall(t *testing.T) {
+	requirePosixShell(t)
+	p := NewProcess(ProcessConfig{
+		Command: "sh",
+		Args:    []string{"-c", "while read -r x; do :; done"},
+	}, silentHandler{})
+	if err := p.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sent := make(chan struct{})
+	ctx := WithRequestSent(context.Background(), func() { close(sent) })
+	errCh := make(chan error, 1)
+	go func() { errCh <- p.Call(ctx, "session/prompt", map[string]any{}, nil) }()
+	<-sent
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("in-flight call returned nil")
+		}
+		if _, ok := errors.AsType[*os.PathError](err); ok {
+			t.Fatalf("in-flight call returned raw pipe error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("in-flight call never returned")
+	}
+	<-p.Done()
+	for name, ch := range map[string]chan struct{}{
+		"readStdout":       p.stdoutDone,
+		"readStderr":       p.stderrDone,
+		"notificationLoop": p.notifDone,
+	} {
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s goroutine leaked", name)
+		}
+	}
+}
+
+func requirePosixShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("spawns a POSIX shell script")
+	}
+}

@@ -1,0 +1,1459 @@
+package textcompletion
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"image/jpeg"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+	repoworkspace "github.com/jahrulnr/nusashell/infrastructure/repository/workspace"
+	coretext "github.com/jahrulnr/nusashell/infrastructure/service/core/text"
+	textwire "github.com/jahrulnr/nusashell/infrastructure/service/wire"
+)
+
+// newService spins an httptest server and a fake provider pointing at it.
+func newService(t *testing.T, stream bool, handler http.HandlerFunc) (*Service, *aggregate.Provider, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	prov, err := aggregate.NewProvider("test", "t", srv.URL, enum.StyleCompletion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov.SetApiKey("sk-test")
+	if stream {
+		prov.EnableStream()
+	} else {
+		prov.DisableStream()
+	}
+	return New(coretext.Options{FileStore: repoworkspace.NewLocal()}), &prov, srv
+}
+
+func newConv(t *testing.T) *aggregate.Conversation {
+	t.Helper()
+	c, err := aggregate.NewConversation("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func events() (*[]event.TurnEvent, event.TurnEventHandler) {
+	var got []event.TurnEvent
+	return &got, func(e event.TurnEvent) { got = append(got, e) }
+}
+
+func TestUnaryRoundtrip(t *testing.T) {
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-test" {
+			t.Error("missing auth header")
+		}
+		json.NewDecoder(r.Body).Decode(&captured)
+		w.Header().Set("x-request-id", "req-1")
+		json.NewEncoder(w).Encode(map[string]any{
+			"model": "m", "choices": []any{map[string]any{
+				"index":         0,
+				"message":       map[string]any{"role": "assistant", "content": "hello there"},
+				"finish_reason": "stop"}},
+			"usage": map[string]any{"prompt_tokens": 1000, "completion_tokens": 50,
+				"total_tokens": 1050, "prompt_tokens_details": map[string]any{"cached_tokens": 900}},
+		})
+	})
+
+	conv := newConv(t)
+	conv.SetSystemPrompt("be brief")
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	tool, _ := valueobject.NewToolSchema("get_time", "current time", json.RawMessage(`{"type":"object"}`), true, enum.ToolPermissionAgent)
+	hidden, _ := valueobject.NewToolSchema("sys", "", nil, true, enum.ToolPermissionSystem)
+	conv.SetTools([]valueobject.ToolSchema{tool, hidden})
+
+	model, _ := entity.NewModel("m")
+	half := 0.5
+	model.SetTemperature(&half)
+
+	ev, h := events()
+	if err := svc.Send(t.Context(), conv, prov, model, h); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wire request shape.
+	if captured.Model != "m" || captured.Temperature == nil || *captured.Temperature != 0.5 {
+		t.Fatalf("params: %+v", captured)
+	}
+	if captured.PromptCacheKey != conv.ID() || captured.PromptCacheOption.TTL != "30m" {
+		t.Fatalf("prompt cache params: %+v", captured)
+	}
+	if captured.Messages[0].Role != "system" || captured.Messages[1].Role != "user" {
+		t.Fatalf("message order: %+v", captured.Messages)
+	}
+	if len(captured.Tools) != 1 || captured.Tools[0].Function.Name != "get_time" {
+		t.Fatal("system-permission tool leaked onto wire")
+	}
+
+	// Domain effects.
+	last := conv.Last()
+	if last == nil || last.Content() != "hello there" || last.FinishReason() != enum.FinishReasonStop {
+		t.Fatalf("message: %+v", last)
+	}
+	if conv.Usage().TotalInput() != 1000 || conv.Usage().InputTokens() != 100 {
+		t.Fatalf("usage not normalized: %+v", conv.Usage())
+	}
+	// Uniform event contract: delta + finished.
+	if len(*ev) != 2 || (*ev)[0].Kind() != enum.TurnEventDelta || (*ev)[1].Kind() != enum.TurnEventFinished {
+		t.Fatalf("events: %+v", *ev)
+	}
+}
+
+func TestImageFileAttachmentBecomesDataURI(t *testing.T) {
+	img, readErr := os.ReadFile("../../../../../test/media/image.png")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	path := filepath.Join(t.TempDir(), "x.png")
+	os.WriteFile(path, img, 0o644)
+
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		})
+	})
+	svc.fileRoot = filepath.Dir(path)
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "see this")
+	a, _ := valueobject.NewAttachment("file://"+path, "image/png")
+	m.AddAttachment(a)
+	conv.Append(m)
+
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	parts, ok := captured.Messages[0].Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("expected text+image parts, got %v", captured.Messages[0].Content)
+	}
+	imgPart := parts[1].(map[string]any)
+	url := imgPart["image_url"].(map[string]any)["url"].(string)
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(img)
+	if url != want {
+		t.Fatalf("image_url = %q", url)
+	}
+}
+
+func TestToolCallsRoundtrip(t *testing.T) {
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls",
+				"message": map[string]any{"role": "assistant", "content": nil,
+					"tool_calls": []any{map[string]any{"id": "call_1", "type": "function",
+						"function": map[string]any{"name": "get_time", "arguments": `{"tz":"utc"}`}}}}}},
+		})
+	})
+
+	conv := newConv(t)
+	u, _ := entity.NewMessage(enum.RoleUser, "time?")
+	conv.Append(u)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	last := conv.Last()
+	if len(last.ToolCalls()) != 1 || last.ToolCalls()[0].Name() != "get_time" ||
+		last.ToolCalls()[0].Input() != `{"tz":"utc"}` ||
+		last.ToolCalls()[0].Type() != enum.TooltypeOrigin {
+		t.Fatalf("tool call: %+v", last.ToolCalls())
+	}
+
+	// Execute + re-send: wire must carry assistant tool_calls + tool message.
+	last.SetToolOutput("call_1", "12:00")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	var sawAssistant, sawTool bool
+	for _, m := range captured.Messages {
+		if m.Role == "assistant" && len(m.ToolCalls) == 1 && m.ToolCalls[0].ID == "call_1" {
+			sawAssistant = true
+		}
+		if m.Role == "tool" && m.ToolCallID == "call_1" {
+			sawTool = true
+			content, ok := m.Content.(string)
+			if !ok || !strings.Contains(content, `<untrusted_tool latency="`) || !strings.Contains(content, "12:00") || !strings.HasSuffix(content, "</untrusted_tool>") {
+				t.Fatalf("provider tool output lost evidence envelope: %#v", m.Content)
+			}
+		}
+	}
+	if !sawAssistant || !sawTool {
+		t.Fatalf("tool roundtrip broken: %+v", captured.Messages)
+	}
+}
+
+// Tool output attachments leave history as a synthetic user message right
+// after the tool message — the tool role itself stays text-only.
+func TestToolOutputAttachmentsBecomeUserParts(t *testing.T) {
+	img, err := base64.StdEncoding.DecodeString("UklGRhwAAABXRUJQVlA4TA8AAAAvAkAAAAcQ/Y/+ByKi/wEA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "shot.webp")
+	if err := os.WriteFile(path, img, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		})
+	})
+	svc.fileRoot = filepath.Dir(path)
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleAssistant, "")
+	tc, _ := entity.NewToolCall("call_1", "read_media", `{"path":"shot.webp"}`, enum.TooltypeOrigin)
+	m.AddToolCall(tc)
+	m.SetToolOutput("call_1", "loaded image shot.webp")
+	att, _ := valueobject.NewAttachment("file://"+path, "image/webp")
+	if err := m.SetToolOutputAttachments("call_1", []valueobject.Attachment{att}); err != nil {
+		t.Fatal(err)
+	}
+	conv.Append(m)
+
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured.Messages) != 3 {
+		t.Fatalf("want assistant+tool+user, got %+v", captured.Messages)
+	}
+	tool := captured.Messages[1]
+	if tool.Role != "tool" || tool.ToolCallID != "call_1" {
+		t.Fatalf("tool message malformed: %+v", tool)
+	}
+	media := captured.Messages[2]
+	if media.Role != "user" {
+		t.Fatalf("attachment carrier must be a user message, got %+v", media)
+	}
+	parts, ok := media.Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("expected label+image parts, got %v", media.Content)
+	}
+	url := parts[1].(map[string]any)["image_url"].(map[string]any)["url"].(string)
+	payload, ok := strings.CutPrefix(url, "data:image/jpeg;base64,")
+	if !ok {
+		t.Fatalf("a WebP must travel as JPEG, got %.40s", url)
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := got.Bounds(); b.Dx() != 3 || b.Dy() != 2 {
+		t.Fatalf("decoded %dx%d, want 3x2", b.Dx(), b.Dy())
+	}
+}
+
+// A model that never declared image input gets an honest placeholder
+// instead of a dead payload — the gate lives at send time, not record time.
+func TestToolOutputAttachmentGatedByModality(t *testing.T) {
+	root := t.TempDir()
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		})
+	})
+	svc.fileRoot = root
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleAssistant, "")
+	tc, _ := entity.NewToolCall("call_1", "read_media", `{}`, enum.TooltypeOrigin)
+	m.AddToolCall(tc)
+	m.SetToolOutput("call_1", "loaded")
+	missing, _ := valueobject.NewAttachment("file://"+filepath.Join(root, "nonexistent.png"), "image/png")
+	m.SetToolOutputAttachments("call_1", []valueobject.Attachment{missing})
+	conv.Append(m)
+
+	// text-only model: the note degrades into the tool output itself —
+	// no media parts survive, so no synthesized user message at all.
+	model, _ := entity.NewModel("m")
+	model.SetInputModalities([]enum.Modality{enum.ModalityText})
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured.Messages) != 2 {
+		t.Fatalf("expected assistant+tool only, got %d messages", len(captured.Messages))
+	}
+	text, _ := captured.Messages[1].Content.(string)
+	if !strings.Contains(text, "omitted") {
+		t.Fatalf("expected omitted note in tool output, got %q", text)
+	}
+
+	// vision-capable model but the file is gone: same — the note rides in
+	// the tool output, never a fake user turn. (The first reply appended
+	// an assistant message, so the count is three, not two.)
+	model, _ = entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, mm := range captured.Messages {
+		if mm.Role == enum.RoleUser.String() {
+			t.Fatalf("no user message may be synthesized, got %+v", mm.Content)
+		}
+	}
+	text, _ = captured.Messages[1].Content.(string)
+	if !strings.Contains(text, "unavailable") {
+		t.Fatalf("expected unavailable note in tool output, got %q", text)
+	}
+}
+
+// With multiple origin calls the tool results must stay one contiguous
+// block — a media-bearing earlier call pushes its synthetic user message
+// after the whole run, never between two tool messages. Strict providers
+// reject interleaved orders, and a persisted poisoned history would fail
+// every subsequent send.
+func TestToolOutputAttachmentsKeepToolBlockContiguous(t *testing.T) {
+	img, readErr := os.ReadFile("../../../../../test/media/image.png")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	path := filepath.Join(t.TempDir(), "shot.png")
+	os.WriteFile(path, img, 0o644)
+
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		})
+	})
+	svc.fileRoot = filepath.Dir(path)
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleAssistant, "")
+	tc1, _ := entity.NewToolCall("call_1", "read_media", `{"path":"shot.png"}`, enum.TooltypeOrigin)
+	tc2, _ := entity.NewToolCall("call_2", "read_file", `{"path":"x.txt"}`, enum.TooltypeOrigin)
+	m.AddToolCall(tc1)
+	m.AddToolCall(tc2)
+	m.SetToolOutput("call_1", "loaded image")
+	m.SetToolOutput("call_2", "file content")
+	att, _ := valueobject.NewAttachment("file://"+path, "image/png")
+	m.SetToolOutputAttachments("call_1", []valueobject.Attachment{att})
+	conv.Append(m)
+
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured.Messages) != 4 {
+		t.Fatalf("want assistant+tool+tool+user, got %+v", captured.Messages)
+	}
+	if captured.Messages[1].Role != "tool" || captured.Messages[1].ToolCallID != "call_1" ||
+		captured.Messages[2].Role != "tool" || captured.Messages[2].ToolCallID != "call_2" ||
+		captured.Messages[3].Role != "user" {
+		t.Fatalf("tool block must stay contiguous, got %+v", captured.Messages)
+	}
+	parts, _ := captured.Messages[3].Content.([]any)
+	label, _ := parts[0].(map[string]any)["text"].(string)
+	if !strings.Contains(label, "call_1") {
+		t.Fatalf("detached carrier must name its call, got %q", label)
+	}
+}
+
+// A pinned attachment whose bytes changed since the tool checked them
+// degrades to the same unavailable placeholder as a missing file — never
+// a different payload than what was sniffed.
+func TestToolOutputAttachmentPinMismatchDegrades(t *testing.T) {
+	img := []byte{0x89, 0x50, 0x4e, 0x47}
+	path := filepath.Join(t.TempDir(), "shot.png")
+	os.WriteFile(path, img, 0o644)
+
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		})
+	})
+	svc.fileRoot = filepath.Dir(path)
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleAssistant, "")
+	tc, _ := entity.NewToolCall("call_1", "read_media", `{}`, enum.TooltypeOrigin)
+	m.AddToolCall(tc)
+	m.SetToolOutput("call_1", "loaded")
+	att, _ := valueobject.NewAttachment("file://"+path, "image/png")
+	att.SetSHA256("0bad") // any digest ≠ the file's
+	m.SetToolOutputAttachments("call_1", []valueobject.Attachment{att})
+	conv.Append(m)
+
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := captured.Messages[1].Content.(string)
+	if !strings.Contains(text, "unavailable") {
+		t.Fatalf("pin mismatch must degrade in the tool output, got %q", text)
+	}
+	if strings.Contains(text, path) {
+		t.Fatal("placeholder must not leak the workspace path")
+	}
+}
+
+func TestUserAttachmentUnavailableDegradesToPlaceholder(t *testing.T) {
+	root := t.TempDir()
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	})
+	svc.fileRoot = root
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "inspect this image")
+	missing, _ := valueobject.NewAttachment("file://"+filepath.Join(root, "gone", "shot.png"), "image/png")
+	missing.SetName("/secret/project/shot.png")
+	m.AddAttachment(missing)
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("missing attachment must not fail the provider request: %v", err)
+	}
+	parts, ok := captured.Messages[0].Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("want text plus unavailable placeholder, got %#v", captured.Messages[0].Content)
+	}
+	text, _ := parts[1].(map[string]any)["text"].(string)
+	if !strings.Contains(text, "unavailable") || !strings.Contains(text, "shot.png") ||
+		strings.Contains(text, "/gone/") || strings.Contains(text, "/secret/") {
+		t.Fatalf("unsafe or missing placeholder: %q", text)
+	}
+}
+
+func TestUserAttachmentGatedByModality(t *testing.T) {
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	})
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "inspect this image")
+	missing, _ := valueobject.NewAttachment("file:///not-resolved.png", "image/png")
+	m.AddAttachment(missing)
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+	model.SetInputModalities([]enum.Modality{enum.ModalityText})
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("unsupported attachment must degrade instead of failing: %v", err)
+	}
+	parts, ok := captured.Messages[0].Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("want text plus omitted placeholder, got %#v", captured.Messages[0].Content)
+	}
+	text, _ := parts[1].(map[string]any)["text"].(string)
+	if !strings.Contains(text, "omitted") {
+		t.Fatalf("want modality placeholder, got %q", text)
+	}
+}
+
+func TestUserAttachmentOutsideConfiguredRootDegrades(t *testing.T) {
+	img := []byte{0x89, 0x50, 0x4e, 0x47}
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(outside, img, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	})
+	svc.fileRoot = root
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "inspect this image")
+	att, _ := valueobject.NewAttachment("file://"+outside, "image/png")
+	att.SetName("shot.png")
+	m.AddAttachment(att)
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("out-of-root attachment must degrade rather than abort: %v", err)
+	}
+	parts, ok := captured.Messages[0].Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("want text plus unavailable placeholder, got %#v", captured.Messages[0].Content)
+	}
+	placeholder, _ := parts[1].(map[string]any)["text"].(string)
+	if !strings.Contains(placeholder, "unavailable") || strings.Contains(placeholder, outside) {
+		t.Fatalf("out-of-root placeholder leaked data: %q", placeholder)
+	}
+}
+
+func TestStreamAssemblesMessage(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+
+	conv := newConv(t)
+	u, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(u)
+	model, _ := entity.NewModel("m")
+
+	ev, h := events()
+	if err := svc.Send(t.Context(), conv, prov, model, h); err != nil {
+		t.Fatal(err)
+	}
+	last := conv.Last()
+	if last.Content() != "Hello" || last.FinishReason() != enum.FinishReasonToolCalls {
+		t.Fatalf("assembled: %+v", last)
+	}
+	if len(last.ToolCalls()) != 1 || last.ToolCalls()[0].ID() != "c1" {
+		t.Fatalf("streamed call: %+v", last.ToolCalls())
+	}
+	if conv.Usage().TotalInput() != 10 {
+		t.Fatal("stream usage lost")
+	}
+	var deltas, finished int
+	for _, e := range *ev {
+		switch e.Kind() {
+		case enum.TurnEventDelta:
+			deltas++
+		case enum.TurnEventFinished:
+			finished++
+		}
+	}
+	if deltas != 2 || finished != 1 {
+		t.Fatalf("events: %+v", *ev)
+	}
+}
+
+// A call with no arguments is complete the moment the provider's
+// finish_reason lands — "arguments" empty or absent is the zero-arg
+// form, not an unfinished stream. Dropping it commits a turn that
+// reports finish_reason=tool_calls with zero calls: a 502 where the
+// provider answered.
+func TestStreamKeepsZeroArgumentCall(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"noop\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+	conv := newConv(t)
+	u, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(u)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("zero-arg call turn failed: %v", err)
+	}
+	calls := conv.Last().ToolCalls()
+	if len(calls) != 1 || calls[0].Name() != "noop" {
+		t.Fatalf("zero-arg call dropped: %+v", calls)
+	}
+}
+
+// Fragments of one call repeat id+name on some providers — the merge
+// must be idempotent, not cumulative: a resent head that concatenates
+// the name turns "exec" into "execexec" and the tool dispatch misses.
+func TestStreamToolCallNameIsIdempotentOnResend(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{}\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+	conv := newConv(t)
+	u, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(u)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	calls := conv.Last().ToolCalls()
+	if len(calls) != 1 || calls[0].Name() != "exec" {
+		t.Fatalf("resent name corrupted the call: %+v", calls)
+	}
+}
+
+func TestErrorMapping(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		body   string
+		want   int
+	}{
+		{429, `{"error":{"message":"slow down","type":"rate_limit_exceeded"}}`, 429},
+		{401, `{"error":{"message":"bad key"}}`, 401},
+		{400, `{"error":{"message":"bad","code":"context_length_exceeded"}}`, 413}, // remap: compact, not retry
+		{500, `{"error":{"message":"oops"}}`, 500},
+	} {
+		svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.status)
+			w.Write([]byte(tc.body))
+		})
+		conv := newConv(t)
+		model, _ := entity.NewModel("m")
+		err := svc.Send(t.Context(), conv, prov, model, nil)
+		if got := apperror.As(err).StatusCode(); got != tc.want {
+			t.Fatalf("status %d → %d, want %d", tc.status, got, tc.want)
+		}
+	}
+}
+
+// A rejection body with no error.message still tells the user something —
+// the shared fallback in wire.StatusError names the HTTP status, and a
+// code-only body names the code.
+func TestStatusErrorFallbackMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"no error object", `{"model":"x"}`, "provider rejected the request (HTTP 400)"},
+		{"code only", `{"error":{"code":"MissingSessionID"}}`, "provider rejected the request (MissingSessionID)"},
+		{"provider message", `{"error":{"message":"bad model"}}`, "bad model"},
+	} {
+		svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(tc.body))
+		})
+		conv := newConv(t)
+		model, _ := entity.NewModel("m")
+		err := svc.Send(t.Context(), conv, prov, model, nil)
+		if err == nil {
+			t.Fatalf("%s: expected send to fail", tc.name)
+		}
+		if got := apperror.As(err).Error(); got != tc.want {
+			t.Fatalf("%s: message = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestStreamSendsIncludeUsage(t *testing.T) {
+	var captured RequestBody
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	if captured.StreamOptions == nil || !captured.StreamOptions.IncludeUsage {
+		t.Fatal("stream_options.include_usage missing — usage would silently zero")
+	}
+}
+
+func TestStreamMidStreamError(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\n"))
+		w.Write([]byte("data: {\"error\":{\"message\":\"slow down\",\"type\":\"rate_limit_error\"}}\n\n"))
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	err := svc.Send(t.Context(), conv, prov, model, nil)
+	if got := apperror.As(err).StatusCode(); got != 429 {
+		t.Fatalf("mid-stream rate_limit_error → %d, want 429", got)
+	}
+	if last := conv.Last(); last != nil && last.Role() == enum.RoleAssistant {
+		t.Fatal("failed stream must not commit the partial message")
+	}
+}
+
+func TestStreamHostileIndex(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":-1,\"function\":{\"arguments\":\"x\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":9999999,\"function\":{\"arguments\":\"x\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil { // must not panic/OOM
+		t.Fatal(err)
+	}
+	if len(conv.Last().ToolCalls()) != 0 { // Last() non-nil — turn committed
+		t.Fatal("hostile indexes must be dropped, not committed")
+	}
+}
+
+func TestStreamTruncatedEOF(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n"))
+		// EOF without finish_reason or [DONE] — a cut connection, not a turn
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	err := svc.Send(t.Context(), conv, prov, model, nil)
+	if got := apperror.As(err).StatusCode(); err == nil || got != 502 {
+		t.Fatalf("truncated stream → %v, want 502", err)
+	}
+	if last := conv.Last(); last != nil && last.Role() == enum.RoleAssistant {
+		t.Fatal("truncated stream must not commit")
+	}
+}
+
+func TestStreamCancelIsNotUpstreamError(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}\n\n"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done() // hold open — cancel must unblock the client
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	done := make(chan error, 1)
+	go func() { done <- svc.Send(ctx, conv, prov, model, nil) }()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if got := apperror.As(err).StatusCode(); got != 408 {
+			t.Fatalf("cancel → %d, want 408", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancel did not unblock Send")
+	}
+	if last := conv.Last(); last == nil || last.Role() != enum.RoleAssistant || last.Content() != "x" {
+		t.Fatalf("canceled stream dropped the delta: %+v", conv.Last())
+	}
+}
+
+func TestStreamSuccessDropsPartialTool(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{\\\"command\\\":\\\"ok.sh\\\"}\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"c2\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{\\\"cmd\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	last := conv.Last()
+	calls := last.ToolCalls()
+	if len(calls) != 1 || calls[0].ID() != "c1" {
+		t.Fatalf("partial tool call must be dropped: %+v", calls)
+	}
+}
+
+func TestStreamCancelKeepsCompleteToolDropsPartial(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"think\",\"content\":\"hello\"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{\\\"command\\\":\\\"somecode.sh\\\"}\"}}]}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"c2\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{\\\"command\\\":\\\"tail\"}}]}}]}\n\n"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	done := make(chan error, 1)
+	go func() { done <- svc.Send(ctx, conv, prov, model, nil) }()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if got := apperror.As(err).StatusCode(); got != 408 {
+			t.Fatalf("cancel → %d, want 408", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancel did not unblock Send")
+	}
+	last := conv.Last()
+	if last == nil || last.Content() != "hello" {
+		t.Fatalf("partial text: %+v", last)
+	}
+	if got := last.OptionalContent()["completion.reasoning_content"]; got != "think" {
+		t.Fatalf("reasoning: %q", got)
+	}
+	calls := last.ToolCalls()
+	if len(calls) != 1 || calls[0].ID() != "c1" || calls[0].Name() != "exec" {
+		t.Fatalf("tools: %+v", calls)
+	}
+	if calls[0].Input() != `{"command":"somecode.sh"}` {
+		t.Fatalf("complete command: %s", calls[0].Input())
+	}
+}
+
+func TestSanitizeCompactedTailDropsReasoningDetails(t *testing.T) {
+	m, _ := entity.NewMessage(enum.RoleAssistant, "answer")
+	m.SetOptionalContent(reasoningDetailsKey, `[{"type":"reasoning.text","text":"think","signature":"SIG"}]`)
+	m.SetOptionalContent("completion.reasoning_content", "think")
+
+	svc := &Service{}
+	got := svc.SanitizeCompactedTail([]entity.Message{m})
+	if len(got) != 1 || got[0].ID() != m.ID() {
+		t.Fatalf("sanitizer changed the tail: %+v", got)
+	}
+	if _, ok := got[0].OptionalContent()[reasoningDetailsKey]; ok {
+		t.Fatalf("reasoning details survived compaction: %+v", got[0].OptionalContent())
+	}
+	if got[0].OptionalContent()["completion.reasoning_content"] != "think" {
+		t.Fatal("plaintext reasoning fallback must survive")
+	}
+	if m.OptionalContent()[reasoningDetailsKey] == "" {
+		t.Fatal("sanitizer mutated the input message")
+	}
+}
+
+// The system-role workspace pin encodes as the completed-call pair it
+// records: an assistant message of tool_calls immediately answered by
+// tool messages — observed evidence at tool-output trust, never an
+// orphan result or a mid-list system message.
+func TestSystemHydrationPinEmitsToolPair(t *testing.T) {
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		json.NewEncoder(w).Encode(map[string]any{
+			"model": "m", "choices": []any{map[string]any{
+				"index":         0,
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+				"finish_reason": "stop"}},
+		})
+	})
+
+	conv := newConv(t)
+	u, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(u)
+	pin, _ := entity.NewMessage(enum.RoleSystem, "")
+	call, _ := entity.NewToolCall("call_ws", "workspace", `{"path":"/srv/ws"}`, enum.TooltypeInjection)
+	call.SetStoredOutput("workspace changed to /srv/ws", "")
+	pin.AddToolCall(call)
+	conv.Append(pin)
+
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	var callMsg, resultMsg *MessageBody
+	for i := range captured.Messages {
+		m := &captured.Messages[i]
+		switch {
+		case m.Role == "system" && i > 0:
+			t.Fatalf("pin must not emit a mid-list system message: %+v", captured.Messages)
+		case len(m.ToolCalls) > 0:
+			callMsg = m
+		case m.Role == "tool":
+			resultMsg = m
+		}
+	}
+	if callMsg == nil || callMsg.Role != "assistant" ||
+		len(callMsg.ToolCalls) != 1 || callMsg.ToolCalls[0].Function.Name != "workspace" {
+		t.Fatalf("pin call missing on wire: %+v", captured.Messages)
+	}
+	if resultMsg == nil || resultMsg.ToolCallID != callMsg.ToolCalls[0].ID {
+		t.Fatalf("pin result missing or unpaired: %+v", captured.Messages)
+	}
+	text, _ := resultMsg.Content.(string)
+	if !strings.Contains(text, "workspace changed to /srv/ws") {
+		t.Fatalf("pin output = %q", text)
+	}
+}
+
+// OpenAI proper answers context overflow with code
+// "context_length_exceeded" (remapped 400→413, the compact+retry
+// trigger). OpenAI-compatible providers (llama.cpp, vLLM, LM Studio…)
+// routinely send a message-only 400 — e.g. "This model's maximum
+// context length is 8192 tokens" — and that phrasing must still remap
+// to 413 the way the messages/responses adapters do.
+func TestContextLengthMessageMapsTo413(t *testing.T) {
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"This model's maximum context length is 8192 tokens. However, your messages resulted in 9000 tokens.","type":"invalid_request_error"}}`))
+	})
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+	err := svc.Send(t.Context(), conv, prov, model, nil)
+	if err == nil {
+		t.Fatal("expected send to fail")
+	}
+	if got := apperror.As(err).StatusCode(); got != 413 {
+		t.Fatalf("context-overflow 400 → status %d, want 413 (compact+retry); "+
+			"the turn loop treats 400 as a definitive payload failure", got)
+	}
+}
+
+// A stalled unary body (headers sent, body never completes) parks the
+// read: the transport only sets ResponseHeaderTimeout and the stream
+// idle timer is a streamResponse concept. With an idle deadline
+// configured the read cuts at the deadline — a dead-but-open
+// connection cannot park the turn forever.
+func TestStalledUnaryBodyHonorsIdleDeadline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"model":"m","choices":`)) // partial body, then silence
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	prov, err := aggregate.NewProvider("test", "t", srv.URL, enum.StyleCompletion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov.SetApiKey("sk-test")
+	prov.DisableStream()
+	svc := New(coretext.Options{FileStore: repoworkspace.NewLocal(), IdleTimeout: 100 * time.Millisecond})
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+	start := time.Now()
+	err = svc.Send(t.Context(), conv, &prov, model, nil)
+	if err == nil {
+		t.Fatal("stalled body must fail")
+	}
+	if got := apperror.As(err).StatusCode(); got != 502 {
+		t.Fatalf("idle body → %d, want 502", got)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatal("idle deadline did not fire promptly")
+	}
+}
+
+// With no idle deadline configured, a stalled unary body blocks until
+// the caller's context ends — and the cancel classifies as 408
+// (request canceled), not 502 "unreadable upstream body".
+func TestStalledUnaryBodyCancelMaps408(t *testing.T) {
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"model":"m","choices":`)) // partial body, then silence
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done()
+	})
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- svc.Send(ctx, conv, prov, model, nil) }()
+
+	select {
+	case err := <-done:
+		t.Fatalf("stalled unary body returned early without an idle deadline: %v", err)
+	case <-time.After(400 * time.Millisecond):
+		// still parked — caller cancel is the only exit
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if apperror.As(err).StatusCode() != 408 {
+			t.Fatalf("cancel mid-body → %d, want 408", apperror.As(err).StatusCode())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancel did not unblock Send")
+	}
+}
+
+// A transport reset after [DONE] must still commit: readSSE stops at
+// the sentinel and never reads again, so a post-terminal transport
+// error can never reach errs.
+func TestStreamResetAfterDoneCommits(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		payload := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Write([]byte(payload))
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" + payload)
+		buf.Flush()
+		time.Sleep(100 * time.Millisecond) // let the client consume the events
+		if tc, ok := conn.(*net.TCPConn); ok {
+			tc.SetLinger(0) // force RST — a flaky network's tail failure
+		}
+		conn.Close()
+	})
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("post-[DONE] reset must not fail a completed turn: %v", err)
+	}
+	if last := conv.Last(); last == nil || last.Content() != "hi" {
+		t.Fatalf("completed turn lost: %+v", conv.Last())
+	}
+}
+
+// A reset between finish_reason and [DONE] — providers that omit the
+// sentinel, or a connection dying in the tail gap — still commits: the
+// finish reason already proves the turn ended, so the pump treats a
+// post-finish transport error as a flaky tail, not a truncated
+// response.
+func TestStreamResetAfterFinishReasonCommits(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		payload := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n"
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Write([]byte(payload))
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" + payload)
+		buf.Flush()
+		time.Sleep(100 * time.Millisecond)
+		if tc, ok := conn.(*net.TCPConn); ok {
+			tc.SetLinger(0) // RST — no [DONE] ever arrives
+		}
+		conn.Close()
+	})
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("reset after finish_reason must not fail a completed turn: %v", err)
+	}
+	if last := conv.Last(); last == nil || last.Content() != "hi" {
+		t.Fatalf("completed turn lost: %+v", conv.Last())
+	}
+}
+
+// The per-chunk idle timer fires mid-stream when chunks stop — the
+// streaming counterpart of the unary idle deadline.
+func TestStreamIdleTimeoutFires(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done() // silent forever — idle must cut it
+	}))
+	t.Cleanup(srv.Close)
+	prov, err := aggregate.NewProvider("test", "t", srv.URL, enum.StyleCompletion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov.SetApiKey("sk-test")
+	prov.EnableStream()
+	svc := New(coretext.Options{FileStore: repoworkspace.NewLocal(), IdleTimeout: 100 * time.Millisecond})
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+	start := time.Now()
+	err = svc.Send(t.Context(), conv, &prov, model, nil)
+	if err == nil {
+		t.Fatal("silent stream must fail")
+	}
+	if got := apperror.As(err).StatusCode(); got != 502 {
+		t.Fatalf("stream idle → %d, want 502", got)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatal("idle timeout did not fire promptly")
+	}
+}
+
+// A refusal is the provider's answer, not an empty message. The OpenAI
+// chat-completions wire carries it beside content in `refusal` on both
+// the unary message and stream deltas.
+func TestUnaryRefusalIsSurfaced(t *testing.T) {
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"model": "m",
+			"choices": []any{map[string]any{
+				"index": 0,
+				"message": map[string]any{
+					"role": "assistant", "content": nil,
+					"refusal": "I'm sorry, but I can't help with that request.",
+				},
+				"finish_reason": "stop",
+			}},
+		})
+	})
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := conv.Last().Content(), "I'm sorry, but I can't help with that request."; got != want {
+		t.Fatalf("refusal dropped: content = %q, want %q", got, want)
+	}
+}
+
+// The streamed shape must surface refusal deltas as display text, and
+// emit them as delta events so the application's ordered parts are not
+// left holding reasoning alone.
+func TestStreamRefusalIsSurfaced(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"I'm sorry, \"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"I can't help.\"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+
+	var deltas strings.Builder
+	onEvent := func(e event.TurnEvent) {
+		if e.Kind() == enum.TurnEventDelta {
+			deltas.WriteString(e.Delta())
+		}
+	}
+	if err := svc.Send(t.Context(), conv, prov, model, onEvent); err != nil {
+		t.Fatal(err)
+	}
+	const want = "I'm sorry, I can't help."
+	if got := conv.Last().Content(); got != want {
+		t.Fatalf("refusal dropped: content = %q, want %q", got, want)
+	}
+	if got := deltas.String(); got != want {
+		t.Fatalf("refusal delta not streamed: deltas = %q, want %q", got, want)
+	}
+}
+
+// A stream that only produced reasoning never produced an answer. The
+// thinking block is display metadata, not assistant content, and no tool
+// call asked for work — committing it as a successful turn leaves a
+// bubble with no answer and no failure card.
+func TestStreamReasoningOnlyIsAnEmptyAnswer(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"thinking only\"}}]}\n\n"))
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	err := svc.Send(t.Context(), conv, prov, model, nil)
+	if err == nil {
+		t.Fatal("reasoning-only stream must fail as an empty answer")
+	}
+	if last := conv.Last(); last != nil && last.Role() == enum.RoleAssistant {
+		t.Fatalf("reasoning-only turn committed: %+v", last.OptionalContent())
+	}
+}
+
+// SSE comments are keepalives, not payload. OpenRouter sends
+// ": OPENROUTER PROCESSING" while a slow model is still thinking; those
+// bytes prove the connection is alive. Dropping them before the idle
+// timer sees them aborts a live stream at the idle deadline even though
+// the provider kept answering.
+func TestStreamKeepaliveCommentsResetIdle(t *testing.T) {
+	const idle = 250 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("test server cannot flush")
+			return
+		}
+		write := func(s string) {
+			_, _ = w.Write([]byte(s))
+			flusher.Flush()
+		}
+		write(": OPENROUTER PROCESSING\n\n")
+		// Longer than the idle deadline in total, but never idle for one
+		// full deadline: each comment is real traffic.
+		for range 9 {
+			time.Sleep(40 * time.Millisecond)
+			write(": OPENROUTER PROCESSING\n\n")
+		}
+		write("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"alive\"},\"finish_reason\":\"stop\"}]}\n\n")
+		write("data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	prov, err := aggregate.NewProvider("test", "t", srv.URL, enum.StyleCompletion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov.EnableStream()
+	svc := New(coretext.Options{IdleTimeout: idle, FileStore: repoworkspace.NewLocal()})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, &prov, model, nil); err != nil {
+		t.Fatalf("keepalive comments must keep the stream alive: %v", err)
+	}
+	if last := conv.Last(); last == nil || last.Content() != "alive" {
+		t.Fatalf("live stream did not commit: %+v", last)
+	}
+}
+
+// Whitespace is not an answer either. A provider that returns only a
+// newline or spaces with finish=stop must fail as an empty reply instead
+// of committing a visually blank assistant stripe.
+func TestStreamWhitespaceOnlyIsAnEmptyAnswer(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" \\n\\t \"},\"finish_reason\":\"stop\"}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	err := svc.Send(t.Context(), conv, prov, model, nil)
+	if err == nil {
+		t.Fatal("whitespace-only stream must fail as an empty answer")
+	}
+	if last := conv.Last(); last != nil && last.Role() == enum.RoleAssistant {
+		t.Fatalf("whitespace-only turn committed: %q", last.Content())
+	}
+}
+
+// A 429 response may name the wait in Retry-After. The adapter is the
+// only layer that sees the header, so it must carry the delay on the
+// error it returns; the turn loop cannot invent it later.
+func TestRateLimitExposesRetryAfter(t *testing.T) {
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	err := svc.Send(t.Context(), conv, prov, model, nil)
+	if err == nil || apperror.As(err).StatusCode() != 429 {
+		t.Fatalf("429 → %v", err)
+	}
+	withDelay, ok := apperror.As(err).(interface{ RetryAfter() time.Duration })
+	if !ok {
+		t.Fatal("429 error must expose the provider's Retry-After")
+	}
+	if got := withDelay.RetryAfter(); got != 7*time.Second {
+		t.Fatalf("Retry-After = %v, want 7s", got)
+	}
+}
+
+// finish_reason already proves the turn ended; a provider/proxy that
+// leaves the connection open afterwards must not turn the idle timer
+// into data loss. The transport-error path commits after finish, so the
+// idle path must too — otherwise a complete answer becomes a 502.
+func TestStreamIdleAfterFinishCommits(t *testing.T) {
+	const idle = 80 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("test server cannot flush")
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		flusher.Flush()
+		time.Sleep(300 * time.Millisecond) // no [DONE], no close
+	}))
+	t.Cleanup(srv.Close)
+	prov, err := aggregate.NewProvider("test", "t", srv.URL, enum.StyleCompletion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov.EnableStream()
+	svc := New(coretext.Options{IdleTimeout: idle, FileStore: repoworkspace.NewLocal()})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, &prov, model, nil); err != nil {
+		t.Fatalf("finish_reason must survive a stalled tail: %v", err)
+	}
+	if last := conv.Last(); last == nil || last.Content() != "hi" {
+		t.Fatalf("completed turn lost: %+v", last)
+	}
+}
+
+// Provider tool call ids are the only correlation key between a call and
+// its output on every wire. Two calls with the same id make SetToolOutput
+// target the first one twice: the second result overwrites the first and
+// the second call stays unresolved. Reject the malformed turn instead of
+// committing corrupt history.
+func TestDuplicateToolCallIDsFailTurn(t *testing.T) {
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"model": "m",
+			"choices": []any{map[string]any{
+				"index": 0,
+				"message": map[string]any{
+					"role": "assistant",
+					"tool_calls": []any{
+						map[string]any{"id": "dup", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"path":"a"}`}},
+						map[string]any{"id": "dup", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"path":"b"}`}},
+					},
+				},
+				"finish_reason": "tool_calls",
+			}},
+		})
+	})
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	err := svc.Send(t.Context(), conv, prov, model, nil)
+	if err == nil {
+		t.Fatalf("duplicate tool ids committed: calls=%+v", conv.Last().ToolCalls())
+	}
+}
+
+// URL hosts are case-insensitive. The OpenRouter-only upstream pin is
+// selected by a substring check on the endpoint, so an endpoint typed
+// as HTTPS://OPENROUTER.AI/API silently loses the pin and lets the
+// aggregator fall back to a different backend — the exact behavior the
+// pin exists to prevent.
+func TestOpenRouterUpstreamPinIsCaseInsensitive(t *testing.T) {
+	conv, _ := aggregate.NewConversation("c1")
+	model, _ := entity.NewModel("m1")
+	model.SetUpstream("anthropic")
+	body, err := encodeRequest(conv, model, false, textwire.MediaRoot{}, "https://OPENROUTER.AI/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ok := body.Extra["provider"]
+	if !ok {
+		t.Fatalf("uppercase OpenRouter host dropped the upstream pin: extra=%v", body.Extra)
+	}
+	var pref struct {
+		Order          []string `json:"order"`
+		AllowFallbacks bool     `json:"allow_fallbacks"`
+	}
+	if err := json.Unmarshal(raw, &pref); err != nil {
+		t.Fatal(err)
+	}
+	if len(pref.Order) != 1 || pref.Order[0] != "anthropic" || pref.AllowFallbacks {
+		t.Fatalf("provider preference = %+v, want anthropic/no-fallbacks", pref)
+	}
+}
+
+// The unary idle deadline is meant to catch a body that stops sending,
+// not a body that is merely slow in total. A large response streamed in
+// regular chunks over a connection slower than idle is alive; cutting it
+// at a fixed wall-clock deadline turns a valid answer into "upstream
+// body idle". Each chunk must reset the deadline, exactly like the
+// streaming path's per-chunk timer.
+func TestUnaryBodyChunksResetTheIdleDeadline(t *testing.T) {
+	body := `{"model":"m","choices":[{"message":{"role":"assistant","content":"slow but alive"},"finish_reason":"stop"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		f, _ := w.(http.Flusher)
+		const step = 30 * time.Millisecond
+		for i := 0; i < len(body); i += 12 {
+			end := min(i+12, len(body))
+			if _, err := w.Write([]byte(body[i:end])); err != nil {
+				return
+			}
+			if f != nil {
+				f.Flush()
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(step):
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	prov, err := aggregate.NewProvider("test", "t", srv.URL, enum.StyleCompletion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov.SetApiKey("sk-test")
+	prov.DisableStream()
+	// Total body ~11 chunks * 30ms = 330ms, far past idle; each gap is
+	// well under it.
+	svc := New(coretext.Options{FileStore: repoworkspace.NewLocal(), IdleTimeout: 100 * time.Millisecond})
+
+	conv := newConv(t)
+	model, _ := entity.NewModel("m")
+	if err := svc.Send(t.Context(), conv, &prov, model, nil); err != nil {
+		t.Fatalf("a steadily arriving body was cut as idle: %v", err)
+	}
+	if last := conv.Last(); last == nil || last.Content() != "slow but alive" {
+		t.Fatalf("answer lost: %+v", conv.Last())
+	}
+}

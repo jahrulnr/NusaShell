@@ -1,0 +1,500 @@
+package toolexec
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"github.com/jahrulnr/nusashell/infrastructure/system/pty"
+)
+
+const (
+	// sessionBufferCap bounds undrained output per session — the rolling
+	// tail keeps the newest bytes; dropped head bytes are counted into
+	// the omitted marker, same contract as codex's HeadTailBuffer.
+	sessionBufferCap = 1 << 20
+	// collectRetain bounds each half of one Collect's retained window —
+	// head and tail alike — so a flooding process cannot grow the
+	// returned output past 2*collectRetain no matter how long the wait.
+	collectRetain = sessionBufferCap
+	// postExitDrainWait gives the reader goroutine a beat after the
+	// process exits so trailing output is collected, mirroring codex's
+	// POST_EXIT_CLOSE_WAIT_CAP.
+	postExitDrainWait = 50 * time.Millisecond
+)
+
+// scrubEnv keeps session output textual and deterministic — codex's
+// UNIFIED_EXEC_ENV set: a dumb TERM and cat pagers stop escape-heavy
+// interactive UI, the C.UTF-8 locale pins output encoding, and
+// NUSASHELL_CI marks the environment the way CODEX_CI marks codex's.
+var scrubEnv = map[string]string{
+	"NO_COLOR":     "1",
+	"TERM":         "dumb",
+	"LANG":         "C.UTF-8",
+	"LC_CTYPE":     "C.UTF-8",
+	"LC_ALL":       "C.UTF-8",
+	"COLORTERM":    "",
+	"PAGER":        "cat",
+	"GIT_PAGER":    "cat",
+	"GH_PAGER":     "cat",
+	"NUSASHELL_CI": "1",
+}
+
+// terminalSession is one long-lived child. Its reader and waiter
+// goroutines belong to the session — never to a caller ctx — so an
+// interrupted turn leaves the process running. Terminate is the only
+// reaper; it is idempotent and safe to call from any goroutine.
+type terminalSession struct {
+	id  int
+	tty bool
+	cmd *exec.Cmd
+	env []string
+	dir string
+
+	// master serves the pty backend for both reads and writes; pipes
+	// sessions hold no stdin handle at all — their child reads EOF.
+	master *os.File
+	// pipeR is the pipes backend's read end — like master, the session
+	// keeps it so Terminate can unblock a reader parked behind a stray
+	// fd inheritor.
+	pipeR *os.File
+
+	done      chan struct{} // closed when Wait() returns
+	readerEOF chan struct{} // closed when the output stream hits EOF
+	notify    chan struct{} // cap 1 — output appended
+	// interaction is a cap-1 semaphore serializing store-level
+	// write/poll interactions — codex's interaction_lock: calls on one
+	// session share the draining buffer, so they queue instead of racing.
+	interaction chan struct{}
+	exitCode    int    // written before done closes
+	signal      string // set instead of a negative code when a signal reaped the process
+	exited      atomic.Bool
+	lastUsed    atomic.Int64 // unixnano — store's LRU clock
+	terminated  atomic.Bool
+
+	mu      sync.Mutex // pending + omitted
+	writeMu sync.Mutex // serialize stdin/master writes
+	pending []byte     // undrained output — rolling tail window
+	omitted int        // bytes dropped from pending's head
+}
+
+// sessionEnv builds the child environment: the daemon env minus the
+// scrubbed keys, then the scrub values — explicit overwrites beat relying
+// on last-entry-wins semantics.
+func sessionEnv(parent []string) []string {
+	if parent == nil {
+		parent = os.Environ()
+	}
+	env := make([]string, 0, len(parent)+len(scrubEnv))
+	for _, kv := range parent {
+		key, _, _ := strings.Cut(kv, "=")
+		if _, scrubbed := scrubEnv[key]; !scrubbed {
+			env = append(env, kv)
+		}
+	}
+	for k, v := range scrubEnv {
+		env = append(env, k+"="+v)
+	}
+	return env
+}
+
+// spawnSession starts the child detached from any caller ctx — a session
+// must outlive the tool call that opened it, so exec.CommandContext is
+// deliberately not used. Terminate is the only reaper.
+func spawnSession(convID string, id int, req dservice.TerminalOpenRequest, env []string) (*terminalSession, error) {
+	sess := &terminalSession{
+		id:          id,
+		tty:         req.TTY,
+		done:        make(chan struct{}),
+		readerEOF:   make(chan struct{}),
+		notify:      make(chan struct{}, 1),
+		interaction: make(chan struct{}, 1),
+		dir:         req.Dir,
+	}
+	sess.env = sessionEnv(env)
+	sess.touch()
+	var err error
+	if req.TTY {
+		err = sess.spawnPTY(req.Command)
+	} else {
+		err = sess.spawnPipes(req.Command)
+	}
+	if err != nil {
+		return nil, err
+	}
+	go sess.wait()
+	return sess, nil
+}
+
+// spawnPipes runs the command with stdout/stderr merged on one os.Pipe —
+// assigning the same write file to both keeps a single stream. Giving
+// os/exec an *os.File means no copy goroutine: Wait is just the leader's
+// reap, so a descendant inheriting the write end can stall the output's
+// EOF but never exit publication. The session's own reader drains the
+// pipe, same ownership as the pty reader. Stdin stays nil — codex's
+// stdin_open=false for non-tty: the child gets /dev/null, so a program
+// reading stdin hits EOF instead of blocking on a pipe Write would
+// refuse to feed anyway.
+func (s *terminalSession) spawnPipes(command string) error {
+	cmd := sessionCommand(command)
+	cmd.Dir = s.dir
+	cmd.Env = s.env
+	r, w, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = w
+	cmd.Stderr = w
+	if err := cmd.Start(); err != nil {
+		r.Close()
+		w.Close()
+		return err
+	}
+	// The child holds its own copy of the write end — the parent copy
+	// must close or reads never see EOF after the child exits.
+	w.Close()
+	s.cmd = cmd
+	s.pipeR = r
+	go s.readPipe()
+	return nil
+}
+
+// readPipe drains the pipes stream into the pending buffer. EOF lands
+// when the last write end in the tree closes — a descendant that
+// inherited the fd can outlive the leader, so the reader ends
+// independently of wait().
+func (s *terminalSession) readPipe() {
+	defer s.pipeR.Close()
+	buf := make([]byte, 8192)
+	for {
+		n, err := s.pipeR.Read(buf)
+		if n > 0 {
+			s.append(buf[:n])
+		}
+		if err != nil {
+			close(s.readerEOF)
+			return
+		}
+	}
+}
+
+// spawnPTY allocates a real pseudo-terminal: the child gets the slave on
+// 0/1/2 inside a fresh session with the pty as controlling terminal, so
+// isatty probes answer true and the kernel owns job control.
+func (s *terminalSession) spawnPTY(command string) error {
+	master, slave, err := pty.Open()
+	if err != nil {
+		return err
+	}
+	cmd, err := ptyCommand(command, slave)
+	if err != nil {
+		master.Close()
+		slave.Close()
+		return err
+	}
+	cmd.Dir = s.dir
+	cmd.Env = s.env
+	if err := cmd.Start(); err != nil {
+		master.Close()
+		slave.Close()
+		return err
+	}
+	// The child holds its own slave descriptors — the parent copy must
+	// close or master reads never see EOF after the child exits.
+	slave.Close()
+	s.cmd = cmd
+	s.master = master
+	go s.readPTY()
+	return nil
+}
+
+// readPTY drains the master into the pending buffer. The kernel reports
+// slave-side exit as EIO — that is EOF, not an error.
+func (s *terminalSession) readPTY() {
+	buf := make([]byte, 8192)
+	for {
+		n, err := s.master.Read(buf)
+		if n > 0 {
+			s.append(buf[:n])
+		}
+		if err != nil {
+			close(s.readerEOF)
+			return
+		}
+	}
+}
+
+// wait blocks in cmd.Wait then publishes the exit before closing done.
+// Both backends hand os/exec real files, so Wait is the leader's reap —
+// never a join on an output stream a stray inheritor can stall. Exit
+// code is set before done so Collect can never observe Running=false
+// with a stale zero.
+func (s *terminalSession) wait() {
+	err := s.cmd.Wait()
+	switch {
+	case err == nil:
+		s.exitCode = 0
+	default:
+		// ExitCode is -1 when a signal reaped the process. That is not an
+		// exit status — record the signal and leave the code at 0 so a
+		// poll never renders "code -1".
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			if code := exitErr.ExitCode(); code > 0 {
+				s.exitCode = code
+			} else {
+				s.signal = exitErr.Error()
+			}
+		} else {
+			s.signal = err.Error()
+		}
+	}
+	s.exited.Store(true)
+	close(s.done)
+}
+
+// append drops bytes into pending under the cap — the oldest bytes go and
+// the omitted counter keeps the drain honest.
+func (s *terminalSession) append(p []byte) {
+	s.mu.Lock()
+	s.pending = append(s.pending, p...)
+	if len(s.pending) > sessionBufferCap {
+		drop := len(s.pending) - sessionBufferCap
+		// A drop that lands on a continuation byte splits a rune. Skip
+		// the rest of that rune so the retained head stays valid UTF-8;
+		// those bytes count as omitted, not as text.
+		for drop < len(s.pending) && s.pending[drop]&0xC0 == 0x80 {
+			drop++
+		}
+		s.omitted += drop
+		s.pending = append([]byte(nil), s.pending[drop:]...)
+	}
+	s.mu.Unlock()
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+}
+
+// drain empties pending — the "chars since last Collect" window — and
+// prepends the omission marker when the cap dropped bytes. The returned
+// count is the bytes that flowed through this drain (retained + omitted)
+// so a Collect can report the honest pre-truncation total.
+func (s *terminalSession) drain() (string, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	flowed := len(s.pending) + s.omitted
+	if len(s.pending) == 0 {
+		if s.omitted > 0 {
+			marker := fmt.Sprintf("... %d bytes omitted ...\n", s.omitted)
+			s.omitted = 0
+			return marker, flowed
+		}
+		return "", 0
+	}
+	out := string(s.pending)
+	s.pending = nil
+	if s.omitted > 0 {
+		out = fmt.Sprintf("... %d bytes omitted ...\n", s.omitted) + out
+		s.omitted = 0
+	}
+	return out, flowed
+}
+
+func (s *terminalSession) ID() int   { return s.id }
+func (s *terminalSession) TTY() bool { return s.tty }
+func (s *terminalSession) touch()    { s.lastUsed.Store(time.Now().UnixNano()) }
+
+// tryInteraction mirrors codex's try_lock_owned on the interaction lock:
+// true means the semaphore was free (acquired then released here), false
+// means a write/poll interaction currently holds it — the store's
+// eviction uses this to leave in-flight sessions alone.
+func (s *terminalSession) tryInteraction() bool {
+	select {
+	case s.interaction <- struct{}{}:
+		<-s.interaction
+		return true
+	default:
+		return false
+	}
+}
+
+// Exited reports process death with the code published before done
+// closed — the pair is always consistent.
+func (s *terminalSession) Exited() (bool, int) {
+	if !s.exited.Load() {
+		return false, 0
+	}
+	return true, s.exitCode
+}
+
+// Write feeds stdin through the pty master — TTY sessions only. Pipes
+// sessions report ErrTerminalStdinClosed, matching codex: interactive
+// input requires the tty backend, and \x03 goes through Interrupt. A dead
+// process reports "session exited"; a live one that ignores stdin may
+// block the write until Terminate lands.
+func (s *terminalSession) Write(p []byte) error {
+	if len(p) == 0 {
+		return nil
+	}
+	// A dead pipes session has a closed stdin too. Death is the fact the
+	// caller needs; the tty remedy is only for a live pipes child.
+	if s.exited.Load() {
+		return errors.New("session exited")
+	}
+	if !s.tty {
+		return dservice.ErrTerminalStdinClosed
+	}
+	s.touch()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err := s.master.Write(p)
+	return err
+}
+
+// Interrupt delivers Ctrl-C. On a pty the byte goes through the line
+// discipline — the kernel signals the foreground group; on pipes there
+// is no line discipline, so the process group gets SIGINT directly.
+func (s *terminalSession) Interrupt() error {
+	if s.exited.Load() {
+		return errors.New("session exited")
+	}
+	if s.tty {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+		_, err := s.master.Write([]byte{3})
+		return err
+	}
+	return killGroup(s.cmd.Process.Pid, interruptSignal)
+}
+
+// Collect drains pending and waits up to maxWait for more output or the
+// process exit. ctx cancel returns the accumulated output with the
+// session left running — interruption never kills background work.
+// Retention is a head+tail window: the sink sees every drained chunk,
+// but the assembled Output keeps only the first and last collectRetain
+// bytes, the dropped middle counted into an omission marker — a flood
+// cannot turn one poll into an unbounded allocation.
+func (s *terminalSession) Collect(ctx context.Context, maxWait time.Duration, sink func(string)) dservice.TerminalPoll {
+	s.touch()
+	deadline := time.NewTimer(maxWait)
+	defer deadline.Stop()
+	var head, tail []byte
+	var omitted, total int
+	collect := func(chunk string) {
+		// The head fills only until the first byte reaches the tail —
+		// tail bytes are chronologically newer, so a head still growing
+		// after that would reorder the stream.
+		if len(tail) == 0 && len(head) < collectRetain {
+			n := min(collectRetain-len(head), len(chunk))
+			// A cut inside a multibyte rune leaves its dangling bytes at
+			// the head's end — keep the head valid and hand the whole
+			// split rune to the tail instead.
+			for n > 0 && n < len(chunk) && chunk[n]&0xC0 == 0x80 {
+				n--
+			}
+			head = append(head, chunk[:n]...)
+			chunk = chunk[n:]
+		}
+		if len(chunk) == 0 {
+			return
+		}
+		tail = append(tail, chunk...)
+		if len(tail) > collectRetain {
+			// Same rune rule as the pending drop in append: skip the
+			// rest of the split rune so the retained tail stays valid.
+			drop := len(tail) - collectRetain
+			for drop < len(tail) && tail[drop]&0xC0 == 0x80 {
+				drop++
+			}
+			omitted += drop
+			tail = append([]byte(nil), tail[drop:]...)
+		}
+	}
+	flush := func() {
+		chunk, n := s.drain()
+		total += n
+		if chunk != "" {
+			if sink != nil {
+				sink(chunk)
+			}
+			collect(chunk)
+		}
+	}
+	output := func() string {
+		if omitted == 0 {
+			return string(head) + string(tail)
+		}
+		return fmt.Sprintf("%s... %d bytes omitted ...\n%s", head, omitted, tail)
+	}
+	for {
+		flush()
+		if s.exited.Load() {
+			// One last window for the reader to drain bytes written just
+			// before death — pty output can still be in flight.
+			select {
+			case <-s.readerEOF:
+			case <-time.After(postExitDrainWait):
+			case <-ctx.Done():
+			}
+			flush()
+			return s.finishedPoll(output(), total)
+		}
+		select {
+		case <-s.notify:
+		case <-s.done:
+		case <-ctx.Done():
+			return s.pollState(output(), total)
+		case <-deadline.C:
+			return s.pollState(output(), total)
+		}
+	}
+}
+
+func (s *terminalSession) pollState(out string, total int) dservice.TerminalPoll {
+	if s.exited.Load() {
+		return s.finishedPoll(out, total)
+	}
+	return dservice.TerminalPoll{Output: out, Running: true, TotalBytes: total}
+}
+
+func (s *terminalSession) finishedPoll(out string, total int) dservice.TerminalPoll {
+	return dservice.TerminalPoll{
+		Output:     out,
+		ExitCode:   s.exitCode,
+		Signal:     s.signal,
+		TotalBytes: total,
+	}
+}
+
+// Terminate kills the process tree and waits out the goroutines. The
+// session stays usable for a final Exited check; Write and Interrupt
+// report the exited error.
+func (s *terminalSession) Terminate() {
+	if !s.terminated.CompareAndSwap(false, true) {
+		return
+	}
+	s.terminateProcess()
+	// Close the write/read side first — a blocked Write unblocks on
+	// EPIPE; closing the pty master or the pipes read end also ends the
+	// reader loop even when a stray inheritor still holds the far end.
+	if s.master != nil {
+		s.master.Close()
+	}
+	if s.pipeR != nil {
+		s.pipeR.Close()
+	}
+	<-s.done
+	// Reap the reader goroutine — bounded in case it is parked on a
+	// stream whose far end an escaped process still holds.
+	select {
+	case <-s.readerEOF:
+	case <-time.After(waitDelay):
+	}
+}

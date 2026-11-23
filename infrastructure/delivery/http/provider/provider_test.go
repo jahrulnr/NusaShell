@@ -1,0 +1,316 @@
+package provider
+
+import (
+	"context"
+	"encoding/json"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+
+	appprovider "github.com/jahrulnr/nusashell/application/provider"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+)
+
+// fakes satisfy the consumer-defined interfaces, not the app.
+type fakeReader struct{ infos []appprovider.ProviderInfo }
+
+func (f *fakeReader) List(context.Context) ([]appprovider.ProviderInfo, error) {
+	return f.infos, nil
+}
+
+func (f *fakeReader) Get(_ context.Context, id string) (appprovider.ProviderInfo, error) {
+	for _, i := range f.infos {
+		if i.ID == id {
+			return i, nil
+		}
+	}
+	return appprovider.ProviderInfo{}, nil
+}
+
+func (f *fakeReader) DiscoverUpstreams(context.Context, string, string) ([]dservice.Upstream, error) {
+	return nil, nil
+}
+
+type fakeWriter struct {
+	deleted       []string
+	lastInput     appprovider.ProviderInput
+	outcome       appprovider.UpsertOutcome
+	err           error
+	importOutcome appprovider.UpsertOutcome
+	importErr     error
+}
+
+func (f *fakeWriter) Upsert(_ context.Context, in appprovider.ProviderInput) (appprovider.UpsertOutcome, error) {
+	f.lastInput = in
+	return f.outcome, f.err
+}
+
+func (f *fakeWriter) ImportModels(context.Context, string) (appprovider.UpsertOutcome, error) {
+	return f.importOutcome, f.importErr
+}
+
+func (f *fakeWriter) Delete(_ context.Context, id string) error {
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+func router(d Deps) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	Register(r.Group("/api"), d)
+	return r
+}
+
+func do(r *gin.Engine, method, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	return rec
+}
+
+func doJSON(r *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestNilReadsLeavesReadRoutesUnregistered(t *testing.T) {
+	// Writes alone mount nothing readable — NoRoute answers the GETs.
+	r := router(Deps{Writes: &fakeWriter{}})
+	for _, p := range []string{
+		"/api/providers",
+		"/api/providers/g",
+		"/api/providers/g/upstreams",
+	} {
+		if rec := do(r, "GET", p); rec.Code != 404 {
+			t.Fatalf("GET %s: want 404, got %d", p, rec.Code)
+		}
+	}
+}
+
+func TestNilWritesLeavesWriteRoutesUnregistered(t *testing.T) {
+	// The path exists for GET; the mutations still stay unregistered.
+	r := router(Deps{Reads: &fakeReader{}})
+	for _, m := range []string{"PUT", "DELETE"} {
+		if rec := do(r, m, "/api/providers/g"); rec.Code != 404 {
+			t.Fatalf("%s /api/providers/g: want 404, got %d", m, rec.Code)
+		}
+	}
+}
+
+func TestListProviders(t *testing.T) {
+	r := router(Deps{Reads: &fakeReader{infos: []appprovider.ProviderInfo{
+		{ID: "openrouter", Name: "OpenRouter", Style: enum.StyleCompletion,
+			Endpoint: "https://openrouter.ai/api/v1", Stream: true},
+	}}})
+	rec := do(r, "GET", "/api/providers")
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var page providerPage
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Data) != 1 || page.Data[0].ID != "openrouter" ||
+		page.Data[0].Style != "completion" || page.Data[0].KeyState != "unset" {
+		t.Fatalf("unexpected list projection: %+v", page.Data)
+	}
+}
+
+// PUT answers the projection plus the import outcome — `added` is
+// always present, `catalogError` absent when the merge succeeded.
+func TestPutProviderCarriesImportOutcome(t *testing.T) {
+	r := router(Deps{
+		Reads:  &fakeReader{infos: []appprovider.ProviderInfo{{ID: "or", Endpoint: "https://x"}}},
+		Writes: &fakeWriter{outcome: appprovider.UpsertOutcome{Added: []string{"m2"}}},
+	})
+	rec := doJSON(r, "PUT", "/api/providers/or",
+		`{"name":"OR","style":"completion","endpoint":"https://x","models":[{"id":"m1"}]}`)
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	added, ok := doc["added"].([]any)
+	if !ok || len(added) != 1 || added[0] != "m2" {
+		t.Fatalf("added = %v, want [m2]", doc["added"])
+	}
+	if _, present := doc["catalogError"]; present {
+		t.Fatal("catalogError must be omitted when empty")
+	}
+}
+
+// A catalog failure still answers 200 — the record saved — with the
+// failure text in catalogError and the stored catalog in models.
+func TestPutProviderCatalogErrorStill200(t *testing.T) {
+	stored, err := entity.NewModel("m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := router(Deps{
+		Reads: &fakeReader{infos: []appprovider.ProviderInfo{
+			{ID: "or", Endpoint: "https://x", Models: []entity.Model{stored}},
+		}},
+		Writes: &fakeWriter{outcome: appprovider.UpsertOutcome{CatalogError: "provider unreachable"}},
+	})
+	rec := doJSON(r, "PUT", "/api/providers/or",
+		`{"name":"OR","style":"completion","endpoint":"https://x","models":[{"id":"m1"}]}`)
+	if rec.Code != 200 {
+		t.Fatalf("catalog failure must stay 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc["catalogError"] != "provider unreachable" {
+		t.Fatalf("catalogError = %v", doc["catalogError"])
+	}
+	if added, ok := doc["added"].([]any); !ok || len(added) != 0 {
+		t.Fatalf("added must serialize as an empty array: %v", doc["added"])
+	}
+	if models, ok := doc["models"].([]any); !ok || len(models) != 1 {
+		t.Fatalf("stored models must ride along: %v", doc["models"])
+	}
+}
+
+// A model-level style pin rides the write body into the input and the
+// read projection back out; an absent pin stays absent.
+func TestModelStyleRoundTrip(t *testing.T) {
+	pinned, err := entity.NewModel("claude-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned.SetStyle(enum.StyleMessages)
+	plain, err := entity.NewModel("deepseek-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &fakeWriter{}
+	r := router(Deps{
+		Reads: &fakeReader{infos: []appprovider.ProviderInfo{
+			{ID: "g", Endpoint: "https://x", Models: []entity.Model{pinned, plain}},
+		}},
+		Writes: w,
+	})
+	rec := doJSON(r, "PUT", "/api/providers/g",
+		`{"name":"G","style":"completion","endpoint":"https://x","models":[{"id":"claude-x","style":"messages"},{"id":"deepseek-x"}]}`)
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(w.lastInput.Models) != 2 || w.lastInput.Models[0].Style != enum.StyleMessages ||
+		w.lastInput.Models[1].Style != "" {
+		t.Fatalf("style must parse per model: %+v", w.lastInput.Models)
+	}
+	var doc struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Models[0]["style"] != "messages" {
+		t.Fatalf("pinned style must project: %v", doc.Models[0])
+	}
+	if _, present := doc.Models[1]["style"]; present {
+		t.Fatalf("inheriting model must omit style: %v", doc.Models[1])
+	}
+}
+
+// The refresh endpoint answers the same write shape — here the merged
+// id.
+func TestImportModelsRoute(t *testing.T) {
+	r := router(Deps{
+		Reads:  &fakeReader{infos: []appprovider.ProviderInfo{{ID: "or", Endpoint: "https://x"}}},
+		Writes: &fakeWriter{importOutcome: appprovider.UpsertOutcome{Added: []string{"m3"}}},
+	})
+	rec := do(r, "POST", "/api/providers/or/import-models")
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if added, ok := doc["added"].([]any); !ok || len(added) != 1 || added[0] != "m3" {
+		t.Fatalf("added = %v, want [m3]", doc["added"])
+	}
+}
+
+// An absent provider is a plain 404 — the import outcome never applies.
+func TestImportModelsMissingProvider404(t *testing.T) {
+	r := router(Deps{
+		Reads:  &fakeReader{},
+		Writes: &fakeWriter{importErr: apperror.NewNotFoundError("provider nope", nil)},
+	})
+	rec := do(r, "POST", "/api/providers/nope/import-models")
+	if rec.Code != 404 {
+		t.Fatalf("missing provider: want 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Reads and Writes are documented as independently optional: a nil
+// surface leaves its routes unregistered. The PUT and import responses
+// are built from the write outcome plus a fresh read projection, so a
+// Writes-only composition cannot serve them — it must leave them
+// unregistered rather than mounting a handler that dereferences a nil
+// reader.
+func TestWritesOnlyLeavesProjectionRoutesUnregistered(t *testing.T) {
+	r := router(Deps{Writes: &fakeWriter{}})
+	for _, tc := range []struct{ method, path, body string }{
+		{"PUT", "/api/providers/g", `{"name":"G","style":"completion","endpoint":"https://x","models":[]}`},
+		{"POST", "/api/providers/g/import-models", ""},
+	} {
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					t.Fatalf("%s %s panicked on a writes-only composition: %v", tc.method, tc.path, rec)
+				}
+			}()
+			rec := doJSON(r, tc.method, tc.path, tc.body)
+			if rec.Code != 404 {
+				t.Fatalf("%s %s: want 404 for an unregistered projection route, got %d", tc.method, tc.path, rec.Code)
+			}
+		}()
+	}
+}
+
+type cancelAwareWriter struct {
+	fakeWriter
+	deleteCtxErr error
+}
+
+func (w *cancelAwareWriter) Delete(ctx context.Context, id string) error {
+	w.deleteCtxErr = ctx.Err()
+	if w.deleteCtxErr != nil {
+		return w.deleteCtxErr
+	}
+	w.deleted = append(w.deleted, id)
+	return nil
+}
+
+// DELETE is destructive: a browser that navigates away or a proxy that
+// drops the connection mid-request must not cancel the record/vault
+// removal halfway. The conversation boundary already detaches accepted
+// deletes from the request context; the provider boundary must do the same.
+func TestDeleteProviderSurvivesRequestCancellation(t *testing.T) {
+	w := &cancelAwareWriter{}
+	r := router(Deps{Reads: &fakeReader{}, Writes: w})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("DELETE", "/api/providers/g", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != 204 {
+		t.Fatalf("DELETE with a canceled request context = %d: %s", rec.Code, rec.Body.String())
+	}
+	if w.deleteCtxErr != nil {
+		t.Fatalf("delete ran on the request's canceled context: %v", w.deleteCtxErr)
+	}
+}

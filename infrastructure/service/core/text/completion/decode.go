@@ -1,0 +1,172 @@
+package textcompletion
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
+)
+
+// Replay artifacts live under adapter-namespaced optionalContent keys.
+// reasoning is display text; reasoning_details is the structured payload
+// (including encrypted blobs and signatures) OpenRouter requires back.
+const (
+	reasoningKey        = "completion.reasoning"
+	reasoningContentKey = "completion.reasoning_content"
+	reasoningDetailsKey = "completion.reasoning_details"
+)
+
+// decodeMessage maps a wire assistant message onto a domain Message:
+// content, origin tool calls, finish reason, and replay artifacts
+// (reasoning, reasoning_content, and reasoning_details ride optionalContent
+// for the next request).
+func decodeMessage(w MessageBody, finishReason string) (entity.Message, error) {
+	// A refusal rides beside a null content — it IS the answer text,
+	// not an error and not an empty message.
+	content := contentText(w.Content)
+	if content == "" {
+		content = w.Refusal
+	}
+	msg, err := entity.NewMessage(enum.RoleAssistant, content)
+	if err != nil {
+		return entity.Message{}, err
+	}
+	if fr, ok := enum.ParseFinishReason(finishReason); ok {
+		msg.SetFinishReason(fr)
+	} else if finishReason != "" {
+		msg.SetFinishReason(enum.FinishReason(finishReason)) // preserve unknown values verbatim
+	}
+	for _, c := range w.ToolCalls {
+		args := c.Function.Arguments
+		if args == "" {
+			args = "{}" // upstreams legitimately emit empty arguments
+		}
+		tc, err := entity.NewToolCall(c.ID, c.Function.Name, args, enum.TooltypeOrigin)
+		if err != nil {
+			return entity.Message{}, err
+		}
+		if err := msg.AddToolCall(tc); err != nil {
+			return entity.Message{}, err
+		}
+	}
+	if w.Reasoning != "" {
+		msg.SetOptionalContent(reasoningKey, w.Reasoning)
+	}
+	if w.ReasoningContent != "" {
+		msg.SetOptionalContent(reasoningContentKey, w.ReasoningContent)
+	}
+	if len(w.ReasoningDetails) > 0 && string(w.ReasoningDetails) != "null" {
+		msg.SetOptionalContent(reasoningDetailsKey, string(w.ReasoningDetails))
+	}
+	return msg, nil
+}
+
+// reasoningTextFromDetails flattens the human-readable entries of an
+// OpenRouter reasoning_details array. Encrypted entries contribute
+// nothing; callers use this for display, never for replay.
+func reasoningTextFromDetails(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var details []struct {
+		Type    string `json:"type"`
+		Text    string `json:"text"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, d := range details {
+		switch d.Type {
+		case "reasoning.text":
+			b.WriteString(d.Text)
+		case "reasoning.summary":
+			b.WriteString(d.Summary)
+		}
+	}
+	return b.String()
+}
+
+// contentText normalizes wire content — string or parts array — into text.
+func contentText(c any) string {
+	switch v := c.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case []any: // some providers return parts on output too
+		var b strings.Builder
+		for _, p := range v {
+			if pm, ok := p.(map[string]any); ok && pm["type"] == "text" {
+				if s, ok := pm["text"].(string); ok {
+					b.WriteString(s)
+				}
+			}
+		}
+		return b.String()
+	default:
+		return ""
+	}
+}
+
+// decodeUsage normalizes provider usage: prompt_tokens is the INCLUSIVE
+// total on this surface — cached tokens are a subset, so uncached input is
+// derived via NewUsageFromTotal.
+func decodeUsage(u *UsageBody) (valueobject.Usage, error) {
+	if u == nil {
+		return valueobject.Usage{}, nil
+	}
+	cacheWrite := u.CacheWrite
+	if cacheWrite == 0 {
+		cacheWrite = u.CacheCreationInput
+	}
+	return valueobject.NewUsageFromTotal(u.PromptTokens, u.PromptDetails.CachedTokens, cacheWrite, u.CompletionTokens)
+}
+
+// statusError builds the routing-facing error for a non-200 response via
+// the shared convention — context_length 400 → 413 remap and the
+// message-less fallback both live in wire.StatusError. The upstream
+// message is safe to surface; the raw body stays in Cause. retryAfter is
+// the provider-asked wait from the response headers (0 mid-stream).
+func statusError(status int, retryAfter time.Duration, body []byte) error {
+	return wire.WithRetryAfter(
+		wire.StatusError(status, upstreamMessage(body), upstreamCode(body), body),
+		retryAfter,
+	)
+}
+
+// upstreamMessage extracts the provider's message when it is plain text —
+// it describes request/parameter problems and is safe to surface. A body
+// without one yields ""; wire owns the fallback wording.
+func upstreamMessage(body []byte) string {
+	var env struct {
+		Error ErrorBody `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return ""
+	}
+	return env.Error.Message
+}
+
+func upstreamCode(body []byte) string {
+	var env struct {
+		Error ErrorBody `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return ""
+	}
+	switch c := env.Error.Code.(type) {
+	case string:
+		return c
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", c)
+	}
+}

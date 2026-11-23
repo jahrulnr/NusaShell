@@ -1,0 +1,76 @@
+[project]
+site_name = "NusaShell Guide"
+site_url = "https://jahrulnr.github.io/NusaShell/"
+site_description = "Learn to set up and use NusaShell, your local workspace for AI models and coding agents."
+site_author = "NusaShell"
+repo_url = "https://github.com/jahrulnr/NusaShell"
+repo_name = "jahrulnr/NusaShell"
+edit_uri = "edit/master/docs/"
+not_in_nav = """
+README.md
+merge-roadmap.md
+"""
+nav = [
+  { "Home" = "index.md" },
+  { "Start here" = [
+    { "Install and first run" = "tutorials/first-run.md" },
+    { "Connect a model" = "tutorials/connect-a-model.md" },
+    { "Use an ACP agent" = "tutorials/use-an-agent.md" },
+  ] },
+  { "Make it yours" = [
+    { "Projects and folders" = "tutorials/projects-and-folders.md" },
+    { "WhatsApp and Telegram" = "tutorials/chat-channels.md" },
+    { "Use the browser" = "tutorials/browser.md" },
+    { "Schedule automations" = "tutorials/automations.md" },
+  ] },
+  { "Reference" = [
+    { "CLI guide" = "cli-guide.md" },
+    { "Provider adapters" = "adapters.md" },
+    { "Architecture" = "architecture.md" },
+    { "Domain model" = "domain-model.md" },
+    { "Persistence" = "persistence.md" },
+    { "Extending NusaShell" = "extending.md" },
+    { "WebSocket API" = "api/websocket.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+logo = "assets/nusashell-icon.png"
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.sections",
+  "navigation.top",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch theme"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+footnotes = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]

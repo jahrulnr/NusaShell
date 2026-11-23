@@ -1,0 +1,57 @@
+package appconversation
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	appjob "github.com/jahrulnr/nusashell/application/job"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+)
+
+// Edit rewrites a user message and resends the turn from it — the
+// conversation is truncated at that message and the model regenerates the
+// answer, so everything the old turn produced is gone.
+//
+// Semantics: only user messages are editable (400 otherwise). A target
+// already compacted into a sealed segment is still reachable — the
+// repository repromotes that era — but an id that exists nowhere is 404.
+// A live turn on the conversation is interrupted first: the edit preempts
+// it, then runs ahead of any queued sends, which land on the rewritten
+// history. The caller's ctx aborts the wait and the regenerate alike.
+// providerID/modelID/opts are the same per-turn overrides Send takes — "" keeps
+// the stored binding, and a successful regenerated turn re-binds them to
+// the room, so a retry can switch off the model that just failed.
+func (app *ConversationApp) Edit(
+	ctx context.Context,
+	convID string,
+	providerID string,
+	modelID string,
+	msgID string,
+	content string,
+	opts appjob.SendOptions,
+	onEvent event.TurnEventHandler,
+) error {
+	if strings.TrimSpace(content) == "" {
+		return apperror.New(400, "empty edit", fmt.Errorf("edit has no replacement text"))
+	}
+	res := make(chan error, 1)
+	j := &appjob.Edit{
+		Ctx:        ctx,
+		MsgID:      msgID,
+		Content:    content,
+		ProviderID: providerID,
+		ModelID:    modelID,
+		Opts:       opts,
+		OnEvent:    onEvent,
+	}
+	j.Result = res
+	app.post(convID, j)
+	select {
+	case err := <-res:
+		return err
+	case <-ctx.Done():
+		return apperror.New(408, "edit canceled", ctx.Err())
+	}
+}

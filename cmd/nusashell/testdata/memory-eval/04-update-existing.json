@@ -1,0 +1,31 @@
+{
+  "name": "update-existing",
+  "index": [
+    {
+      "name": "indent-style",
+      "type": "user",
+      "scope": "global",
+      "description": "Owner indents with tabs",
+      "body": "Tabs, width 4."
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Format this file. Also, I switched to two spaces for indentation everywhere, no more tabs."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Reformatted with two-space indentation."
+    }
+  ],
+  "expect": [
+    {
+      "op": "update",
+      "evidence": "I switched to two spaces",
+      "target": "indent-style"
+    }
+  ]
+}

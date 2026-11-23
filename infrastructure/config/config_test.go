@@ -1,0 +1,266 @@
+package config
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+)
+
+type testStore struct{}
+
+func (testStore) Read(path string) ([]byte, error)          { return os.ReadFile(path) }
+func (testStore) WriteAtomic(path string, raw []byte) error { return os.WriteFile(path, raw, 0o644) }
+func (testStore) Exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	return err == nil, err
+}
+
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestLoadFileValuesWin(t *testing.T) {
+	var c Config
+	if err := c.Load(testStore{}, writeConfig(t, `{"conversation":{"mailbox_cap":8,"max_turn_steps":3},"service":{"idle_timeout":"10s"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if c.Conversation.MailboxCap != 8 || c.Conversation.MaxTurnStep != 3 {
+		t.Fatalf("file values must win: %+v", c.Conversation)
+	}
+	if c.Service.IdleTimeout != Duration(10*time.Second) {
+		t.Fatalf("duration must parse: %v", c.Service.IdleTimeout)
+	}
+	// Absent fields keep their tag default.
+	if c.Service.HeaderTimeout != Duration(2*time.Minute) {
+		t.Fatalf("absent field must take tag default: %v", c.Service.HeaderTimeout)
+	}
+}
+
+func TestLoadZeroMeansDefault(t *testing.T) {
+	var c Config
+	if err := c.Load(testStore{}, writeConfig(t, `{"conversation":{"mailbox_cap":0}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if c.Conversation.MailboxCap != 128 {
+		t.Fatalf("explicit zero must fall back to tag default, got %d", c.Conversation.MailboxCap)
+	}
+}
+
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	var c Config
+	// Unknown keys are rejected — a typo must fail loudly instead of
+	// silently tuning nothing; comment-as-field leftovers are file
+	// edits, not config.
+	if err := c.Load(testStore{}, writeConfig(t, `{"conversation":{"mailbox_cap":8},"bogus":true}`)); err == nil {
+		t.Fatal("top-level unknown key must fail")
+	}
+	if err := c.Load(testStore{}, writeConfig(t, `{"conversation":{"mailbox_cap":8,"typo":1}}`)); err == nil {
+		t.Fatal("nested unknown key must fail")
+	}
+	if err := c.Load(testStore{}, writeConfig(t, `{"conversation":{"mailbox_cap":8}}`)); err != nil {
+		t.Fatalf("known keys still load: %v", err)
+	}
+	if c.Conversation.MailboxCap != 8 {
+		t.Fatalf("known key must still apply, got %d", c.Conversation.MailboxCap)
+	}
+}
+
+func TestLoadRejectsMalformedJSON(t *testing.T) {
+	var c Config
+	if err := c.Load(testStore{}, writeConfig(t, `{nope`)); err == nil {
+		t.Fatal("malformed JSON must fail")
+	}
+	if err := c.Load(testStore{}, writeConfig(t, `{"conversation":{"mailbox_cap":8}} {"extra":true}`)); err == nil {
+		t.Fatal("trailing garbage must fail")
+	}
+	// More() only reports inside an open array/object — a stray closer
+	// reads as "nothing more" to it, so the EOF check must catch it.
+	for _, raw := range []string{`{"conversation":{}}}`, `{"conversation":{}}]`, `{"conversation":{}} extra`, `{"conversation":{}}42`} {
+		if err := c.Load(testStore{}, writeConfig(t, raw)); err == nil {
+			t.Fatalf("trailing %q must fail", raw)
+		}
+	}
+}
+
+func TestValidateRejectsNonObjectDocument(t *testing.T) {
+	for _, raw := range []string{"null", "[]", `"text"`, "42"} {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := Validate([]byte(raw)); err == nil {
+				t.Fatalf("%s must not be a valid config document", raw)
+			}
+		})
+	}
+}
+
+func TestNormalizeClampsNegatives(t *testing.T) {
+	c := Config{Conversation: ConversationConfig{MailboxCap: -1, MaxTurnStep: -5}}
+	c.Normalize()
+	if c.Conversation.MailboxCap != 128 || c.Conversation.MaxTurnStep != 512 {
+		t.Fatalf("negatives must clamp to tag defaults, got %+v", c.Conversation)
+	}
+	s := ServiceConfig{IdleTimeout: -1}
+	s.Normalize()
+	if s.IdleTimeout != Duration(90_000_000_000) {
+		t.Fatalf("negative duration must clamp to tag default, got %v", s.IdleTimeout)
+	}
+}
+
+func TestDurationMarshalEmitsHumanString(t *testing.T) {
+	raw, err := json.Marshal(ServiceConfig{HeaderTimeout: Duration(30 * time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"header_timeout":"30s","idle_timeout":"0s"}` {
+		t.Fatalf("marshal must emit the human string, got %s", raw)
+	}
+}
+
+func TestLoadMissingFile(t *testing.T) {
+	var c Config
+	if err := c.Load(testStore{}, filepath.Join(t.TempDir(), "nope.json")); err == nil {
+		t.Fatal("missing file must fail")
+	}
+}
+
+func TestLoadRequiresStoreForFile(t *testing.T) {
+	var c Config
+	if err := c.Load(nil, "config.json"); err == nil {
+		t.Fatal("non-empty config path requires a store")
+	}
+	if err := c.Load(nil, ""); err != nil {
+		t.Fatalf("default config must not require a store: %v", err)
+	}
+}
+
+func TestAppDefaultsOnNormalize(t *testing.T) {
+	var c Config
+	c.Normalize()
+	if c.App.Name != "NusaShell" || c.App.Source != "https://github.com/jahrulnr/NusaShell" {
+		t.Fatalf("App defaults not applied: %+v", c.App)
+	}
+}
+
+func TestLoadEmptyPathYieldsDefaults(t *testing.T) {
+	c := NewConfig()
+	c.Conversation.MailboxCap = 1 // simulate a caller mutation
+	if err := c.Load(testStore{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if c.Conversation.MailboxCap != 1 {
+		t.Fatal("empty path must not clobber set values")
+	}
+	c.Conversation.MailboxCap = 0
+	if err := c.Load(testStore{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if c.Conversation.MailboxCap != 128 {
+		t.Fatal("empty path must still fill zero fields from tags")
+	}
+}
+
+// Validate shares Load's strictness — a typo'd key fails instead of
+// silently loading with defaults that tune nothing.
+func TestValidateRejectsTypoKeys(t *testing.T) {
+	// "prt" is a typo for "port"; "max_liness" for "max_lines".
+	raw := []byte(`{"server":{"prt":1},"log":{"max_liness":5}}`)
+	if _, err := Validate(raw); err == nil {
+		t.Fatal("typo'd keys must fail validation — silently loading defaults means the setting tunes nothing")
+	}
+}
+
+// storage.dir "~" expands to the user's home — otherwise
+// "dir": "~/nusashell" lands in a literal "~" directory under the CWD.
+func TestValidateExpandsHomeDir(t *testing.T) {
+	c, err := Validate([]byte(`{"storage":{"dir":"~/nusashell"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home in test env")
+	}
+	if c.Storage.Dir != home+"/nusashell" {
+		t.Fatalf("dir = %q, want %q", c.Storage.Dir, home+"/nusashell")
+	}
+}
+
+// The threads and chat roles may name an agent or a provider, not both; the other roles
+// call a model directly and refuse an agent. A provider without a model
+// is not assigned.
+func TestValidateModelRoles(t *testing.T) {
+	c, err := Validate([]byte(`{"models":{"threads":{"agent":"codex"},"chat":{"agent":" claude "},"utility":{"provider":"or","model":"m"},"image":{"provider":"or"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Models.Threads.Agent != "codex" || c.Models.Chat.Agent != "claude" || !c.Models.Chat.Assigned() || !c.Models.Utility.Assigned() || c.Models.Image.Assigned() {
+		t.Fatalf("roles = %+v", c.Models)
+	}
+	for _, raw := range []string{
+		`{"models":{"chat":{"agent":"claude","provider":"or"}}}`,
+		`{"models":{"threads":{"agent":"claude","provider":"or"}}}`,
+		`{"models":{"utility":{"agent":"claude"}}}`,
+		`{"models":{"speech":{"agent":"claude"}}}`,
+	} {
+		if _, err := Validate([]byte(raw)); err == nil {
+			t.Fatalf("%s must fail validation", raw)
+		}
+	}
+}
+
+// Compaction starts well short of the window: the estimate counts characters
+// and a flat figure per attachment, and a fold begun late has little room.
+func TestCompactBudgetDefaultsToEightyPercent(t *testing.T) {
+	var c Config
+	if err := c.Load(testStore{}, writeConfig(t, `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if c.Conversation.CompactBudgetPct != 80 {
+		t.Fatalf("compact_budget_pct = %d, want 80", c.Conversation.CompactBudgetPct)
+	}
+}
+
+func TestAgentIdleTimeoutDefaultsToFiveMinutes(t *testing.T) {
+	if got := NewConfig().Agents.IdleTimeout; got != Duration(5*time.Minute) {
+		t.Fatalf("default = %v", got)
+	}
+	var c Config
+	if err := c.Load(testStore{}, writeConfig(t, `{"agents":{"idle_timeout":"20m"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if c.Agents.IdleTimeout != Duration(20*time.Minute) {
+		t.Fatalf("file value lost: %v", c.Agents.IdleTimeout)
+	}
+	// Zero and negative values are unconfigured, as for every deadline.
+	for _, body := range []string{`{"agents":{"idle_timeout":"0s"}}`, `{"agents":{"idle_timeout":"-3m"}}`} {
+		var c Config
+		if err := c.Load(testStore{}, writeConfig(t, body)); err != nil {
+			t.Fatalf("%s: %v", body, err)
+		}
+		if c.Agents.IdleTimeout != Duration(5*time.Minute) {
+			t.Fatalf("%s: got %v, want the default", body, c.Agents.IdleTimeout)
+		}
+	}
+}
+
+// The server looks for idle processes once a minute, so a shorter timeout
+// is refused rather than quietly rounded.
+func TestAgentIdleTimeoutHasAFloor(t *testing.T) {
+	var c Config
+	err := c.Load(testStore{}, writeConfig(t, `{"agents":{"idle_timeout":"30s"}}`))
+	if err == nil || !strings.Contains(apperror.As(err).Caused(), "agents.idle_timeout must be at least 1m0s") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := c.Load(testStore{}, writeConfig(t, `{"agents":{"idle_timeout":"1m"}}`)); err != nil {
+		t.Fatalf("the floor itself must be allowed: %v", err)
+	}
+}

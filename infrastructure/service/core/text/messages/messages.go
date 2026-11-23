@@ -1,0 +1,193 @@
+// Package textmessages is the Anthropic /v1/messages adapter. The wire is
+// content-block shaped end to end: thinking and redacted_thinking blocks
+// must replay verbatim (their signatures bind to the prompt prefix),
+// tool_use/tool_result ride as blocks, and usage counters are disjoint —
+// input_tokens is already the uncached count.
+package textmessages
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/jahrulnr/nusashell/infrastructure/config"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+	coretext "github.com/jahrulnr/nusashell/infrastructure/service/core/text"
+	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
+)
+
+// anthropicVersion is the wire version header the endpoint requires.
+const anthropicVersion = "2023-06-01"
+
+// Service is the stateless translator for this wire — endpoint,
+// credentials, and stream preference are read from the provider argument
+// of every Send, so one instance serves every messages-style provider.
+type Service struct {
+	client    *http.Client
+	log       drepo.Logger
+	referer   string
+	title     string
+	fileRoot  string
+	fileStore drepo.Workspace
+	idle      time.Duration
+}
+
+// New builds the service — Options only; providers arrive per Send.
+func New(opts coretext.Options) *Service {
+	svcCfg := config.ServiceConfig{
+		HeaderTimeout: config.Duration(opts.HeaderTimeout),
+		IdleTimeout:   config.Duration(opts.IdleTimeout),
+	}
+	svcCfg.Normalize()
+	client := opts.Client
+	if client == nil {
+		client = &http.Client{Transport: &http.Transport{
+			ResponseHeaderTimeout: time.Duration(svcCfg.HeaderTimeout),
+		}}
+	}
+	return &Service{
+		client:    client,
+		log:       opts.Logger,
+		referer:   opts.Referer,
+		title:     opts.Title,
+		fileRoot:  opts.FileRoot,
+		fileStore: opts.FileStore,
+		idle:      time.Duration(svcCfg.IdleTimeout),
+	}
+}
+
+// Send performs one messages attempt — request marshal, POST, decode,
+// then append the assistant message and usage onto conv. Stream mode is
+// selected by prov; events reach onEvent uniformly either way.
+func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) error {
+	stream := prov.StreamMode()
+	body, err := encodeRequest(conv, model, stream, wire.MediaRoot{Dir: coretext.FileRoot(conv, s.fileRoot), Store: s.fileStore})
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	s.logAppend(ctx, "provider.request", json.RawMessage(raw))
+
+	// prov.Endpoint() is the provider's base URL (e.g.
+	// https://api.anthropic.com/v1); this wire lives at /messages under it.
+	url := strings.TrimRight(prov.Endpoint(), "/") + "/messages"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	// x-api-key is canonical on this surface; the version header is a
+	// wire requirement, not a per-provider quirk.
+	req.Header.Set("x-api-key", prov.ApiKey())
+	req.Header.Set("anthropic-version", anthropicVersion)
+	req.Header.Set("Content-Type", "application/json")
+	if beta := betaHeaderValue(model); beta != "" {
+		req.Header.Set("anthropic-beta", beta)
+	}
+	if enum.OpenCode.MatchesEndpoint(prov.Endpoint()) {
+		req.Header.Set("x-opencode-session", conv.ID())
+	}
+	if s.referer != "" {
+		req.Header.Set("HTTP-Referer", s.referer)
+	}
+	if s.title != "" {
+		req.Header.Set("X-Title", s.title)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil { // caller gave up — not an upstream failure
+			return apperror.New(408, "request canceled or timed out", ctx.Err())
+		}
+		return apperror.New(502, "upstream unreachable", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := wire.ReadBody(ctx, resp.Body, s.idle)
+		s.logAppend(ctx, "provider.error", map[string]any{
+			"status": resp.StatusCode, "request_id": resp.Header.Get("request-id"), "body": json.RawMessage(raw),
+		})
+		return wire.WithRetryAfter(statusError(resp.StatusCode, raw), wire.RetryAfter(resp.Header.Get("Retry-After")))
+	}
+
+	if stream {
+		return s.streamResponse(ctx, resp, conv, onEvent)
+	}
+	return s.unaryResponse(ctx, resp, conv, onEvent)
+}
+
+// unaryResponse decodes the full body, appends the message, and emits the
+// synthetic delta+finished pair the port promises non-stream callers.
+func (s *Service) unaryResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler) error {
+	raw, err := wire.ReadBody(ctx, resp.Body, s.idle)
+	if err != nil {
+		return err
+	}
+	s.logAppend(ctx, "provider.response", map[string]any{
+		"request_id": resp.Header.Get("request-id"),
+		"model":      resp.Header.Get("x-ai-model"),
+		"body":       json.RawMessage(raw),
+	})
+	var rb ResponseBody
+	if err := json.Unmarshal(raw, &rb); err != nil {
+		return apperror.New(502, "malformed upstream body", err)
+	}
+	// Some Anthropic-compatible providers answer errors as HTTP 200 with
+	// an {"type":"error","error":{…}} envelope — decode the same way a
+	// mid-stream error event decodes, or the turn commits an empty
+	// assistant message and reports success.
+	if rb.Error != nil {
+		return wire.WithRetryAfter(statusError(streamStatusHint(rb.Error), raw), wire.RetryAfter(resp.Header.Get("Retry-After")))
+	}
+	// A complete JSON body is this wire's settled terminal — a response
+	// without stop_reason still committed, so the verdict is end_turn.
+	stopReason := rb.StopReason
+	if stopReason == "" {
+		stopReason = "end_turn"
+	}
+	msg, meta, err := decodeMessage(rb.Content, stopReason)
+	if err != nil {
+		return err
+	}
+	if err := coretext.EmptyAnswerError(msg, meta.artifacts, "", []json.RawMessage{raw}); err != nil {
+		return err
+	}
+	usage, err := decodeUsage(rb.Usage)
+	if err != nil {
+		return err
+	}
+	conv.Append(msg)
+	conv.AddUsage(usage)
+	if meta.reasoning != "" {
+		emit(onEvent, event.NewReasoningEvent(meta.reasoning))
+	}
+	emit(onEvent, event.NewDeltaEvent(msg.Content()))
+	for _, tc := range msg.ToolCalls() {
+		emit(onEvent, event.NewToolCallEvent(tc))
+	}
+	emit(onEvent, event.NewFinishedEvent(msg.FinishReason(), usage))
+	return nil
+}
+
+func emit(h event.TurnEventHandler, e event.TurnEvent) {
+	if h != nil {
+		h(e)
+	}
+}
+
+func (s *Service) logAppend(ctx context.Context, kind string, v any) {
+	if s.log != nil {
+		_ = s.log.Append(ctx, kind, v) // diagnostics must never break a send
+	}
+}

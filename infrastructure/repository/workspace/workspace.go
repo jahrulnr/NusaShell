@@ -1,0 +1,146 @@
+package repoworkspace
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"syscall"
+
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+)
+
+type Local struct{}
+
+func NewLocal() drepo.Workspace { return Local{} }
+
+func (Local) CheckRoot(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(abs)
+	if err != nil {
+		return "", err
+	}
+	return abs, root.Close()
+}
+
+func (Local) Open(ctx context.Context, dir string) (drepo.WorkspaceSession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("workspace %q: %w", dir, err)
+	}
+	return &session{root: root, dir: dir}, nil
+}
+
+// OpenHost reads a regular file by absolute host path — the workspace
+// os.Root never enters the picture, and the sha256 pin remains the only
+// guarantee the caller gets about what send-time serves.
+func (Local) OpenHost(ctx context.Context, path string) (io.ReadCloser, fs.FileInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if !filepath.IsAbs(path) {
+		return nil, nil, fmt.Errorf("host path %q must be absolute", path)
+	}
+	// O_NONBLOCK like OpenRegular below: a blocking open on a FIFO or
+	// device waits for a writer that may never come — the regular-file
+	// check must run before the handle can park.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		if err == nil {
+			err = fmt.Errorf("path is not a regular file")
+		}
+		return nil, nil, err
+	}
+	return f, info, nil
+}
+
+func (Local) HostURI(path string) string { return "file://" + path }
+
+type session struct {
+	root *os.Root
+	dir  string
+}
+
+func (s *session) Close() error { return s.root.Close() }
+
+func (s *session) FS() fs.FS { return s.root.FS() }
+
+func (s *session) CreateFile(name string) (io.WriteCloser, error) {
+	// Create is OpenFile with mode 0666, i.e. whatever the umask lets
+	// through. This path exports transcripts — pasted secrets travel
+	// with them — so the file is owner-only regardless of the process
+	// umask. Mode applies only when the name is created; truncating an
+	// existing export leaves its old mode, so clamp the descriptor too.
+	f, err := s.root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func (s *session) Stat(name string) (fs.FileInfo, error) { return s.root.Stat(name) }
+
+func (s *session) OpenRegular(name string) (io.ReadCloser, fs.FileInfo, error) {
+	f, err := s.root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("path is not a regular file")
+	}
+	return f, info, nil
+}
+
+func (s *session) ReadFile(name string) ([]byte, error) { return s.root.ReadFile(name) }
+
+func (s *session) WriteFile(name string, data []byte, perm fs.FileMode) error {
+	// O_NONBLOCK like OpenRegular, plus the regular-file check on the
+	// opened fd — a stat-then-open pair would leave a window for a FIFO
+	// to be swapped in and park the writer (ENXIO beats that race).
+	f, err := s.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NONBLOCK, perm)
+	if err != nil {
+		return err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		if err == nil {
+			err = fmt.Errorf("path is not a regular file")
+		}
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err
+}
+
+func (s *session) MkdirAll(name string, perm fs.FileMode) error {
+	return s.root.MkdirAll(name, perm)
+}
+
+func (s *session) AttachmentURI(name string) string {
+	return "file://" + filepath.Join(s.dir, name)
+}

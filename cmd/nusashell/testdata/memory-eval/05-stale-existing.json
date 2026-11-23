@@ -1,0 +1,32 @@
+{
+  "name": "stale-existing",
+  "project": "p_eval",
+  "index": [
+    {
+      "name": "db-choice",
+      "type": "project",
+      "scope": "project",
+      "description": "The service stores data in Postgres 16",
+      "body": "Postgres 16, chosen for JSONB.\n**Why:** JSONB queries.\n**How to apply:** write SQL for Postgres."
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Forget the Postgres note, that's not true anymore. We haven't picked the new store yet."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Okay, I won't assume Postgres."
+    }
+  ],
+  "expect": [
+    {
+      "op": "stale",
+      "evidence": "that's not true anymore",
+      "target": "db-choice"
+    }
+  ]
+}

@@ -1,0 +1,324 @@
+/* NusaShell WebUI — design tokens and the few things utility classes can't
+   express well (rendered Markdown, syntax colors, third-party widgets). */
+
+:root,
+[data-theme="dark"] {
+  --bg: #161616;
+  --panel: #1c1c1c;
+  --raised: #242424;
+  --hover: #2c2c2c;
+  --line: #2e2e2e;
+  --fg: #e8e6e3;
+  --muted: #9a9894;
+  --faint: #6a6864;
+  --accent: #5fb8a6;
+  --accent-fg: #0d1f1b;
+  --mention: #9be3d4;
+  --mention-bg: rgb(95 184 166 / 0.2);
+  --ok: #5fbf7f;
+  --warn: #e0b04c;
+  --bad: #e5655b;
+  --code-bg: #1f1f1f;
+  --pop: #2e2e2e;
+  --pop-line: #4a4945;
+  --shadow: 0 12px 32px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.04);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #fbfaf8;
+  --panel: #f3f2ef;
+  --raised: #ffffff;
+  --hover: #ebe9e5;
+  --line: #e0ddd8;
+  --fg: #1d1c1a;
+  --muted: #6b6965;
+  --faint: #9c9994;
+  --accent: #237a69;
+  --accent-fg: #ffffff;
+  --mention: #1b6657;
+  --mention-bg: rgb(35 122 105 / 0.12);
+  --ok: #2e8a4c;
+  --warn: #a8740c;
+  --bad: #c2392f;
+  --code-bg: #f3f2ef;
+  --pop: #ffffff;
+  --pop-line: #cfccc5;
+  --shadow: 0 12px 32px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
+  color-scheme: light;
+}
+
+/* Element defaults sit in the base layer so utilities can override them. */
+@layer base {
+  html, body { height: 100%; }
+  body { margin: 0; font-size: 14px; line-height: 1.5; overflow: hidden; }
+  * { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+  ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+  /* The passage a reply is being written to, once the reply box has the selection. */
+  ::highlight(quote-pick) { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+}
+
+.boot {
+  height: 100%; display: grid; place-items: center;
+  color: var(--faint); font: 500 14px system-ui, sans-serif; letter-spacing: .08em;
+}
+
+.shadow-pop { box-shadow: var(--shadow); }
+
+/* Plain CSS (not JIT utilities) so the auto-grow measurement on first
+   paint already includes the padding. */
+.composer-input {
+  display: block; width: 100%; resize: none; background: transparent; border: 0; outline: none;
+  padding: 12px 16px 4px; font: inherit; font-size: 14px; line-height: 1.6; color: var(--fg);
+}
+.composer-input:focus-visible { outline: none; }
+.composer-input::placeholder { color: var(--faint); }
+
+/* Animated activity orb used for "working" states. */
+.orb { width: 8px; height: 8px; border-radius: 999px; background: var(--warn); flex: none; }
+.orb.live { animation: orb 1.2s ease-in-out infinite; }
+.orb.ok { background: var(--ok); }
+.orb.bad { background: var(--bad); }
+.orb.idle { background: var(--faint); }
+@keyframes orb { 50% { opacity: .35; transform: scale(.75); } }
+
+.shimmer {
+  background: linear-gradient(90deg, var(--muted) 0%, var(--fg) 50%, var(--muted) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: shimmer 1.8s linear infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+.skeleton {
+  background: linear-gradient(90deg, var(--raised), var(--hover), var(--raised));
+  background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb.live, .shimmer, .skeleton { animation: none; }
+}
+
+/* ---------- Rendered Markdown ---------- */
+.md { overflow-wrap: anywhere; line-height: 1.65; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md blockquote, .md pre, .md .diagram { margin: .6em 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-weight: 600; line-height: 1.3; margin: 1.1em 0 .45em; }
+.md h1 { font-size: 1.45em; } .md h2 { font-size: 1.3em; } .md h3 { font-size: 1.12em; } .md h4 { font-size: 1em; } .md h5 { font-size: .93em; } .md h6 { font-size: .87em; color: var(--muted); }
+.md ul, .md ol { padding-left: 1.4em; }
+.md ul { list-style: disc; } .md ol { list-style: decimal; }
+.md li { margin: .2em 0; }
+.md li > p { margin: .2em 0; }
+.md li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.3em; }
+.md input[type=checkbox] { margin-right: .45em; vertical-align: -1px; accent-color: var(--accent); }
+.md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.md strong { font-weight: 600; }
+.md blockquote { border-left: 3px solid var(--line); padding-left: .9em; color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--fg) 22%, transparent); margin: 1.4em 0; }
+.md code, .rawtext, .font-mono, pre { font-variant-ligatures: none; }
+.md code { font-family: var(--font-mono); font-size: .86em; }
+.md :not(pre) > code { background: var(--raised); border: 1px solid var(--line); padding: .08em .35em; border-radius: 5px; }
+/* A table scrolls sideways in its .md-table box instead of squeezing its
+   columns: the table is as wide as its content, each cell wraps at a
+   readable measure, and cells opt out of .md's break-anywhere, which would
+   let a column shrink to one letter and split a path mid-word (break-word
+   still breaks a word too long for its cell). Headers stay on one line. */
+.md .md-table { margin: .6em 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.md table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: .93em; }
+.md th, .md td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: .45em .75em; text-align: left;
+  vertical-align: top; overflow-wrap: break-word; min-width: 8ch; max-width: 46ch; }
+.md :is(th, td):last-child { border-right: 0; }
+.md tr:last-child > td { border-bottom: 0; }
+.md th { background: var(--panel); font-weight: 600; white-space: nowrap; }
+/* A cell that is one code span — a path, an identifier — reads whole. */
+.md td.md-code-cell { max-width: none; white-space: nowrap; }
+.md img { display: none; }
+.md .md-image { color: var(--muted); }
+.md dl { margin: .6em 0; } .md dt { font-weight: 600; margin-top: .5em; } .md dd { margin-left: 1.4em; }
+.md kbd { font-family: var(--font-mono); font-size: .82em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: .05em .4em; background: var(--raised); }
+.md mark { background: color-mix(in srgb, var(--warn) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 .15em; }
+.md details { border: 1px solid var(--line); border-radius: 8px; padding: .4em .8em; margin: .6em 0; }
+.md summary { cursor: pointer; color: var(--muted); }
+.md sup, .md sub { font-size: .75em; }
+.md .md-fnref button { color: var(--accent); background: none; border: 0; padding: 0 .1em; font: inherit; }
+/* A mention in the owner's own words: a light chip that reads on the dark
+   bubble, darker on the light one. */
+.md .useref { border-radius: 5px; padding: .05em .3em; font-weight: 500; background: var(--mention-bg); color: var(--mention);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
+.md .md-footnotes { font-size: .9em; color: var(--muted); }
+.md .md-footnotes ol { padding-left: 1.4em; }
+.md .md-footnotes li:target, .md .md-footnotes li { scroll-margin: 80px; }
+
+.md .codeblock, .md .diagram { margin: .85em 0; }
+.md li > .codeblock, .md li > .diagram { margin: .6em 0; }
+.codeblock { border: 1px solid var(--line); border-radius: 10px; background: var(--code-bg); overflow: hidden; }
+.codeblock header {
+  /* The language and Copy are chrome, not text a selection should carry. */
+  user-select: none; -webkit-user-select: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 4px 6px 4px 12px; font-size: 12px; color: var(--faint); border-bottom: 1px solid var(--line);
+}
+.codeblock pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; }
+.codeblock pre code { font-family: var(--font-mono); background: none; border: 0; padding: 0; }
+.copybtn {
+  font-size: 12px; color: var(--muted); padding: 2px 8px; border-radius: 6px; background: transparent; border: 0;
+}
+.copybtn:hover { background: var(--hover); color: var(--fg); }
+
+.diagram { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--code-bg); }
+.diagram .canvas { min-height: 80px; overflow: auto; padding: 8px; }
+.diagram .canvas svg { max-width: 100%; height: auto; }
+.diagram details { border-top: 1px solid var(--line); font-size: 12px; }
+.diagram summary { padding: 6px 12px; color: var(--muted); cursor: pointer; }
+.diagram details pre { margin: 0; padding: 8px 12px; overflow-x: auto; font-family: var(--font-mono); }
+
+:root {
+  --pele-font: var(--font-sans);
+  --pele-font-mono: var(--font-mono);
+  --pele-bg: transparent;
+  --pele-fg: var(--fg);
+  --pele-muted: var(--muted);
+  --pele-surface: var(--raised);
+  --pele-surface-alt: var(--panel);
+  --pele-border: var(--line);
+  --pele-line: var(--muted);
+  --pele-accent: var(--accent);
+  --pele-error: var(--bad);
+  --pele-radius: 6px;
+}
+
+/* Syntax colors (highlight.js class names). */
+.hljs-comment, .hljs-quote { color: var(--faint); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type, .hljs-meta .hljs-keyword { color: #c792ea; }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute .hljs-string { color: #a5d6a7; }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-variable.constant_ { color: #f2b47c; }
+.hljs-title, .hljs-title.function_, .hljs-section { color: #82aaff; }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-name, .hljs-selector-class { color: #7fd4c4; }
+.hljs-built_in, .hljs-title.class_ { color: #ffcb6b; }
+.hljs-deletion { color: var(--bad); }
+.hljs-meta { color: var(--muted); }
+[data-theme="light"] .hljs-keyword, [data-theme="light"] .hljs-selector-tag, [data-theme="light"] .hljs-literal, [data-theme="light"] .hljs-type { color: #8a3fb8; }
+[data-theme="light"] .hljs-string, [data-theme="light"] .hljs-regexp, [data-theme="light"] .hljs-addition { color: #2f7a35; }
+[data-theme="light"] .hljs-number, [data-theme="light"] .hljs-symbol, [data-theme="light"] .hljs-bullet { color: #b25b0d; }
+[data-theme="light"] .hljs-title, [data-theme="light"] .hljs-title.function_, [data-theme="light"] .hljs-section { color: #2457c5; }
+[data-theme="light"] .hljs-attr, [data-theme="light"] .hljs-attribute, [data-theme="light"] .hljs-property, [data-theme="light"] .hljs-name { color: #1f7a6c; }
+[data-theme="light"] .hljs-built_in, [data-theme="light"] .hljs-title.class_ { color: #9a6b00; }
+
+/* Tool I/O and other raw text panes. */
+.rawtext {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 320px; overflow: auto; background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; margin: 0;
+}
+
+/* slim-select mapped onto the app tokens through its own variables. */
+:root {
+  --ss-primary-color: var(--accent);
+  --ss-bg-color: var(--raised);
+  --ss-font-color: var(--fg);
+  --ss-placeholder-color: var(--faint);
+  --ss-disabled-color: var(--panel);
+  --ss-border-color: var(--line);
+  --ss-highlight-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  --ss-focus-color: var(--accent);
+  --ss-main-height: 32px;
+  --ss-option-height: 32px;
+  --ss-border-radius: 8px;
+  --ss-content-height: 280px;
+}
+.ss-main { font-size: 13px; }
+/* A select in a toolbar: a row shorter than a form field. */
+.ss-dense { --ss-main-height: 28px; --ss-option-height: 28px; }
+.ss-dense .ss-main { font-size: 12px; padding: 0 6px; }
+.ss-dense.min-w-40 { min-width: 0; }
+/* The floating list sits a level above dialogs/panels: --raised blends into
+   --panel, so the list gets its own surface and a border you can actually see. */
+.ss-content { font-size: 13px; background-color: var(--pop); border-color: var(--pop-line); box-shadow: var(--shadow); z-index: 10000; }
+.ss-content .ss-search input { background-color: transparent; }
+.ss-content .ss-list .ss-option:hover:not(.ss-disabled) { background-color: color-mix(in srgb, var(--fg) 9%, transparent); color: var(--fg); }
+.ss-content .ss-list .ss-option.ss-highlighted, .ss-content .ss-list .ss-option:not(.ss-disabled).ss-selected { background-color: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--fg); }
+
+/* Dock panels drag from a divider inside their far edge. */
+.thread-sidebar {
+  --pane-min: 200px;
+  --pane-max: 384px;
+  --pane-reserve: 340px;
+  inline-size: clamp(var(--pane-min), var(--pane-width, 264px), min(var(--pane-max), calc(100% - var(--pane-reserve))));
+}
+.pane-splitter {
+  position: absolute;
+  inset-block: 0;
+  z-index: 5;
+  inline-size: 12px;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pane-splitter::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 5px;
+  inline-size: 2px;
+  background: transparent;
+}
+.pane-splitter:is(:hover, :focus-visible, [data-dragging])::before { background: var(--accent); }
+.pane-splitter--left { inset-inline-end: -6px; }
+.pane-splitter--right { display: none; inset-inline-start: -6px; }
+@media (min-width: 64rem) {
+  .thread-sidebar { --pane-reserve: 660px; }
+  .thread-sidepane {
+    --pane-min: 320px;
+    --pane-reserve: 340px;
+    inset: auto;
+    inline-size: clamp(var(--pane-min), var(--pane-width, min(48%, 760px)), calc(100% - var(--pane-reserve)));
+  }
+  .pane-splitter--right { display: block; }
+}
+.pane-splitter::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 4px;
+  inline-size: 4px;
+  block-size: 24px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--faint);
+  pointer-events: none;
+}
+.pane-splitter:is(:hover, :focus-visible, [data-dragging])::after { background: var(--accent); }
+.pane-splitter[aria-disabled="true"] { cursor: default; }
+.pane-splitter[aria-disabled="true"]::before,
+.pane-splitter[aria-disabled="true"]::after { display: none; }
+/* The side pane overlays the chat from md to lg: keep the sidebar's
+   divider out of the way under it. */
+@media (min-width: 48rem) and (width < 64rem) {
+  #app:has(.thread-sidepane) .pane-splitter--left { visibility: hidden; }
+}
+
+/* The live view's toolbar wraps its pickers below the address row when the
+   pane is too narrow to hold them in line. */
+.browser-split-view { container: browser-pane / inline-size; }
+@container browser-pane (inline-size < 440px) {
+  .browser-toolbar { flex-wrap: wrap; height: auto; min-height: 40px; padding-block: 6px; }
+  .browser-device-tools { flex-basis: 100%; justify-content: flex-end; }
+}
+
+/* The agent's pointer over the live view: it glides to each spot the agent
+   acts on, a click rings out from its tip, and it fades once the agent
+   has been still a moment. */
+.agent-pointer { position: absolute; pointer-events: none; z-index: 5;
+  transition: left .28s ease-out, top .28s ease-out, opacity .4s ease; }
+.agent-pointer .ring { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 9999px;
+  border: 2px solid var(--accent); opacity: 0; animation: agent-click .6s ease-out .28s; }
+@keyframes agent-click { from { opacity: .9; transform: scale(.3); } to { opacity: 0; transform: scale(1.4); } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-pointer { transition: opacity .4s ease; }
+  .agent-pointer .ring { animation: none; }
+}

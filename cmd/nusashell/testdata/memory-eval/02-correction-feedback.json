@@ -1,0 +1,31 @@
+{
+  "name": "correction-feedback",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Rename the handler to ServeConfig."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Renamed. Summary of changes: renamed the handler, updated two callers, ran the tests."
+    },
+    {
+      "role": "user",
+      "id": "m_3",
+      "text": "Stop adding a summary at the end of every reply, I read the diff myself."
+    },
+    {
+      "role": "assistant",
+      "id": "m_4",
+      "text": "Understood."
+    }
+  ],
+  "expect": [
+    {
+      "op": "add",
+      "evidence": "Stop adding a summary"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "stated-habit",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Before we plan the release: I always deploy on Fridays after lunch, never on Mondays. Can you draft the checklist?"
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Here is a release checklist built around a Friday afternoon deploy: freeze Thursday, tag Friday morning, deploy after lunch."
+    }
+  ],
+  "expect": [
+    {
+      "op": "add",
+      "evidence": "deploy on Fridays"
+    }
+  ]
+}

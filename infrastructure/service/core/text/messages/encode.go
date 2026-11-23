@@ -1,0 +1,580 @@
+package textmessages
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"path"
+	"strconv"
+	"strings"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	coretext "github.com/jahrulnr/nusashell/infrastructure/service/core/text"
+	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
+)
+
+// defaultMaxTokens fills the wire-required max_tokens when the model
+// leaves it unset — Anthropic rejects the request without one. Generous
+// enough to not clip thinking + answer on interactive turns; operators
+// override per model when they want a tighter cap.
+const defaultMaxTokens = 16384
+
+// blocksKey is the adapter-namespaced optionalContent key carrying the
+// assistant turn's ordered block template: text and tool_use entries are
+// bare placeholders ({"type":"text"} / {"type":"tool_use"}) refilled from
+// domain state; thinking, redacted_thinking, and server blocks are stored
+// verbatim — signatures bind to the prompt prefix, so order and content
+// must replay exactly as received.
+const blocksKey = "messages.content_blocks"
+
+// betaKey is the model optionalContent selector for the anthropic-beta
+// header. Unlike messages.<param> body escape hatches it cannot ride the
+// JSON body, so encodeRequest skips it and Send sets the header.
+const betaKey = "messages.anthropic_beta"
+
+var errUnsupported = errPlain("modality has no carrier on this wire")
+
+// encodeRequest maps domain state onto the wire body. Attachments resolve
+// to sendable form here (url/base64/text sources) — the domain stores
+// references only.
+func encodeRequest(conv *aggregate.Conversation, model entity.Model, stream bool, fileRoot wire.MediaRoot) (*RequestBody, error) {
+	maxTokens, err := coretext.MaxTokensOr(model, defaultMaxTokens, conv.EstimatedTokens())
+	if err != nil {
+		return nil, err
+	}
+	body := &RequestBody{
+		Model:     model.ID(),
+		MaxTokens: maxTokens,
+		Stream:    stream,
+		Metadata:  &MetadataBody{UserID: conv.ID()},
+	}
+	if sp := conv.SystemPrompt(); sp != "" {
+		body.System = sp
+	}
+	for _, m := range conv.ModelReplay() {
+		msgs, err := encodeMessage(m, model, fileRoot)
+		if err != nil {
+			return nil, err
+		}
+		for _, msg := range msgs {
+			// Roles must alternate — an assistant turn with calls
+			// already emits a tool_result user turn, so a following
+			// user message folds into it (the same merge rule the
+			// generatecontent adapter applies). String content
+			// normalizes to a text block so turns merge as one array.
+			if n := len(body.Messages); n > 0 && body.Messages[n-1].Role == msg.Role {
+				body.Messages[n-1].Content = append(
+					contentBlocks(body.Messages[n-1].Content), contentBlocks(msg.Content)...)
+			} else {
+				body.Messages = append(body.Messages, msg)
+			}
+		}
+	}
+	for _, t := range conv.Tools() {
+		if !t.CallableByAgent() {
+			continue // system-only and disabled tools never reach the wire
+		}
+		body.Tools = append(body.Tools, ToolBody{
+			Name:        t.Name(),
+			Description: t.Description(),
+			InputSchema: t.Parameters(),
+		})
+	}
+
+	body.Temperature = model.Temperature()
+	body.TopP = model.TopP()
+	body.TopK = model.TopK()
+	body.StopSequences = model.StopSequences()
+	// Params without a wire home are dropped, not zeroed — presence/
+	// frequency penalty and seed don't exist on this surface; the provider
+	// validates what it receives.
+	if e := model.Effort(); !e.IsUnset() && e != enum.EffortNone {
+		effort := e.String()
+		if e == enum.EffortMinimal {
+			effort = enum.EffortLow.String() // no minimal on this wire
+		}
+		body.OutputConfig = &OutputConfig{Effort: effort}
+	}
+	body.Thinking = thinkingRequest(model, body.MaxTokens)
+	// Adapter-namespaced escape hatch: "messages.<param>" lands verbatim —
+	// this is how thinking config and cache_control ride through without
+	// dedicated fields. Beta selectors are headers, not body fields.
+	for k, v := range model.OptionalContent() {
+		if k == betaKey {
+			continue
+		}
+		if name, ok := strings.CutPrefix(k, "messages."); ok {
+			if body.Extra == nil {
+				body.Extra = map[string]json.RawMessage{}
+			}
+			var raw json.RawMessage
+			if err := json.Unmarshal([]byte(v), &raw); err != nil {
+				raw, _ = json.Marshal(v) // not JSON → plain string value
+			}
+			body.Extra[name] = raw
+		}
+	}
+	return body, nil
+}
+
+// thinkingRequest builds the explicit thinking opt-in Anthropic requires
+// for visible reasoning — unlike open-source reasoning models (DeepSeek,
+// GLM), which emit reasoning by default, claude returns thinking blocks
+// only when asked. Only claude-* ids qualify: the contract is
+// Anthropic's, and an anthropic-compatible provider may front families
+// that reject the field outright. A configured messages.thinking
+// optionalContent suppresses the default entirely — the escape hatch
+// then carries exactly what the operator wrote (including a real
+// {"type":"disabled"}). effort:none stays silent: the disabled contract
+// only exists on some 5.x models at ≤high and 400s elsewhere, so there
+// is no safe wire for it.
+//
+// Generation split, verified against the wire:
+//   - Thinking exists on claude-3.7+ only — older ids reject the field
+//     entirely, so they get nothing.
+//   - 3.7 through 4.5 take enabled + budget_tokens — the only thinking
+//     contract they know. They never think by default, so the request
+//     rides the user's effort pick rather than firing unconditionally.
+//   - ≥4.6 (and anything unparseable — treated as current) takes
+//     adaptive + display summarized. On 5.x adaptive thinking already
+//     runs with display omitted — this asks the same default to surface
+//     its summary. On 4.6–4.8 thinking defaults OFF, so this is a
+//     capability opt-in, not just visibility: deliberate — it matches
+//     the open-source behavior where reasoning reaches the user
+//     whenever the model reasons. Adaptive still lets the model decide
+//     whether a prompt warrants thinking at all.
+func thinkingRequest(model entity.Model, maxTokens int) *ThinkingBody {
+	if claudeMarker(model.ID()) < 0 {
+		return nil
+	}
+	if _, configured := model.OptionalContent()["messages.thinking"]; configured {
+		return nil
+	}
+	effort := model.Effort()
+	if effort == enum.EffortNone {
+		return nil
+	}
+	if claudeEnabledEra(model.ID()) {
+		if effort.IsUnset() {
+			return nil
+		}
+		budget := thinkingBudget(effort)
+		// budget_tokens must stay under max_tokens — the answer needs
+		// headroom. A cap too small to hold the budget skips thinking
+		// rather than silently lowering the effort the user asked for.
+		if budget <= 0 || budget >= maxTokens {
+			return nil
+		}
+		return &ThinkingBody{Type: "enabled", BudgetTokens: budget}
+	}
+	if !claudeThinks(model.ID()) {
+		return nil
+	}
+	return &ThinkingBody{Type: "adaptive", Display: "summarized"}
+}
+
+// claudeThinks reports whether the id's generation knows thinking at
+// all — the contract arrived with claude-3.7; older ids (or ids whose
+// version sits below it) reject the field. Unparseable reads as current:
+// new generations keep the adaptive contract.
+func claudeThinks(id string) bool {
+	major, minor, ok := claudeVersion(id)
+	if !ok {
+		return true
+	}
+	return major >= 4 || (major == 3 && minor >= 7)
+}
+
+// claudeEnabledEra reports whether the id names a generation that
+// accepts the enabled/budget thinking contract — claude-3.7 through 4.5;
+// 4.6 dropped it for adaptive and newer ids 400 on it. A missing minor
+// reads as .0 — claude-sonnet-4-20250514 is 4.0, still enabled-era.
+func claudeEnabledEra(id string) bool {
+	major, minor, ok := claudeVersion(id)
+	if !ok {
+		return false
+	}
+	return (major == 3 && minor >= 7) || (major == 4 && minor <= 5)
+}
+
+// claudeVersion parses the generation out of a claude-* id: the first
+// all-digit run after the "claude-" marker is the major, the next
+// ≤2-digit run the minor — an -YYYYMMDD date suffix never counts, and
+// dot-form versions ("claude-3.5-sonnet") parse like dash-form.
+// "claude-sonnet-4-5" → (4,5); "claude-3-5-sonnet-20241022" → (3,5).
+func claudeVersion(id string) (major, minor int, ok bool) {
+	i := claudeMarker(id)
+	if i < 0 {
+		return 0, 0, false
+	}
+	for _, seg := range strings.FieldsFunc(id[i+len("claude-"):], func(r rune) bool {
+		return r == '-' || r == '.'
+	}) {
+		// Pure-digit segments only — name words, dot minors, and date
+		// suffixes all fail Atoi and are not version components.
+		n, err := strconv.Atoi(seg)
+		if err != nil {
+			if ok {
+				break
+			}
+			continue
+		}
+		if !ok {
+			major, ok = n, true
+			continue
+		}
+		if len(seg) <= 2 {
+			minor = n
+		}
+		break
+	}
+	return major, minor, ok
+}
+
+// claudeMarker locates the "claude-" marker when it starts a segment —
+// "claude-haiku-5-5" and "anthropic/claude-sonnet-4" qualify, but
+// "notaclaude-v2" doesn't: the family marker can't tail another word.
+func claudeMarker(id string) int {
+	i := strings.Index(id, "claude-")
+	if i > 0 {
+		if c := id[i-1]; c == '_' || (c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			return -1
+		}
+	}
+	return i
+}
+
+// thinkingBudget maps effort onto the ≤4.5 wire's required budget_tokens
+// floor of 1024 — the generation's only depth dial.
+func thinkingBudget(e enum.Effort) int {
+	switch e {
+	case enum.EffortMinimal:
+		return 1024
+	case enum.EffortLow:
+		return 2048
+	case enum.EffortMedium:
+		return 4096
+	case enum.EffortHigh:
+		return 8192
+	case enum.EffortXHigh:
+		return 12288
+	case enum.EffortMax:
+		return 16000
+	}
+	return 0
+}
+
+// contentBlocks normalizes a turn's content to a block array — bare
+// strings become a single text block — so same-role turns merge into
+// one content array.
+func contentBlocks(content any) []any {
+	switch c := content.(type) {
+	case string:
+		return []any{ContentBlock{Type: "text", Text: c}}
+	case []any:
+		return c
+	case nil:
+		return nil // no content to merge
+	default:
+		// A shape this switch predates still rides the merge as its own
+		// block — dropping it would silently lose the turn's content.
+		return []any{content}
+	}
+}
+
+// encodeMessage emits one wire turn for plain messages, or an assistant
+// turn followed by a user turn of tool_result blocks when the domain
+// message carries executed calls — Anthropic has no tool role, results
+// ride inside the next user turn. Injection calls are application-
+// originated hydration: on a system-role record they encode as the
+// tool_use + tool_result pair they record — observed evidence rides at
+// tool-output trust, not inside an instruction turn. Anywhere else they
+// hydrate as inline text (legacy user-role records keep their shape).
+// Injection output attachments are never encoded. A call's own output
+// attachments ride inside its tool_result block — this wire carries
+// media there natively, no synthetic user message needed.
+func encodeMessage(m entity.Message, model entity.Model, fileRoot wire.MediaRoot) ([]MessageBody, error) {
+	role := "user"
+	if m.Role() == enum.RoleAssistant {
+		role = "assistant"
+	}
+	// Roles with no wire home (system/developer inside the message list)
+	// encode as user turns — mid-conversation system turns are
+	// model-conditional on this surface, a user turn is always legal.
+
+	var origin, injected []entity.ToolCall
+	for _, tc := range m.ToolCalls() {
+		if tc.Type() == enum.TooltypeInjection {
+			injected = append(injected, tc)
+		} else {
+			origin = append(origin, tc)
+		}
+	}
+
+	// A system-role hydration record with calls to show takes the
+	// completed-call wire shape: assistant tool_use blocks immediately
+	// answered by a user turn of tool_result blocks.
+	if m.Role() == enum.RoleSystem && len(injected) > 0 {
+		var msgs []MessageBody
+		if m.Content() != "" {
+			msgs = append(msgs, MessageBody{Role: "user", Content: m.Content()})
+		}
+		calls := append(append([]entity.ToolCall(nil), injected...), origin...)
+		msgs = append(msgs, MessageBody{Role: "assistant",
+			Content: encodeAssistantBlocks(m, "", calls)})
+		var results []any
+		for _, tc := range calls {
+			results = append(results, ContentBlock{Type: "tool_result",
+				ToolUseID: tc.ID(), Content: tc.OutputWithUntrustedTagOrInterrupted()})
+		}
+		msgs = append(msgs, MessageBody{Role: "user", Content: results})
+		return msgs, nil
+	}
+
+	var text strings.Builder
+	text.WriteString(m.Content())
+	for _, tc := range injected {
+		if tc.HasOutput() {
+			text.WriteString("\n" + tc.OutputWithUntrustedTag()) // already an untrusted-evidence envelope
+		}
+	}
+
+	var blocks []any
+	if role == "assistant" {
+		blocks = encodeAssistantBlocks(m, text.String(), origin)
+	} else {
+		if text.String() != "" {
+			blocks = append(blocks, ContentBlock{Type: "text", Text: text.String()})
+		}
+		for _, a := range m.Attachments() {
+			blocks = append(blocks, attachmentBlock(a, model, fileRoot))
+		}
+	}
+
+	var content any = text.String()
+	if len(blocks) > 0 {
+		content = blocks
+	}
+	msgs := []MessageBody{{Role: role, Content: content}}
+
+	if len(origin) > 0 {
+		var results []any
+		for _, tc := range origin {
+			content := tc.OutputWithUntrustedTagOrInterrupted()
+			if atts := tc.OutputAttachments(); len(atts) > 0 {
+				parts := []any{ContentBlock{Type: "text", Text: content}}
+				for _, a := range atts {
+					parts = append(parts, attachmentBlock(a, model, fileRoot))
+				}
+				results = append(results, ContentBlock{Type: "tool_result", ToolUseID: tc.ID(), Content: parts})
+			} else {
+				results = append(results, ContentBlock{Type: "tool_result", ToolUseID: tc.ID(), Content: content})
+			}
+		}
+		msgs = append(msgs, MessageBody{Role: "user", Content: results})
+	}
+	return msgs, nil
+}
+
+// encodeAssistantBlocks rebuilds the assistant turn's content in the order
+// the provider produced it. A stored template replays thinking and server
+// blocks verbatim with text/tool_use refilled at their original positions;
+// without one, text leads and tool_use blocks follow — the shape a
+// non-thinking turn takes.
+func encodeAssistantBlocks(m entity.Message, text string, origin []entity.ToolCall) []any {
+	var blocks []any
+	var template []json.RawMessage
+	if raw := m.OptionalContent()[blocksKey]; raw != "" {
+		_ = json.Unmarshal([]byte(raw), &template) // malformed → default order below
+	}
+	textDone, used := false, 0
+	emitText := func() {
+		// The domain stores one concatenated string. A second text
+		// placeholder must not refill that whole string again.
+		if textDone {
+			return
+		}
+		blocks = append(blocks, ContentBlock{Type: "text", Text: text})
+		textDone = true
+	}
+	emitCall := func() {
+		if used >= len(origin) {
+			return
+		}
+		blocks = append(blocks, toolUseBlock(origin[used]))
+		used++
+	}
+	for _, entry := range template {
+		var head struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(entry, &head); err != nil {
+			continue
+		}
+		switch head.Type {
+		case "text":
+			emitText()
+		case "tool_use":
+			emitCall()
+		default:
+			blocks = append(blocks, entry) // verbatim — signatures must not be reserialized
+		}
+	}
+	if !textDone && (text != "" || (len(blocks) == 0 && len(origin) == 0)) {
+		// Emit a text block when content exists or the turn would carry
+		// nothing — but not a filler "" ahead of tool_use blocks:
+		// Anthropic rejects empty text blocks.
+		emitText()
+	}
+	for used < len(origin) {
+		emitCall()
+	}
+	return blocks
+}
+
+// toolUseBlock encodes one domain call as a wire tool_use block — input is
+// an object on this surface, so malformed stored input degrades to {}.
+func toolUseBlock(tc entity.ToolCall) ContentBlock {
+	in := json.RawMessage(tc.Input())
+	if !json.Valid(in) || len(in) == 0 {
+		in = json.RawMessage("{}")
+	}
+	return ContentBlock{Type: "tool_use", ID: tc.ID(), Name: tc.Name(), Input: in}
+}
+
+// attachmentBlock maps a stored reference to its wire block, degrading in
+// place when the model can't take the modality or the wire can't carry it
+// — a missing file must not wedge the whole request.
+func attachmentBlock(a valueobject.Attachment, model entity.Model, fileRoot wire.MediaRoot) any {
+	if !model.AcceptsInput(a.Modality()) {
+		return ContentBlock{Type: "text", Text: "(" + a.Modality().String() + " attachment omitted: model does not accept it)"}
+	}
+	b, err := encodeAttachment(a, fileRoot)
+	if err != nil {
+		label := "(media attachment unavailable)"
+		if err == errUnsupported {
+			label = "(" + a.Modality().String() + " attachment omitted: this wire cannot carry it)"
+		} else if name := safeAttachmentName(a.Name()); name != "" {
+			label = "(media attachment unavailable: " + name + ")"
+		}
+		return ContentBlock{Type: "text", Text: label}
+	}
+	return b
+}
+
+// encodeAttachment resolves a reference into an image or document block.
+// Remote URLs ride as url sources (the provider fetches them); local and
+// inline payloads go base64 — or as a text document source when the media
+// is already plain text.
+func encodeAttachment(a valueobject.Attachment, fileRoot wire.MediaRoot) (ContentBlock, error) {
+	switch a.Modality() {
+	case enum.ModalityImage:
+		src, err := source(a, fileRoot)
+		if err != nil {
+			return ContentBlock{}, err
+		}
+		return ContentBlock{Type: "image", Source: src}, nil
+	case enum.ModalityFile, enum.ModalityText:
+		if strings.HasPrefix(a.MediaType(), "text/") {
+			src, err := textSource(a, fileRoot)
+			if err != nil {
+				return ContentBlock{}, err
+			}
+			return ContentBlock{Type: "document", Source: src}, nil
+		}
+		src, err := source(a, fileRoot)
+		if err != nil {
+			return ContentBlock{}, err
+		}
+		return ContentBlock{Type: "document", Source: src}, nil
+	default:
+		return ContentBlock{}, errUnsupported // audio/video — no carrier here
+	}
+}
+
+// source picks url vs base64 by scheme — remote references pass through,
+// local/inline materialize.
+func source(a valueobject.Attachment, fileRoot wire.MediaRoot) (*SourceBody, error) {
+	uri := a.URI()
+	if strings.HasPrefix(uri, "https://") || strings.HasPrefix(uri, "http://") {
+		if _, err := wire.ResolveURI(a, fileRoot); err != nil {
+			return nil, err
+		}
+		return &SourceBody{Type: "url", URL: uri}, nil
+	}
+	data, mediaType, err := wire.ResolveBase64(a, fileRoot)
+	if err != nil {
+		return nil, err
+	}
+	return &SourceBody{Type: "base64", MediaType: mediaType, Data: data}, nil
+}
+
+// textSource materializes a text/* attachment as a document text source —
+// the wire wants the content itself, not an encoding of it.
+func textSource(a valueobject.Attachment, fileRoot wire.MediaRoot) (*SourceBody, error) {
+	uri := a.URI()
+	if strings.HasPrefix(uri, "https://") || strings.HasPrefix(uri, "http://") {
+		if _, err := wire.ResolveURI(a, fileRoot); err != nil {
+			return nil, err
+		}
+		return &SourceBody{Type: "url", URL: uri}, nil
+	}
+	data, _, err := wire.ResolveBase64(a, fileRoot)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, err
+	}
+	return &SourceBody{Type: "text", MediaType: a.MediaType(), Data: string(raw)}, nil
+}
+
+func safeAttachmentName(name string) string {
+	name = path.Base(strings.ReplaceAll(name, `\`, "/"))
+	if name == "." || name == "/" {
+		return ""
+	}
+	return name
+}
+
+type plainError string
+
+func (e plainError) Error() string { return string(e) }
+
+func errPlain(s string) error { return plainError(s) }
+
+// betaHeaderValue flattens the model's beta selector into the header form
+// Anthropic accepts: JSON string array, JSON string, or a comma/whitespace
+// separated list. Empty entries and duplicates are removed.
+func betaHeaderValue(model entity.Model) string {
+	raw := strings.TrimSpace(model.OptionalContent()[betaKey])
+	if raw == "" {
+		return ""
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		var one string
+		if err := json.Unmarshal([]byte(raw), &one); err == nil {
+			values = []string{one}
+		} else {
+			values = strings.FieldsFunc(raw, func(r rune) bool {
+				return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t'
+			})
+		}
+	}
+	seen := make(map[string]bool, len(values))
+	out := values[:0]
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return strings.Join(out, ", ")
+}

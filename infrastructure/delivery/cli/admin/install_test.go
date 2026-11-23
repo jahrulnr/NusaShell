@@ -1,0 +1,716 @@
+package admin
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/jahrulnr/nusashell/infrastructure/config"
+	"github.com/jahrulnr/nusashell/infrastructure/system"
+)
+
+func isolateInstallHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("CONFIG_PATH", "")
+	t.Setenv("PATH", "/usr/bin")
+	t.Chdir(t.TempDir())
+	return home
+}
+
+// fakeService is the system.Service port scripted per test — the admin
+// layer is exercised through the interface, the way main wires it.
+type fakeService struct {
+	availErr   error
+	registered system.Spec
+	regErr     error
+	deregName  string
+	deregNote  string
+	deregErr   error
+	startCalls int
+	startErr   error
+	stopCalls  int
+	stopErr    error
+	isActive   bool
+	elsewhere  bool
+	statusOut  string
+	state      system.State
+	statusErr  error
+	lingerErr  error
+	calls      []string
+}
+
+func (f *fakeService) Name() string { return "test service" }
+func (f *fakeService) Available() error {
+	f.calls = append(f.calls, "available")
+	return f.availErr
+}
+func (f *fakeService) Register(spec system.Spec) error {
+	f.calls = append(f.calls, "register")
+	f.registered = spec
+	return f.regErr
+}
+func (f *fakeService) Deregister(name string) (string, error) {
+	f.calls = append(f.calls, "deregister "+name)
+	f.deregName = name
+	return f.deregNote, f.deregErr
+}
+func (f *fakeService) Start(name string) error {
+	f.calls = append(f.calls, "start "+name)
+	f.startCalls++
+	return f.startErr
+}
+func (f *fakeService) Stop(name string) error {
+	f.calls = append(f.calls, "stop "+name)
+	f.stopCalls++
+	return f.stopErr
+}
+func (f *fakeService) Restart(name string) error {
+	f.calls = append(f.calls, "restart "+name)
+	return nil
+}
+func (f *fakeService) Status(name string) (string, system.State, error) {
+	f.calls = append(f.calls, "status "+name)
+	return f.statusOut, f.state, f.statusErr
+}
+func (f *fakeService) Active(string) bool          { return f.isActive }
+func (f *fakeService) ActiveElsewhere(string) bool { return f.elsewhere }
+func (f *fakeService) PersistAcrossLogout() error {
+	f.calls = append(f.calls, "linger")
+	return f.lingerErr
+}
+
+// writeServeConfig places a user config carrying the given port under
+// the isolated HOME — serveControl reads the port from it via
+// listenPort.
+func writeServeConfig(t *testing.T, home string, port int) {
+	t.Helper()
+	cfg := filepath.Join(home, ".config", "nusashell", "config.json")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg, []byte(fmt.Sprintf("{\"server\":{\"port\":%d}}\n", port)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// heldPort opens a loopback listener and keeps it — the port counts
+// as in-use until the caller closes the returned listener.
+func heldPort(t *testing.T) (int, net.Listener) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ln.Addr().(*net.TCPAddr).Port, ln
+}
+
+// freePort returns a loopback port that answered "refused" a moment
+// ago — good enough to exercise the not-in-use branch.
+func freePort(t *testing.T) int {
+	t.Helper()
+	port, ln := heldPort(t)
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return port
+}
+
+func TestServeLifecycle(t *testing.T) {
+	for _, arg := range []string{"install", "start", "stop", "status"} {
+		if !IsServeAdmin(arg) {
+			t.Fatalf("IsServeAdmin(%q) = false", arg)
+		}
+	}
+	for _, arg := range []string{"--port", "-h", "help", "--help", "repair", "uninstall"} {
+		if IsServeAdmin(arg) {
+			t.Fatalf("IsServeAdmin(%q) = true", arg)
+		}
+	}
+}
+
+func TestServeStartRefusesHeldPort(t *testing.T) {
+	home := isolateInstallHome(t)
+	port, ln := heldPort(t)
+	defer ln.Close()
+	writeServeConfig(t, home, port)
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"start"}, &out, &errs, svc); code == 0 {
+		t.Fatal("start on a held port succeeded")
+	}
+	if !strings.Contains(errs.String(), "already in use") {
+		t.Fatalf("stderr = %q, want the port conflict named", errs.String())
+	}
+	if svc.startCalls != 0 {
+		t.Fatalf("start reached the manager with a held port: %v", svc.calls)
+	}
+}
+
+func TestServeStartDelegates(t *testing.T) {
+	home := isolateInstallHome(t)
+	writeServeConfig(t, home, freePort(t))
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"start"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("start exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if svc.startCalls != 1 {
+		t.Fatalf("start did not reach the manager: %v", svc.calls)
+	}
+}
+
+func TestServeStopDelegatesWithoutConfig(t *testing.T) {
+	isolateInstallHome(t)
+	// stop must not depend on the config path resolving — a broken
+	// config cannot be allowed to block stopping the service.
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"stop"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("stop exit %d\n%s", code, errs.String())
+	}
+	if svc.stopCalls != 1 {
+		t.Fatalf("stop did not reach the manager: %v", svc.calls)
+	}
+}
+
+func TestServeStopSurfacesImplError(t *testing.T) {
+	isolateInstallHome(t)
+	svc := &fakeService{stopErr: errors.New("systemctl --user stop: boom")}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"stop"}, &out, &errs, svc); code == 0 {
+		t.Fatal("stop succeeded against a failing manager")
+	}
+	if !strings.Contains(errs.String(), "boom") {
+		t.Fatalf("stderr = %q", errs.String())
+	}
+}
+
+func TestServeStartFailureNamesHeldPort(t *testing.T) {
+	home := isolateInstallHome(t)
+	// The service believes itself active (so the preflight delegates),
+	// start still fails, and the port turns out held — the conflict
+	// message beats the raw manager error.
+	port, ln := heldPort(t)
+	defer ln.Close()
+	writeServeConfig(t, home, port)
+	svc := &fakeService{isActive: true, startErr: errors.New("systemctl --user start nusashell.service: boom")}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"start"}, &out, &errs, svc); code == 0 {
+		t.Fatal("start succeeded against a failing manager")
+	}
+	if !strings.Contains(errs.String(), "already in use") {
+		t.Fatalf("stderr = %q, want the port conflict named", errs.String())
+	}
+}
+
+func TestServeStartDelegatesWhenServiceActive(t *testing.T) {
+	home := isolateInstallHome(t)
+	// The service's own listener holds the port — an active service
+	// must still delegate start (a no-op), not be refused as a
+	// foreign port conflict.
+	port, ln := heldPort(t)
+	defer ln.Close()
+	writeServeConfig(t, home, port)
+	svc := &fakeService{isActive: true}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"start"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("start exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if svc.startCalls != 1 {
+		t.Fatalf("active service start did not reach the manager: %v", svc.calls)
+	}
+}
+
+func TestServeStartFailureSurfacesImplError(t *testing.T) {
+	home := isolateInstallHome(t)
+	writeServeConfig(t, home, freePort(t))
+	svc := &fakeService{startErr: errors.New("start failed — see `journalctl -u x`")}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"start"}, &out, &errs, svc); code == 0 {
+		t.Fatal("start succeeded against a failing manager")
+	}
+	if !strings.Contains(errs.String(), "journalctl") {
+		t.Fatalf("stderr = %q, want the impl's own hint passed through", errs.String())
+	}
+}
+
+func TestServeInstallWarnsWhenManagerUnavailable(t *testing.T) {
+	home := isolateInstallHome(t)
+	// serve install is the full install — the CLI copy stands even when
+	// no manager exists, so the service gap degrades to a warning.
+	svc := &fakeService{availErr: errors.New("user systemd is unavailable (no bus)")}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "bin", "nusashell")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range svc.calls {
+		if c == "register" {
+			t.Fatalf("register ran without a manager: %v", svc.calls)
+		}
+	}
+	if !strings.Contains(errs.String(), "service was not installed") {
+		t.Fatalf("stderr = %q", errs.String())
+	}
+}
+
+func TestInstallLingerUnsupportedIsNote(t *testing.T) {
+	isolateInstallHome(t)
+	svc := &fakeService{lingerErr: fmt.Errorf("%w: test service", system.ErrUnsupported)}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install", "--linger"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if !strings.Contains(errs.String(), "--linger skipped") {
+		t.Fatalf("stderr = %q, want the unsupported note", errs.String())
+	}
+}
+
+func TestServeStatusMapsStateToExitCode(t *testing.T) {
+	home := isolateInstallHome(t)
+	writeServeConfig(t, home, freePort(t))
+	for _, tc := range []struct {
+		state    system.State
+		statusEr error
+		wantCode int
+	}{
+		{system.StateRunning, nil, 0},
+		{system.StateStopped, nil, 3},
+		{system.StateFailed, nil, 3},
+		{system.StateUnknown, errors.New("bus gone"), 1},
+	} {
+		t.Run(fmt.Sprint(tc.state), func(t *testing.T) {
+			svc := &fakeService{statusOut: "report", state: tc.state, statusErr: tc.statusEr}
+			var out, errs bytes.Buffer
+			if code := ServeAdmin([]string{"status"}, &out, &errs, svc); code != tc.wantCode {
+				t.Fatalf("status exit %d, want %d", code, tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestUninstallDeregisters(t *testing.T) {
+	home := isolateInstallHome(t)
+	bin := filepath.Join(home, ".local", "bin", "nusashell")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := &fakeService{deregNote: "bus down; removed the file anyway"}
+	var out, errs bytes.Buffer
+	if code := Uninstall(nil, &out, &errs, svc); code != 0 {
+		t.Fatalf("uninstall exit %d", code)
+	}
+	if svc.deregName != "nusashell" {
+		t.Fatalf("deregister called with %q, want the CLI name", svc.deregName)
+	}
+	if _, err := os.Stat(bin); !os.IsNotExist(err) {
+		t.Fatalf("binary still present after uninstall: %v", err)
+	}
+	if !strings.Contains(errs.String(), "removed the file anyway") {
+		t.Fatalf("stderr = %q, want the impl's note surfaced", errs.String())
+	}
+}
+
+func TestInstallCopiesExecutable(t *testing.T) {
+	src, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err = filepath.EvalSymlinks(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "nusashell")
+	copied, err := installBinary(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !copied {
+		t.Fatal("expected a copy")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, before) {
+		t.Fatal("copied bytes differ from the executable")
+	}
+	fi, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o755 {
+		t.Fatalf("mode = %v, want 0755", fi.Mode().Perm())
+	}
+	after, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("source executable was modified")
+	}
+}
+
+func TestInstallBinarySkipsSameFile(t *testing.T) {
+	src, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err = filepath.EvalSymlinks(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied, err := installBinary(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied {
+		t.Fatal("reinstall of the running executable copied onto itself")
+	}
+	after, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Size() != after.Size() || before.ModTime() != after.ModTime() || before.Mode() != after.Mode() {
+		t.Fatalf("executable changed: before %+v after %+v", before, after)
+	}
+}
+
+func TestInstallRegistersWebService(t *testing.T) {
+	home := isolateInstallHome(t)
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\nstdout:\n%s\nstderr:\n%s", code, out.String(), errs.String())
+	}
+	bin := filepath.Join(home, ".local", "bin", "nusashell")
+	if _, err := os.Stat(bin); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(home, ".config", "nusashell", "config.json")
+	spec := svc.registered
+	if spec.Name != "nusashell" {
+		t.Fatalf("spec.Name = %q", spec.Name)
+	}
+	if spec.Exec != bin || len(spec.Args) != 1 || spec.Args[0] != "serve" {
+		t.Fatalf("spec.Exec/Args = %q %v, want %s serve", spec.Exec, spec.Args, bin)
+	}
+	if spec.Env["CONFIG_PATH"] != cfg {
+		t.Fatalf("spec.Env = %v, want CONFIG_PATH=%s", spec.Env, cfg)
+	}
+	// The daemon bakes a PATH into the unit so agent exec sees the
+	// user's toolchain — the installer's PATH led by stable user bins.
+	path := spec.Env["PATH"]
+	for _, want := range []string{
+		filepath.Join(home, ".local", "bin"),
+		filepath.Join(home, "go", "bin"),
+	} {
+		if !strings.Contains(path, want) {
+			t.Fatalf("spec.Env PATH %q missing %s", path, want)
+		}
+	}
+	if host := os.Getenv("PATH"); host != "" && !strings.Contains(path, host) {
+		t.Fatalf("spec.Env PATH %q lost the installer PATH %q", path, host)
+	}
+	data := filepath.Join(home, ".local", "share", "nusashell")
+	if spec.WorkingDir != data {
+		t.Fatalf("spec.WorkingDir = %q, want %q", spec.WorkingDir, data)
+	}
+	raw, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Validate(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Storage.Dir != data {
+		t.Fatalf("storage.dir = %q, want %q", loaded.Storage.Dir, data)
+	}
+	if !strings.Contains(errs.String(), "not on PATH") {
+		t.Fatalf("stderr = %q, want PATH hint", errs.String())
+	}
+	if !strings.Contains(out.String(), "http://127.0.0.1:10994") {
+		t.Fatalf("stdout = %q, want WebUI url", out.String())
+	}
+}
+
+func TestInstallWritesDesktopEntryAndIcon(t *testing.T) {
+	home := isolateInstallHome(t)
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	desktop := filepath.Join(home, ".local", "share", "applications", "nusashell.desktop")
+	body, err := os.ReadFile(desktop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"[Desktop Entry]",
+		"Name=NusaShell",
+		"Exec=xdg-open http://127.0.0.1:10994/",
+		"Icon=nusashell",
+		"Terminal=false",
+		"Categories=Network;",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("desktop entry missing %q:\n%s", want, body)
+		}
+	}
+	icon := filepath.Join(home, ".local", "share", "icons", "hicolor", "256x256", "apps", "nusashell.png")
+	raw, err := os.ReadFile(icon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) < 8 || !bytes.Equal(raw[:8], []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
+		t.Fatal("icon is not a PNG")
+	}
+}
+
+func TestUninstallRemovesDesktopEntryAndIcon(t *testing.T) {
+	home := isolateInstallHome(t)
+	shortcuts := []string{
+		filepath.Join(home, ".local", "share", "applications", "nusashell.desktop"),
+		filepath.Join(home, ".local", "share", "icons", "hicolor", "256x256", "apps", "nusashell.png"),
+	}
+	for _, path := range shortcuts {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := Uninstall(nil, &out, &errs, svc); code != 0 {
+		t.Fatalf("uninstall exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	for _, path := range shortcuts {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s still present after uninstall: %v", path, err)
+		}
+	}
+}
+
+func TestShortcutContent(t *testing.T) {
+	url := "http://127.0.0.1:10994/"
+	if got := internetShortcut(url); got != "[InternetShortcut]\r\nURL="+url+"\r\n" {
+		t.Fatalf("internetShortcut = %q", got)
+	}
+	if got := desktopEntry(url); !strings.Contains(got, "Exec=xdg-open "+url) {
+		t.Fatalf("desktopEntry = %q", got)
+	}
+}
+
+func TestLocalWebURLFollowsConfiguredPort(t *testing.T) {
+	home := isolateInstallHome(t)
+	writeServeConfig(t, home, 1234)
+	cfg := filepath.Join(home, ".config", "nusashell", "config.json")
+	if got := localWebURL(cfg); got != "http://127.0.0.1:1234/" {
+		t.Fatalf("localWebURL = %q", got)
+	}
+	if got := localWebURL(filepath.Join(home, "missing.json")); got != "http://127.0.0.1:10994/" {
+		t.Fatalf("localWebURL(missing) = %q", got)
+	}
+}
+
+func TestInstallReportsStartVsRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		active  bool
+		wantOut string
+	}{
+		{"fresh install starts", false, "service started"},
+		{"update restarts", true, "service restarted onto the new binary"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateInstallHome(t)
+			svc := &fakeService{isActive: tc.active}
+			var out, errs bytes.Buffer
+			if code := ServeAdmin([]string{"install"}, &out, &errs, svc); code != 0 {
+				t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+			}
+			if !strings.Contains(out.String(), tc.wantOut) {
+				t.Fatalf("stdout = %q, want %q", out.String(), tc.wantOut)
+			}
+		})
+	}
+}
+
+func TestInstallSkipsServiceWhenManagerUnavailable(t *testing.T) {
+	home := isolateInstallHome(t)
+	svc := &fakeService{availErr: errors.New("user systemd is unavailable (no bus)")}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "bin", "nusashell")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range svc.calls {
+		if c == "register" {
+			t.Fatalf("register ran without a manager: %v", svc.calls)
+		}
+	}
+	if !strings.Contains(errs.String(), "service was not installed") {
+		t.Fatalf("stderr = %q", errs.String())
+	}
+}
+
+func TestInstallNoServiceSkipsManager(t *testing.T) {
+	home := isolateInstallHome(t)
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install", "--no-service"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "bin", "nusashell")); err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.calls) != 0 {
+		t.Fatalf("manager touched with --no-service: %v", svc.calls)
+	}
+}
+
+func TestInstallLeavesExistingConfig(t *testing.T) {
+	home := isolateInstallHome(t)
+	cfg := filepath.Join(home, ".config", "nusashell", "config.json")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("{\"storage\":{\"dir\":\"./data\"}}\n")
+	if err := os.WriteFile(cfg, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("config rewritten:\n%s", got)
+	}
+	if svc.registered.WorkingDir != home {
+		t.Fatalf("spec.WorkingDir = %q, want home %q (relative storage.dir)", svc.registered.WorkingDir, home)
+	}
+}
+
+func TestInstallLingerFailureStillSucceeds(t *testing.T) {
+	isolateInstallHome(t)
+	svc := &fakeService{lingerErr: errors.New("linger was not enabled: denied — sudo loginctl enable-linger $USER")}
+	var out, errs bytes.Buffer
+	if code := ServeAdmin([]string{"install", "--linger"}, &out, &errs, svc); code != 0 {
+		t.Fatalf("install exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if !strings.Contains(errs.String(), "sudo loginctl enable-linger") {
+		t.Fatalf("stderr = %q", errs.String())
+	}
+	if !strings.Contains(out.String(), "http://127.0.0.1:10994") {
+		t.Fatalf("stdout = %q", out.String())
+	}
+	if slices.Contains(svc.calls, "linger") {
+		return
+	}
+	t.Fatalf("PersistAcrossLogout never called: %v", svc.calls)
+}
+
+func TestUninstallKeepsConfigAndData(t *testing.T) {
+	home := isolateInstallHome(t)
+	cfg := filepath.Join(home, ".config", "nusashell", "config.json")
+	data := filepath.Join(home, ".local", "share", "nusashell")
+	bin := filepath.Join(home, ".local", "bin", "nusashell")
+	for _, path := range []string{cfg, filepath.Join(data, "keep"), bin} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("marker"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &fakeService{}
+	var out, errs bytes.Buffer
+	if code := Uninstall(nil, &out, &errs, svc); code != 0 {
+		t.Fatalf("uninstall exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if svc.deregName != "nusashell" {
+		t.Fatalf("deregister = %q, want the CLI name", svc.deregName)
+	}
+	if _, err := os.Stat(bin); !os.IsNotExist(err) {
+		t.Fatalf("binary err = %v, want not exist", err)
+	}
+	if b, err := os.ReadFile(cfg); err != nil || string(b) != "marker" {
+		t.Fatalf("config = %q, err %v", b, err)
+	}
+	if b, err := os.ReadFile(filepath.Join(data, "keep")); err != nil || string(b) != "marker" {
+		t.Fatalf("data = %q, err %v", b, err)
+	}
+	if !strings.Contains(out.String(), "kept config "+cfg) || !strings.Contains(out.String(), "kept data "+data) {
+		t.Fatalf("stdout = %q", out.String())
+	}
+}
+
+func TestUninstallSurfacesDeregisterError(t *testing.T) {
+	isolateInstallHome(t)
+	svc := &fakeService{deregErr: errors.New("systemctl --user disable --now: boom")}
+	var out, errs bytes.Buffer
+	if code := Uninstall(nil, &out, &errs, svc); code == 0 {
+		t.Fatal("uninstall succeeded against a failing deregister")
+	}
+	if !strings.Contains(errs.String(), "boom") {
+		t.Fatalf("stderr = %q", errs.String())
+	}
+}
+
+func TestUninstallWithoutManagerSucceeds(t *testing.T) {
+	home := isolateInstallHome(t)
+	// A host with no service manager has no registration to remove; the
+	// copied binary still goes and uninstall reports success.
+	t.Setenv(system.BackendEnv, "bogus")
+	bin := filepath.Join(home, ".local", "bin", "nusashell")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out, errs bytes.Buffer
+	if code := Uninstall(nil, &out, &errs, system.New()); code != 0 {
+		t.Fatalf("uninstall exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	if _, err := os.Stat(bin); !os.IsNotExist(err) {
+		t.Fatalf("binary err = %v, want not exist", err)
+	}
+	if !strings.Contains(errs.String(), "no service registration removed") {
+		t.Fatalf("stderr = %q, want the no-manager note", errs.String())
+	}
+}

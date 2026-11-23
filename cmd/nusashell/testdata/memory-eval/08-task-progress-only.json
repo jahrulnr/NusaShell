@@ -1,0 +1,20 @@
+{
+  "name": "task-progress-only",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Run the tests and fix whatever fails."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Two tests failed; both fixed. All green now."
+    },
+    {
+      "role": "user",
+      "id": "m_3",
+      "text": "Good, now bump the version to 1.4.2 and update the changelog."
+    }
+  ]
+}

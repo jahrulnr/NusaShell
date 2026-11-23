@@ -1,0 +1,277 @@
+package textgeneratecontent
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+	coretext "github.com/jahrulnr/nusashell/infrastructure/service/core/text"
+	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
+)
+
+// streamResponse consumes the SSE body — each data: payload is a partial
+// GenerateContentResponse, and there is no terminal sentinel: end-of-
+// stream is connection close after the final candidate chunk. Text
+// streams live, parts accumulate (consecutive same-kind text parts merge
+// and adopt the latest signature), the last finishReason/usageMetadata
+// win, and EOF is the commit point. An idle past s.idle (reset per chunk)
+// is a dead connection — thinking phases run silent for minutes.
+func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler) error {
+	events := make(chan []byte)
+	errs := make(chan error, 1)
+	done := make(chan struct{})
+	defer close(done) // unblocks a pending send in the pump on early return
+	go readSSE(resp.Body, done, events, errs)
+
+	var (
+		parts    []json.RawMessage
+		finish   string
+		usage    *UsageBody
+		logged   []json.RawMessage
+		blocked  string
+		anyChunk bool
+	)
+	timer := time.NewTimer(s.idle)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.logAppend(ctx, "provider.stream", logged)
+			kept := completeParts(parts)
+			if partsHaveContent(kept) {
+				if err := s.commitStream(conv, onEvent, kept, "", usage, blocked, logged); err != nil {
+					return err
+				}
+			}
+			return apperror.New(408, "request canceled or timed out", ctx.Err())
+		case <-timer.C:
+			s.logAppend(ctx, "provider.stream", logged)
+			// finishReason already proved the turn ended — a stalled tail
+			// after the verdict commits like EOF, not a 502.
+			if finish == "" {
+				return apperror.New(502, "upstream stream idle", nil)
+			}
+			return s.commitStream(conv, onEvent, parts, finish, usage, blocked, logged)
+		case err := <-errs:
+			s.logAppend(ctx, "provider.stream", logged)
+			// EOF is this wire's terminal marker — commit whatever
+			// accumulated. Unlike completion/messages, a clean EOF
+			// without a finishReason is a complete turn here, not
+			// truncation: Gemini serves finishReason per-candidate and
+			// omits it on some deployments, so EOF is the only reliable
+			// terminal. A stream that died before its first chunk, or
+			// errored before a finishReason, is a truncated upstream —
+			// a reset in the tail gap after finishReason must not
+			// discard a complete turn.
+			if err != nil && finish == "" {
+				emit(onEvent, event.NewErrorEvent(err))
+				return err
+			}
+			if !anyChunk {
+				err := apperror.New(502, "upstream stream truncated", nil)
+				emit(onEvent, event.NewErrorEvent(err))
+				return err
+			}
+			if finish == "" {
+				// A settled commit always carries a finish verdict —
+				// "" only survives on partial (canceled) commits.
+				finish = "STOP"
+			}
+			return s.commitStream(conv, onEvent, parts, finish, usage, blocked, logged)
+		case data := <-events:
+			timer.Reset(s.idle)
+			if len(data) == 0 {
+				continue // keepalive heartbeat — traffic, not payload
+			}
+			logged = append(logged, data)
+			var rb ResponseBody
+			if err := json.Unmarshal(data, &rb); err != nil {
+				continue // partial/garbage lines are dropped, not fatal
+			}
+			if rb.Error != nil {
+				err := wire.WithRetryAfter(streamError(rb.Error, data), wire.RetryAfter(resp.Header.Get("Retry-After")))
+				s.logAppend(ctx, "provider.stream", logged)
+				emit(onEvent, event.NewErrorEvent(err))
+				return err
+			}
+			anyChunk = true
+			if rb.PromptFeedback != nil && rb.PromptFeedback.BlockReason != "" {
+				blocked = rb.PromptFeedback.BlockReason
+			}
+			for _, c := range rb.Candidates {
+				for _, raw := range c.Content.Parts {
+					parts = appendPart(parts, raw, onEvent)
+				}
+				if c.FinishReason != "" {
+					finish = c.FinishReason // the last one wins
+				}
+			}
+			if rb.Usage != nil {
+				usage = rb.Usage // cumulative — the last one wins
+			}
+		}
+	}
+}
+
+// completeParts drops a function call whose args object is still open.
+// Gemini delivers calls as whole parts; a truncated args payload is not
+// a call yet. Text and thought parts stay.
+func completeParts(parts []json.RawMessage) []json.RawMessage {
+	kept := make([]json.RawMessage, 0, len(parts))
+	for _, raw := range parts {
+		var p PartBody
+		if json.Unmarshal(raw, &p) != nil {
+			continue
+		}
+		if p.FunctionCall != nil {
+			args := p.FunctionCall.Args
+			if p.FunctionCall.Name == "" || len(args) == 0 || !json.Valid(args) {
+				continue
+			}
+		}
+		kept = append(kept, raw)
+	}
+	return kept
+}
+
+func partsHaveContent(parts []json.RawMessage) bool {
+	for _, raw := range parts {
+		var p PartBody
+		if json.Unmarshal(raw, &p) != nil {
+			continue
+		}
+		if p.Text != "" || p.FunctionCall != nil || p.Thought {
+			return true
+		}
+	}
+	return false
+}
+
+// appendPart folds one streamed part into the accumulator and emits its
+// live event. Text fragments of the same thought-ness merge into the
+// trailing part (a signature lands on the last fragment and binds the
+// merged whole); calls and other parts append as distinct entries.
+func appendPart(parts []json.RawMessage, raw json.RawMessage, onEvent event.TurnEventHandler) []json.RawMessage {
+	var p PartBody
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return parts
+	}
+	if p.FunctionCall == nil && (p.Text != "" || p.ThoughtSignature != "" || textPart(raw)) {
+		if p.Thought {
+			emit(onEvent, event.NewReasoningEvent(p.Text))
+		} else {
+			emit(onEvent, event.NewDeltaEvent(p.Text))
+		}
+		// Merge into a trailing text-kind part of the same thought-ness.
+		// Unmodeled parts (executableCode, codeExecutionResult, …) decode
+		// as an all-zero PartBody; remarshaling them would erase the
+		// payload the template has to replay verbatim.
+		if len(parts) > 0 && mergeableText(parts[len(parts)-1], p.Thought) {
+			var tail PartBody
+			if json.Unmarshal(parts[len(parts)-1], &tail) == nil {
+				tail.Text += p.Text
+				if p.ThoughtSignature != "" {
+					tail.ThoughtSignature = p.ThoughtSignature // signature binds the merged whole
+				}
+				if merged, err := json.Marshal(tail); err == nil {
+					parts[len(parts)-1] = merged
+					return parts
+				}
+			}
+		}
+	}
+	return append(parts, raw)
+}
+
+// mergeableText reports whether raw is a modeled text/thought part of the
+// given thought-ness. Any other key — function payloads, media, or a part
+// this adapter does not model — is a distinct entry and must stay raw.
+func mergeableText(raw json.RawMessage, thought bool) bool {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(raw, &keys) != nil {
+		return false
+	}
+	for k := range keys {
+		switch k {
+		case "text", "thought", "thoughtSignature":
+		default:
+			return false
+		}
+	}
+	var probe struct {
+		Text             *string `json:"text"`
+		Thought          bool    `json:"thought"`
+		ThoughtSignature string  `json:"thoughtSignature"`
+	}
+	if json.Unmarshal(raw, &probe) != nil {
+		return false
+	}
+	if probe.Text == nil && probe.ThoughtSignature == "" && !probe.Thought {
+		return false
+	}
+	return probe.Thought == thought
+}
+
+// commitStream turns the accumulated parts into the assistant message at
+// EOF — a stream whose decode carries nothing usable fails instead of
+// committing an empty turn; everything else commits through the shared
+// decode.
+func (s *Service) commitStream(conv *aggregate.Conversation, onEvent event.TurnEventHandler, parts []json.RawMessage, finish string, usage *UsageBody, blocked string, logged []json.RawMessage) error {
+	msg, meta, err := decodeParts(parts, finish) // reasoning already streamed live
+	if err != nil {
+		return err
+	}
+	if err := coretext.EmptyAnswerError(msg, meta.artifacts, blocked, logged); err != nil {
+		return err
+	}
+	if blocked != "" && msg.FinishReason() == "" {
+		msg.SetFinishReason(enum.FinishReasonContentFilter)
+	}
+	u, err := decodeUsage(usage)
+	if err != nil {
+		return err
+	}
+	conv.Append(msg)
+	conv.AddUsage(u)
+	for _, tc := range msg.ToolCalls() {
+		emit(onEvent, event.NewToolCallEvent(tc))
+	}
+	emit(onEvent, event.NewFinishedEvent(msg.FinishReason(), u))
+	return nil
+}
+
+// readSSE pumps SSE data payloads until EOF — no [DONE] sentinel on this
+// wire; payloads arrive as bare data: JSON. Sends select on done so a
+// canceled consumer can't leak the pump.
+func readSSE(body io.Reader, done <-chan struct{}, out chan<- []byte, errs chan<- error) {
+	defer close(errs) // nil receive = clean close
+	sc := wire.ScanSSE(body)
+	for sc.Scan() {
+		payload := wire.SSEData(sc.Bytes())
+		if len(payload) == 0 {
+			// Comments/keepalives are traffic too — heartbeat the idle
+			// timer; the consumer drops the empty event.
+			select {
+			case out <- []byte{}:
+			case <-done:
+				return
+			}
+			continue
+		}
+		select {
+		case out <- payload:
+		case <-done:
+			return
+		}
+	}
+	if err := sc.Err(); err != nil {
+		errs <- apperror.New(502, "upstream stream broken", err)
+	}
+}

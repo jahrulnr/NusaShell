@@ -1,0 +1,21 @@
+{
+  "name": "reference-tracker",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Ingestion bugs are tracked in the Linear project INGEST, file this one there when we're done."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Will do once the fix lands."
+    }
+  ],
+  "expect": [
+    {
+      "op": "add",
+      "evidence": "Linear project INGEST"
+    }
+  ]
+}
