@@ -48,11 +48,14 @@ export const baseName = (path) => String(path ?? '').replace(/[\\/]+$/, '').spli
 // video, or sound becomes a placeholder that lib/markdown.js turns into
 // the playable embed once the block is sanitized; another local file
 // becomes a file link; a remote address becomes a plain link.
-export function renderImage({ href, text }) {
+// nonce marks the placeholder as this render's own chrome, so a message that
+// writes the same attributes by hand is not mistaken for one (lib/mdchrome.js).
+export function renderImage({ href, text }, nonce = '') {
   const path = localTarget(href);
   const kind = path ? mediaKind(path) : '';
   if (kind) {
-    return `<span class="md-media" data-media="${esc(path)}" data-kind="${kind}" title="${esc(text)}">${esc(text || baseName(path))}</span>`;
+    const ns = nonce ? ` data-ns="${esc(nonce)}"` : '';
+    return `<span class="md-media" data-media="${esc(path)}" data-kind="${kind}"${ns} title="${esc(text)}">${esc(text || baseName(path))}</span>`;
   }
   if (path || /^(?:https?:)/i.test(String(href ?? '').trim())) {
     return `<a href="${esc(String(href).trim())}">${esc(text || (path ? baseName(path) : href))}</a>`;

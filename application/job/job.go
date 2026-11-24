@@ -29,6 +29,13 @@ type Deps struct {
 	Providers    drepo.Provider
 	Environments map[enum.Environment]EnvironmentDriver
 	Config       config.ConversationConfig
+	// ThreadsEffort is Settings → Models → "New threads" reasoning effort:
+	// what a room's first provider turn starts on when the caller names none
+	// and the room stores none — a cross-thread spawn, an automation run, a
+	// CLI send. None of those has a picker, so this is their only source for
+	// the value; WebUI and channel turns send their own. Unset keeps the
+	// model's configured effort.
+	ThreadsEffort enum.Effort
 	// Terminals owns conversation-keyed terminal sessions — reaped here
 	// because sessions outlive the jobs that opened them.
 	Terminals dservice.TerminalSessions

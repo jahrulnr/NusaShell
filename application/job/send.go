@@ -236,6 +236,16 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 				return err
 			}
 			providerID, modelID = prov.ID(), model.ID()
+			// A room's first provider turn starts from Settings → Models →
+			// "New threads" when nothing else names an effort: a spawn, an
+			// automation run, or any caller without a picker sends none, and
+			// the room stores none yet. Setting the turn's option — not only
+			// the model — stores it as the room's own, so the thread starts on
+			// that value and keeps it when the setting changes later. WebUI
+			// and channel turns still win: they always send their choice.
+			if len(conv.Messages()) == 0 && j.Opts.Effort == "" && conv.Effort() == "" && !d.ThreadsEffort.IsUnset() {
+				j.Opts.Effort = d.ThreadsEffort
+			}
 			// Per-turn selections override the catalog entry in memory; the
 			// room's workspace rebinds the same way providerID/modelID do below.
 			useSelection(&model, conv, j.Opts)

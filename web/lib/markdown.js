@@ -9,6 +9,7 @@ import hljs from '/vendor/highlight/highlight.min.mjs';
 import { mountDiagram, validateDiagramSource } from './diagram.js';
 import { markedUser, withRefSentinels, applyRefHighlights } from './usermark.js';
 import { renderImage, localTarget, baseName } from './mdlinks.js';
+import { CHROME_ATTRS, CHROME_CLASSES, NONCE_ATTR, newNonce, stripForeignChrome, diagramParts } from './mdchrome.js';
 import { fileURL } from './api.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -21,18 +22,21 @@ marked.use({
       const language = (lang || '').trim().split(/\s+/)[0].toLowerCase();
       const closed = /\n[ \t]*(`{3,}|~{3,})[ \t]*\n*$/.test(raw ?? '');
       if (DIAGRAM_LANGS.has(language) && closed) {
-        return `<div class="diagram" data-diagram><div class="canvas"></div>`
+        // Every element that carries a chrome class carries the nonce with
+        // it: the strip takes the class off anything else, including our own
+        // canvas if it were left unmarked (lib/mdchrome.js).
+        return `<div class="diagram" data-diagram ${NONCE_ATTR}="${nonce}"><div class="canvas" ${NONCE_ATTR}="${nonce}"></div>`
           + `<details><summary>Diagram source</summary><pre>${esc(text)}</pre></details></div>`;
       }
       const label = DIAGRAM_LANGS.has(language) && !closed ? `${language} · streaming` : (language || 'text');
-      return `<div class="codeblock"><header><span>${esc(label)}</span>`
-        + `<button type="button" class="copybtn" data-copy>Copy</button></header>`
-        + `<pre><code data-lang="${esc(language)}">${esc(text)}</code></pre></div>`;
+      return `<div class="codeblock" ${NONCE_ATTR}="${nonce}"><header><span>${esc(label)}</span>`
+        + `<button type="button" class="copybtn" data-copy ${NONCE_ATTR}="${nonce}">Copy</button></header>`
+        + `<pre><code data-lang="${esc(language)}" ${NONCE_ATTR}="${nonce}">${esc(text)}</code></pre></div>`;
     },
     // A local picture, video, or sound shows inline (lib/mdlinks.js); a
     // remote one is never fetched. Raw HTML passes through and is reduced
     // to the allowlist below by DOMPurify, so <img>/<video> never survive.
-    image: renderImage,
+    image: (token) => renderImage(token, nonce),
   },
   extensions: [{
     // GitHub-style footnote reference: [^id]. Definitions are lifted out of
@@ -47,13 +51,17 @@ marked.use({
     },
     renderer(t) {
       const n = footnotes.get(t.id).n;
-      return `<sup class="md-fnref"><button type="button" data-fn="${esc(t.id)}" title="Footnote ${n}">${n}</button></sup>`;
+      return `<sup class="md-fnref" ${NONCE_ATTR}="${nonce}"><button type="button" data-fn="${esc(t.id)}" ${NONCE_ATTR}="${nonce}" title="Footnote ${n}">${n}</button></sup>`;
     },
   }],
 });
 
 // Footnotes of the message being rendered: id -> { n, text }.
 let footnotes = new Map();
+
+// The mark this render pass puts on the chrome it builds (lib/mdchrome.js).
+// Set with the footnotes and the file href, before any block is rendered.
+let nonce = newNonce();
 
 // Lifts "[^id]: text" definitions (with indented continuation lines) out of
 // the source and numbers them by first reference.
@@ -96,10 +104,10 @@ const TAGS = [
   'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var',
 ];
 const ATTRS = ['href', 'title', 'type', 'checked', 'disabled', 'align', 'start', 'open', 'colspan', 'rowspan', 'target', 'rel',
-  'class', 'data-copy', 'data-lang', 'data-diagram', 'data-fn', 'data-fn-def', 'data-file', 'data-media', 'data-kind'];
+  'class', 'data-file', NONCE_ATTR, ...CHROME_ATTRS];
 // Only the renderer's own class names survive, so pasted HTML cannot reach
 // the app's utility classes (e.g. a fixed overlay over the UI).
-const OWN_CLASSES = new Set(['codeblock', 'copybtn', 'diagram', 'canvas', 'md-image', 'md-media', 'md-fnref', 'md-footnotes']);
+const OWN_CLASSES = CHROME_CLASSES;
 
 // Only http(s), mailto, and same-origin paths (the app's /#/ thread links)
 // survive as they are. Bare #fragments are the app router's, so they are
@@ -155,6 +163,7 @@ function renderBlock(token, links, inst = marked) {
   wrap.className = 'contents';
   wrap.style.display = 'contents';
   wrap.innerHTML = DOMPurify.sanitize(html, PURIFY);
+  stripForeignChrome(wrap, nonce);
   return wrap;
 }
 
@@ -174,6 +183,7 @@ function embedMedia(path, kind, caption) {
   const box = document.createElement('span');
   box.className = 'md-embed';
   box.dataset.embed = url;
+  box.setAttribute(NONCE_ATTR, nonce);
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'md-embed-' + kind;
@@ -227,6 +237,7 @@ function embedMedia(path, kind, caption) {
 // and its pictures and videos keep their element instead of reloading.
 function decorate(wrap, reuse) {
   for (const ph of wrap.querySelectorAll('.md-media[data-media]')) {
+    if (ph.getAttribute(NONCE_ATTR) !== nonce) { ph.replaceWith(ph.textContent); continue; }
     const kind = ph.dataset.kind;
     if (!['image', 'video', 'audio'].includes(kind)) { ph.replaceWith(ph.textContent); continue; }
     const url = fileHref(ph.dataset.media);
@@ -255,12 +266,15 @@ function decorate(wrap, reuse) {
     }
   }
   for (const box of wrap.querySelectorAll('[data-diagram]')) {
-    const source = box.querySelector('details pre').textContent;
-    const canvas = box.querySelector('.canvas');
+    // Only a box this renderer built has the shape below; anything else is
+    // someone else's markup wearing the attribute, and is left alone.
+    const parts = diagramParts(box);
+    if (!parts) continue;
+    const { canvas, source } = parts;
     if (!validateDiagramSource(source)) {
       canvas.textContent = 'Diagram uses unsupported features — showing source.';
       canvas.className = 'canvas text-xs text-muted';
-      box.querySelector('details').open = true;
+      if (parts.details) parts.details.open = true;
       continue;
     }
     try {
@@ -270,7 +284,7 @@ function decorate(wrap, reuse) {
     } catch {
       canvas.textContent = 'Diagram could not be rendered.';
       canvas.className = 'canvas text-xs text-muted';
-      box.querySelector('details').open = true;
+      if (parts.details) parts.details.open = true;
     }
   }
 }
@@ -313,6 +327,7 @@ const fileHrefFor = (conversationId) => (conversationId ? (path) => fileURL(conv
 // conversationId names the thread whose workspace local paths resolve in.
 export function renderInto(root, source, { conversationId = '' } = {}) {
   let tokens;
+  nonce = newNonce();
   fileHref = fileHrefFor(conversationId);
   const { src, notes } = extractFootnotes(cleanFences(source));
   footnotes = notes;
@@ -331,6 +346,7 @@ export function renderInto(root, source, { conversationId = '' } = {}) {
 // sanitized block cache can reconcile them before they become spans.
 export function renderUserInto(root, source, refs, { conversationId = '' } = {}) {
   let tokens;
+  nonce = newNonce();
   fileHref = fileHrefFor(conversationId);
   const src = cleanFences(withRefSentinels(source, refs));
   try { tokens = markedUser.lexer(src); } catch { tokens = [{ type: 'paragraph', raw: src, text: src, tokens: [{ type: 'text', raw: src, text: src }] }]; }
@@ -340,16 +356,17 @@ export function renderUserInto(root, source, refs, { conversationId = '' } = {})
 }
 
 function renderFootnotes(notes, links) {
-  let html = '<section class="md-footnotes"><hr><ol>';
+  let html = `<section class="md-footnotes" ${NONCE_ATTR}="${nonce}"><hr><ol>`;
   for (const [id, v] of notes) {
     const body = marked.lexer(v.text);
     body.links = links;
-    html += `<li data-fn-def="${esc(id)}">${marked.parser(body)}</li>`;
+    html += `<li data-fn-def="${esc(id)}" ${NONCE_ATTR}="${nonce}">${marked.parser(body)}</li>`;
   }
   html += '</ol></section>';
   const wrap = document.createElement('div');
   wrap.style.display = 'contents';
   wrap.innerHTML = DOMPurify.sanitize(html, PURIFY);
+  stripForeignChrome(wrap, nonce);
   return wrap;
 }
 

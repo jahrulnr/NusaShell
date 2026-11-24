@@ -106,8 +106,11 @@ func New(
 			Providers:    providers,
 			Environments: environments,
 			Config:       ccfg,
-			Terminals:    terminals,
-			SummaryTool:  summaryTool,
+			// A new thread starts on this effort: spawns and automations have
+			// no picker to send one, so the setting is their only source.
+			ThreadsEffort: cfg.Models.Threads.Effort,
+			Terminals:     terminals,
+			SummaryTool:   summaryTool,
 		},
 		workers: map[string]*worker.Worker{},
 	}
@@ -252,6 +255,7 @@ func (app *ConversationApp) post(convID string, j queuedJob) {
 				ccfg.Normalize()
 				app.cfg = ccfg
 				app.deps.Config = ccfg
+				app.deps.ThreadsEffort = fresh.Models.Threads.Effort
 			}
 		}
 		deps := app.deps
