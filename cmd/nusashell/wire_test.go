@@ -53,7 +53,7 @@ func TestComposeInstallsAndRegistersSkills(t *testing.T) {
 	if permissions["skills"] != enum.ToolPermissionGeneral || permissions["read_skill"] != enum.ToolPermissionAgent || permissions["custom_tools"] != enum.ToolPermissionSystem {
 		t.Fatalf("skills not registered: %v", permissions)
 	}
-	for _, name := range []string{"skill-creator", "tool-creator"} {
+	for _, name := range []string{"skill-creator", "tool-creator", "nusashell", "coding-workflow"} {
 		if _, err := os.Stat(filepath.Join(cfg.Storage.Dir, "builtin-skills", name, "SKILL.md")); err != nil {
 			t.Fatal(err)
 		}

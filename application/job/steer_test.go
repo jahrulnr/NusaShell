@@ -92,7 +92,7 @@ func TestRunTurnFoldsSteerAfterToolResult(t *testing.T) {
 	svc := &steerFoldSvc{}
 	var kinds []enum.TurnEventKind
 	onEvent := func(e event.TurnEvent) { kinds = append(kinds, e.Kind()) }
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, onEvent, steers); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, onEvent, steers, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -169,7 +169,7 @@ func TestRunTurnFoldsSteerBeforeFirstCall(t *testing.T) {
 	steers := NewSteeringInput()
 	steers.push("early input")
 	svc := &captureSvc{}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, steers); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, steers, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	// Call 1 saw the folded steer with its context record trailing it.
@@ -217,7 +217,7 @@ func TestRunTurnLeavesUnconsumedSteer(t *testing.T) {
 	}
 	steers := NewSteeringInput()
 	svc := doneSvc{onSend: func() { steers.push("too late") }}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, steers); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, steers, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(conv.Messages()) != 3 {
@@ -346,7 +346,7 @@ func TestRunTurnSteerAppendCommittedDespiteError(t *testing.T) {
 		SummaryTool: mustSummaryTool(t), Convs: convs, Config: config.ConversationConfig{MaxTurnStep: 4}}
 	steers := NewSteeringInput()
 	receipt := steers.Submit(valueobject.UserInput{Text: "steer me"})
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, steers)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, steers, valueobject.TurnOrigin{})
 	if err == nil {
 		t.Fatal("the post-commit error must still fail the turn")
 	}
@@ -371,7 +371,7 @@ func TestRunTurnSteerAppendFailureLeavesUnconsumed(t *testing.T) {
 	steers := NewSteeringInput()
 	failed := steers.Submit(valueobject.UserInput{Text: "first line"})
 	drained := steers.Submit(valueobject.UserInput{Text: "second line"})
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, steers)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, steers, valueobject.TurnOrigin{})
 	if err == nil {
 		t.Fatal("the failed append must fail the turn")
 	}
@@ -388,7 +388,7 @@ func TestRunTurnSteerIdenticalTextBothPaths(t *testing.T) {
 	steers := NewSteeringInput()
 	steers.push("same text")
 	receipt := steers.Submit(valueobject.UserInput{Text: "same text"})
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, steers); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, steers, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -409,7 +409,7 @@ func TestRunTurnConsumesOnlyItsOwnMailbox(t *testing.T) {
 	queued := NewSteeringInput()
 	running.push("for the running turn")
 	queuedReceipt := queued.Submit(valueobject.UserInput{Text: "for the queued job"})
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, running); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, doneSvc{}, nil, running, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if queuedReceipt.State() != SteeringPending {

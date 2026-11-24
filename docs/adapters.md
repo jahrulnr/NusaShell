@@ -125,11 +125,11 @@ Three details matter:
 
 - **Injection vs origin calls.** Calls of `enum.TooltypeInjection` are
   application-originated hydration. On a `RoleSystem` record (the workspace
-  pin) they encode as the completed `tool_calls` + `tool` pair they record —
-  the harness ran them on the model's behalf — so observed evidence rides at
-  tool-output trust rather than inside an instruction turn. On any other
-  carrier (legacy user-role records) they fold into the message text
-  instead, and their output attachments are never encoded.
+  and origin pins) they encode as the completed `tool_calls` + `tool` pair
+  they record — the harness ran them on the model's behalf — so observed
+  evidence rides at tool-output trust rather than inside an instruction turn.
+  On any other carrier (legacy user-role records) they fold into the message
+  text instead, and their output attachments are never encoded.
 - **Tool output attachments ride a synthetic user message.** The
   chat-completions `tool` role is text-only, so media a call produced is sent
   as an openclaw-style follow-up user message labeling the call it came from.
@@ -463,13 +463,18 @@ in lexical order and report a diagnostic. Missing roots are empty; malformed
 skills and unreadable roots are reported as diagnostics without dropping valid
 entries. `read_skill` returns the original source and its absolute directory;
 supporting resources are read or executed from that directory as needed.
+ACP agents do not get the `skills`/`read_skill` tool catalog: their session
+instructions name the installed builtin-skills directory, and they read those
+`SKILL.md` files with their own file tools.
 
-Composition embeds and atomically installs `skill-creator` and `tool-creator`
-into the application-owned builtin root. Shipped files are refreshed from the
-binary on startup; user customizations belong in global or workspace roots.
-The source trees are `assets/skills/skill-creator/` and
-`assets/skills/tool-creator/`; nested scripts, references, templates, icons,
-and licenses are embedded and materialized with each skill.
+Composition embeds and atomically installs `skill-creator`, `tool-creator`,
+`nusashell`, and `coding-workflow` into the application-owned builtin root.
+Shipped files are refreshed from the binary on startup; user customizations
+belong in global or workspace roots. The source trees are
+`assets/skills/skill-creator/`, `assets/skills/tool-creator/`,
+`assets/skills/nusashell/`, and `assets/skills/coding-workflow/`; nested
+scripts, references, templates, icons, and licenses are embedded and
+materialized with each skill.
 The terminal environment provides custom executable paths and a lazy Python
 runtime as described below.
 

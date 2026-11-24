@@ -159,6 +159,9 @@ func TestScheduledRunsKeepTheirThread(t *testing.T) {
 	if len(calls) != 1 || calls[0].prompt != "What changed?" || calls[0].opts.Agent != "claude" {
 		t.Fatalf("calls = %+v", calls)
 	}
+	if got := calls[0].opts.Origin; got.Kind != enum.TurnOriginAutomation || got.Name != "Standup" {
+		t.Fatalf("origin = %+v, want the Standup automation", got)
+	}
 	first := calls[0].convID
 	if rooms.titles[first] != "Automation · Standup" {
 		t.Fatalf("title = %q", rooms.titles[first])

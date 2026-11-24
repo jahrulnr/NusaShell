@@ -129,7 +129,7 @@ func longTurn(t *testing.T, svc *longTurnSvc) *aggregate.Conversation {
 	model.SetContextWindow(entity.DefaultUnknownMaxOutputTokens + 500)
 	schema, _ := valueobject.NewToolSchema("push", "test tool", nil, true, enum.ToolPermissionAgent)
 	driver := EnvironmentBundle{Tools: map[string]dservice.Tool{"push": fatTool{schema: schema}}}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	return conv

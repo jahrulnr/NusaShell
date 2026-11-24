@@ -21,7 +21,7 @@ import (
 // its permission requests through the agent's policy and the owner, and
 // tries mid-turn steering; what the agent cannot take becomes a follow-up
 // prompt after the current prompt yields at its next safe point or ends.
-func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.Conversation, driver EnvironmentDriver, input entity.Message, onEvent event.TurnEventHandler, steers *SteeringInput) error {
+func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.Conversation, driver EnvironmentDriver, input entity.Message, onEvent event.TurnEventHandler, steers *SteeringInput, origin valueobject.TurnOrigin) error {
 	if d.Agents == nil || d.AgentRuntime == nil {
 		return apperror.New(503, "agent runtime unavailable", nil)
 	}
@@ -145,7 +145,7 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 				}
 			})
 		}
-		err := d.AgentRuntime.Prompt(ctx, dservice.AgentPrompt{Agent: agent, Conversation: conv, Workspace: dir, Input: input, Model: conv.ModelID(), ExtraFolders: extra, MCPServers: servers, Options: agentOptions(agent, conv), Elicit: elicit, OnStarted: started}, emit, approve)
+		err := d.AgentRuntime.Prompt(ctx, dservice.AgentPrompt{Agent: agent, Conversation: conv, Workspace: dir, Input: input, Model: conv.ModelID(), ExtraFolders: extra, MCPServers: servers, Options: agentOptions(agent, conv), Elicit: elicit, OnStarted: started, Origin: origin}, emit, approve)
 		stopLive()
 		steering.Wait()
 		// The runtime appends the reply even when the turn broke off —

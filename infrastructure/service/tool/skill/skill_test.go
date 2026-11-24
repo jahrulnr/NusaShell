@@ -32,6 +32,8 @@ func TestBuiltinSupportFilesEmbedAndInstall(t *testing.T) {
 		"tool-creator/scripts/init_tool.py",
 		"tool-creator/scripts/validate_tool.py",
 		"tool-creator/templates/main.py.tmpl",
+		"nusashell/SKILL.md",
+		"coding-workflow/SKILL.md",
 	}
 	builtin := Builtins()
 	installed := t.TempDir()
@@ -89,7 +91,7 @@ func TestBuiltinCatalogAndReadThroughTools(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.Text), &catalog); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Skills) != 2 || len(catalog.Diagnostics) != 0 {
+	if len(catalog.Skills) != 4 || len(catalog.Diagnostics) != 0 {
 		t.Fatalf("builtins = %+v", catalog)
 	}
 	readTool, err := NewReadSkillTool(store)

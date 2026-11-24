@@ -210,8 +210,8 @@ executed by the application — from `TooltypeInjection` calls, which are
 hydration entries the application inserts (announcements, subagent
 results). The distinction is load-bearing on the wire: the completion
 adapter encodes origin calls as real `tool_calls`. Injection calls on a
-system-role record (the workspace pin) encode as the completed call +
-result pair they record — the harness ran them on the model's behalf —
+system-role record (the workspace and origin pins) encode as the completed
+call + result pair they record — the harness ran them on the model's behalf —
 so observed evidence rides at tool-output trust. The pin's `workspace`
 name resolves against a real `ToolPermissionSystem` schema registered
 with the room's tool catalog (`tool/workspace`), so the call the model
@@ -331,6 +331,7 @@ adapter.
 | `Role` | `system`, `user`, `developer`, `assistant` | Message authorship |
 | `Style` | `completion`, `responses`, `messages`, `generatecontent` | Wire paradigm; the provider owns it and the app keys adapters on it |
 | `Tooltype` | `injection`, `origin` | App-injected hydration call vs model-originated call |
+| `TurnOriginKind` | `web`, `channel`, `automation`, `conversation` | Where a turn started; carried per turn, never in the system prompt |
 | `LLMUserType` | `origin`, `system` | Real user input vs system payload (compaction checkpoints are `system`) |
 | `ToolPermission` | `system`, `agent`, `general` | Who may invoke a `ToolSchema` |
 | `FinishReason` | `stop`, `tool_calls`, `length`, `content_filter`, `interrupted` | Normalized turn end; `length` means tool arguments may be truncated and must not be executed; `interrupted` is a caller cancel, never a provider verdict |
@@ -408,6 +409,13 @@ records and readers: `IsKeyRef` detects the shape, `KeyRefName` splits the
 ref into the name it points at, `SecretRef` builds the vault form. Any
 non-ref value is literal key material — writers persist refs verbatim, and
 readers may surface a ref but never the resolved value.
+
+**`TurnOrigin` — `turnorigin.go`.** Where one turn started: `web`, a chat
+`channel`, an `automation`, or another `conversation`. `Normalized()` trims
+the optional name and rejects the zero value and unknown kinds; `Description()`
+renders the one-line form the model reads. It is per-turn context, not
+conversation state — the API runtime records it as an `origin` injection call
+and the agent runtime sends it ahead of the prompt.
 
 **Support types.** `Workspace` (`workspace.go`) is a canonical
 slash-separated workspace-relative path — platform-neutral because the

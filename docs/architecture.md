@@ -306,6 +306,15 @@ is reused. Each iteration:
   `(unset)` when neither source supplies one. It persists like any
   message; adapters replay it as untrusted evidence alongside tool
   results; the system prompt never carries it.
+- **Record where the turn came from.** `SendOptions.Origin` carries the
+  web/channel/automation/thread source through Send, Edit, and Resume;
+  `runTurn` appends an injection-typed `origin` record before the provider
+  call, next to the workspace pin. The origin lives in per-turn history,
+  never in the system prompt, so the cached prompt prefix does not change
+  with the transport. The same origin already in the live tail is not
+  repeated; a different origin, or one sealed by compaction, records again.
+  ACP agents receive the same value as a prompt context block, since their
+  sessions do not read NusaShell history.
 - **Hydrate skills.** The selected environment registers `skills` with
   `ToolPermissionGeneral`: the discovery phase executes it with the turn's
   workspace context before calling the provider, and the agent may call it to
@@ -423,10 +432,10 @@ flushes the live block to scrollback and drains the input queue.
 
 The product exposes reasoning and tool activity received from providers as
 transcript data. The system prompt does not ask the model to suppress that
-data. The example about hiding private chain-of-thought in
-`infrastructure/prompt/system/conversation.md` is an instruction for the
-assistant implementing this product, not a restriction on the product's
-event stream.
+data. The rule that a coding agent must not invent an unrequested
+data-hiding boundary lives in the builtin `coding-workflow` skill — guidance
+for the assistant implementing this product, not a restriction on the
+product's event stream.
 
 On disk the whole time: `data/conversations/<id>/` holds `meta.json`,
 `active.jsonl` (the live tail), and numbered sealed segments. Messages
@@ -509,10 +518,11 @@ one choice.
 
 **The system prompt is code.** Because it is applied per turn and never
 persisted, upgrading the binary upgrades every room's prompt; because it
-is embedded, a room file is fully user-owned data. Workspace context
-never enters it — the turn injects the active path as a persisted
-`workspace` record behind the user's message instead, so history
-carries what the room actually saw.
+is embedded, a room file is fully user-owned data. Workspace and turn-origin
+context never enter it — the turn injects the active path as a persisted
+`workspace` record and the source as an `origin` record behind the user's
+message instead, so history carries what the room actually saw and the
+cached prompt prefix survives.
 
 ## Composition root specifics
 

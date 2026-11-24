@@ -12,6 +12,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoconversation "github.com/jahrulnr/nusashell/infrastructure/repository/conversation"
 )
@@ -50,7 +51,7 @@ func TestRunTurnRetriesTransientUpstreamFailure(t *testing.T) {
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
 	svc := &flakySvc{fails: 2, status: 502}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if want := int32(1 + len(sendRetryBackoff)); svc.calls != want {
@@ -77,7 +78,7 @@ func TestRunTurnAnnouncesRetryWait(t *testing.T) {
 			waits = append(waits, e.Status())
 		}
 	}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, onEvent, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, onEvent, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(waits) != len(sendRetryBackoff) {
@@ -99,7 +100,7 @@ func TestRunTurnNoRetryOnClientError(t *testing.T) {
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
 	svc := &flakySvc{fails: 9, status: 400}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil); err == nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err == nil {
 		t.Fatal("a definitive provider error must fail the turn")
 	}
 	if svc.calls != 1 {
@@ -117,7 +118,7 @@ func TestRunTurnRetryExhaustion(t *testing.T) {
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
 	svc := &flakySvc{fails: 9, status: 503}
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{})
 	if err == nil {
 		t.Fatal("exhausted retries must fail the turn")
 	}
@@ -155,7 +156,7 @@ func TestRunTurnNoRetryAfterEmittedDelta(t *testing.T) {
 			deltas++
 		}
 	}
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, onEvent, nil)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, onEvent, nil, valueobject.TurnOrigin{})
 	if err == nil {
 		t.Fatal("a mid-stream failure must fail the turn")
 	}
@@ -178,7 +179,7 @@ func TestRunTurnKeepsStreamedTextOnFailure(t *testing.T) {
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
 	svc := &emitThenFailSvc{status: 502}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil); err == nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err == nil {
 		t.Fatal("a mid-stream failure must fail the turn")
 	}
 	check := func(label string, c *aggregate.Conversation) {
@@ -253,7 +254,7 @@ func TestRunTurn413AfterEmittedDeltaPropagates(t *testing.T) {
 		}
 	}
 	svc := &emitThenFailSvc{status: 413}
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{})
 	if apperror.As(err).StatusCode() != 413 {
 		t.Fatalf("post-delta 413 must propagate, got %v", err)
 	}
@@ -294,7 +295,7 @@ func TestRunTurnHonorsRetryAfter(t *testing.T) {
 	svc := &retryAfterSvc{}
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	err := d.runTurn(ctx, "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil)
+	err := d.runTurn(ctx, "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{})
 	if apperror.As(err).StatusCode() != 408 {
 		t.Fatalf("retry-after wait must end as a canceled turn, got %v", err)
 	}

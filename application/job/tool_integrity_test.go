@@ -9,6 +9,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoconversation "github.com/jahrulnr/nusashell/infrastructure/repository/conversation"
 )
@@ -35,7 +36,7 @@ func TestRunTurnRejectsToolCallFinishWithoutCalls(t *testing.T) {
 		Config:      config.ConversationConfig{MaxTurnStep: 4},
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, &emptyToolCallSvc{}, nil, nil); err == nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, &emptyToolCallSvc{}, nil, nil, valueobject.TurnOrigin{}); err == nil {
 		t.Fatal("finish_reason=tool_calls with zero calls must fail the turn")
 	}
 }
@@ -59,7 +60,7 @@ func TestRunTurnStampsInterruptedFinishOnPartialReply(t *testing.T) {
 		Config:      config.ConversationConfig{MaxTurnStep: 4},
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, &canceledPartialSvc{}, nil, nil)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, &canceledPartialSvc{}, nil, nil, valueobject.TurnOrigin{})
 	if code := apperror.As(err).StatusCode(); code != 408 {
 		t.Fatalf("canceled turn → %v (status %d), want 408", err, code)
 	}

@@ -244,7 +244,9 @@ tool.
    agent can also call it to refresh the catalog. The hydration result is
    recorded exactly. Its repository owns discovery across builtin, global,
    and workspace roots. A separate `read_skill` agent tool loads the selected
-   source. See
+   source in the model runtime; an ACP agent gets the builtin-skills
+   directory in its session instructions and reads those `SKILL.md` files
+   with its own file tools. See
    [Skill discovery](adapters.md) for layout, precedence, and diagnostics.
 
    The same executed hydration phase records `custom_tools` paths. This is a
@@ -313,12 +315,12 @@ tool.
 
 ## Authoring skills and custom executables
 
-`skill-creator` and `tool-creator` are builtin skills with source under
-`assets/skills/`. Read them with `read_skill` and use the returned skill
-directory for script paths. Do not edit the application-owned builtin copy;
-it is refreshed from the binary. NusaShell discovers `name` and `description`
-from `SKILL.md`; it does not interpret `agents/openai.yaml` UI or policy
-fields.
+`skill-creator`, `tool-creator`, `nusashell`, and `coding-workflow` are
+builtin skills with source under `assets/skills/`. Read them with
+`read_skill` and use the returned skill directory for script paths. Do not
+edit the application-owned builtin copy; it is refreshed from the binary.
+NusaShell discovers `name` and `description` from `SKILL.md`; it does not
+interpret `agents/openai.yaml` UI or policy fields.
 
 Create and validate a workspace skill with:
 

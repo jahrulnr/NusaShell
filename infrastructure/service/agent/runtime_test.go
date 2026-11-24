@@ -456,9 +456,12 @@ func TestElicitationWithoutOwner(t *testing.T) {
 	}
 }
 
-// An agent that takes a system prompt gets NusaShell's guidance appended.
+// An agent that takes a system prompt gets NusaShell's guidance appended,
+// including the builtin-skill files it must read with its own tools.
 func TestSessionSystemPrompt(t *testing.T) {
 	rt, in := setup(t, "hello")
+	skillsDir := filepath.Join(t.TempDir(), "builtin-skills")
+	rt.opts.BuiltinSkillsDir = skillsDir
 	trace := filepath.Join(t.TempDir(), "trace")
 	if err := in.Agent.SetEnv(map[string]string{"FAKE_ACP_SYSTEM_PROMPT": "1", "FAKE_ACP_TRACE_SESSION_PROMPT": "1", "FAKE_ACP_TRACE": trace}); err != nil {
 		t.Fatal(err)
@@ -472,8 +475,17 @@ func TestSessionSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"systemPrompt":{"mode":"append"`) || !strings.Contains(string(raw), "NusaShell") {
+	got := strings.ReplaceAll(string(raw), `\\`, `\`)
+	if !strings.Contains(string(raw), `"systemPrompt":{"mode":"append"`) || !strings.Contains(got, "NusaShell") {
 		t.Fatalf("session/new = %s", raw)
+	}
+	for _, name := range []string{"nusashell", "coding-workflow"} {
+		if path := filepath.Join(skillsDir, name, "SKILL.md"); !strings.Contains(got, path) {
+			t.Fatalf("session instructions do not name %s: %s", path, raw)
+		}
+	}
+	if strings.Contains(got, "read_skill") {
+		t.Fatalf("session instructions name an API-only skill tool: %s", raw)
 	}
 }
 

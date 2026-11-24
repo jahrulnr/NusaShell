@@ -156,7 +156,7 @@ func TestRunTurnAppendsWorkspaceContextAfterEditableLine(t *testing.T) {
 	}
 	svc := &captureSvc{}
 	// The driver's default must lose to the binding.
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{DefaultRoot: "/elsewhere"}, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{DefaultRoot: "/elsewhere"}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -190,13 +190,13 @@ func TestRunTurnWorkspaceContextFallbackAndUnset(t *testing.T) {
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
 	svc := &captureSvc{}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{DefaultRoot: "/srv/root"}, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{DefaultRoot: "/srv/root"}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	requireWorkspaceContext(t, conv.Messages()[1], "/srv/root")
 
 	conv2 := seedRoom(t, d.Convs, "empty", "hi")
-	if err := d.runTurn(t.Context(), "empty", conv2, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "empty", conv2, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	requireWorkspaceContext(t, conv2.Messages()[1], "")
@@ -217,7 +217,7 @@ func TestRunTurnSingleContextThroughToolLoop(t *testing.T) {
 	schema, _ := valueobject.NewToolSchema("push", "test tool", nil, true, enum.ToolPermissionAgent)
 	driver := EnvironmentBundle{Tools: map[string]dservice.Tool{"push": pushTool{schema: schema}}}
 	svc := &steerFoldSvc{}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -273,7 +273,7 @@ func TestRunTurn413KeepTailOneLeavesSingleContext(t *testing.T) {
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
 	svc := &overflowOnceSvc{}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -317,7 +317,7 @@ func TestEditDropsAndRegeneratesWorkspaceContext(t *testing.T) {
 	if !ok {
 		t.Fatal("seed provider missing m1")
 	}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := d.Convs.Load(t.Context(), "room")
@@ -433,7 +433,7 @@ func TestWorkspaceImitationDeniedByPermissionGate(t *testing.T) {
 		Tools:       map[string]dservice.Tool{"workspace": &dirProbe{schema: wsSchema}},
 	}
 	conv := seedRoom(t, d.Convs, "room", "go")
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, &wsImitator{}, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, &wsImitator{}, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -474,7 +474,7 @@ func TestTurnWorkspaceBindingFallbackAndExecution(t *testing.T) {
 	if got := TurnWorkspace(conv, driver); got != "/fallback/dir" {
 		t.Fatalf("unbound TurnWorkspace = %q, want the fallback", got)
 	}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, &dirProbeSvc{}, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, &dirProbeSvc{}, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if probe.saw != "/fallback/dir" {
@@ -493,7 +493,7 @@ func TestTurnWorkspaceBindingFallbackAndExecution(t *testing.T) {
 	if got := TurnWorkspace(conv2, driver2); got != "/bound/dir" {
 		t.Fatalf("bound TurnWorkspace = %q, want the binding", got)
 	}
-	if err := d.runTurn(t.Context(), "bound", conv2, driver2, nil, entity.Model{}, &dirProbeSvc{}, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "bound", conv2, driver2, nil, entity.Model{}, &dirProbeSvc{}, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if probe2.saw != "/bound/dir" {
@@ -588,7 +588,7 @@ func TestRunTurnCompactRepinsWorkspaceContext(t *testing.T) {
 	schema, _ := valueobject.NewToolSchema("push", "test tool", nil, true, enum.ToolPermissionAgent)
 	driver := EnvironmentBundle{Tools: map[string]dservice.Tool{"push": fatTool{schema: schema}}}
 	svc := &foldWatchSvc{}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -641,7 +641,7 @@ func TestRunTurn413FoldRepinsWorkspaceContext(t *testing.T) {
 	// The second real call 413s into a fold whose kept tail is the
 	// answered assistant call — the seed line's record is sealed.
 	svc := &foldWatchSvc{failAt: 2}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -691,7 +691,7 @@ func TestRunTurn413FoldKeepsPinSuppressesRepin(t *testing.T) {
 	schema, _ := valueobject.NewToolSchema("push", "test tool", nil, true, enum.ToolPermissionAgent)
 	driver := EnvironmentBundle{Tools: map[string]dservice.Tool{"push": pushTool{schema: schema}}}
 	svc := &foldWatchSvc{failAt: 2}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -725,7 +725,7 @@ func TestRunTurnNoFoldLeavesNonEditableTailUnpinned(t *testing.T) {
 	svc := &foldWatchSvc{}
 	// The default window is wide enough that the fat result never
 	// reaches the budget — the fold branch never fires.
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -756,7 +756,7 @@ func TestWorkspacePinSkipsWhenUnchanged(t *testing.T) {
 	}
 	driver := EnvironmentBundle{DefaultRoot: "/fallback/dir"}
 	conv := seedRoom(t, d.Convs, "room", "first")
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, doneSvc{}, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, doneSvc{}, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	requireWorkspaceContext(t, conv.Messages()[1], "/fallback/dir")
@@ -767,7 +767,7 @@ func TestWorkspacePinSkipsWhenUnchanged(t *testing.T) {
 	if _, err := d.Convs.AppendMessage(t.Context(), "room", user2); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, doneSvc{}, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, doneSvc{}, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := countWorkspaceContexts(conv.Messages()); got != 1 {
@@ -782,13 +782,106 @@ func TestWorkspacePinSkipsWhenUnchanged(t *testing.T) {
 	if _, err := d.Convs.AppendMessage(t.Context(), "room", user3); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, doneSvc{}, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, doneSvc{}, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := countWorkspaceContexts(conv.Messages()); got != 2 {
 		t.Fatalf("pins = %d, want 2 — a dir change must re-record", got)
 	}
 	requireWorkspaceContext(t, conv.Messages()[len(conv.Messages())-2], "/other/dir")
+}
+
+// originContexts lists the injection records that name where a turn came
+// from, oldest first.
+func originContexts(msgs []entity.Message) []entity.ToolCall {
+	var out []entity.ToolCall
+	for _, m := range msgs {
+		for _, call := range m.ToolCalls() {
+			if call.Type() == enum.TooltypeInjection && call.Name() == "origin" {
+				out = append(out, call)
+			}
+		}
+	}
+	return out
+}
+
+// A turn records its origin next to the workspace pin. The same origin is
+// not repeated while its record is still in the live tail; a different
+// one — or a zero/unknown origin that has nothing to say — is handled
+// without churning history.
+func TestRunTurnRecordsOriginAndDedups(t *testing.T) {
+	d := Deps{
+		SummaryTool: mustSummaryTool(t),
+		Convs:       repoconversation.NewConversationRepository(t.TempDir()),
+		Config:      config.ConversationConfig{MaxTurnStep: 4},
+	}
+	conv := seedRoom(t, d.Convs, "room", "first")
+	driver := EnvironmentBundle{DefaultRoot: "/work"}
+	turn := func(text string, origin valueobject.TurnOrigin) {
+		t.Helper()
+		user, err := entity.NewMessage(enum.RoleUser, text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conv.Append(user)
+		if _, err := d.Convs.AppendMessage(t.Context(), "room", user); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, doneSvc{}, nil, nil, origin); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	turn("web turn", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb})
+	if got := originContexts(conv.Messages()); len(got) != 1 {
+		t.Fatalf("origin records = %d, want 1: %+v", len(got), got)
+	} else {
+		call := got[0]
+		if call.Input() != `{"kind":"web"}` || call.Output() != "turn origin: web" {
+			t.Fatalf("web origin = %q %q", call.Input(), call.Output())
+		}
+		if call.OutputLatency() != "" {
+			t.Fatalf("origin latency = %q, want empty — a stored record, not an execution", call.OutputLatency())
+		}
+	}
+
+	// The live tail still carries the web record, so a second web turn
+	// adds nothing.
+	turn("another web turn", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb})
+	if got := originContexts(conv.Messages()); len(got) != 1 {
+		t.Fatalf("origin records = %d, want 1 — unchanged origin repeated", len(got))
+	}
+
+	// A channel turn is a real change and records its name.
+	turn("from chat", valueobject.TurnOrigin{Kind: enum.TurnOriginChannel, Name: "telegram"})
+	got := originContexts(conv.Messages())
+	if len(got) != 2 {
+		t.Fatalf("origin records = %d, want 2", len(got))
+	}
+	if got[1].Input() != `{"kind":"channel","name":"telegram"}` || got[1].Output() != "turn origin: chat channel telegram" {
+		t.Fatalf("channel origin = %q %q", got[1].Input(), got[1].Output())
+	}
+
+	// An automation names the run, and the zero/unknown values write
+	// nothing.
+	turn("scheduled", valueobject.TurnOrigin{Kind: enum.TurnOriginAutomation, Name: "Daily report"})
+	turn("no origin", valueobject.TurnOrigin{})
+	turn("bad origin", valueobject.TurnOrigin{Kind: "carrier-pigeon"})
+	got = originContexts(conv.Messages())
+	if len(got) != 3 {
+		t.Fatalf("origin records = %d, want 3: %+v", len(got), got)
+	}
+	if got[2].Output() != `turn origin: automation "Daily report"` {
+		t.Fatalf("automation origin = %q", got[2].Output())
+	}
+
+	stored, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(originContexts(stored.Messages())) != 3 {
+		t.Fatal("origin records did not persist")
+	}
 }
 
 // contextScript is an EnvironmentDriver whose ToolContexts returns a

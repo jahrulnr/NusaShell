@@ -38,7 +38,7 @@ const maxRateLimitWait = 60 * time.Second
 // step — after the last tool result persisted, before the next
 // provider call — so injected text never bisects a tool-call/result
 // pair or interleaves with a streaming reply.
-func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conversation, driver EnvironmentDriver, prov *aggregate.Provider, model entity.Model, svc dservice.TextModelService, onEvent event.TurnEventHandler, steers *SteeringInput) error {
+func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conversation, driver EnvironmentDriver, prov *aggregate.Provider, model entity.Model, svc dservice.TextModelService, onEvent event.TurnEventHandler, steers *SteeringInput, origin valueobject.TurnOrigin) error {
 	// Hand-built Deps may carry a zero or invalid config — normalize
 	// clamps and tag defaults fill it.
 	ccfg := d.Config
@@ -168,6 +168,13 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 				return err
 			}
 			pinnedID = conv.Last().ID()
+		}
+		// Where the turn came from is per-turn context, recorded next to
+		// the workspace pin rather than in the system prompt: a prompt
+		// edited per request loses its cache prefix. The same origin in
+		// the live tail is not repeated; a fold that sealed it restores it.
+		if err := d.appendOriginContext(ctx, convID, conv, origin); err != nil {
+			return err
 		}
 		// The environment renders its system tool snapshots each step;
 		// unchanged ones dedup away so only semantic change costs a
@@ -707,6 +714,56 @@ scan:
 		return err
 	}
 	call.SetStoredOutput("workspace changed to "+shown, "")
+	if err := msg.AddToolCall(call); err != nil {
+		return err
+	}
+	conv.Append(msg)
+	_, err = d.Convs.AppendMessage(ctx, convID, msg)
+	return err
+}
+
+// appendOriginContext records where the turn came from as one
+// injection-typed `origin` call on a system-role message, appended before
+// the provider call it informs. It stays out of the system prompt so the
+// cached prefix never changes with the transport. The record carries the
+// structured origin as input and a one-line description as output; an
+// origin already sitting in the live tail is not repeated, while a
+// different one — or a sealed one after compaction — is.
+func (d Deps) appendOriginContext(ctx context.Context, convID string, conv *aggregate.Conversation, origin valueobject.TurnOrigin) error {
+	origin, ok := origin.Normalized()
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(origin)
+	if err != nil {
+		return apperror.New(500, "turn origin marshal failed", err)
+	}
+	input := string(raw)
+scan:
+	for _, v := range slices.Backward(conv.Messages()) {
+		for _, tc := range v.ToolCalls() {
+			if tc.Type() != enum.TooltypeInjection || tc.Name() != "origin" {
+				continue
+			}
+			if tc.Input() == input {
+				return nil
+			}
+			break scan // newest origin record names a different place — re-record
+		}
+	}
+	msg, err := entity.NewMessage(enum.RoleSystem, "")
+	if err != nil {
+		return err
+	}
+	callID, err := valueobject.NewID("call", "")
+	if err != nil {
+		return err
+	}
+	call, err := entity.NewToolCall(callID.String(), "origin", input, enum.TooltypeInjection)
+	if err != nil {
+		return err
+	}
+	call.SetStoredOutput("turn origin: "+origin.Description(), "")
 	if err := msg.AddToolCall(call); err != nil {
 		return err
 	}

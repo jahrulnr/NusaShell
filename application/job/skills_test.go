@@ -76,7 +76,7 @@ func TestRunTurnHydratesSkillsAndRefreshesChanges(t *testing.T) {
 		if turn == 2 {
 			discovery.text = `{"skills":[]}`
 		}
-		if err := d.runTurn(t.Context(), conv.ID(), conv, driver, nil, entity.Model{}, svc, nil, nil); err != nil {
+		if err := d.runTurn(t.Context(), conv.ID(), conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 			t.Fatal(err)
 		}
 		want := 1
@@ -107,7 +107,7 @@ func TestAgentCanCallSkillsCatalogAfterHydration(t *testing.T) {
 	conv := seedRoom(t, d.Convs, "skills-agent-call", "find a skill")
 	driver, discovery := skillsDriver(t)
 	svc := &skillsCallingService{t: t}
-	if err := d.runTurn(t.Context(), conv.ID(), conv, driver, nil, entity.Model{}, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), conv.ID(), conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if svc.calls != 2 {
@@ -216,7 +216,7 @@ func TestSkillsHydrationReappearsAfterCompaction(t *testing.T) {
 				model.SetContextWindow(entity.DefaultUnknownMaxOutputTokens + 500)
 			}
 			svc := &skillsFoldService{t: t, inner: inner}
-			if err := d.runTurn(t.Context(), conv.ID(), conv, driver, nil, model, svc, nil, nil); err != nil {
+			if err := d.runTurn(t.Context(), conv.ID(), conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 				t.Fatal(err)
 			}
 			if conv.Messages()[0].UserType() != enum.LLMUserTypeSystem {

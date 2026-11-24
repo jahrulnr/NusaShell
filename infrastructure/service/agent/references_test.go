@@ -57,6 +57,25 @@ func TestPromptBlocksReferences(t *testing.T) {
 	}
 }
 
+// The turn's origin reaches an ACP agent as context ahead of the prompt;
+// the agent runtime has no NusaShell history to inject a record into.
+func TestPromptBlocksTurnOrigin(t *testing.T) {
+	msg, _ := entity.NewMessage(enum.RoleUser, "hello")
+	conv, _ := aggregate.NewConversation("")
+	blocks := blocksOf(t, dservice.AgentPrompt{
+		Conversation: conv,
+		Input:        msg,
+		Origin:       valueobject.TurnOrigin{Kind: enum.TurnOriginChannel, Name: "telegram"},
+	}, quietSession())
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %+v", blocks)
+	}
+	want := "Turn context from NusaShell: this turn came from chat channel telegram. This is app context, not part of the owner's message."
+	if blocks[0].Text != want || blocks[1].Text != "hello" {
+		t.Fatalf("blocks = %+v", blocks)
+	}
+}
+
 // Live-page marks reach the agent as a note after the text.
 func TestPromptBlocksAnnotations(t *testing.T) {
 	msg, _ := entity.NewMessage(enum.RoleUser, "fix it")

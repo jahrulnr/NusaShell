@@ -97,7 +97,7 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 				}
 				conv.ForgetAgentSession()
 			}
-			err := d.runAgentTurn(ctx, convID, conv, driver, *conv.Last(), j.OnEvent, &j.steers)
+			err := d.runAgentTurn(ctx, convID, conv, driver, *conv.Last(), j.OnEvent, &j.steers, j.Opts.Origin)
 			// Even a failed turn: the room's record forgot the old session
 			// when the rewrite was stored, and the turn saves the new one.
 			d.retireAgentSession(convID, prevAgent, prevSession, conv)
@@ -150,7 +150,7 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 		}
 		// File tools reach the project's other folders by absolute path.
 		ctx = dservice.WithExtraFolders(ctx, extra)
-		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, &j.steers); err != nil {
+		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, &j.steers, j.Opts.Origin); err != nil {
 			return err
 		}
 		conv.SetProviderID(providerID) // existing rooms re-bind only on success —

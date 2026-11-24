@@ -29,6 +29,11 @@ func TestParseRoundtrips(t *testing.T) {
 			t.Fatalf("ToolPermission %q roundtrip failed", v)
 		}
 	}
+	for _, v := range []TurnOriginKind{TurnOriginWeb, TurnOriginChannel, TurnOriginAutomation, TurnOriginConversation} {
+		if got, f := ParseTurnOriginKind(v.String()); !f || got != v {
+			t.Fatalf("TurnOriginKind %q roundtrip failed", v)
+		}
+	}
 	for _, v := range []LLMUserType{LLMUserTypeOrigin, LLMUserTypeSystem} {
 		if got, f := ParseLLMUserType(v.String()); !f || got != v {
 			t.Fatalf("LLMUserType %q roundtrip failed", v)

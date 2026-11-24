@@ -477,7 +477,9 @@ func (h *Hub) turnResume(c *conn, cmd command) {
 // the use case, never here — a host filesystem check would reject
 // remote workspaces.
 func turnSelection(c *conn, cmd command, effort, upstream, workspace string) (appjob.SendOptions, bool) {
-	var opts appjob.SendOptions
+	// Every turn admitted by a socket is a web turn; channel, automation,
+	// and cross-thread runs enter through Hub.Run with their own origin.
+	opts := appjob.SendOptions{Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}}
 	if effort != "" {
 		e, ok := enum.ParseEffort(effort)
 		if !ok {

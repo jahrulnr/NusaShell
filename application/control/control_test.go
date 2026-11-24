@@ -72,7 +72,10 @@ func (f *fakeRooms) add(id string, role enum.Role, text string) {
 	f.mu.Unlock()
 }
 
-type run struct{ conv, provider, model, agent, project, text string }
+type run struct {
+	conv, provider, model, agent, project, text string
+	origin                                      valueobject.TurnOrigin
+}
 
 type fakeTurns struct {
 	mu    sync.Mutex
@@ -97,7 +100,7 @@ func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string,
 	f.rooms.mu.Unlock()
 	f.rooms.add(convID, enum.RoleUser, text)
 	f.rooms.add(convID, enum.RoleAssistant, "done: "+text)
-	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text}
+	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text, opts.Origin}
 	if f.gate != nil {
 		<-f.gate
 	}
@@ -257,6 +260,9 @@ func TestSendStopAndSpawn(t *testing.T) {
 	r := <-turns.runs
 	if r.conv != "c_other" || r.provider != "" || r.agent != "" || !strings.HasPrefix(r.text, "[From thread @otter Planner (c_self)]\n[Your answer here does not reach that thread. If it needs a reply, send one to c_self with the conversation MCP tool send.]\n\nship it") {
 		t.Fatalf("send ran %+v", r)
+	}
+	if r.origin.Kind != enum.TurnOriginConversation {
+		t.Fatalf("send origin = %+v, want another thread", r.origin)
 	}
 
 	// A busy thread takes the text into its running turn.

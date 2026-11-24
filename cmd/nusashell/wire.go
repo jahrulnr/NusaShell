@@ -376,11 +376,12 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	// serves every room bound to an agent.
 	agentRepo := repoagent.New(filepath.Join(dir, "agents"), secrets)
 	agentRuntime := serviceagent.New(serviceagent.Options{
-		ClientName:    admin.CLIName,
-		ClientTitle:   admin.ProductName,
-		ClientVersion: version,
-		Workspace:     workspaceStore,
-		Uploads:       uploads,
+		ClientName:       admin.CLIName,
+		ClientTitle:      admin.ProductName,
+		ClientVersion:    version,
+		Workspace:        workspaceStore,
+		BuiltinSkillsDir: builtinDir,
+		Uploads:          uploads,
 	})
 
 	projectRepo := repoproject.New(db)

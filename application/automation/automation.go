@@ -544,7 +544,8 @@ func (a *App) launch(ctx context.Context, au aggregate.Automation, run *entity.A
 	if err := a.repo.SaveRun(context.Background(), run); err != nil {
 		a.log.Warn("could not record a run", "automation", au.ID(), "error", err)
 	}
-	opts := appjob.SendOptions{Agent: au.AgentID(), Project: au.ProjectID()}
+	opts := appjob.SendOptions{Agent: au.AgentID(), Project: au.ProjectID(),
+		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginAutomation, Name: au.Name()}}
 	_, _, err := a.runner.Run(ctx, convID, au.ProviderID(), au.ModelID(), au.Prompt(), nil, opts, nil)
 	if err != nil {
 		// If the room is gone afterwards — deleted while the turn ran —

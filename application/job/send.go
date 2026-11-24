@@ -110,6 +110,10 @@ type SendOptions struct {
 	// a transport can submit steering into a send that is still queued
 	// on the room worker without touching whatever job is running.
 	Steering *SteeringInput
+	// Origin names where this turn started — the web UI, a chat channel,
+	// an automation, or another thread. The turn records it as context,
+	// never as part of the system prompt.
+	Origin valueobject.TurnOrigin
 }
 
 // Send is one user turn as a queued command: it validates routing,
@@ -331,10 +335,10 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 			if j.ModelID != "" {
 				conv.SetModelID(j.ModelID)
 			}
-			err = d.runAgentTurn(ctx, convID, conv, driver, user, j.OnEvent, j.mailbox())
+			err = d.runAgentTurn(ctx, convID, conv, driver, user, j.OnEvent, j.mailbox(), j.Opts.Origin)
 			d.retireAgentSession(convID, prevAgent, prevSession, conv)
 		} else {
-			err = d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, j.mailbox())
+			err = d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, j.mailbox(), j.Opts.Origin)
 		}
 		if err != nil {
 			// Route and model rebind only after success. Workspace and

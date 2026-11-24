@@ -77,7 +77,7 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 			if last.Role() != enum.RoleUser || !last.Editable() {
 				return apperror.New(409, "nothing to retry — send a new message to the agent", nil)
 			}
-			if err := d.runAgentTurn(ctx, convID, conv, driver, *last, j.OnEvent, &j.steers); err != nil {
+			if err := d.runAgentTurn(ctx, convID, conv, driver, *last, j.OnEvent, &j.steers, j.Opts.Origin); err != nil {
 				return err
 			}
 			return d.Convs.Save(ctx, conv)
@@ -104,7 +104,7 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 		}
 		// File tools reach the project's other folders by absolute path.
 		ctx = dservice.WithExtraFolders(ctx, extra)
-		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, &j.steers); err != nil {
+		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, &j.steers, j.Opts.Origin); err != nil {
 			return err
 		}
 		conv.SetProviderID(providerID)

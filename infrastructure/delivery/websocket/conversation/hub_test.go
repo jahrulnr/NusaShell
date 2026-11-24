@@ -60,7 +60,7 @@ func TestTurnSendPassesEnvironmentSelection(t *testing.T) {
 		}
 	}
 	opts := <-selected
-	if opts.Environment != enum.EnvironmentDocker || opts.Workspace != "/remote/project" {
+	if opts.Environment != enum.EnvironmentDocker || opts.Workspace != "/remote/project" || opts.Origin.Kind != enum.TurnOriginWeb {
 		t.Fatalf("forwarded opts = %+v", opts)
 	}
 }
@@ -104,7 +104,8 @@ func TestTurnEditPassesSelection(t *testing.T) {
 		}
 	}
 	if gotProviderID != "gw2" || gotModel != "claude-y" ||
-		gotOpts.Effort != enum.EffortHigh || gotOpts.Upstream != "or-fast" || gotOpts.Workspace != "/remote/project" {
+		gotOpts.Effort != enum.EffortHigh || gotOpts.Upstream != "or-fast" || gotOpts.Workspace != "/remote/project" ||
+		gotOpts.Origin.Kind != enum.TurnOriginWeb {
 		t.Fatalf("forwarded selection = %q %q %+v", gotProviderID, gotModel, gotOpts)
 	}
 }
@@ -142,7 +143,8 @@ func TestTurnResumePassesSelection(t *testing.T) {
 		}
 	}
 	if gotProviderID != "gw2" || gotModel != "claude-y" ||
-		gotOpts.Effort != enum.EffortHigh || gotOpts.Upstream != "or-fast" || gotOpts.Workspace != "/remote/project" {
+		gotOpts.Effort != enum.EffortHigh || gotOpts.Upstream != "or-fast" || gotOpts.Workspace != "/remote/project" ||
+		gotOpts.Origin.Kind != enum.TurnOriginWeb {
 		t.Fatalf("forwarded selection = %q %q %+v", gotProviderID, gotModel, gotOpts)
 	}
 }

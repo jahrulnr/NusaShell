@@ -35,6 +35,10 @@ type AgentPrompt struct {
 	ExtraFolders []string
 	// Input is the user message just appended to the room.
 	Input entity.Message
+	// Origin says where this turn started — the web UI, a chat channel,
+	// an automation, or another thread. The runtime sends it as turn
+	// context ahead of the prompt; the zero value adds nothing.
+	Origin valueobject.TurnOrigin
 	// Model is the agent model to run the turn on; "" keeps the agent's
 	// current choice.
 	Model string

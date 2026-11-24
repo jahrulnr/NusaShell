@@ -157,6 +157,7 @@ func (r *fakeRooms) AnswerElicitation(_, id string, a valueobject.ElicitationAns
 
 type runCall struct {
 	convID, provider, model, agent, content string
+	origin                                  valueobject.TurnOrigin
 }
 
 // fakeRunner "runs" a turn by writing a reply into fakeRooms.
@@ -176,7 +177,7 @@ type fakeRunner struct {
 
 func (f *fakeRunner) Run(_ context.Context, convID, providerID, modelID, content string, attachments []valueobject.Attachment, opts appjob.SendOptions, observe event.TurnEventHandler) (string, appconversation.SendResult, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, runCall{convID, providerID, modelID, opts.Agent, content})
+	f.calls = append(f.calls, runCall{convID, providerID, modelID, opts.Agent, content, opts.Origin})
 	f.files = append(f.files, attachments)
 	f.refs = append(f.refs, opts.References)
 	evs, fail := f.events, f.fail
@@ -266,6 +267,9 @@ func TestFirstMessageOpensALinkedThread(t *testing.T) {
 	app.process(ctx, msg("42", "42:1", "hello"))
 	if len(runner.calls) != 1 || runner.calls[0].provider != "or" || runner.calls[0].convID == "" {
 		t.Fatalf("runs = %+v", runner.calls)
+	}
+	if got := runner.calls[0].origin; got.Kind != enum.TurnOriginChannel || got.Name != "telegram" {
+		t.Fatalf("origin = %+v, want the telegram channel", got)
 	}
 	convID := runner.calls[0].convID
 	chat, _ := valueobject.NewChatRef("telegram", "42", "")

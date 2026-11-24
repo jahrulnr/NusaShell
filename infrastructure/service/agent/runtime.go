@@ -58,6 +58,10 @@ type Options struct {
 	// Workspace serves the agents' fs/read_text_file and fs/write_text_file
 	// inside each session's folders; nil refuses them.
 	Workspace drepo.Workspace
+	// BuiltinSkillsDir is where the composition root installed NusaShell's
+	// builtin skills. Session instructions name the SKILL.md files there so
+	// an ACP agent can read them with its own file tools; "" omits the note.
+	BuiltinSkillsDir string
 	// Uploads keeps the pictures and sounds an agent sends inline in its
 	// reply; nil drops them.
 	Uploads drepo.Uploads
@@ -366,7 +370,7 @@ func (r *Runtime) ensureSession(ctx context.Context, p *proc, conv *aggregate.Co
 	// Agents that take a system prompt get NusaShell's guidance appended
 	// to their own once per session, with the folders the room works in;
 	// the others get the same text ahead of their first input.
-	instructions := prompt.SystemPrompt("agent-session") + workspaceNote(cwd, listed)
+	instructions := prompt.SystemPrompt("agent-session") + workspaceNote(cwd, listed) + builtinSkillsNote(r.opts.BuiltinSkillsDir)
 	var system *acp.SystemPrompt
 	takesSystemPrompt := client.Capabilities().SupportsSystemPrompt()
 	if takesSystemPrompt {
@@ -457,6 +461,19 @@ func workspaceNote(cwd string, extra []string) string {
 	}
 	b.WriteString("Read, search, and change files in all of them by absolute path, as the task needs.\n")
 	return b.String()
+}
+
+// builtinSkillsNote names the installed builtin skills for an agent that
+// reads them as ordinary files. The composition root owns the directory; the
+// adapter only renders the instruction beside the workspace note.
+func builtinSkillsNote(dir string) string {
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	dir = filepath.Clean(dir)
+	return "\nNusaShell's builtin skills are installed under " + dir + ". When relevant, read " +
+		filepath.Join(dir, "nusashell", "SKILL.md") + " or " + filepath.Join(dir, "coding-workflow", "SKILL.md") +
+		" as ordinary files with your own file tools.\n"
 }
 
 // Prompt runs one agent turn and appends its assistant message.
@@ -667,6 +684,10 @@ func (r *Runtime) promptBlocks(ctx context.Context, in dservice.AgentPrompt, s *
 		if recap := transcriptRecap(in.Conversation.Messages(), in.Input.ID()); recap != "" {
 			blocks = append(blocks, acp.ContentBlock{Type: "text", Text: recap})
 		}
+	}
+	if desc := in.Origin.Description(); desc != "" {
+		blocks = append(blocks, acp.ContentBlock{Type: "text", Text: "Turn context from NusaShell: this turn came from " + desc +
+			". This is app context, not part of the owner's message."})
 	}
 	return append(blocks, user...), taken
 }

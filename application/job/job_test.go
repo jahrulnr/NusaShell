@@ -59,7 +59,7 @@ func TestRunTurnStepCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &loopSvc{}
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{})
 	if apperror.As(err).StatusCode() != 500 {
 		t.Fatalf("step cap → %v, want 500", err)
 	}
@@ -109,7 +109,7 @@ func TestRunTurn413WithAppendedMessagePropagates(t *testing.T) {
 		}
 	}
 	svc := &partial413Svc{}
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil)
+	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{})
 	if apperror.As(err).StatusCode() != 413 {
 		t.Fatalf("appended-message 413 must propagate, got %v", err)
 	}
@@ -270,7 +270,7 @@ func TestToolOutputExposedLive(t *testing.T) {
 			results = append(results, ev.ToolCall().ID()+":"+strconv.FormatBool(ev.ToolFailed()))
 		}
 	}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, onEvent, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, entity.Model{}, svc, onEvent, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -436,7 +436,7 @@ func TestRunTurnCancelCleanupUsesDeadCtx(t *testing.T) {
 		"push": cancelingTool{schema: schema, do: cancel},
 	}}
 	svc := &twoPendingSvc{}
-	runErr := d.runTurn(ctx, "room", conv, driver, nil, entity.Model{}, svc, nil, nil)
+	runErr := d.runTurn(ctx, "room", conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{})
 	stored, err := repo.Load(context.Background(), "room")
 	if err != nil {
 		t.Fatal(err)
@@ -496,7 +496,7 @@ func TestRunTurnOutputPatchSurvivesLateCancel(t *testing.T) {
 		"push": successCancelingTool{schema: schema, do: cancel},
 	}}
 	svc := &twoPendingSvc{}
-	_ = d.runTurn(ctx, "room", conv, driver, nil, entity.Model{}, svc, nil, nil)
+	_ = d.runTurn(ctx, "room", conv, driver, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{})
 	stored, err := repo.Load(context.Background(), "room")
 	if err != nil {
 		t.Fatal(err)

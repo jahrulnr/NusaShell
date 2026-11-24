@@ -425,7 +425,8 @@ func (a *App) Spawn(ctx context.Context, self string, in SpawnInput) (result map
 // the whole turn, and a relayed head could echo that prompt onward.
 func (a *App) start(convID, agent, provider, model, text, project, title string) {
 	go func() {
-		_, _, err := a.turns.Run(a.ctx, convID, provider, model, text, nil, appjob.SendOptions{Agent: agent, Project: project, Title: title}, nil)
+		_, _, err := a.turns.Run(a.ctx, convID, provider, model, text, nil, appjob.SendOptions{Agent: agent, Project: project, Title: title,
+			Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}}, nil)
 		if err != nil {
 			a.log.Info("cross-thread turn ended with an error", "conversation", convID, "error", err)
 		}

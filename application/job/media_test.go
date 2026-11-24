@@ -147,7 +147,7 @@ func TestMediaGateLimitsNewAttachments(t *testing.T) {
 			model.SetMaxImages(tc.maxImages)
 			svc := &snapSvc{live: conv}
 			driver := EnvironmentBundle{Tools: map[string]dservice.Tool{"snap": snapTool{images: tc.toolImages}}}
-			if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil); err != nil {
+			if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 				t.Fatal(err)
 			}
 			if svc.folded {
@@ -184,7 +184,7 @@ func TestMediaGateFoldOnLimit(t *testing.T) {
 	model.SetMaxImages(8)
 	svc := &snapSvc{live: conv}
 	driver := EnvironmentBundle{Tools: map[string]dservice.Tool{"snap": snapTool{images: 1}}}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if !svc.folded {
@@ -218,7 +218,7 @@ func TestMediaGateFoldAtTurnEnd(t *testing.T) {
 	model.SetMaxImages(4)
 	svc := &snapSvc{live: conv}
 	driver := EnvironmentBundle{Tools: map[string]dservice.Tool{"snap": snapTool{images: 1}}}
-	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if !svc.folded {
@@ -251,7 +251,7 @@ func TestUserAttachmentsRespectMaxImages(t *testing.T) {
 	model := entity.Model{}
 	model.SetMaxImages(1)
 	svc := &mediaCountSvc{}
-	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, model, svc, nil, nil); err != nil {
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 		return // rejecting the over-cap send is also safe
 	}
 	if svc.seen > 1 {
@@ -284,7 +284,7 @@ func TestToolResultEventCarriesTheMediaTheModelSees(t *testing.T) {
 					sent = append(sent, ev.ToolCall().OutputAttachments()...)
 				}
 			}
-			if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, onEvent, nil); err != nil {
+			if err := d.runTurn(t.Context(), "room", conv, driver, nil, model, svc, onEvent, nil, valueobject.TurnOrigin{}); err != nil {
 				t.Fatal(err)
 			}
 			if len(sent) != tc.want {
