@@ -6,11 +6,14 @@
 package webui
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,11 +27,23 @@ func Register(r *gin.Engine, assets fs.FS) {
 	if assets == nil {
 		return
 	}
+	// etags caches each asset's strong validator. The files are embedded, so
+	// a name's bytes never change for the life of the process: one hash per
+	// file turns a reload into a 304 instead of a re-download, which is what
+	// makes the no-cache contract on the scripts affordable.
+	var etags sync.Map
 	serve := func(c *gin.Context) {
 		headers(c)
 		name := strings.TrimPrefix(path.Clean("/"+c.Request.URL.Path), "/")
 		if name == "" {
 			name = "index.html"
+		}
+		if name == "favicon.svg" {
+			// The icon is the one asset with no cross-file contract: nothing
+			// pairs it with a script, so a browser may keep it for hours and
+			// revalidate it by ETag after that. Every other asset revalidates
+			// on each load, so a rebuilt binary shows up at once.
+			c.Header("Cache-Control", "public, max-age="+strconv.Itoa(iconMaxAge))
 		}
 		f, err := assets.Open(name)
 		if err != nil {
@@ -41,6 +56,13 @@ func Register(r *gin.Engine, assets fs.FS) {
 			transport.WriteProblem(c, http.StatusNotFound, "not_found", "no such asset")
 			return
 		}
+		if tag, ok := assetETag(assets, &etags, name); ok {
+			c.Header("ETag", tag)
+			if ifNoneMatch(c.GetHeader("If-None-Match"), tag) {
+				c.Status(http.StatusNotModified)
+				return
+			}
+		}
 		http.FileServer(http.FS(assets)).ServeHTTP(c.Writer, c.Request)
 	}
 	for _, p := range []string{"/", "/app.js", "/favicon.svg"} {
@@ -51,6 +73,38 @@ func Register(r *gin.Engine, assets fs.FS) {
 		r.GET(p, serve)
 		r.HEAD(p, serve)
 	}
+}
+
+// iconMaxAge is how long a browser may keep the app icon without asking: a
+// few hours, so a new icon reaches an open tab the same day.
+const iconMaxAge = 4 * 60 * 60
+
+// assetETag answers name's strong ETag, hashing its bytes once and keeping
+// the result for the life of the process.
+func assetETag(assets fs.FS, etags *sync.Map, name string) (string, bool) {
+	if tag, ok := etags.Load(name); ok {
+		return tag.(string), true
+	}
+	data, err := fs.ReadFile(assets, name)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256(data)
+	tag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	etags.Store(name, tag)
+	return tag, true
+}
+
+// ifNoneMatch answers whether an If-None-Match header names tag: a list, the
+// wildcard, or the weak form a browser may echo back.
+func ifNoneMatch(header, tag string) bool {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if part == "*" || part == tag || part == "W/"+tag {
+			return true
+		}
+	}
+	return false
 }
 
 // Shell answers a browser navigation the router could not match: the app

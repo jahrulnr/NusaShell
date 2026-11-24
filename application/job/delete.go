@@ -44,26 +44,31 @@ func (j *Delete) Execute(context.Context) (err error) {
 	}
 	// The agent-side session belongs to the room too. Removing it can mean
 	// starting the agent, so it does not hold up the reply.
-	if j.Deps.AgentRuntime != nil {
-		go j.discardAgentSession(agentID, agentSession)
-	}
+	j.Deps.discardAgentSession(j.ConvID(), agentID, agentSession)
 	if j.Deps.OnDeleted != nil {
 		j.Deps.OnDeleted(j.ConvID())
 	}
 	return worker.ErrTerminate
 }
 
-// discardAgentSession removes the session the agent kept for a deleted
-// room. An agent that was removed meanwhile has nothing to delete, so its
-// live session, if any, is only released.
-func (j *Delete) discardAgentSession(agentID, sessionID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if agentID != "" && j.Deps.Agents != nil {
-		if agent, err := j.Deps.Agents.Load(ctx, agentID); err == nil {
-			j.Deps.AgentRuntime.Discard(ctx, agent, j.ConvID(), sessionID)
-			return
-		}
+// discardAgentSession removes the session an agent kept for a room that is
+// being cleared or deleted. Removing it can mean starting the agent, so it
+// runs detached: neither a clear nor a delete waits for that. An agent that
+// was removed meanwhile has nothing to discard, so its live session, if any,
+// is only released.
+func (d Deps) discardAgentSession(convID, agentID, sessionID string) {
+	if d.AgentRuntime == nil {
+		return
 	}
-	j.Deps.AgentRuntime.Release(ctx, j.ConvID())
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if agentID != "" && d.Agents != nil {
+			if agent, err := d.Agents.Load(ctx, agentID); err == nil {
+				d.AgentRuntime.Discard(ctx, agent, convID, sessionID)
+				return
+			}
+		}
+		d.AgentRuntime.Release(ctx, convID)
+	}()
 }

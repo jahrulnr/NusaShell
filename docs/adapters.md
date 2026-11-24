@@ -608,11 +608,12 @@ backend failed. Provider kinds with only model-mediated *answer* surfaces
 answers on the agent's behalf.
 
 Searchwire truncates over-limit fetch text and writes the FULL extracted
-text to a `tempFile` under its temp dir — a path the turn's workspace-
-confined `read_file` cannot reach. The adapter therefore re-spills that
+text to a `tempFile` under its temp dir. The adapter re-spills that
 artifact into the conversation's `ToolOutput` store (the same reservation
 `exec` uses) and rewrites `tempFile` to the reachable reference, removing
-the original. Likewise any web document over the call's output budget is
+the original — the full text lives with the conversation it belongs to
+instead of a temp dir a later cleanup sweeps. Likewise any web document
+over the call's output budget is
 spilled whole and returned middle-truncated with a `full output:` pointer
 — matching the exec contract. The searcher is constructed with
 `MaxResponseBytes` under the output budget so truncation plus an artifact
@@ -621,10 +622,23 @@ triggers consistently instead of silent mid-document elision.
 The four file tools receive the same `repository.Workspace` at construction;
 `cmd/nusashell/wire.go` also passes the delivery's workspace root as their
 fallback root (`serve`'s owner home).
-The local repository opens `os.Root` per call so every requested path resolves inside the workspace,
-traversal (`..`) and symlink escapes included — except `read_media`,
-which additionally accepts absolute host paths through `Workspace.OpenHost`
-(an agent that wrote a screenshot to `/tmp` names it directly). `read_media` and
+Before any folder decision the path is expanded by one helper
+(`infrastructure/system/patharg`), shared by the four file tools,
+`read_media`, the media tools' input paths and the HTTP preview: a
+`file:` URL becomes the local path it names (a host other than empty or
+`localhost` is refused), a leading `~` — alone, `~/…` or `~\…` — becomes
+the owner's home, and on Windows only `%VAR%` becomes that variable's value
+(an unset one is an error naming it, never a literal `%APPDATA%` folder).
+`$HOME`/`${HOME}`, `~user`, a `~` in the middle of a path and `%APPDATA%`
+on Linux stay literal — they are names a file may legitimately have.
+The local repository opens `os.Root` per call: a relative path resolves
+inside the workspace, an absolute path inside the thread's folders resolves
+there, and any other absolute path anchors at its own deepest existing
+folder — so a plan under `~/.memory` or a file in `/tmp` opens like any
+other. Traversal (`..`) and symlink escapes still fail from whatever folder
+the call opened. `read_media` reaches absolute host paths through
+`Workspace.OpenHost` without the root at all (an agent that wrote a
+screenshot to `/tmp` names it directly). `read_media` and
 `/attach`-style resolution share the same discipline: sniff the first 512
 bytes for `http.DetectContentType` (a `.csv` *is* text and is refused — use
 `read_file`), enforce `wire.MaxAttachmentBytes` from the stat rather than a

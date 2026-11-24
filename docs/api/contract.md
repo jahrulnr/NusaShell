@@ -225,7 +225,7 @@ Full schemas, typed errors, and examples live in
 | `GET /api/conversations/{id}/approval-rules` · `DELETE /api/conversations/{id}/approval-rules/{ruleId}` | The room's "always allow" rules — `{ "data": [{ id, action, createdAt }] }`; the agent is not asked again for that kind of action — and forgetting one (`204`). |
 | `GET /api/conversations/{id}/elicitations` · `POST /api/conversations/{id}/elicitations/{elicitationId}` | Open requests for input from the room's agent (`[{id, mode, message, schema, url}]`, `mode` is `form` or `url`), and answering one with body `{action, content}`: `action` is `accept`, `decline`, or `cancel`; `content` (accept only) must match the form's schema — a missing required field, an unknown field, or a wrong type, length, range, pattern, or choice is `400` and the request stays open. `204`; `404` when nothing waits under that id. |
 | `GET /api/conversations/{id}/agent-options` · `PUT /api/conversations/{id}/agent-options` | The agent's session options for the room — `{ "data": [{ id, name, description, category, type, current, choices: [{value, name, description}] }] }`, its live session's when one runs, else the agent's defaults — and setting one with body `{id, value}` (answers the updated list). The room keeps its picks and applies them before each turn. |
-| `GET /api/conversations/{id}/commands` | Slash commands the room's live agent session offers — `{ "data": [{ name, description, hint }] }`; empty before its first turn. |
+| `GET /api/commands?conversationId=` | The composer's slash-command catalog — `{ "data": [{ name, description, hint, source, enabled, reason }] }`: the native commands (compact, clear, fork) first, then the room's agent commands, one row per name with `source` saying which owns it (native wins a collision). `enabled`/`reason` are the server's verdict for this room; an agent command is always on. Without `conversationId` it answers the native set with every row off and `reason: "Send a message first"`. |
 | `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Items include `activeTurnId` / `activeTurnKind` while a transport turn is in progress. `limit` default 30, max 100. |
 | `GET /api/conversations/{id}` | One projection. Detail adds `canCompact`, and `activeTurnId` / `activeTurnKind` while a transport turn is in progress. |
 | `GET /api/conversations/{id}/messages?start&limit` | Ranged history; `start >= 0` absolute, negative counts back from the end. `limit` max 100. |
@@ -289,7 +289,7 @@ Full schemas, typed errors, and examples live in
 | `DELETE /api/conversations/{id}` | Delete the room and its storage; queued jobs on it die `410`. |
 | `DELETE /api/conversations` | Delete **every** room, then purge the artifacts only rooms own — uploads, page-mark picks, browser recordings, and saved views (the fresh-room view included). Body must be `{"confirm":"DELETE"}` — anything else is `400 confirm_required`. Each room's delete preempts a running turn rather than skipping it; a room that refuses to delete aborts the artifact purge so the survivors' files stay, and the error names the failed ids. Answers `{"deleted": N}` and clears the activity log below. |
 | `GET /api/conversation-control/activity?caller=&target=&limit=` | The cross-thread activity log — which thread called which `conversation` tool, newest first: `{ "entries": [{ at, caller, tool, target, outcome, durationMs }] }`. Metadata only — no message text or tool arguments. `caller`/`target` filter on thread ids (a target that never resolved to a thread is empty); `limit` default 50, max 500. |
-| `POST /api/conversations/{id}/compactions` | Queue a manual compaction on the room's worker; `200` with the updated conversation when it finishes. |
+| `POST /api/conversations/{id}/commands` | Run one native command — an action, not a turn: body `{name, args, confirm}`, `200 {command, conversation}` with the room detail projection (the new room for `fork`). `compact` folds the live tail like the old compactions route, in the provider rooms that can; `clear` empties history, folds, and tool output while keeping the room's identity and drops its agent session (`409 confirmation_required` without `confirm: true`, or the word `confirm` as the only argument); `fork` copies the whole logical history and its tool-output files into a new room titled `<source> (fork)` (a still-default title stays default) and answers that room. Refusals: `400 invalid_argument` for an unknown name or stray arguments, `400 nothing_to_compact` / `nothing_to_clear` / `nothing_to_fork`, `409 busy` while a transport turn runs, `409 unavailable` for a command that does not apply to the room kind (compaction in an agent room). |
 | `GET /api/providers?offset&limit` · `GET /api/providers/{id}` | Sanitized provider projections (paged list, sorted by id), including broken records. |
 | `GET /api/providers/{id}/upstreams?model={modelId}` | Upstream backends an aggregator provider can serve the model through — `{ "data": [{ "name", "slug" }] }`, empty for direct providers. `model` is required (`400` without it). The picker echoes `slug` back as `payload.upstream` on `turn.send`/`turn.edit`/`turn.resume`. |
 | `PUT /api/providers/{id}` | Full-replace upsert — the path id is authoritative (a body `id` is `400`); `apiKey` is tri-state write-only. After the replace, the provider catalog merges into the record: advertised ids the document lacked are appended, and entries already present backfill catalog-declared metadata (`contextWindow`, `outputLimit`, `modelType`, modalities, `supportedEfforts`, `name`, `canonical`, `aliasOf`, `pricing`) only on fields still unknown — an explicit value wins over the provider's declaration; clearing a field to zero re-derives it at the next import. A model's `style` pin fills the same way from the catalog's per-model API recommendation (models.dev `recommended_api`: chat-completions, responses, messages), and only when it differs from the provider's style; an explicit pin always wins, and clearing it re-derives at the next import. The response carries `added` (always present) plus `catalogError` when the merge failed — a catalog failure never fails the write. |
@@ -313,6 +313,52 @@ creation (`turn.send` upserts the room — a null or absent
 `conversationId` gets a server-minted `c_<base32>` id), and provider
 mutation *is* full replacement via `PUT`. Inventing soft-partial
 endpoints would only fork the semantics.
+
+### Native slash commands
+
+A native command is an **action, not a turn**: it writes no message and emits
+no `turn.*` frame. The catalog (`GET /api/commands`) is the one definition —
+the three commands NusaShell owns (`compact`, `clear`, `fork`) plus the room's
+agent commands, one row per name. A recognized name on a draft's first line
+always dispatches as a command, never as text for the model or the agent; a
+name outside the catalog is ordinary prose.
+
+`POST /api/conversations/{id}/commands` runs one, and the application — not
+the transport — enforces every precondition:
+
+- **Idle room.** A live `turn.send`/`turn.edit` refuses every command with
+  `409 busy`; compaction, clearing, and copying history under a running turn
+  are all unsound. The turn hub is the authority on "live", read through a
+  late-bound hook (`UseLiveTurns`) wired at composition.
+- **Room kind.** `compact` keeps its old meaning: provider rooms only, a
+  foldable tail required. An agent room answers `409 unavailable` — the agent
+  manages its own context.
+- **Nothing to act on.** An empty room answers `400 nothing_to_compact`,
+  `400 nothing_to_clear`, or `400 nothing_to_fork`; a non-empty room with no
+  new foldable history answers `400 nothing_to_compact`.
+- **Confirmation.** `clear` is destructive: without `confirm: true` (or the
+  word `confirm` as its only argument, the shape a chat ingress sends) it
+  answers `409 confirmation_required`.
+- **Arguments.** `compact` and `fork` take none and `clear` accepts only
+  `confirm`; anything else is `400 invalid_argument`, as is an unknown name. A
+  refused command keeps the client's draft; only a `200` spends it.
+
+`clear` keeps the room's identity — id, title, provider/model/effort/upstream
+or agent binding and its options, workspace, environment, project, `@label`,
+reply routing, pin, memory setting, and accumulated usage — and removes every
+message, sealed segment, and conversation-owned tool-output file. The agent's
+session handle and context report go with the history, so the next turn starts
+a fresh one; the same release runs against the agent's own session.
+
+`fork` creates a new room that is a full copy of the source's logical history
+(sealed segments plus live tail, with message attachments and the tool-output
+files they reference) and of its bindings, workspace, environment, project,
+memory setting, and agent session options. It copies no `@label`, reply
+routing, pin, approval rules, agent session handle, saved view, or usage
+(starts at zero). The title is `<source title> (fork)`, except a source still
+on its default title keeps it and auto-titles on its first send. The source is
+never modified, and the copy becomes visible — to `Info`, `List`, and this
+contract — only once its history is complete.
 
 ### Pagination, honestly
 
@@ -384,10 +430,16 @@ successful non-2xx and has no body.)
 
 | `status` | `code` | Meaning |
 |---|---|---|
-| 400 | `invalid_argument` | Malformed id, unknown enum, negative token count, non-user edit target, nothing-to-compact, unknown setting key, `null` value, … |
+| 400 | `invalid_argument` | Malformed id, unknown enum, negative token count, non-user edit target, unknown command name or stray command arguments, unknown setting key, `null` value, … |
+| 400 | `nothing_to_compact` | The room has no new foldable history (or none at all). |
+| 400 | `nothing_to_clear` | The room is already empty. |
+| 400 | `nothing_to_fork` | The room has nothing to copy. |
 | 403 | `forbidden_origin` | `Host`/`Origin` check failed. |
 | 404 | `not_found` | Conversation, provider, model-in-catalog, message id, or running turn does not exist. |
 | 408 | `interrupted` | The request or turn was canceled (client cancel, shutdown race). |
+| 409 | `busy` | A transport turn is live in the room; a native command waits for it to finish. |
+| 409 | `confirmation_required` | A destructive command (`clear`) was called without `confirm`. |
+| 409 | `unavailable` | The command does not apply to this room kind (compaction in an agent room). |
 | 409 | `update_busy` | An update install is already running. |
 | 409 | `update_disabled` | This build cannot install a release: a dev build, or a platform without a release binary. |
 | 409 | `update_not_available` | The latest known release is not newer than this build. |
@@ -503,7 +555,8 @@ Suggested order — each phase is shippable and testable on its own:
    conversations, messages, providers, settings, tools), problem+json
    error mapping.
 2. **Phase 2 — HTTP writes. ✅ Done.** `PATCH` rename, `DELETE`
-   conversation, `POST` compactions, `PUT`/`DELETE` provider, `PATCH`
+   conversation, native commands (`POST /api/conversations/{id}/commands`),
+   `PUT`/`DELETE` provider, `PATCH`
    settings — strict one-document JSON bodies, `Content-Type`
    `application/json` required, 1 MiB body cap, path ids validated
    against the domain identity rule.

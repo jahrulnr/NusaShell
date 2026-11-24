@@ -23,6 +23,7 @@ import (
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
+	"github.com/jahrulnr/nusashell/infrastructure/system/patharg"
 )
 
 // maxReferences bounds the images one call may hand a model.
@@ -273,6 +274,11 @@ func (d Deps) read(ctx context.Context, path string, kinds ...enum.Modality) (m 
 	if path == "" {
 		return dservice.Media{}, errors.New("an empty path was given")
 	}
+	expanded, err := patharg.Expand(path)
+	if err != nil {
+		return dservice.Media{}, err
+	}
+	path = expanded
 	var f io.ReadCloser
 	var size int64
 	if filepath.IsAbs(path) {

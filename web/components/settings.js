@@ -5,6 +5,8 @@ import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, setPref, toast, emit, state, askConfirm } from '../lib/store.js';
 import { api, errorText, setCsrf } from '../lib/api.js';
 import { loadProviders, navigate, deleteAllRooms } from '../lib/chat.js';
+import { useSettingsDoc, getPath } from '../lib/settings.js';
+import { API_STYLES, STYLE_SHORT } from '../lib/providers.js';
 import { Icon } from './icons.js';
 import { cx, Button, Checkbox, Dialog, Select, Toggle, ErrorBlock, Spinner, fmtTokens } from './ui.js';
 import { MenuButton } from './chat.js';
@@ -162,13 +164,6 @@ function Providers({ arg }) {
   </div>`;
 }
 
-const STYLES = [
-  { value: 'completion', text: 'Chat Completions (OpenAI-compatible)' },
-  { value: 'responses', text: 'Responses (OpenAI)' },
-  { value: 'messages', text: 'Messages (Anthropic)' },
-  { value: 'generatecontent', text: 'generateContent (Gemini)' },
-];
-
 function stripModel(m) {
   const { listed, ...rest } = m;
   return rest;
@@ -251,7 +246,7 @@ function ProviderDialog({ provider, onClose }) {
         </label>
       </div>
       <label class="flex flex-col gap-1.5 text-[13px]"><span class="text-muted">API style</span>
-        <${Select} label="API style" value=${f.style} options=${STYLES} onChange=${set('style')} />
+        <${Select} label="API style" value=${f.style} options=${API_STYLES} onChange=${set('style')} />
       </label>
       <label class="flex flex-col gap-1.5 text-[13px]"><span class="text-muted">Endpoint</span>
         <input class=${inputCls} value=${f.endpoint} onInput=${(e) => set('endpoint')(e.target.value)} placeholder="https://api.example.com/v1" inputmode="url" />
@@ -322,7 +317,6 @@ const MODEL_TYPES = [
   { value: 'transcription', text: 'Transcription (STT)' },
   { value: 'video', text: 'Video' },
 ];
-const STYLE_SHORT = { completion: 'Chat Completions', responses: 'Responses', messages: 'Messages', generatecontent: 'generateContent' };
 
 // ModelRow: one catalog entry with an inline editor for the per-model
 // overrides the provider document carries (API style pin, defaults, limits).
@@ -360,7 +354,7 @@ function ModelRow({ model: m, providerStyle, onChange, onRemove }) {
       <label class="flex flex-col gap-1 sm:col-span-2">
         <span class="text-xs text-muted">API style for this model</span>
         <${Select} label="API style for this model" value=${m.style || ''}
-          options=${[{ value: '', text: `Same as provider (${STYLE_SHORT[providerStyle]})` }, ...STYLES]}
+          options=${[{ value: '', text: `Same as provider (${STYLE_SHORT[providerStyle]})` }, ...API_STYLES]}
           onChange=${(v) => put('style', v)} />
         <span class="text-xs text-faint">Pin when this model only works on another protocol — e.g. GPT models on Responses, Claude on Messages.</span>
       </label>
@@ -415,7 +409,6 @@ const FIELDS = [
   ] },
 ];
 
-const getPath = (o, k) => k.split('.').reduce((a, p) => a?.[p], o);
 
 function SettingField({ field, value, onSaved }) {
   const show = (v) => (field.type === 'list' ? (v || []).join(', ') : v ?? '');
@@ -497,12 +490,7 @@ function PasswordDialog({ hasPassword, onClose }) {
 function General() {
   const s = useStore();
   const [pwOpen, setPwOpen] = useState(false);
-  const [doc, setDoc] = useState({ status: 'loading' });
-  const load = () => {
-    setDoc({ status: 'loading' });
-    api.settings().then((d) => setDoc({ status: 'ready', d }), (e) => setDoc({ status: 'error', error: errorText(e) }));
-  };
-  useEffect(load, []);
+  const [doc, { reload, saved }] = useSettingsDoc();
   return html`<div class="flex flex-col gap-8">
     <section>
       <${SectionTitle} title="Account" desc=${s.auth.required
@@ -534,11 +522,11 @@ function General() {
       </${Card}>
     </section>
     ${doc.status === 'loading' && html`<div class="flex flex-col gap-2"><div class="skeleton h-5 w-40"></div><div class="skeleton h-40 rounded-xl"></div></div>`}
-    ${doc.status === 'error' && html`<${ErrorBlock} title="Could not load settings" message=${doc.error} onRetry=${load} />`}
+    ${doc.status === 'error' && html`<${ErrorBlock} title="Could not load settings" message=${doc.error} onRetry=${reload} />`}
     ${doc.status === 'ready' && html`<${Notifications} on=${getPath(doc.d, 'notifications.desktop') !== 'off'} onSaved=${(d) => setDoc({ status: 'ready', d })} />`}
     ${doc.status === 'ready' && FIELDS.map((g) => html`<section key=${g.group}>
       <${SectionTitle} title=${g.group} desc=${g.note} />
-      <${Card}>${g.items.map((f) => html`<${SettingField} key=${f.key} field=${f} value=${getPath(doc.d, f.key)} onSaved=${(d) => setDoc({ status: 'ready', d })} />`)}</${Card}>
+      <${Card}>${g.items.map((f) => html`<${SettingField} key=${f.key} field=${f} value=${getPath(doc.d, f.key)} onSaved=${saved} />`)}</${Card}>
     </section>`)}
     <${DeleteAllData} />
   </div>`;

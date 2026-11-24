@@ -123,7 +123,7 @@ func (r *ToolOutputRepository) outputDir(ctx context.Context, conversationID str
 	if !info.IsDir() {
 		return "", fmt.Errorf("exec conversation %s is not a directory", conversationID)
 	}
-	spillDir := filepath.Join(convDir, "tool-output")
+	spillDir := filepath.Join(convDir, toolOutputDir)
 	if err := os.Mkdir(spillDir, 0o700); err != nil && !os.IsExist(err) {
 		return "", fmt.Errorf("exec output dir: %w", err)
 	}

@@ -64,11 +64,13 @@ type Rooms interface {
 	RecordDelivery(ctx context.Context, convID, msgID string, files []valueobject.Attachment, receipt valueobject.Receipt) error
 }
 
-// Runtime is what a turn runs on: an agent, or a provider and model.
+// Runtime is what a turn runs on: an agent, or a provider and model with
+// the reasoning effort its role starts on.
 type Runtime struct {
 	AgentID    string
 	ProviderID string
 	ModelID    string
+	Effort     enum.Effort
 }
 
 func (r Runtime) empty() bool { return r.AgentID == "" && r.ProviderID == "" }
@@ -386,7 +388,7 @@ func (a *App) runTurn(ctx context.Context, in dservice.InboundMessage, convID, b
 			a.dropPolls(func(w *pollWaiter) bool { return w.elicitation == id })
 		}
 	}
-	opts := appjob.SendOptions{Agent: rt.AgentID, References: refs,
+	opts := appjob.SendOptions{Agent: rt.AgentID, Effort: rt.Effort, References: refs,
 		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginChannel, Name: chat.Channel()}}
 	a.mu.Lock()
 	a.origins[convID] = chat

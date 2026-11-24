@@ -4,7 +4,7 @@
 // effort and upstream choices; agents add the session options they report
 // (modes such as plan/build/bypass, and their own config). The product mode
 // hides the runtime it leaves out.
-import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
+import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
 import { toast } from '../lib/store.js';

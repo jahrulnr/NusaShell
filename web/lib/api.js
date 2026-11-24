@@ -92,7 +92,13 @@ export const api = {
   // A purge can run a while — every thread, its uploads, picks,
   // recordings, and views. The confirm word is the contract's own check.
   deleteAllConversations: () => request('DELETE', '/api/conversations', { body: { confirm: 'DELETE' }, timeout: LONG_TIMEOUT_MS }),
-  compact: (cid) => request('POST', `/api/conversations/${id(cid)}/compactions`, { timeout: LONG_TIMEOUT_MS }),
+  // commands is the room's slash-command catalog: the native commands plus the
+  // room's agent commands, native first, each with this room's availability.
+  // Without a conversationId it answers the native set, every row off.
+  commands: (params) => request('GET', '/api/commands' + q(params || {}), { timeout: 20_000 }),
+  // runCommand runs one native command — an action, not a turn. Compaction can
+  // fold a lot of history, so it gets the long budget.
+  runCommand: (cid, body) => request('POST', `/api/conversations/${id(cid)}/commands`, { body, timeout: LONG_TIMEOUT_MS }),
   // The cross-thread activity log — which thread called which
   // conversation tool. Metadata only; ?caller=/target=/limit= filter it.
   controlActivity: (params) => request('GET', '/api/conversation-control/activity' + q(params)),
@@ -168,7 +174,6 @@ export const api = {
   saveView: (cid, document, keepalive = false) =>
     request('PUT', cid ? `/api/conversations/${id(cid)}/view` : '/api/view', { body: { document }, keepalive }),
   roots: (params) => request('GET', `/api/roots?${new URLSearchParams(params)}`),
-  agentCommands: (cid) => request('GET', `/api/conversations/${id(cid)}/commands`),
   browser: (cid) => request('GET', `/api/conversations/${id(cid)}/browser`),
   // Starting the browser launches Chrome, which takes a moment.
   startBrowser: (cid, url) => request('POST', `/api/conversations/${id(cid)}/browser`, { body: { url }, timeout: 60_000 }),

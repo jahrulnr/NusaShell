@@ -45,6 +45,12 @@ func ClassifyError(err error) (status int, code, detail string) {
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		status = http.StatusBadGateway
 	}
+	// An error that names its own stable code keeps it: several 409s share
+	// the status but not the meaning (a missing confirmation is not an
+	// invalid argument).
+	if named := ae.Code(); named != "" {
+		return status, named, ae.Error()
+	}
 	return status, codeFor(status, ae.IsUpstream()), ae.Error()
 }
 

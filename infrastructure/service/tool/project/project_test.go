@@ -190,8 +190,9 @@ func TestNoiseDirsAreSkipped(t *testing.T) {
 	}
 }
 
-// Extra folders render their own section under a different header so the
-// model can tell the bound workspace from a folder it merely reaches.
+// Extra folders render one compact line — the AGENTS.md + layout budget
+// belongs to the bound workspace alone, and a per-folder walk every
+// pass would multiply the record's cost.
 func TestExecuteRendersExtraFolders(t *testing.T) {
 	tool, ctx, _ := mkTool(t)
 	extra := t.TempDir()
@@ -202,9 +203,10 @@ func TestExecuteRendersExtraFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.Text, "extra folder "+extra) ||
-		!strings.Contains(out.Text, "extra rules") ||
-		!strings.Contains(out.Text, "- lib/ — 1 file") {
-		t.Fatalf("extra folder section missing:\n%s", out.Text)
+	if !strings.Contains(out.Text, "+ "+extra+" — see its AGENTS.md if the turn moves there") {
+		t.Fatalf("extra folder line missing:\n%s", out.Text)
+	}
+	if strings.Contains(out.Text, "extra rules") || strings.Contains(out.Text, "extra folder") {
+		t.Fatalf("extra folder must not render a full section:\n%s", out.Text)
 	}
 }

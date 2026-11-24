@@ -1,7 +1,7 @@
 // The composer's reference picker: "@" offers threads and projects from
-// what is loaded, "/" offers the agent's commands (at the start of the
-// message) and searches files, folders, skills and MCP servers on the
-// server.
+// what is loaded, "/" offers the room's command catalog (native commands
+// first, then its agent's) and searches files, folders, skills and MCP
+// servers on the server.
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { state } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
@@ -33,6 +33,8 @@ export function placeParams(r) {
 }
 
 // useReferenceChoices lists what the trigger at the caret can select.
+// commands are the room's catalog rows (lib/commands.js), already ordered
+// native first with their source and availability.
 export function useReferenceChoices(r, trigger, commands) {
   const [search, setSearch] = useState({ key: '', items: [], status: 'idle' });
   const place = placeParams(r);
@@ -60,9 +62,10 @@ export function useReferenceChoices(r, trigger, commands) {
     return { items, message: items.length ? '' : 'No threads or projects match' };
   }
   const q = trigger.query.toLowerCase();
+  // A command names the first line of the message; anywhere else a "/" is
+  // just a path or prose.
   const cmds = trigger.start === 0
     ? commands.filter((c) => c.name.toLowerCase().startsWith(q)).slice(0, 8)
-      .map((c) => ({ kind: 'command', id: c.name, name: c.name, detail: [c.description, c.hint].filter(Boolean).join(' · ') }))
     : [];
   const found = search.key === key ? search.items : [];
   const items = [...cmds, ...found];
@@ -73,6 +76,9 @@ export function useReferenceChoices(r, trigger, commands) {
     else if (!items.length) message = 'No matches';
     else if (search.truncated) message = 'Showing the first matches — type more to narrow.';
   }
+  // A catalog the server could not answer is said out loud next to the
+  // files that still matched, rather than passing for an empty list.
+  if (!items.length && r.catalog?.status === 'error') message = 'Commands are unavailable: ' + (r.catalog.error || 'the server did not answer');
   return { items, message, loading: search.status === 'loading' && search.key === key };
 }
 
@@ -82,14 +88,23 @@ export function ReferenceMenu({ prefix, items, message, loading, active, onPick 
   if (!items.length && !message) return null;
   return html`<div ref=${list} id="reference-menu" role="listbox" aria-label="References"
     class="mx-3 mb-1 rounded-xl border border-line bg-panel shadow-pop py-1 max-h-64 overflow-y-auto">
-    ${items.map((c, i) => html`<button key=${c.kind + c.id} id=${'ref-opt-' + i} type="button" role="option" aria-selected=${i === active}
-      onMouseDown=${(e) => { e.preventDefault(); onPick(c); }}
-      class=${cx('w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-hover min-w-0', i === active && 'bg-hover')}>
-      <${Icon} name=${KIND_ICON[c.kind] || 'link'} size=${14} class="shrink-0 text-muted" />
-      <span class="font-mono text-[13px] shrink-0 max-w-[45%] truncate">${prefix}${c.name}</span>
-      <span class="text-xs text-faint shrink-0">${KIND_LABEL[c.kind] || c.kind}</span>
-      ${c.detail && html`<span class="text-xs text-muted truncate min-w-0">${c.detail}</span>`}
-    </button>`)}
+    ${items.map((c, i) => {
+      // A row the room cannot use keeps its place and says why; it is drawn
+      // dimmed and cannot be picked, clicked or run.
+      const off = c.enabled === false;
+      return html`<button key=${c.kind + c.id} id=${'ref-opt-' + i} type="button" role="option"
+        aria-selected=${i === active} aria-disabled=${off} disabled=${off}
+        onMouseDown=${(e) => { e.preventDefault(); onPick(c); }}
+        class=${cx('w-full flex items-center gap-2 px-3 py-1.5 text-left min-w-0',
+          off ? 'opacity-50 cursor-default' : 'hover:bg-hover', i === active && !off && 'bg-hover')}>
+        <${Icon} name=${c.icon || KIND_ICON[c.kind] || 'link'} size=${14} class="shrink-0 text-muted" />
+        <span class="font-mono text-[13px] shrink-0 max-w-[45%] truncate">${prefix}${c.name}</span>
+        <span class="text-xs text-faint shrink-0">${c.source || KIND_LABEL[c.kind] || c.kind}</span>
+        ${off
+          ? html`<span class="text-xs text-warn truncate min-w-0">${c.reason || 'Not available here'}</span>`
+          : c.detail && html`<span class="text-xs text-muted truncate min-w-0">${c.detail}</span>`}
+      </button>`;
+    })}
     ${message && html`<div class="flex items-center gap-2 px-3 py-1.5 text-xs text-muted">${loading && html`<${Spinner} size=${11} />`}${message}</div>`}
   </div>`;
 }

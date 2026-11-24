@@ -1,11 +1,12 @@
 // The agent side of the composer: the room's agent session options (its
-// mode first) and the slash commands it offers.
+// mode first). Its slash commands come from the room's command catalog, with
+// the native commands — see lib/commands.js.
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { toast } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
 import { selection, isBusy } from '../lib/chat.js';
 import { Icon } from './icons.js';
-import { cx, Popover, Select, Spinner, Toggle } from './ui.js';
+import { Popover, Select, Spinner, Toggle } from './ui.js';
 
 // AgentOptions shows the session's mode and other options of an agent
 // room. Picks are kept on the room and apply to its session.
@@ -77,14 +78,3 @@ export function AgentOptions({ room: r }) {
   </div>`;
 }
 
-// useCommands loads the slash commands of an agent room.
-export function useCommands(r) {
-  const sel = selection(r);
-  const [cmds, setCmds] = useState([]);
-  const busyTurn = isBusy(r);
-  useEffect(() => {
-    if (!r.id || !sel.agentId) { setCmds([]); return; }
-    api.agentCommands(r.id).then((res) => setCmds(res.data || []), () => setCmds([]));
-  }, [r.id, sel.agentId, busyTurn]);
-  return cmds;
-}

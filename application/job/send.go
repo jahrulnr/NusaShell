@@ -298,12 +298,9 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 				title = user.Content()
 			}
 			conv.SetTitle(title)
-			// Every room gets a handle chats can name it by.
-			if conv.Label() == "" {
-				if label, err := d.freeLabel(ctx); err == nil {
-					_ = conv.SetLabel(label)
-				}
-			}
+			// The room's handle is the store's to give: Save allocates one for
+			// a new room under the lock it writes with, so two rooms created at
+			// the same moment cannot pick the same animal.
 			if err := d.Convs.Save(ctx, conv); err != nil {
 				return err
 			}

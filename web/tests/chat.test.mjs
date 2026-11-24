@@ -5,6 +5,7 @@ import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from '../lib/store.js';
 import * as chat from '../lib/chat.js';
+import { historyItems, liveHistory } from '../lib/turn.js';
 
 let ws;
 const sentTurns = () => ws.sent.filter((c) => c.type === 'turn.send');
@@ -192,6 +193,44 @@ test('streamed deltas build the live turn and a completed frame ends it', async 
   ws.serve({ type: 'turn.completed', requestId: cmd.requestId, conversationId: 'c_1', turnId: 't1', seq: 3, payload: { userMessagePersisted: true } });
   await sleep(40);
   assert.equal(state.rooms.c_1.live, null);
+});
+
+test('a turn relayed from another thread keeps the answer above it, then shows the prompt the stream never carries', async () => {
+  const messages = [
+    { id: 'm1', role: 'user', content: 'kalo di windows harusnya X:/ ga sih?' },
+    { id: 'm2', role: 'assistant', content: 'Betul — C:\\ cuma contoh.' },
+  ];
+  serveThread('c_1', { messages });
+  chat.navigate('#/c/c_1');
+  await sleep(40);
+  const r = state.rooms.c_1;
+  // Another thread (or a chat, or another browser) starts a turn here: this
+  // tab never sent it and has no prompt of its own.
+  ws.serve({ type: 'conversation.activity', conversationId: 'c_1', turnId: 't9', payload: { state: 'opened', kind: 'send', requestId: 'req-relay' } });
+  ws.serve({ type: 'turn.opened', conversationId: 'c_1', turnId: 't9', seq: 0, payload: { startedAt: Date.now() } });
+  await sleep(20);
+  assert.equal(r.live.adopted, true);
+  assert.ok(!r.live.userText);
+  // The prompt is written just after the turn opens, so until this tab has
+  // it, history still ends with the previous answer — which the transcript
+  // must keep, not trim at the last prompt it happens to hold.
+  let shown = liveHistory(historyItems(r.messages), r.live);
+  assert.deepEqual(shown.map((x) => x.kind), ['user', 'text']);
+  assert.equal(shown[1].text, 'Betul — C:\\ cuma contoh.');
+  assert.equal(r.messages.some((m) => m.id === 'm3'), false);
+  messages.push({ id: 'm3', role: 'user', content: '[From thread @lynx Riset (c_9)]\n\nGuard workspace' });
+  ws.serve({ type: 'turn.delta', conversationId: 'c_1', turnId: 't9', seq: 1, payload: { text: 'Betul' } });
+  await sleep(40);
+  // The first streamed frame proves the write landed: the prompt joins the
+  // transcript above the live output, and the answer above it is untouched.
+  shown = liveHistory(historyItems(r.messages), r.live);
+  assert.deepEqual(shown.map((x) => x.kind), ['user', 'text', 'user']);
+  assert.equal(shown[2].msg.id, 'm3');
+  assert.deepEqual(r.live.segments.map((s) => s.text), ['Betul']);
+  ws.serve({ type: 'turn.completed', requestId: 'req-relay', conversationId: 'c_1', turnId: 't9', seq: 2, payload: { userMessagePersisted: true } });
+  await sleep(40);
+  assert.equal(r.live, null);
+  assert.deepEqual(r.messages.map((m) => m.id), ['m1', 'm2', 'm3']);
 });
 
 // ---------- the model picked while a turn runs ----------
@@ -1057,8 +1096,8 @@ test('a new thread starts on the owner default, and a pick or a binding wins ove
   const home = chat.freshRoom();
   home.sel = {};
   assert.deepEqual([chat.selection(home).agentId, chat.selection(home).modelId, chat.selection(home).effort], ['claude', 'opus', 'default']);
-  state.threadDefault = { agent: '', provider: 'or', model: 'gpt' };
-  assert.deepEqual([chat.selection(home).providerId, chat.selection(home).modelId], ['or', 'gpt']);
+  state.threadDefault = { agent: '', provider: 'or', model: 'gpt', effort: 'max' };
+  assert.deepEqual([chat.selection(home).providerId, chat.selection(home).modelId, chat.selection(home).effort], ['or', 'gpt', 'max']);
   home.sel = { providerId: 'p2', modelId: 'm2' };
   assert.equal(chat.selection(home).providerId, 'p2', 'a pick in the composer wins');
   home.sel = {};

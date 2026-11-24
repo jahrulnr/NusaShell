@@ -142,27 +142,3 @@ func (s *server) deleteAll(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"deleted": deleted})
 }
-
-func (s *server) compact(c *gin.Context) {
-	id, ok := transport.PathID(c)
-	if !ok {
-		return
-	}
-	if err := s.writes.Compact(s.jobs, id); err != nil {
-		transport.RespondError(c, err)
-		return
-	}
-	info, err := s.reads.Info(s.jobs, id)
-	if err != nil {
-		transport.RespondError(c, err)
-		return
-	}
-	available, err := s.reads.CanCompact(s.jobs, id)
-	if err != nil {
-		transport.RespondError(c, err)
-		return
-	}
-	out := toConversation(info)
-	out.CanCompact = &available
-	c.JSON(200, out)
-}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
@@ -26,6 +27,7 @@ type Config struct {
 	Memory        MemoryConfig        `json:"memory"`
 	WebSearch     WebSearchConfig     `json:"websearch"`
 	Browser       BrowserConfig       `json:"browser"`
+	Symbols       SymbolsConfig       `json:"symbols"`
 }
 
 // Normalize runs each section's normalization — invalid values clamp to
@@ -44,6 +46,7 @@ func (c *Config) Normalize() {
 	c.Memory.Normalize()
 	c.WebSearch.Normalize()
 	c.Browser.Normalize()
+	c.Symbols.Normalize()
 }
 
 // NewConfig returns the defaults — scalar tunables read their `default`
@@ -52,6 +55,13 @@ func (c *Config) Normalize() {
 func NewConfig() Config {
 	var c Config
 	c.Normalize()
+	// The schema document carries the effort leaves the model roles accept,
+	// so `config set models.threads.effort` resolves: leaves that are only
+	// present once set cannot be typed or validated. A file keeps them out
+	// until the owner picks one (omitempty) — zero effort means the model's
+	// own default, then the provider's.
+	c.Models.Threads.Effort = enum.EffortDefault
+	c.Models.Chat.Effort = enum.EffortDefault
 	return c
 }
 

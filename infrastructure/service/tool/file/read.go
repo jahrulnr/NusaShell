@@ -16,18 +16,20 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
-// FileReadTool reads a text file under the turn's workspace — the
-// constructor carries the schema and validates the default sandbox
-// boundary; Execute resolves the call input through the injected workspace
-// repository, whose local implementation confines symlink traversal.
+// FileReadTool reads a text file under the turn's workspace, or one an
+// absolute path names elsewhere — the constructor carries the schema and
+// validates the default root; Execute resolves the call input through the
+// injected workspace repository, whose local implementation confines
+// symlink traversal from whatever folder the call opened.
 type FileReadTool struct {
 	dir    string
 	store  drepo.Workspace
 	schema valueobject.ToolSchema
 }
 
-// NewFileReadTool binds the tool's default root: every requested path
-// resolves inside it. A turn-scoped workspace dir overrides it per call.
+// NewFileReadTool binds the tool's default root: a relative path resolves
+// inside it, an absolute path anchors where it lives. A turn-scoped
+// workspace dir overrides it per call.
 func NewFileReadTool(store drepo.Workspace, root string) (service.Tool, error) {
 	abs, err := checkDir(store, root)
 	if err != nil {
@@ -36,7 +38,7 @@ func NewFileReadTool(store drepo.Workspace, root string) (service.Tool, error) {
 	schema, err := valueobject.NewToolSchema(
 		"read_file",
 		"Read a UTF-8 text file relative to the workspace root. A file too long for one answer comes back a page at a time: the answer ends with the lines shown and the offset to continue from.",
-		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, or absolute inside one of the thread's folders"},"offset":{"type":"integer","description":"First line to read, 1-based (default 1)"},"limit":{"type":"integer","description":"Most lines to read (default: as many as fit)"}},"required":["path"]}`),
+		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, an absolute path anywhere on disk, or ~/… for the owner's home"},"offset":{"type":"integer","description":"First line to read, 1-based (default 1)"},"limit":{"type":"integer","description":"Most lines to read (default: as many as fit)"}},"required":["path"]}`),
 		true,
 		enum.ToolPermissionAgent,
 	)

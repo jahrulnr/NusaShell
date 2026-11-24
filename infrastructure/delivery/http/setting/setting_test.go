@@ -97,8 +97,8 @@ func TestPatchSettings(t *testing.T) {
 		r.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := patch(`{"values":{"models.utility.provider":"or","models.utility.model":"m","server.bind":"192.168.18.81"}}`); rec.Code != 200 ||
-		w.got["models.utility.provider"] != `"or"` || w.got["models.utility.model"] != `"m"` || w.got["server.bind"] != `"192.168.18.81"` {
+	if rec := patch(`{"values":{"models.utility.provider":"or","models.utility.model":"m","models.threads.effort":"max","server.bind":"192.168.18.81"}}`); rec.Code != 200 ||
+		w.got["models.utility.provider"] != `"or"` || w.got["models.utility.model"] != `"m"` || w.got["models.threads.effort"] != `"max"` || w.got["server.bind"] != `"192.168.18.81"` {
 		t.Fatalf("patch: %d %v", rec.Code, w.got)
 	}
 	w.got = nil

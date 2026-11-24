@@ -12,12 +12,11 @@ import (
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
-// AgentSurface is a room's agent session: its options and slash commands.
+// AgentSurface is a room's agent session: its options and approval rules.
 // *appconversation.ConversationApp satisfies it.
 type AgentSurface interface {
 	AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, error)
 	SetAgentOption(ctx context.Context, convID, id, value string) error
-	AgentCommands(convID string) []dservice.AgentCommand
 	ApprovalRules(ctx context.Context, convID string) ([]aggregate.ApprovalRule, error)
 	DeleteApprovalRule(ctx context.Context, convID, id string) error
 }
@@ -26,7 +25,6 @@ func registerAgent(api *gin.RouterGroup, svc AgentSurface) {
 	a := &agentServer{svc: svc}
 	api.GET("/conversations/:id/agent-options", a.options)
 	api.PUT("/conversations/:id/agent-options", a.setOption)
-	api.GET("/conversations/:id/commands", a.commands)
 	api.GET("/conversations/:id/approval-rules", a.rules)
 	api.DELETE("/conversations/:id/approval-rules/:rule", a.deleteRule)
 }
@@ -58,11 +56,6 @@ func (a *agentServer) setOption(c *gin.Context) {
 	a.options(c)
 }
 
-func (a *agentServer) commands(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"data": a.svc.AgentCommands(c.Param("id"))})
-}
-
-// rules lists the room's "always allow" rules.
 func (a *agentServer) rules(c *gin.Context) {
 	list, err := a.svc.ApprovalRules(c.Request.Context(), c.Param("id"))
 	if err != nil {

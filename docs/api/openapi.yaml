@@ -579,52 +579,6 @@ paths:
         "500": { $ref: "#/components/responses/Internal" }
         "503": { $ref: "#/components/responses/Unavailable" }
 
-  /api/conversations/{conversationId}/compactions:
-    parameters:
-      - $ref: "#/components/parameters/ConversationId"
-    post:
-      operationId: compactConversation
-      tags: [conversations]
-      summary: Compact history into a checkpoint
-      description: |
-        Queues a one-shot manual compaction on the room's worker — it runs
-        after any in-flight turn finishes (compaction never preempts) and
-        folds the live tail into a sealed segment plus a checkpoint
-        summary, keeping the configured tail messages live.
-
-        The request blocks until the queued job completes — including any
-        time spent waiting behind a running turn — and answers `200` with
-        the updated conversation when done. A live tail that already fits
-        in the keep-tail answers `400`. A client that abandons the
-        request early does not cancel the job; the compaction still lands.
-        Requires a same-origin `Origin` header.
-      responses:
-        "200":
-          description: Compaction completed; updated conversation projection.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Conversation" }
-        "400":
-          description: e.g. nothing to compact — the live tail fits within the keep-tail.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/Problem" }
-              example:
-                type: "urn:nusashell:problem:invalid_argument"
-                title: "Invalid Argument"
-                status: 400
-                code: "invalid_argument"
-                detail: "nothing to compact"
-        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "408": { $ref: "#/components/responses/Interrupted" }
-        "410": { $ref: "#/components/responses/Gone" }
-        "429": { $ref: "#/components/responses/QueueFull" }
-        "500": { $ref: "#/components/responses/Internal" }
-        "502": { $ref: "#/components/responses/UpstreamError" }
-        "503": { $ref: "#/components/responses/Unavailable" }
-        "504": { $ref: "#/components/responses/UpstreamTimeout" }
-
   /api/providers:
     get:
       operationId: listProviders
@@ -2416,25 +2370,138 @@ paths:
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /api/conversations/{conversationId}/commands:
-    parameters:
-      - $ref: "#/components/parameters/ConversationId"
+  /api/commands:
     get:
-      operationId: listAgentCommands
-      tags: [agents]
-      summary: Slash commands the thread's agent offers
-      description: The composer's `/` menu. A command runs by sending `/name input` as the prompt.
+      operationId: listCommands
+      tags: [conversations]
+      summary: The composer's slash-command catalog
+      description: |
+        The native commands (`compact`, `clear`, `fork`) followed by the room's
+        agent commands, one row per name — a native name wins a collision.
+        `source` says who owns a row; `enabled`/`reason` are the server's
+        verdict for the room.
+
+        Without `conversationId` every native row is off with
+        `reason: "Send a message first"`. A live transport turn turns all of
+        them off, an agent room cannot fold its own context, and an empty room
+        has nothing to act on — each with its own reason. An agent command is
+        always enabled: the agent decides for itself.
+      parameters:
+        - name: conversationId
+          in: query
+          required: false
+          schema: { type: string }
+          description: The room whose availability the catalog reports.
       responses:
         "200":
-          description: The commands the thread's agent session reported; empty for a thread without an agent.
+          description: The catalog, native rows first.
           content:
             application/json:
               schema:
                 type: object
                 required: [data]
                 properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/AgentCommand" } }
+                  data: { type: array, items: { $ref: "#/components/schemas/Command" } }
+              example:
+                data:
+                  - name: "compact"
+                    description: "Summarize older history into a checkpoint"
+                    hint: ""
+                    source: "native"
+                    enabled: true
+                    reason: ""
+                  - name: "review"
+                    description: "Review the working tree"
+                    hint: "/review [path]"
+                    source: "agent"
+                    enabled: true
+                    reason: ""
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/conversations/{conversationId}/commands:
+    parameters:
+      - $ref: "#/components/parameters/ConversationId"
+    post:
+      operationId: runCommand
+      tags: [conversations]
+      summary: Run one native command
+      description: |
+        An action, not a turn: no message is written and no `turn.*` frame is
+        emitted. `compact` folds the live tail into a checkpoint — the same
+        compaction the header button used to POST; `clear` empties the room's
+        messages, folds, and tool output while keeping its identity, and drops
+        its agent session; `fork` copies the whole logical history and the
+        tool-output files it references into a new room titled
+        `<source title> (fork)`.
+
+        The answer is the room detail projection the command leaves the caller
+        on — the new room for a fork.
+
+        Every precondition is enforced here rather than by the transport: a
+        live transport turn refuses every command (`409 busy`), `clear`
+        requires `confirm: true` or the word `confirm` as its only argument
+        (`409 confirmation_required`), an agent room cannot compact
+        (`409 unavailable`), and a room with nothing to act on answers
+        `400 nothing_to_*`. Arguments are fixed in this version — `compact` and
+        `fork` take none, `clear` only `confirm` — and anything else, like an
+        unknown name, is `400 invalid_argument`. A recognized command is never
+        downgraded to text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, description: A catalog name, matched case-sensitively. }
+                args: { type: string, description: "Arguments; `clear` accepts only `confirm`." }
+                confirm: { type: boolean, description: The confirmation a destructive command needs. }
+              additionalProperties: false
+            example: { name: "clear", args: "", confirm: true }
+      responses:
+        "200":
+          description: The command ran; the room it leaves the caller on.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [command, conversation]
+                properties:
+                  command: { type: string }
+                  conversation: { $ref: "#/components/schemas/Conversation" }
+        "400":
+          description: Unknown name, stray arguments, or a room with nothing to act on (`nothing_to_compact`, `nothing_to_clear`, `nothing_to_fork`).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: "urn:nusashell:problem:nothing_to_clear"
+                title: "Bad Request"
+                status: 400
+                code: "nothing_to_clear"
+                detail: "This thread is empty"
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "408": { $ref: "#/components/responses/Interrupted" }
+        "409":
+          description: A live turn (`busy`), a missing confirmation (`confirmation_required`), or a command that does not apply to this room kind (`unavailable`).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: "urn:nusashell:problem:confirmation_required"
+                title: "Conflict"
+                status: 409
+                code: "confirmation_required"
+                detail: "nothing is cleared without confirm"
+        "410": { $ref: "#/components/responses/Gone" }
+        "429": { $ref: "#/components/responses/QueueFull" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/UpstreamTimeout" }
 
   /api/conversations/{conversationId}/approval-rules:
     parameters:
@@ -3290,7 +3357,7 @@ components:
         status: { type: integer, example: 404 }
         code:
           type: string
-          enum: [invalid_argument, forbidden_origin, unauthenticated, csrf, too_many_attempts, not_found, interrupted, gone, input_too_large, queue_full, internal, upstream_error, unavailable, upstream_timeout]
+          enum: [invalid_argument, nothing_to_compact, nothing_to_clear, nothing_to_fork, forbidden_origin, unauthenticated, csrf, too_many_attempts, not_found, interrupted, busy, confirmation_required, gone, input_too_large, queue_full, internal, upstream_error, unavailable, upstream_timeout]
           description: Stable machine code for programmatic routing.
         detail:
           type: string
@@ -3364,7 +3431,7 @@ components:
           description: Number of compacted archive segments.
         canCompact:
           type: boolean
-          description: Present on detail and completed-compaction responses; whether manual compaction can fold new live history.
+          description: Present on detail and command responses; whether manual compaction can fold new live history.
         activeTurnId:
           type: string
           description: Present on detail and on list items while this process has a non-terminal transport turn for the room. A client attaches with turn.watch. Omitted when the room is idle and never part of persisted state.
@@ -4362,13 +4429,16 @@ components:
               value: { type: string }
               name: { type: string }
               description: { type: string }
-    AgentCommand:
+    Command:
       type: object
-      required: [name]
+      required: [name, source, enabled]
       properties:
-        name: { type: string }
+        name: { type: string, description: "The command's name, reserved on a draft's first line." }
         description: { type: string }
         hint: { type: string, description: Placeholder for the command's input. }
+        source: { type: string, enum: [native, agent], description: Who owns the row; a native name wins a collision. }
+        enabled: { type: boolean, description: This room's verdict — a refused row stays visible with its reason. }
+        reason: { type: string, description: Why the row is off; empty when it is on. }
     ApprovalRule:
       type: object
       required: [id, action, createdAt]

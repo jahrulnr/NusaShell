@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
@@ -15,7 +16,8 @@ import (
 
 // A project's other folders are reachable by absolute path through every
 // file tool; a relative path stays in the workspace dir, and an absolute
-// path outside all of the thread's folders is refused.
+// path outside all of the thread's folders is reachable too — it anchors
+// at its own deepest existing folder instead of being refused.
 func TestFileToolsReachExtraFolders(t *testing.T) {
 	primary, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
 	ctx := service.WithExtraFolders(service.WithWorkspaceDir(context.Background(), primary), []string{extra})
@@ -31,6 +33,10 @@ func TestFileToolsReachExtraFolders(t *testing.T) {
 	}
 	write, read := mustWriteTool(t, primary), mustReadTool(t, primary)
 	patch, err := NewFilePatchTool(repoworkspace.NewLocal(), primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err := NewFileSearchTool(repoworkspace.NewLocal(), primary)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,10 +60,28 @@ func TestFileToolsReachExtraFolders(t *testing.T) {
 	if got, err := run(read, map[string]any{"path": filepath.Join(primary, "here.txt")}); err != nil || got != "x" {
 		t.Fatalf("absolute path in the primary folder = %q, %v", got, err)
 	}
-	if _, err := run(write, map[string]any{"path": filepath.Join(outside, "no.txt"), "content": "x"}); err == nil {
-		t.Fatal("a path outside the thread's folders must be refused")
+
+	// Outside every folder of the thread: read, write, patch and search
+	// all reach it — a plan under ~/.memory, a file in /tmp.
+	elsewhere := filepath.Join(outside, "plan", "notes.plan.md")
+	if _, err := run(write, map[string]any{"path": elsewhere, "content": "alpha beta"}); err != nil {
+		t.Fatalf("write outside = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outside, "no.txt")); err == nil {
-		t.Fatal("the refused write landed")
+	if got, err := run(read, map[string]any{"path": elsewhere}); err != nil || got != "alpha beta" {
+		t.Fatalf("read outside = %q, %v", got, err)
+	}
+	if _, err := run(patch, map[string]any{"path": elsewhere, "old_string": "beta", "new_string": "gamma"}); err != nil {
+		t.Fatalf("patch outside = %v", err)
+	}
+	if got, err := run(read, map[string]any{"path": elsewhere}); err != nil || got != "alpha gamma" {
+		t.Fatalf("read after patch outside = %q, %v", got, err)
+	}
+	if got, err := run(search, map[string]any{"pattern": "alpha", "path": outside}); err != nil || !strings.Contains(got, "plan/notes.plan.md:1: alpha gamma") {
+		t.Fatalf("search outside = %q, %v", got, err)
+	}
+	// The workspace session still refuses to step out of the folder it
+	// opened, so a relative path cannot wander off.
+	if _, err := run(read, map[string]any{"path": filepath.Join("..", filepath.Base(outside), "plan", "notes.plan.md")}); err == nil {
+		t.Fatal("a relative path must not escape the workspace dir")
 	}
 }

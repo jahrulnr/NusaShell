@@ -4,7 +4,16 @@
 # as "dev", and "dev" turns the update check off.
 VERSION ?= $(or $(shell tr -d '[:space:]' < VERSION 2>/dev/null),dev)
 
+# repomap + the grammar_subset tags carry the tree-sitter symbol index
+# into the default binary (~+13 MB). build-lean drops them for hosts that
+# would rather not pay for the symbol_map record.
+REPOMAP_TAGS := repomap grammar_subset grammar_subset_go grammar_subset_javascript grammar_subset_typescript grammar_subset_tsx grammar_subset_python grammar_subset_rust grammar_subset_java grammar_subset_kotlin grammar_subset_c_sharp grammar_subset_ruby grammar_subset_php grammar_subset_c grammar_subset_cpp grammar_subset_swift
+
 build:
+	mkdir -p ./bin
+	go build -tags '$(REPOMAP_TAGS)' -ldflags "-X main.version=$(VERSION)" -o bin/nusashell ./cmd/nusashell
+
+build-lean:
 	mkdir -p ./bin
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/nusashell ./cmd/nusashell
 
@@ -19,10 +28,11 @@ test: build
 	go vet ./...
 	go test ./...
 
-# One read-only gate over the whole tree: host build, vet, tests, the WebUI
-# syntax check, and a cross-compile of every package for the platforms the
-# roadmap claims. Separate from `test` because `test` runs `go fix`, which
-# rewrites sources — a check that mutates its subject cannot report on it.
+# One read-only gate over the whole tree: host build, vet, tests (including
+# the tagged symbol-map engine), the WebUI syntax check, and a
+# cross-compile of every package for the platforms the roadmap claims.
+# Separate from `test` because `test` runs `go fix`, which rewrites
+# sources — a check that mutates its subject cannot report on it.
 # A failing platform names itself in the output; `GOOS=X go build ./...`
 # leaves no binary behind because it covers more than one package.
 check: fmt-check test-web
@@ -30,6 +40,7 @@ check: fmt-check test-web
 	go vet ./...
 	go vet -tags memoryeval ./cmd/nusashell/
 	go test ./...
+	go test -tags '$(REPOMAP_TAGS)' ./infrastructure/service/symbol/... ./infrastructure/service/tool/symbolmap/ ./infrastructure/config/ ./cmd/nusashell/
 	GOOS=windows go build ./...
 	GOOS=darwin go build ./...
 

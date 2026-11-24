@@ -62,6 +62,63 @@ func NewConversation(id string) (*Conversation, error) {
 	return &Conversation{id: vo.String(), environment: DefaultEnvironment}, nil
 }
 
+// Fork returns the aggregate for a copy of this room: a fresh id, the same
+// runtime bindings, workspace, environment, project, memory setting, and
+// agent session options, and the same title. A room still on its default
+// title keeps it, so the copy auto-titles on its first send; any other title
+// gains the "(fork)" marker.
+//
+// The copy drops what belongs to one room rather than to its content — the
+// @label, reply routing, pin, the agent's own session handle and context
+// report, the title an agent gave the room, approval rules, the saved view,
+// and accumulated usage — and starts with no history: the repository copies
+// the stored messages in.
+func (c Conversation) Fork() (*Conversation, error) {
+	fork, err := NewConversation("")
+	if err != nil {
+		return nil, err
+	}
+	fork.title = c.title
+	if c.title != "" && !c.TitleIsDefault() {
+		fork.title = forkTitle(c.title)
+	}
+	if c.agentID != "" {
+		// BindAgent owns the agent state: it clears the provider route, the
+		// session handle, and the owner's option picks, so the picks are
+		// copied after it.
+		if err := fork.BindAgent(c.agentID); err != nil {
+			return nil, err
+		}
+		fork.agentOptions = maps.Clone(c.agentOptions)
+	} else {
+		fork.SetProviderID(c.providerID)
+		fork.SetModelID(c.modelID)
+	}
+	fork.effort = c.effort
+	fork.upstream = c.upstream
+	fork.workspace = c.workspace
+	if err := fork.SetEnvironment(c.environment); err != nil {
+		return nil, err
+	}
+	if err := fork.SetProject(c.projectID); err != nil {
+		return nil, err
+	}
+	fork.memoryOff = c.memoryOff
+	return fork, nil
+}
+
+// forkTitle marks a copy's title, keeping the marker inside the display
+// bound every title respects.
+func forkTitle(source string) string {
+	const marker = " (fork)"
+	title := titleFrom(source)
+	room := maxTitleRunes - len([]rune(marker)) - 1
+	if r := []rune(title); len(r) > room {
+		title = strings.TrimSpace(string(r[:room])) + "…"
+	}
+	return title + marker
+}
+
 // Append adds a message to the conversation history.
 func (c *Conversation) Append(m entity.Message) {
 	c.messages = append(c.messages, m)
@@ -150,6 +207,18 @@ func (c *Conversation) RewriteFrom(msgID, content string) error {
 		return nil
 	}
 	return ErrMessageNotFound
+}
+
+// ClearHistory empties the room's dialogue while keeping its identity: the
+// messages go, and the agent's session handle and context report go with them
+// so the next turn opens a fresh agent-side session. Everything else — title,
+// provider or agent binding and its options, workspace, environment, project,
+// label, routing, pin, memory setting, and accumulated usage — stays. The
+// repository's Clear persists exactly this post-state.
+func (c *Conversation) ClearHistory() {
+	clear(c.messages)
+	c.messages = nil
+	c.forgetSession()
 }
 
 // ForgetAgentSession drops the agent's session handle after this record

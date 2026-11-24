@@ -2,13 +2,10 @@ package conversation
 
 import (
 	"context"
-	"errors"
 	"io"
 	"io/fs"
 	"mime"
 	"net/http"
-	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -92,39 +89,8 @@ func (w *workspace) roots(c *gin.Context) {
 	c.JSON(200, gin.H{"roots": roots})
 }
 
-// localPath turns what a thread links into a filesystem path: a file:
-// URL, ~ for the owner's home, or a plain path (relative ones resolve
-// against the thread's folder).
-func localPath(raw string) (string, error) {
-	if raw == "" || strings.ContainsRune(raw, 0) {
-		return "", errors.New("a file path is required")
-	}
-	if strings.HasPrefix(strings.ToLower(raw), "file:") {
-		// A "#" is a filename character in what agents hand over, not a
-		// fragment marker.
-		u, err := url.Parse(strings.ReplaceAll(raw, "#", "%23"))
-		if err != nil {
-			return "", errors.New("invalid file URL")
-		}
-		if u.Host != "" && u.Host != "localhost" {
-			return "", errors.New("the file URL must refer to this machine")
-		}
-		raw = u.Path
-	} else if strings.Contains(raw, "://") {
-		return "", errors.New("expected a local file path")
-	}
-	if raw == "~" || strings.HasPrefix(raw, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		raw = filepath.Join(home, raw[1:])
-	}
-	if raw == "" {
-		return "", errors.New("a file path is required")
-	}
-	return filepath.FromSlash(raw), nil
-}
+// localPath — the file: / ~ / %VAR% expansion a linked file needs — lives
+// in localfile.go, next to the helper every surface now shares.
 
 // file streams a linked file. Media and PDFs open inline; anything else,
 // or download=1, downloads. Range requests work, so a preview can read

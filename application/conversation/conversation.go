@@ -69,6 +69,9 @@ type ConversationApp struct {
 	// changed hears of a room changing outside a turn (a reply's
 	// delivery to a chat, a generated title), so open views reload it.
 	changed []func(convID string)
+	// liveTurns tells whether a transport turn is in progress in a room; the
+	// hub owns that fact. Nil reads every room as idle.
+	liveTurns func(convID string) bool
 	// utility names the model for small tasks (thread titles); read on
 	// each use, "" turns them off.
 	utility func() (providerID, modelID string)
@@ -263,6 +266,10 @@ func (app *ConversationApp) post(convID string, j queuedJob) {
 		case *appjob.Delete:
 			x.Deps = deps
 		case *appjob.Compact:
+			x.Deps = deps
+		case *appjob.Clear:
+			x.Deps = deps
+		case *appjob.Fork:
 			x.Deps = deps
 		case *appjob.Annotate:
 			x.Deps = deps

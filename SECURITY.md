@@ -21,9 +21,10 @@ for one person on one machine, and makes no security guarantees for shared or ho
 - **`exec` is not sandboxed.** It runs shell commands as your user, with your filesystem
   access and environment, and a default timeout of 120 seconds. The environment includes
   any keys exported to it, including keys referenced with `env:`.
-- **Files outside the workspace.** `read_file`, `write_file`, and `apply_patch` are
-  confined to the workspace. `read_media` accepts absolute host paths, and `exec` can reach
-  anything your user can reach.
+- **Files outside the workspace.** `read_file`, `write_file`, `apply_patch`, and
+  `search` resolve a relative path inside the workspace and accept an absolute path
+  anywhere your user can read or write; `read_media` accepts absolute host paths, and
+  `exec` can reach anything your user can reach.
 - **Prompt injection is best-effort.** Instructions can arrive through user messages, tool
   results, the system prompt, or the provider in use. Tool results are
   wrapped in an `<untrusted_tool>` envelope before the model reads them. That reduces the

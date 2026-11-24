@@ -207,7 +207,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 				return appchannel.Runtime{}
 			}
 			r := c.Models.Chat
-			return appchannel.Runtime{AgentID: r.Agent, ProviderID: r.Provider, ModelID: r.Model}
+			return appchannel.Runtime{AgentID: r.Agent, ProviderID: r.Provider, ModelID: r.Model, Effort: r.Effort}
 		},
 	}, slog.Default())
 	chats.Register(telegram.New(channelRepo, b.Secrets(), slog.Default()))
@@ -285,6 +285,12 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		}
 	}()
 	eng.conversations.OnChanged(hub.RoomChanged)
+	// A command runs only in an idle room: the hub is the one place that knows
+	// whether a transport turn is live, so commands read it from there.
+	eng.conversations.UseLiveTurns(func(convID string) bool {
+		_, _, live := hub.ActiveTurn(convID)
+		return live
+	})
 	// Threads work with each other and drive a browser through two
 	// built-in MCP servers. The model runtime reaches them over an
 	// in-process connection; agents start this binary as a relay that
@@ -473,6 +479,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		Approvals:          eng.conversations,
 		Elicitations:       eng.conversations,
 		AgentSurface:       eng.conversations,
+		Commands:           eng.conversations,
 		Workspace:          eng.conversations,
 		Uploads:            eng.conversations,
 		Views:              eng.conversations,

@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 )
 
 // ModelsConfig assigns a model to each job the server does on its own
@@ -37,6 +39,11 @@ type ModelRole struct {
 	Agent    string `json:"agent"`
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	// Effort is the reasoning effort a thread of this role starts on —
+	// Threads and Chat only, and only when the role names a model: an
+	// agent carries its own effort among its session options. Empty keeps
+	// the model's configured effort, then the provider default.
+	Effort enum.Effort `json:"effort,omitempty"`
 }
 
 // Assigned reports whether the role names something to run: an agent, or
@@ -49,6 +56,7 @@ func (r *ModelRole) normalize() {
 	r.Agent = strings.TrimSpace(r.Agent)
 	r.Provider = strings.TrimSpace(r.Provider)
 	r.Model = strings.TrimSpace(r.Model)
+	r.Effort = enum.Effort(strings.TrimSpace(r.Effort.String()))
 }
 
 func (c *ModelsConfig) Normalize() {
@@ -67,15 +75,33 @@ func (c ModelsConfig) validate() error {
 		if r.Agent != "" && r.Provider != "" {
 			return fmt.Errorf("models.%s names both agent %q and provider %q; keep one", name, r.Agent, r.Provider)
 		}
+		if r.Effort != "" {
+			if _, ok := enum.ParseEffort(r.Effort.String()); !ok {
+				return fmt.Errorf("models.%s.effort %q is not a known effort", name, r.Effort)
+			}
+			// "default" is the schema's placeholder and means "send
+			// nothing"; only a real level needs a model to apply to.
+			if !r.Effort.IsUnset() {
+				if r.Agent != "" {
+					return fmt.Errorf("models.%s sets both an agent and an effort; an agent carries its own effort", name)
+				}
+				if r.Provider == "" || r.Model == "" {
+					return fmt.Errorf("models.%s.effort needs a provider and model", name)
+				}
+			}
+		}
 	}
 	// Only a thread can run on an agent; the other roles call a model
-	// directly.
+	// directly. None of them takes a reasoning effort.
 	for name, r := range map[string]ModelRole{
 		"utility": c.Utility, "embedding": c.Embedding, "transcription": c.Transcription,
 		"image": c.Image, "video": c.Video, "speech": c.Speech,
 	} {
 		if r.Agent != "" {
 			return fmt.Errorf("models.%s takes a provider and model, not an agent", name)
+		}
+		if r.Effort != "" && !r.Effort.IsUnset() {
+			return fmt.Errorf("models.%s does not take a reasoning effort", name)
 		}
 	}
 	return nil

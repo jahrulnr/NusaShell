@@ -688,8 +688,10 @@ turns never see it. Custom executables on `PATH` are not tools of their own:
 the agent runs them through `exec` or `exec_session`, guided by their
 companion skills.
 
-The file tools are confined to the workspace, except `read_media` which
-also accepts absolute host paths (the returned reference is still
+The file tools resolve a relative path inside the workspace and accept an
+absolute path anywhere on disk (a plan under `~/.memory`, a file in
+`/tmp`), so nothing they reach is off-limits to the agent; `read_media`
+takes absolute host paths the same way (the returned reference is still
 content-pinned — send-time resolution re-reads the file and verifies the
 sha256 the tool recorded). `exec` is not confined at all — it runs in
 the launch environment with a default 120 s timeout (the model may ask

@@ -93,8 +93,12 @@ func (tool *ProjectContextTool) Execute(ctx context.Context, _ entity.ToolCall, 
 		if extra == "" || extra == dir {
 			continue
 		}
-		b.WriteString("\n\n")
-		tool.renderDir(ctx, &b, "extra folder ", extra)
+		// Extra folders get one line, not a section: AGENTS.md + layout
+		// belong to the workspace the turn is rooted in, and walking
+		// every bound folder each pass would multiply the cost.
+		b.WriteString("\n+ ")
+		b.WriteString(extra)
+		b.WriteString(" — see its AGENTS.md if the turn moves there")
 	}
 	return dservice.ToolResult{Text: b.String()}, nil
 }

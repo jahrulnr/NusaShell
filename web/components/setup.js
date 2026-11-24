@@ -7,6 +7,7 @@ import { api, errorText } from '../lib/api.js';
 import { loadProviders, loadAgents, loadAgentModels } from '../lib/chat.js';
 import { Icon, Logo } from './icons.js';
 import { cx, Button, ErrorBlock, Select, Spinner } from './ui.js';
+import { API_STYLES } from '../lib/providers.js';
 
 const inputCls = 'h-9 rounded-lg bg-raised border border-line px-3 text-[13px] outline-none focus:border-accent w-full';
 
@@ -19,13 +20,6 @@ const PRESETS = [
   { id: 'gemini', name: 'Gemini', style: 'generatecontent', endpoint: 'https://generativelanguage.googleapis.com/v1beta', note: 'Google Gemini models.' },
   { id: 'ollama', name: 'Ollama', style: 'completion', endpoint: 'http://127.0.0.1:11434/v1', note: 'Models running on this machine.', keyless: true },
   { id: 'custom', name: 'Other', style: 'completion', endpoint: '', note: 'Any OpenAI-compatible, Responses, Messages, or Gemini endpoint.', custom: true },
-];
-
-const STYLES = [
-  { value: 'completion', text: 'Chat Completions (OpenAI-compatible)' },
-  { value: 'responses', text: 'Responses (OpenAI)' },
-  { value: 'messages', text: 'Messages (Anthropic)' },
-  { value: 'generatecontent', text: 'generateContent (Gemini)' },
 ];
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+|-+$/g, '');
@@ -133,7 +127,7 @@ function ApiStep({ onBack, onSaved }) {
           <input class=${inputCls} value=${f.id} onInput=${(e) => set('id')(e.target.value)} placeholder="My server" />
         </label>
         <div class="flex flex-col gap-1.5 text-[13px]"><span class="text-muted">API style</span>
-          <${Select} label="API style" value=${f.style} options=${STYLES} onChange=${set('style')} />
+          <${Select} label="API style" value=${f.style} options=${API_STYLES} onChange=${set('style')} />
         </div>
       </div>`}
       <label class="flex flex-col gap-1.5 text-[13px]"><span class="text-muted">Endpoint</span>

@@ -1,8 +1,9 @@
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, state, emit, toast } from '../lib/store.js';
-import { room, freshRoom, rename, removeRoom, compact, isBusy, openRoom, navigate, annotateRoom } from '../lib/chat.js';
+import { room, freshRoom, rename, removeRoom, runCommand, isBusy, openRoom, navigate, annotateRoom } from '../lib/chat.js';
+import { useCommands, commandBusyLabel } from '../lib/commands.js';
 import { Icon, Logo } from './icons.js';
-import { cx, Popover, IconButton, Dialog, Button, ErrorBlock, Spinner } from './ui.js';
+import { Popover, IconButton, Dialog, Button, ErrorBlock, Spinner } from './ui.js';
 import { Transcript } from './transcript.js';
 import { useFollow } from '../lib/follow.js';
 import { SetupWizard, needsSetup } from './setup.js';
@@ -24,6 +25,9 @@ function Header({ room: r, browser, pane, setPane }) {
   useEffect(() => { if (editing) { titleInput.current?.focus(); titleInput.current?.select(); } }, [editing]);
   const title = r.info?.title || 'Untitled thread';
   const ws = r.info?.workspace;
+  // Compact runs on the same catalog the composer's "/" menu reads, so its
+  // availability and reason are the server's, not a second rule here.
+  const compact = useCommands(r).find((c) => c.name === 'compact');
 
   const saveTitle = (v) => { setEditing(false); if (v.trim() !== (r.info?.title || '')) rename(r, v.trim()); };
   return html`<header class="flex items-center gap-1 h-12 px-2 sm:px-3 border-b border-line shrink-0">
@@ -42,7 +46,7 @@ function Header({ room: r, browser, pane, setPane }) {
         <${Icon} name="folder" size=${14} /><span class="truncate max-w-56">${ws.split('/').pop()}</span>
       </span>`}
     </div>
-    ${r.compacting && html`<span class="flex items-center gap-1.5 text-xs text-muted"><${Spinner} size=${12} /> Compacting</span>`}
+    ${r.command && html`<span class="flex items-center gap-1.5 text-xs text-muted"><${Spinner} size=${12} /> ${commandBusyLabel(r.command)}</span>`}
     <${BrowserButton} browser=${browser} />
     <${PaneButtons} pane=${pane} setPane=${setPane} />
     <${LinksButton} room=${r} />
@@ -52,10 +56,10 @@ function Header({ room: r, browser, pane, setPane }) {
         <button type="button" class="w-full flex items-center gap-2.5 px-3 h-9 hover:bg-hover" onClick=${() => { setMenu(false); setEditing(true); }}>
           <${Icon} name="pencil" size=${15} /> Rename
         </button>
-        <button type="button" disabled=${!r.info?.canCompact || isBusy(r) || r.compacting}
-          title=${r.info?.canCompact ? 'Summarize older history to free context' : 'Nothing to compact yet'}
+        <button type="button" disabled=${compact?.enabled === false || isBusy(r) || !!r.command}
+          title=${compact?.enabled === false ? (compact.reason || 'Not available now') : 'Summarize older history to free context'}
           class="w-full flex items-center gap-2.5 px-3 h-9 hover:bg-hover disabled:opacity-40 disabled:hover:bg-transparent"
-          onClick=${() => { setMenu(false); compact(r); }}>
+          onClick=${() => { setMenu(false); runCommand(r, 'compact'); }}>
           <${Icon} name="compress" size=${15} /> Compact history
         </button>
         <button type="button" class="w-full flex items-center gap-2.5 px-3 h-9 hover:bg-hover"

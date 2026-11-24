@@ -50,7 +50,7 @@ func NewReadMediaTool(store drepo.Workspace, root string) (service.Tool, error) 
 	schema, err := valueobject.NewToolSchema(
 		"read_media",
 		"Load an image, audio, video, or other non-text media file so it can be inspected directly. For text files use read_file.",
-		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, or an absolute host path"}},"required":["path"]}`),
+		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, an absolute host path, or ~/… for the owner's home"}},"required":["path"]}`),
 		true,
 		enum.ToolPermissionAgent,
 	)
@@ -77,6 +77,10 @@ func (tool *ReadMediaTool) Execute(ctx context.Context, call entity.ToolCall, _ 
 	if strings.TrimSpace(input.Path) == "" {
 		return service.ToolResult{}, fmt.Errorf("path is required")
 	}
+	path, err := expandPath(input.Path)
+	if err != nil {
+		return service.ToolResult{}, err
+	}
 	// Absolute host paths bypass the workspace os.Root — an agent working
 	// outside its workspace (a screenshot in /tmp, an asset elsewhere on
 	// disk) names the file directly. The sha256 pin still binds what
@@ -86,15 +90,14 @@ func (tool *ReadMediaTool) Execute(ctx context.Context, call entity.ToolCall, _ 
 	var f io.ReadCloser
 	var info fs.FileInfo
 	var uri string
-	if filepath.IsAbs(input.Path) {
-		var err error
-		f, info, err = tool.store.OpenHost(ctx, input.Path)
+	if filepath.IsAbs(path) {
+		f, info, err = tool.store.OpenHost(ctx, path)
 		if err != nil {
 			return service.ToolResult{}, fmt.Errorf("%q is not a readable regular file: %w", input.Path, err)
 		}
-		uri = tool.store.HostURI(input.Path)
+		uri = tool.store.HostURI(path)
 	} else {
-		root, rel, err := callRoot(ctx, tool.store, tool.dir, input.Path)
+		root, rel, err := callRoot(ctx, tool.store, tool.dir, path)
 		if err != nil {
 			return service.ToolResult{}, err
 		}

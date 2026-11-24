@@ -32,17 +32,19 @@ const (
 )
 
 // FileSearchTool finds files by path and text by regular expression in
-// the turn's workspace. The walk goes through the workspace repository,
-// which leaves out what the tree's version control ignores, so build
-// output, dependencies and other ignored trees never flood the answer.
+// the turn's workspace, or anywhere an absolute path points. The walk goes
+// through the workspace repository, which leaves out what the tree's
+// version control ignores, so build output, dependencies and other ignored
+// trees never flood the answer.
 type FileSearchTool struct {
 	dir    string
 	store  drepo.Workspace
 	schema valueobject.ToolSchema
 }
 
-// NewFileSearchTool binds the tool's default root; a turn-scoped
-// workspace dir overrides it per call.
+// NewFileSearchTool binds the tool's default root; a relative path
+// resolves inside it and an absolute path anchors where it lives. A
+// turn-scoped workspace dir overrides it per call.
 func NewFileSearchTool(store drepo.Workspace, root string) (service.Tool, error) {
 	abs, err := checkDir(store, root)
 	if err != nil {
@@ -51,7 +53,7 @@ func NewFileSearchTool(store drepo.Workspace, root string) (service.Tool, error)
 	schema, err := valueobject.NewToolSchema(
 		"search",
 		"Search the workspace's files: text by regular expression (RE2 syntax), paths by glob, or both. Leaves out what .gitignore ignores, .git, binary files and files over 2 MiB. Answers path:line: text for each matching line, or the matching paths when no pattern is given.",
-		json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regular expression to find in file contents (RE2). Omit to list the files the glob matches"},"glob":{"type":"string","description":"Only files whose path matches, e.g. *.go, src/**/*.ts. Without a slash it matches the file name"},"path":{"type":"string","description":"Folder or file to search, relative to the workspace root or absolute inside one of the thread's folders (default: the workspace root)"},"ignore_case":{"type":"boolean","description":"Match letters in either case"},"max_results":{"type":"integer","description":"Most matches to return — default 100, at most 500"}}}`),
+		json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Regular expression to find in file contents (RE2). Omit to list the files the glob matches"},"glob":{"type":"string","description":"Only files whose path matches, e.g. *.go, src/**/*.ts. Without a slash it matches the file name"},"path":{"type":"string","description":"Folder or file to search, relative to the workspace root, an absolute path anywhere on disk, or ~/… for the owner's home (default: the workspace root)"},"ignore_case":{"type":"boolean","description":"Match letters in either case"},"max_results":{"type":"integer","description":"Most matches to return — default 100, at most 500"}}}`),
 		true,
 		enum.ToolPermissionAgent,
 	)

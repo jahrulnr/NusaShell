@@ -15,19 +15,20 @@ import (
 )
 
 // FileWriteTool creates or replaces a text file under the turn's
-// workspace — the constructor carries the schema and validates the
-// default sandbox boundary; Execute resolves the call input against an
-// os.Root opened per call so `..` traversal and symlink escapes fail
-// alike.
+// workspace, or at an absolute path elsewhere — the constructor carries
+// the schema and validates the default root; Execute resolves the call
+// input against an os.Root opened per call so `..` traversal and symlink
+// escapes fail alike.
 type FileWriteTool struct {
 	dir    string
 	store  drepo.Workspace
 	schema valueobject.ToolSchema
 }
 
-// NewFileWriteTool binds the tool's default root: every requested path
-// resolves inside it — os.Root confines traversal and symlink escapes
-// alike. A turn-scoped workspace dir overrides it per call.
+// NewFileWriteTool binds the tool's default root: a relative path resolves
+// inside it — os.Root confines traversal and symlink escapes alike — while
+// an absolute path anchors where it lives. A turn-scoped workspace dir
+// overrides it per call.
 func NewFileWriteTool(store drepo.Workspace, root string) (service.Tool, error) {
 	abs, err := checkDir(store, root)
 	if err != nil {
@@ -36,7 +37,7 @@ func NewFileWriteTool(store drepo.Workspace, root string) (service.Tool, error) 
 	schema, err := valueobject.NewToolSchema(
 		"write_file",
 		"Create or overwrite a UTF-8 text file relative to the workspace root.",
-		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, or absolute inside one of the thread's folders"},"content":{"type":"string","description":"Complete file content — an existing file is replaced"}},"required":["path","content"]}`),
+		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, an absolute path anywhere on disk, or ~/… for the owner's home"},"content":{"type":"string","description":"Complete file content — an existing file is replaced"}},"required":["path","content"]}`),
 		true,
 		enum.ToolPermissionAgent,
 	)

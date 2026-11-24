@@ -21,13 +21,12 @@ import (
 // --- write fakes ---
 
 type fakeConvWrites struct {
-	last      appconversation.Annotation // the latest Annotate call
-	renamed   map[string]string
-	deleted   []string
-	compacted []string
-	purged    bool  // DeleteAll ran
-	ctxErr    error // ctx state observed inside the job call
-	err       error
+	last    appconversation.Annotation // the latest Annotate call
+	renamed map[string]string
+	deleted []string
+	purged  bool  // DeleteAll ran
+	ctxErr  error // ctx state observed inside the job call
+	err     error
 }
 
 func (f *fakeConvWrites) Annotate(_ context.Context, id string, a appconversation.Annotation) error {
@@ -55,12 +54,6 @@ func (f *fakeConvWrites) DeleteAll(ctx context.Context) (int, error) {
 	}
 	f.purged = true
 	return len(f.deleted), nil
-}
-
-func (f *fakeConvWrites) Compact(ctx context.Context, id string) error {
-	f.ctxErr = ctx.Err()
-	f.compacted = append(f.compacted, id)
-	return f.err
 }
 
 type fakeGwWrites struct {
@@ -332,19 +325,6 @@ func TestControlActivityRoute(t *testing.T) {
 	e := entries[0].(map[string]any)
 	if e["caller"] != "c_a" || e["tool"] != "send" || e["target"] != "c_b" || e["outcome"] != "ok" {
 		t.Fatalf("entry projection = %v", e)
-	}
-}
-
-func TestCompactConversationReturnsCompletedState(t *testing.T) {
-	fcw := &fakeConvWrites{}
-	convs := &fakeConversations{infos: []drepo.ConversationInfo{{ID: "c_1", SealedSegments: 1}}}
-	h := newTestHandler(t, Deps{Conversations: convs, ConversationWrites: fcw, Jobs: context.Background()})
-	req := httptest.NewRequest("POST", "http://"+testAuthority+"/api/conversations/c_1/compactions", nil)
-	req.Header.Set("Origin", "http://"+testAuthority)
-	rec := httptest.NewRecorder()
-	(*h).ServeHTTP(rec, req)
-	if rec.Code != 200 || len(fcw.compacted) != 1 || decodeBody(t, rec)["sealedSegments"] != float64(1) {
-		t.Fatalf("want completed compaction state, got %d %v %s", rec.Code, fcw.compacted, rec.Body.String())
 	}
 }
 

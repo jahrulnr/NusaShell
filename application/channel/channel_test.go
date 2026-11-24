@@ -158,6 +158,7 @@ func (r *fakeRooms) AnswerElicitation(_, id string, a valueobject.ElicitationAns
 type runCall struct {
 	convID, provider, model, agent, content string
 	origin                                  valueobject.TurnOrigin
+	effort                                  enum.Effort
 }
 
 // fakeRunner "runs" a turn by writing a reply into fakeRooms.
@@ -177,7 +178,7 @@ type fakeRunner struct {
 
 func (f *fakeRunner) Run(_ context.Context, convID, providerID, modelID, content string, attachments []valueobject.Attachment, opts appjob.SendOptions, observe event.TurnEventHandler) (string, appconversation.SendResult, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, runCall{convID, providerID, modelID, opts.Agent, content, opts.Origin})
+	f.calls = append(f.calls, runCall{convID, providerID, modelID, opts.Agent, content, opts.Origin, opts.Effort})
 	f.files = append(f.files, attachments)
 	f.refs = append(f.refs, opts.References)
 	evs, fail := f.events, f.fail
@@ -227,16 +228,23 @@ func (f *fakeRunner) Busy(convID string) bool {
 	return f.busy[convID]
 }
 
-type fakeCatalog struct{}
+type fakeCatalog struct{ runtime Runtime }
 
-func (fakeCatalog) Default(context.Context) (Runtime, error) {
-	return Runtime{ProviderID: "or", ModelID: "auto"}, nil
+func (c fakeCatalog) Default(context.Context) (Runtime, error) {
+	if c.runtime.empty() {
+		return Runtime{ProviderID: "or", ModelID: "auto"}, nil
+	}
+	return c.runtime, nil
 }
 func (fakeCatalog) Choices(context.Context) ([]Choice, error) {
 	return []Choice{{Runtime{ProviderID: "or", ModelID: "auto"}, "OpenRouter Auto"}, {Runtime{AgentID: "claude"}, "Claude Agent"}}, nil
 }
 
 func setup(t *testing.T) (*App, *fakeChannel, *fakeRunner, *fakeRooms, *repochannel.Repository) {
+	return setupCatalog(t, fakeCatalog{})
+}
+
+func setupCatalog(t *testing.T, catalog fakeCatalog) (*App, *fakeChannel, *fakeRunner, *fakeRooms, *repochannel.Repository) {
 	t.Helper()
 	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "app.db"), migration.Files)
 	if err != nil {
@@ -250,7 +258,7 @@ func setup(t *testing.T) (*App, *fakeChannel, *fakeRunner, *fakeRooms, *repochan
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := New(repo, repo, uploads, repoproject.New(db), rooms, runner, fakeCatalog{}, nil)
+	app := New(repo, repo, uploads, repoproject.New(db), rooms, runner, catalog, nil)
 	ch := &fakeChannel{}
 	app.Register(ch)
 	return app, ch, runner, rooms, repo
@@ -794,5 +802,15 @@ func TestReplyQuoteReachesTheRoom(t *testing.T) {
 	app.process(ctx, msg("42", "4", "plain"))
 	if got := runner.calls[3].content; got != "plain" {
 		t.Fatalf("plain message = %q", got)
+	}
+}
+
+// The chat role's effort rides the turn's options, so a room the channel
+// opens starts on the effort the owner chose for chat channels.
+func TestChatRoleEffortReachesTheTurn(t *testing.T) {
+	app, _, runner, _, _ := setupCatalog(t, fakeCatalog{runtime: Runtime{ProviderID: "or", ModelID: "auto", Effort: enum.EffortMax}})
+	app.process(context.Background(), msg("42", "1", "hello"))
+	if len(runner.calls) != 1 || runner.calls[0].effort != enum.EffortMax {
+		t.Fatalf("runs = %+v", runner.calls)
 	}
 }

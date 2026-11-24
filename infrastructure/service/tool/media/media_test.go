@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -159,5 +160,62 @@ func TestSpeakAndVideoAttach(t *testing.T) {
 	}
 	if m.video.FirstFrame == nil || m.video.Duration != 5 || len(streamed) == 0 {
 		t.Fatalf("request = %+v, streamed %q", m.video, streamed)
+	}
+}
+
+// A ~/… path a model writes reaches the owner's home for every media tool's
+// input, instead of becoming a "./~" folder in the workspace.
+func TestMediaInputsExpandHome(t *testing.T) {
+	tools, m, ws, ctx := setup(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "ref.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := tools["generate_image"].Execute(ctx, call(t, "generate_image", `{"prompt":"a fox","references":["~/ref.png"]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.image.References) != 1 || m.image.References[0].MediaType != "image/png" {
+		t.Fatalf("references = %+v", m.image.References)
+	}
+	if len(res.Attachments) == 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "~")); err == nil {
+		t.Fatal(`the media tool treated ~/… as a workspace path`)
+	}
+
+	if err := os.WriteFile(filepath.Join(home, "clip.txt"), []byte("halo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools["transcribe"].Execute(ctx, call(t, "transcribe", `{"path":"~/clip.txt"}`), nil); err != nil {
+		// The fixture is text, not audio: the point is that the path resolved
+		// in the home folder, which the error names.
+		if !strings.Contains(err.Error(), "clip.txt") || strings.Contains(err.Error(), "no such file") {
+			t.Fatalf("transcribe ~/clip.txt = %v", err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(ws, "~")); err == nil {
+		t.Fatal(`transcribe treated ~/… as a workspace path`)
+	}
+}
+
+// The Windows %VAR% rule is the helper's, not the media tool's: on this host
+// %APPDATA% stays a literal folder name.
+func TestMediaInputPathExpandsLikeFileTools(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a literal %APPDATA% folder is the non-Windows policy")
+	}
+	tools, _, ws, ctx := setup(t)
+	dir := filepath.Join(ws, "%APPDATA%")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ref.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools["generate_image"].Execute(ctx, call(t, "generate_image", `{"prompt":"a fox","references":["%APPDATA%/ref.png"]}`), nil); err != nil {
+		t.Fatalf("generate_image %%APPDATA%%/ref.png: %v", err)
 	}
 }

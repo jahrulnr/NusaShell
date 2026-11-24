@@ -231,6 +231,29 @@ export function toolFailed(output) {
     || /\(exit [1-9]\d*\)\s*$/.test(o) || /\(signal: [^)]+\)\s*$/.test(o);
 }
 
+// liveHistory trims a transcript list to what the live turn still leaves to
+// history. A resumed turn re-answers the newest prompt and its live tail
+// replaces the stored answers after it, so history stops at that prompt — but
+// only for a retry this tab started, which read that prompt from the room
+// before the turn: an adopted one cannot tell the turn's prompt from an older
+// message a stale page still ends on. An edit replaces the message it names,
+// so history stops ahead of it. A send trims nothing: its prompt is the newest
+// message itself, and history before the turn is content no stream reproduces
+// — trimming at "the last prompt in history" cut away the answer in front of a
+// turn whose own prompt had not been read yet.
+export function liveHistory(items, live) {
+  if (!live) return items;
+  if (live.editOf) {
+    const at = items.findIndex((x) => x.id === live.editOf);
+    return at < 0 ? items : items.slice(0, at);
+  }
+  if (live.kind === 'resume' && !live.adopted) {
+    const at = items.findLastIndex((x) => x.kind === 'user');
+    return at < 0 ? items : items.slice(0, at + 1);
+  }
+  return items;
+}
+
 // historyItems flattens persisted messages into transcript items:
 // { kind: 'user', msg } | { kind: 'note', msg } | segment-like items.
 export function historyItems(messages, cwd = '') {

@@ -14,19 +14,21 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
-// FilePatchTool rewrites a text file under the turn's workspace by
-// literal search/replace — deliberately not unified diff: diff grammars
-// are fragile for models, and exact-match anchoring either matches or
-// fails, forcing a re-read instead of a fuzzy guess.
+// FilePatchTool rewrites a text file under the turn's workspace, or one an
+// absolute path names elsewhere, by literal search/replace — deliberately
+// not unified diff: diff grammars are fragile for models, and exact-match
+// anchoring either matches or fails, forcing a re-read instead of a fuzzy
+// guess.
 type FilePatchTool struct {
 	dir    string
 	store  drepo.Workspace
 	schema valueobject.ToolSchema
 }
 
-// NewFilePatchTool binds the tool's default root: every requested path
-// resolves inside it — os.Root confines traversal and symlink escapes
-// alike. A turn-scoped workspace dir overrides it per call.
+// NewFilePatchTool binds the tool's default root: a relative path resolves
+// inside it — os.Root confines traversal and symlink escapes alike — while
+// an absolute path anchors where it lives. A turn-scoped workspace dir
+// overrides it per call.
 func NewFilePatchTool(store drepo.Workspace, root string) (service.Tool, error) {
 	abs, err := checkDir(store, root)
 	if err != nil {
@@ -35,7 +37,7 @@ func NewFilePatchTool(store drepo.Workspace, root string) (service.Tool, error) 
 	schema, err := valueobject.NewToolSchema(
 		"apply_patch",
 		"Replace an exact string in a UTF-8 text file relative to the workspace root.",
-		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, or absolute inside one of the thread's folders"},"old_string":{"type":"string","description":"Exact text to find; may span multiple lines"},"new_string":{"type":"string","description":"Replacement text; empty deletes old_string"},"replace_all":{"type":"boolean","description":"Replace every occurrence instead of requiring a unique match (default false)"}},"required":["path","old_string","new_string"]}`),
+		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path relative to the workspace root, an absolute path anywhere on disk, or ~/… for the owner's home"},"old_string":{"type":"string","description":"Exact text to find; may span multiple lines"},"new_string":{"type":"string","description":"Replacement text; empty deletes old_string"},"replace_all":{"type":"boolean","description":"Replace every occurrence instead of requiring a unique match (default false)"}},"required":["path","old_string","new_string"]}`),
 		true,
 		enum.ToolPermissionAgent,
 	)

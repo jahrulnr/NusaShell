@@ -41,6 +41,10 @@ const (
 	lineMessage       = "message"
 	lineToolOutput    = "tool_output"
 	lineDelivery      = "delivery"
+	// toolOutputDir holds the files a room's tool calls spilled — the only
+	// files the store keeps inside a conversation directory besides its own
+	// records.
+	toolOutputDir = "tool-output"
 )
 
 // ConversationRepository is a JSONL-backed Conversation store. A single

@@ -354,7 +354,7 @@ export function BrowserPanel({ room: r, browser: b }) {
     <div class="flex items-center gap-2 h-9 px-3 border-b border-line shrink-0">
       <div class="flex-1 min-w-0 truncate text-[12px] text-muted">${page.title || page.url || 'Browser'}</div>
       ${st?.profile && st.profile !== 'default' && html`<span class="text-[11px] text-faint border border-line rounded px-1.5 shrink-0" title="Browser profile">${st.profile}</span>`}
-      <button type="button" aria-pressed=${consoleOpen} onClick=${() => setConsoleOpen(!consoleOpen)} title="The page's console: its logs and errors, and JavaScript you run in it"
+      <button type="button" aria-pressed=${consoleOpen} onClick=${() => setConsoleOpen(!consoleOpen)} title="Page console: logs, errors, and scripts"
         class=${cx('h-6 px-2 rounded-md text-[12px] inline-flex items-center gap-1 hover:bg-hover shrink-0', consoleOpen ? 'text-accent' : 'text-muted hover:text-fg')}>
         <${Icon} name="terminal" size=${12} /> Console</button>
       <button type="button" onClick=${end} class="h-6 px-2 rounded-md text-[12px] text-muted hover:text-bad hover:bg-hover shrink-0">End session</button>

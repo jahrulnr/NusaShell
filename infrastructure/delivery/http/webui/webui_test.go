@@ -82,8 +82,9 @@ func TestWidgetAssetsServeAndHead(t *testing.T) {
 	}
 }
 
-// Every asset shares one no-cache contract: a long-lived stylesheet
-// served next to a fresh script pairs new markup with stale rules.
+// Every script and stylesheet shares one no-cache contract: a long-lived
+// stylesheet served next to a fresh script pairs new markup with stale
+// rules. Each still carries an ETag, so the revalidation costs a 304.
 func TestAssetsNeverPairFreshJSWithStaleCSS(t *testing.T) {
 	r := router(t)
 	for _, p := range []string{"/styles/theme.css", "/components/x.js"} {
@@ -91,6 +92,41 @@ func TestAssetsNeverPairFreshJSWithStaleCSS(t *testing.T) {
 		if got := w.Header().Get("Cache-Control"); got != "no-cache" {
 			t.Errorf("GET %s cache-control = %q", p, got)
 		}
+		if w.Header().Get("ETag") == "" {
+			t.Errorf("GET %s has no ETag", p)
+		}
+	}
+}
+
+// The icon is the one asset with no cross-file contract, so a browser may
+// keep it for hours — and revalidate it by ETag when that runs out.
+func TestIconIsCacheableAndRevalidates(t *testing.T) {
+	r := router(t)
+	w := request(r, "GET", "/favicon.svg", authority)
+	if w.Code != 200 {
+		t.Fatalf("GET /favicon.svg = %d", w.Code)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "public, max-age=14400" {
+		t.Errorf("icon cache-control = %q", got)
+	}
+	tag := w.Header().Get("ETag")
+	if tag == "" {
+		t.Fatal("icon has no ETag")
+	}
+	req := httptest.NewRequest("GET", "/favicon.svg", nil)
+	req.Host = authority
+	req.Header.Set("If-None-Match", tag)
+	again := httptest.NewRecorder()
+	r.ServeHTTP(again, req)
+	if again.Code != 304 || again.Body.Len() != 0 {
+		t.Errorf("revalidation = %d len=%d, want 304 with no body", again.Code, again.Body.Len())
+	}
+	// A validator that does not match still gets the bytes.
+	req.Header.Set("If-None-Match", `"stale"`)
+	fresh := httptest.NewRecorder()
+	r.ServeHTTP(fresh, req)
+	if fresh.Code != 200 || fresh.Body.Len() == 0 {
+		t.Errorf("mismatched validator = %d len=%d, want 200 with the body", fresh.Code, fresh.Body.Len())
 	}
 }
 

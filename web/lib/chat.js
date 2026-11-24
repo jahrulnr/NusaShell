@@ -1,11 +1,12 @@
 // Chat controller: owns the socket, the per-room state, and every command.
 // Components read `state` and call these functions; nothing else talks to
 // the socket.
-import { state, emit, toast, dismissToast } from './store.js';
+import { state, emit, toast, dismissToast, askConfirm } from './store.js';
 import { api, errorText, ApiError } from './api.js';
 import { TurnSocket, newRequestId } from './socket.js';
 import { newTurn, applyFrame, snapshotSegments } from './turn.js';
 import { referencesForSend, referencesToDraft, liveReferences } from './references.js';
+import { parseCommand, isNativeCommand, catalogRow, loadCommands } from './commands.js';
 import { loadView, startViews } from './views.js';
 
 const HISTORY_PAGE = 60;
@@ -29,7 +30,11 @@ function blankRoom(key, id) {
     messages: [], hist: { status: id ? 'loading' : 'ready', error: null, start: 0, total: 0, more: false },
     live: null, pendingOpen: null, settling: false,
     failed: null, queue: [], steers: [],
-    draft: '', refs: [], files: [], sel: {}, ctx: null, cutHistory: false, recording: null,
+    // command is the native command running on this room right now (its name),
+    // and catalog what the server says this room offers: the native commands
+    // and its agent's own, with availability. Both follow the room, not a tab.
+    command: '', catalog: { status: 'idle', items: [], error: null }, catalogAt: 0,
+    draft: '', refs: [], files: [], sel: {}, ctx: null, recording: null,
     // quotes are passages picked from a transcript to answer, each with
     // the owner's reply to it, riding above the draft until it is sent.
     quotes: [],
@@ -288,6 +293,8 @@ async function checkUpdate() {
 export async function openRoom(id) {
   const r = room(id);
   loadView(r);
+  // The command catalog is the room's: another room has another set.
+  loadCommands(r);
   if (r.live) { loadInfo(r); return; }
   await Promise.all([loadInfo(r), loadHistory(r)]);
   if (r.info?.activeTurnId && !r.live) watch(r, r.info.activeTurnId, r.info.activeTurnKind, -1);
@@ -444,13 +451,13 @@ export function selection(r) {
     : r.info?.providerId ? { providerId: r.info.providerId, modelId: r.info.modelId, effort: r.info.effort, upstream: r.info.upstream } : null;
   const t = !r.id && state.threadDefault;
   const fallback = t?.agent ? { agentId: t.agent, modelId: t.model }
-    : t?.provider && t?.model ? { providerId: t.provider, modelId: t.model } : null;
+    : t?.provider && t?.model ? { providerId: t.provider, modelId: t.model, effort: t.effort || 'default' } : null;
   const base = r.sel.providerId || r.sel.agentId ? r.sel : bound || fallback || p;
   return {
     agentId: base.agentId || '',
     providerId: base.agentId ? '' : base.providerId || '',
     modelId: base.modelId || '',
-    effort: r.sel.effort ?? (bound ? bound.effort || 'default' : fallback ? 'default' : p.effort) ?? 'default',
+    effort: r.sel.effort ?? (bound ? bound.effort || 'default' : fallback ? (fallback.effort || 'default') : p.effort) ?? 'default',
     upstream: r.sel.upstream ?? (bound ? bound.upstream || '' : fallback ? '' : p.upstream) ?? '',
     workspace: r.sel.workspace ?? r.info?.workspace ?? '',
   };
@@ -485,6 +492,18 @@ export function setSelection(r, patch) {
   emit();
 }
 
+// applyRoomInfo stores a room's fresh record — the open room's info and the
+// list row that shows it. The row keeps the live-turn fields, which the
+// record projection does not carry, and replaces the rest rather than
+// merging, so a cleared project or pin disappears.
+function applyRoomInfo(info) {
+  if (state.rooms[info.id]) state.rooms[info.id].info = info;
+  const i = state.convs.items.findIndex((c) => c.id === info.id);
+  if (i < 0) return;
+  const { activeTurnId, activeTurnKind } = state.convs.items[i];
+  state.convs.items[i] = { ...info, activeTurnId, activeTurnKind };
+}
+
 // persistSelection binds the room to what the picker shows, so a turn that
 // starts anywhere — a WhatsApp or Telegram message, an automation, another
 // browser — runs the model the owner picked. Without it the choice lived
@@ -501,13 +520,7 @@ async function persistSelection(r, s, runtime = true) {
     ? { agentId: s.agentId, ...(s.modelId ? { modelId: s.modelId } : {}) }
     : { ...(runtime ? { providerId: s.providerId, modelId: s.modelId } : {}), effort: s.effort, upstream: s.upstream };
   try {
-    const info = await api.annotate(r.id, body);
-    if (state.rooms[r.id]) state.rooms[r.id].info = info;
-    const i = state.convs.items.findIndex((c) => c.id === r.id);
-    if (i >= 0) {
-      const { activeTurnId, activeTurnKind } = state.convs.items[i];
-      state.convs.items[i] = { ...info, activeTurnId, activeTurnKind };
-    }
+    applyRoomInfo(await api.annotate(r.id, body));
     // The room carries the choice now, so the local override is spent:
     // dropping it lets the picker render the room's real binding, and a
     // change made from a chat shows up here instead of being masked.
@@ -592,6 +605,15 @@ function prependDraft(r, text, refs, files) {
 // offsets); files are the uploads attached to the draft. All three
 // modes carry the same message — they differ only in timing.
 export function submit(r, text, refs = [], files = [], steerTurnId = '') {
+  // A native command is an action, not a turn: recognized on the draft's first
+  // line, it never becomes a message to the model or the agent — not even when
+  // the room refuses it. The caller keeps the draft; only the server's 200
+  // spends it.
+  const cmd = parseCommand(text);
+  if (cmd && isNativeCommand(r, cmd.name)) {
+    runCommand(r, cmd.name, cmd.args, String(text || '').trim());
+    return false;
+  }
   if (files.some((f) => f.status === 'uploading')) {
     toast('Wait for the files to finish uploading.', 'info');
     return false;
@@ -775,10 +797,46 @@ export function restoreQueued(r, id) {
 function watch(r, turnId, kind, afterSeq) {
   if (!r.live || r.live.turnId !== turnId) {
     r.live = newTurn({ turnId, conversationId: r.id, kind: kind || 'send' });
-    r.cutHistory = afterSeq < 0;
+    // adopted marks a turn this tab never opened — another browser, a chat
+    // channel, or a thread relaying a prompt into this room. Its prompt is
+    // not in hand, only in the room's history.
+    r.live.adopted = true;
+    // A live turn turns every native command off for the room.
+    loadCommands(r, { force: true });
   }
   command(r, 'watch', { type: 'turn.watch', conversationId: r.id, turnId, afterSeq });
   emit();
+}
+
+// readNewestPage merges the room's newest page into what the transcript
+// holds without dropping the earlier pages the reader loaded — for a change
+// that landed under the room rather than through a turn this tab ran. It
+// answers the page it read; a failed read changes nothing and the next load
+// shows what it missed.
+async function readNewestPage(r) {
+  const page = await api.messages(r.id, -HISTORY_PAGE, HISTORY_PAGE);
+  if (state.rooms[r.id] !== r) return null;
+  const fresh = new Map(page.messages.map((m) => [m.id, m]));
+  const known = new Set(r.messages.map((m) => m.id));
+  r.messages = [...r.messages.map((m) => fresh.get(m.id) || m), ...page.messages.filter((m) => !known.has(m.id))];
+  r.hist.total = page.total;
+  r.histAt = Date.now();
+  r.histStale = false;
+  emit();
+  return page;
+}
+
+// readLivePrompt shows the prompt of a turn this tab adopted. The server
+// writes that user message just after the turn opens — no stream frame
+// carries it — so the transcript would otherwise run the live output
+// straight on from the previous turn's answer and show the prompt itself
+// only once the turn ends and history reloads. Callers read when the turn
+// opens (the notice may beat the write) and again at the turn's first
+// streamed frame, which proves the write landed.
+function readLivePrompt(r) {
+  if (state.route.view !== 'chat' || state.route.id !== r.id) return;
+  if (!r.live?.adopted || r.live.kind !== 'send') return;
+  readNewestPage(r).catch(() => { /* the turn's end reads it */ });
 }
 
 // After a (re)connect: re-attach every live turn from its last seq and
@@ -808,6 +866,7 @@ function reattach() {
       r.infoStale = true;
       r.histStale = true;
       r.ctxStale = true;
+      r.catalogAt = 0;
     }
     if (r.pendingOpen) {
       requests.delete(r.pendingOpen.requestId);
@@ -862,15 +921,7 @@ function onFrame(f) {
       if (state.route.view !== 'chat' || state.route.id !== r.id) { emit(); return; }
       if (r.infoStatus === 'ready') loadInfo(r);
       if (r.live || r.hist.status !== 'ready') { emit(); return; }
-      api.messages(r.id, -HISTORY_PAGE, HISTORY_PAGE).then((page) => {
-        const fresh = new Map(page.messages.map((m) => [m.id, m]));
-        const known = new Set(r.messages.map((m) => m.id));
-        r.messages = [...r.messages.map((m) => fresh.get(m.id) || m), ...page.messages.filter((m) => !known.has(m.id))];
-        r.hist.total = page.total;
-        r.histAt = Date.now();
-        r.histStale = false;
-        emit();
-      }).catch(() => { /* the next load shows it */ });
+      readNewestPage(r).catch(() => { /* the next load shows it */ });
       return;
     }
     case 'turn.cancel_ack': requests.delete(f.requestId); return;
@@ -900,6 +951,13 @@ function onFrame(f) {
     r.ctx = { estimate: 0, ...r.ctx, total: f.payload.size, live: f.payload.used, cost: f.payload.cost || null };
   }
   if (!r.live || r.live.turnId !== f.turnId) { emit(); return; }
+  // A turn this tab did not open holds its prompt only in history: the
+  // opening frame precedes the server's write of that user message, and
+  // every frame after it proves the write landed. Read once for it.
+  if (f.type !== 'turn.opened' && !r.live.promptRead) {
+    r.live.promptRead = true;
+    readLivePrompt(r);
+  }
   const compacting = r.live.phase?.phase === 'compacting';
   if (!applyFrame(r.live, f)) return;
   // A fold just ended: the history is smaller than any size reported before
@@ -941,12 +999,13 @@ function onOpened(f) {
   r.live.userFiles = req.kind === 'send' ? r.pendingOpen?.files || null : null;
   r.live.userRecording = req.kind === 'send' ? r.pendingOpen?.recording || null : null;
   r.live.editOf = req.kind === 'edit' ? r.pendingOpen?.messageId : null;
-  r.cutHistory = false;
   r.pendingOpen = null;
   if (req.kind === 'resume') {
     r.failed = null;
     r.held = false;
   }
+  // A live turn turns every native command off for the room.
+  loadCommands(r, { force: true });
   refreshConversationsSoon();
   emit();
 }
@@ -987,7 +1046,6 @@ function onResync(f) {
   const p = f.payload || {};
   if (r.live?.turnId !== f.turnId || r.live.terminal) return;
   if (p.turn === 'active') {
-    r.cutHistory = false;
     // A journal gap lands here: the server's own snapshot rebuilds what
     // streamed, the clock rides with it, and the live tail keeps
     // appending after it. When the bound trimmed earlier output — or no
@@ -1022,7 +1080,6 @@ function onResync(f) {
     onTerminal(r, terminal);
   } else {
     r.live = null;
-    r.cutHistory = false;
     for (const s of r.steers) if (s.turnId === f.turnId) s.state = 'unknown';
     loadInfo(r);
     loadHistory(r);
@@ -1039,15 +1096,26 @@ function onActivity(f) {
   // — a turn opening or ending writes the record and usually history.
   r.infoStale = true;
   if (p.state !== 'opened') r.histStale = true;
+  // A turn starting or ending changes what the room's commands may do; the
+  // next open (or the visible-room read below) asks again.
+  r.catalogAt = 0;
   const ours = p.requestId && requests.has(p.requestId);
   if (ours || r.live?.turnId === f.turnId) return;
-  if (p.state === 'opened' && !r.live && !r.pendingOpen && state.route.id === r.id) watch(r, f.turnId, p.kind, -1);
+  if (p.state === 'opened' && !r.live && !r.pendingOpen && state.route.view === 'chat' && state.route.id === r.id) {
+    watch(r, f.turnId, p.kind, -1);
+    // Show the prompt the turn answers as soon as it is readable; the
+    // notice can beat the server's write, and the turn's first streamed
+    // frame reads again when it does.
+    readLivePrompt(r);
+  }
   // Only the room on screen refetches; every other room reloads when it
   // is opened. A terminal state means the turn wrote its messages —
   // stale alone does not show them here, so the visible room reloads.
   if (p.state !== 'opened' && !r.live && state.route.view === 'chat' && state.route.id === r.id) {
     loadInfo(r);
     loadHistory(r);
+    // The room is idle again, so its commands are available again.
+    loadCommands(r, { force: true });
   }
 }
 
@@ -1123,9 +1191,10 @@ async function onTerminal(r, f) {
   emit();
   await (wroteNothing ? loadInfo(r) : Promise.all([loadInfo(r), loadHistory(r)]));
   r.live = null;
-  r.cutHistory = false;
   r.settling = false;
   if (!wroteNothing) fetchContext(r, { keepLive: true, force: true });
+  // The room is idle again: its native commands come back on.
+  loadCommands(r, { force: true });
   refreshConversationsSoon();
   emit();
   // Drain only after a clean finish with readable history; otherwise keep Send next available.
@@ -1206,15 +1275,7 @@ export async function rename(r, title) {
 export async function annotateRoom(id, patch) {
   let ok = false;
   try {
-    const info = await api.annotate(id, patch);
-    if (state.rooms[id]) state.rooms[id].info = info;
-    // Replace, not merge: the projection omits empty fields, so a merge
-    // would keep a cleared projectId or pin.
-    const i = state.convs.items.findIndex((c) => c.id === id);
-    if (i >= 0) {
-      const { activeTurnId, activeTurnKind } = state.convs.items[i];
-      state.convs.items[i] = { ...info, activeTurnId, activeTurnKind };
-    }
+    applyRoomInfo(await api.annotate(id, patch));
     ok = true;
   } catch (err) { toast('Could not update the thread: ' + errorText(err), 'error'); }
   emit();
@@ -1285,18 +1346,119 @@ function forgetThread(id) {
   loadConversations();
 }
 
-export async function compact(r) {
-  r.compacting = true;
+// ---------- native commands ----------
+
+// runCommand runs one native command on the room. A command is an action, not
+// a turn: no message is written and no turn frame is sent. The server owns
+// every precondition; the client refuses only what the room's catalog already
+// says is unavailable. A refusal — local or from the server — keeps the draft,
+// and only a 200 spends it. draft is the text that was submitted, so a draft
+// the owner rewrote while the command ran is left alone.
+export async function runCommand(r, name, args = '', draft = '') {
+  if (!r.id) {
+    const row = catalogRow(r, name);
+    toast(row?.reason || 'Send a message first.', 'info');
+    return false;
+  }
+  if (r.command) {
+    toast(`/${r.command} is still running.`, 'info');
+    return false;
+  }
+  const row = catalogRow(r, name);
+  if (row && row.enabled === false) {
+    toast(row.reason || `/${name} is not available in this thread.`, 'info');
+    return false;
+  }
+  r.command = name;
   emit();
+  let ok = false;
   try {
-    r.info = await api.compact(r.id);
+    let res;
+    try {
+      res = await api.runCommand(r.id, { name, args, confirm: false });
+    } catch (err) {
+      // A destructive command asks first: the dialog is the `confirm: true` the
+      // server wants, and cancelling keeps the draft untouched.
+      if (!(err instanceof ApiError && err.status === 409 && err.code === 'confirmation_required')) throw err;
+      if (!await confirmCommand(name)) return false;
+      res = await api.runCommand(r.id, { name, args, confirm: true });
+    }
+    // The server answered 200: the input is spent.
+    if (draft && r.draft.trim() === draft) {
+      r.draft = '';
+      r.refs = [];
+    }
+    await applyCommand(r, res?.command || name, res?.conversation || null);
+    ok = true;
+  } catch (err) {
+    // A refusal that names the room's state — busy, unavailable — also means
+    // the catalog is out of date; read it again for the next attempt.
+    if (err instanceof ApiError && err.status === 409) loadCommands(r, { force: true });
+    toast(err instanceof ApiError && (err.status === 400 || err.status === 409)
+      ? err.message
+      : `/${name} failed: ` + errorText(err), 'error');
+  } finally {
+    r.command = '';
+    emit();
+  }
+  loadCommands(r, { force: true });
+  return ok;
+}
+
+// confirmCommand asks before a destructive command runs. The answer is the
+// `confirm: true` the server requires; a chat ingress sends the word itself.
+function confirmCommand(name) {
+  if (name === 'clear') {
+    return askConfirm({
+      title: 'Clear this thread?',
+      body: 'Every message, fold, and tool output in this thread is removed. The thread keeps its model, workspace, project, and label; its agent session starts fresh.',
+      confirm: 'Clear',
+      danger: true,
+    });
+  }
+  return askConfirm({ title: `Run /${name}?`, body: 'This cannot be undone.', confirm: 'Run', danger: true });
+}
+
+// applyCommand settles what a command did. Compaction and clearing leave the
+// room in place and reload what they rewrote; a fork answers with the new room,
+// which is listed and opened.
+async function applyCommand(r, name, info) {
+  if (name === 'fork') {
+    if (!info?.id) throw new ApiError(0, 'invalid_response', 'The server did not return the forked thread.');
+    // The fork's projection is already in hand, so its header paints before
+    // its reads land. The lists (threads, projects) learn about it too.
+    const next = room(info.id);
+    next.info = info;
+    next.infoStatus = 'ready';
+    next.infoAt = Date.now();
+    next.infoStale = false;
+    refreshConversationsSoon();
+    navigate('#/c/' + encodeURIComponent(info.id));
+    openRoom(info.id);
+    toast('Thread forked.');
+    return;
+  }
+  if (info) {
+    r.info = info;
+    r.infoStale = false;
+    r.infoAt = Date.now();
+  }
+  if (name === 'clear') {
+    // The room's identity stays; its history, folds, and tool output are gone.
+    r.messages = [];
+    r.failed = null;
     r.histStale = true;
+    r.ctxStale = true;
     await loadHistory(r);
     fetchContext(r, { force: true });
-    toast('History compacted.');
-  } catch (err) { toast('Compaction failed: ' + errorText(err), 'error'); }
-  r.compacting = false;
-  emit();
+    toast('Thread cleared.');
+    return;
+  }
+  // compact: the checkpoint the room's worker wrote.
+  r.histStale = true;
+  await loadHistory(r);
+  fetchContext(r, { force: true });
+  toast('History compacted.');
 }
 
 // ---------- quoting a selection ----------

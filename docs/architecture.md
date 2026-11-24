@@ -550,8 +550,10 @@ harness-side `workspace` and `custom_tools` records), `repoagent` and the
 ACP `serviceagent.Runtime`, then `appconversation.New(…, WithAgents(…))`
 and `appagent.New`. The owner's home is the local driver's `FallbackRoot`:
 a room with no bound workspace runs its tools there, and the injected
-`workspace` context record cites it. File tools are `os.Root`-confined;
-`exec` is intentionally unsandboxed, gated instead by its
+`workspace` context record cites it. File tools are `os.Root`-confined
+inside whatever folder a call resolves to — the workspace for a relative
+path, the path's own folder for an absolute one; `exec` is intentionally
+unsandboxed, gated instead by its
 `ToolPermissionAgent` schema, which the application turn checks before
 `Execute` runs.
 

@@ -536,3 +536,25 @@ func TestInspectPropagatesSecretStoreOutage(t *testing.T) {
 		t.Fatal("secret store outage was reported as a broken record, not an error")
 	}
 }
+
+// A supported-effort level this build does not know is dropped, not fatal:
+// the catalog import already tolerates it, and a record written by a newer
+// build must not take the whole provider down.
+func TestDecodeDropsUnknownSupportedEffort(t *testing.T) {
+	rec := providerRecord{
+		ID: "or", Name: "OpenRouter", Style: "completion", Endpoint: "https://openrouter.ai/api/v1", Stream: true,
+		Models: []modelRecord{{ID: "glm", SupportedEfforts: []string{"high", "ultra", "max"}}},
+	}
+	p, err := decodeProvider(rec, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := p.Model("glm")
+	if !ok {
+		t.Fatal("model missing after decode")
+	}
+	got := m.SupportedEfforts()
+	if len(got) != 2 || got[0] != enum.EffortHigh || got[1] != enum.EffortMax {
+		t.Fatalf("efforts = %v, want [high max]", got)
+	}
+}

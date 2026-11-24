@@ -28,10 +28,11 @@ type Reader interface {
 	ContextFooterStats(ctx context.Context, convID, providerID, modelID string) (appconversation.ContextFooterStats, error)
 }
 
-// Writer is the mutation surface: Rename is synchronous; Delete and
-// Compact are accepted jobs that must outlive the HTTP request — they
-// run under Deps.Jobs, the server-lifecycle context, so an abandoned
-// request never half-applies them and server shutdown still cancels them.
+// Writer is the mutation surface: Rename is synchronous; Delete is an
+// accepted job that must outlive the HTTP request — it runs under
+// Deps.Jobs, the server-lifecycle context, so an abandoned request never
+// half-applies it and server shutdown still cancels it. History operations
+// (compact, clear, fork) are commands, not writer verbs.
 // *appconversation.ConversationApp satisfies it.
 type Writer interface {
 	Annotate(ctx context.Context, id string, a appconversation.Annotation) error
@@ -40,7 +41,6 @@ type Writer interface {
 	// threads own (uploads, picks, recordings, views); it answers with
 	// the deleted count, or a partial count plus error.
 	DeleteAll(ctx context.Context) (int, error)
-	Compact(ctx context.Context, id string) error
 }
 
 // Approver answers the permission requests a room's agent is waiting on.
@@ -71,9 +71,12 @@ type Deps struct {
 	// Elicitations answers agents' requests for input; nil leaves its
 	// routes unregistered.
 	Elicitations Elicitor
-	// Agent serves rooms' agent options and commands; nil leaves its
-	// routes unregistered.
+	// Agent serves rooms' agent options; nil leaves its routes
+	// unregistered.
 	Agent AgentSurface
+	// Commands serves the slash-command catalog and runs one native
+	// command; nil leaves both routes unregistered.
+	Commands CommandSurface
 	// Workspace serves reference search and the folders a room works
 	// in; nil leaves its routes unregistered.
 	Workspace WorkspaceSurface
@@ -100,7 +103,7 @@ func Register(api *gin.RouterGroup, d Deps) {
 	if jobs == nil {
 		jobs = context.Background()
 	}
-	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, clearActivity: d.ActivityClearer}
+	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, clearActivity: d.ActivityClearer, commands: d.Commands}
 	if d.Approvals != nil {
 		a := &approvals{svc: d.Approvals}
 		api.GET("/conversations/:id/approvals", a.list)
@@ -113,6 +116,14 @@ func Register(api *gin.RouterGroup, d Deps) {
 	}
 	if d.Agent != nil {
 		registerAgent(api, d.Agent)
+	}
+	if d.Commands != nil {
+		api.GET("/commands", s.listCommands)
+		// Running a command answers with a room projection, which a
+		// writes-only composition has no read surface to build.
+		if d.Reads != nil {
+			api.POST("/conversations/:id/commands", s.runCommand)
+		}
 	}
 	if d.Workspace != nil {
 		registerWorkspace(api, d.Workspace)
@@ -133,12 +144,11 @@ func Register(api *gin.RouterGroup, d Deps) {
 	if d.Writes != nil {
 		api.DELETE("/conversations", s.deleteAll)
 		api.DELETE("/conversations/:id", s.delete)
-		// Rename and compact answer with a fresh projection — a writes-only
-		// composition has no read surface to build it from, so the routes
-		// stay unregistered rather than panic inside the handler.
+		// Rename answers with a fresh projection — a writes-only
+		// composition has no read surface to build it from, so the route
+		// stays unregistered rather than panic inside the handler.
 		if d.Reads != nil {
 			api.PATCH("/conversations/:id", s.annotate)
-			api.POST("/conversations/:id/compactions", s.compact)
 		}
 	}
 }
@@ -146,6 +156,7 @@ func Register(api *gin.RouterGroup, d Deps) {
 type server struct {
 	reads         Reader
 	writes        Writer
+	commands      CommandSurface
 	live          LiveTurn
 	jobs          context.Context
 	clearActivity interface{ Clear() }

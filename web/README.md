@@ -17,6 +17,15 @@ under `vendor/` (see `vendor/README.md`).
 - **Pele** — Mermaid-syntax diagrams, rendered to SVG locally.
 - **slim-select** — styled `<select>` replacement (`components/ui.js` `Select`).
 
+## Caching
+
+Every asset answers an `ETag` (a content hash of the embedded file), so a
+reload costs a `304` instead of a re-download. Scripts and stylesheets stay
+`no-cache`: a rebuilt binary must show up at once, and a stylesheet served
+from cache next to a fresh script pairs new markup with stale rules. The
+icon is the one asset with no cross-file contract, so it alone is
+`public, max-age=4h` — and revalidates by its `ETag` after that.
+
 ## Popovers
 
 `Popover` (`components/ui.js`) opens from its wrapper on wide screens and as a
@@ -38,7 +47,10 @@ everywhere and obeys the theme: no `alert`/`confirm`/`prompt`, no native
 checkbox input (use `NumberField`, `DateTimeField`, `TimeField` from
 `components/fields.js` and `Checkbox` from `components/ui.js`), no `title`
 tooltip bubble (`lib/tooltip.js` takes any `title` over and draws its own, so
-keep writing `title=`), and no `controls` on media (`components/player.js`).
+keep writing `title=` — a few words naming the control, never an explanation:
+a long one lands as a panel over the content the reader was reading, and the
+bubble leaves on its own after a few seconds; put explanations in the
+interface), and no `controls` on media (`components/player.js`).
 Ask a yes-or-no question with `askConfirm()` from `lib/store.js`, which
 `ConfirmHost` renders; forms carry `noValidate` so the browser never shows its
 own validation bubbles. The exceptions are the file picker behind Attach, the
@@ -58,6 +70,8 @@ lib/
   turn.js             frames/history → transcript items; tool summaries
   markdown.js         block-incremental Markdown → sanitized DOM
   diagram.js          Pele seam: preflight gate, SVG scrubber, locked options
+  providers.js        provider API styles, named once for every form
+  settings.js         the settings document a page edits, and dotted reads
   tooltip.js          the app's own tooltips, taking over `title`
 components/
   sidebar.js          thread list (paged), new thread, settings
@@ -97,6 +111,15 @@ not-found view (`MissingView`).
   from the tray. Recall and a terminal snapshot that confirms a steer was not
   consumed return its complete input to the draft, not to the queue. An
   unknown outcome is never resent automatically.
+- **Native commands.** `/compact`, `/clear`, and `/fork` are NusaShell's own
+  actions, not turns: a draft whose first line is one of those names runs it
+  (`POST /api/conversations/:id/commands`) and never reaches the model or the
+  agent — a refusal keeps the draft, and only a 200 spends it. The "/" menu
+  lists them above the agent's commands and the file/skill/MCP matches, each
+  row naming its source (NusaShell, or the room's agent) and, when the room
+  cannot use it, the server's reason (`/api/commands?conversationId=`), which
+  the arrows step over. `/clear` asks with a danger dialog first; a fork opens
+  the new thread. The header's *Compact history* calls the same endpoint.
 - **Drafts follow the thread.** A room's unsent draft — text, references,
   quotes, files that finished uploading, and an attached browser
   recording (the RecordingBar's *Attach* picker in the live view; it

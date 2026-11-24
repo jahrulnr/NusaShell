@@ -15,7 +15,7 @@ import (
 	repofiletree "github.com/jahrulnr/nusashell/infrastructure/repository/filetree"
 	"github.com/jahrulnr/nusashell/infrastructure/system"
 
-	_ "go.uber.org/automaxprocs"
+	"go.uber.org/automaxprocs/maxprocs"
 	// Automation schedules name IANA zones; embed the database so hosts
 	// without one (Windows, slim containers) still resolve them.
 	_ "time/tzdata"
@@ -27,6 +27,11 @@ import (
 var version = "dev"
 
 func main() {
+	// automaxprocs sizes GOMAXPROCS from the container's CPU quota. Its
+	// default logger announces the outcome on every start ("Leaving
+	// GOMAXPROCS=12: CPU quota undefined"), which is noise for a local
+	// harness; the adjustment still applies, the chatter does not.
+	_, _ = maxprocs.Set(maxprocs.Logger(func(string, ...any) {}))
 	fileTree := repofiletree.NewLocal()
 	args := os.Args[1:]
 	// People repeat the invocation target via habit — the binary name, or

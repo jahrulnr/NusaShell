@@ -221,6 +221,12 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	if err != nil {
 		return nil, err
 	}
+	// symbol_map is the third hydration record — registered only when the
+	// binary carries the repomap tag (wire_symbolmap.go); the lean build
+	// stub registers nothing.
+	if err := wireSymbolMap(tools, configPath, dir, workspaceStore, workspaceRoot); err != nil {
+		return nil, err
+	}
 	// The compaction checkpoint contract rides no room catalog — the
 	// compaction job offers it alone inside its scratch dialogue.
 	summaryTool, err := toolsummary.NewSummaryTool()

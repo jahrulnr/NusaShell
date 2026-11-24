@@ -57,9 +57,16 @@ type ConversationInfo struct {
 // corruption or I/O failures.
 type Conversation interface {
 	// Save upserts the conversation-level record: id, providerID/modelID binding,
-	// title, system prompt, tools catalog, accumulated usage. Messages are
-	// persisted per turn via AppendMessage. The bound provider is a separate
-	// aggregate — resolved via the Provider repository by ProviderID().
+	// title, system prompt, tools catalog, accumulated usage, and the room's
+	// label. Messages are persisted per turn via AppendMessage. The bound
+	// provider is a separate aggregate — resolved via the Provider repository
+	// by ProviderID().
+	//
+	// Save owns the label invariant: a new room with no label is given the
+	// first one no other room holds, and a label another room already holds is
+	// refused (409) — both decided under the lock that writes the record, so
+	// concurrent creations and renames cannot end up sharing a handle. The
+	// aggregate's label is updated to the label stored.
 	Save(ctx context.Context, conv *aggregate.Conversation) error
 
 	// AppendMessage appends one message (a turn) to the stored history. The
@@ -128,6 +135,21 @@ type Conversation interface {
 	// Delete removes the whole conversation and its owned files, including
 	// tool output, while leaving other conversations untouched.
 	Delete(ctx context.Context, convID string) error
+
+	// Clear empties the room's stored dialogue — the live tail, every sealed
+	// segment, and the conversation-owned tool output — and rewrites meta
+	// from conv, the caller's post-state: identity kept, counters zero, and
+	// the agent session dropped (see Conversation.ClearHistory). conv carries
+	// the same id; the messages it holds are not written.
+	Clear(ctx context.Context, conv *aggregate.Conversation) error
+
+	// Fork copies srcID's logical history — sealed segments plus the live
+	// tail, with the message attachments and tool-output files they
+	// reference — into a new room described by dst, which supplies the new id
+	// and its bindings. The copy is published only once it is complete, so
+	// Info, List, and Load never find a half-copied thread. The source is
+	// read, never modified.
+	Fork(ctx context.Context, srcID string, dst *aggregate.Conversation) error
 }
 
 // RepairAction selects how RepairOrphan resolves an uncommitted sealed

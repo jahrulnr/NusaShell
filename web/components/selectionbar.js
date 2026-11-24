@@ -188,7 +188,7 @@ export function SelectionBar({ room, scroller }) {
             aria-label=${voice.phase === 'transcribing' ? 'Transcribing' : 'Dictate a reply'} title=${voice.phase === 'transcribing' ? 'Transcribing…' : 'Dictate a reply'} class=${icon}>
             ${busyVoice ? html`<${Spinner} size=${14} />` : html`<${Icon} name="mic" size=${16} />`}
           </button>`)}
-      <button type="button" onClick=${side} aria-label="Start a side chat about this" title="Start a side chat — a new thread about this; this one stays as it is" class=${icon}>
+      <button type="button" onClick=${side} aria-label="Start a side chat about this" title="Start a side chat about this" class=${icon}>
         <${Icon} name="sideChat" size=${16} />
       </button>
       <button type="button" onClick=${quote} disabled=${busyVoice} aria-label="Add to your message" title="Add to your message (Enter)"

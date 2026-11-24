@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
@@ -210,6 +211,29 @@ func TestValidateModelRoles(t *testing.T) {
 		`{"models":{"threads":{"agent":"claude","provider":"or"}}}`,
 		`{"models":{"utility":{"agent":"claude"}}}`,
 		`{"models":{"speech":{"agent":"claude"}}}`,
+	} {
+		if _, err := Validate([]byte(raw)); err == nil {
+			t.Fatalf("%s must fail validation", raw)
+		}
+	}
+}
+
+// A role's effort applies only when the role names a model: an agent
+// carries its own effort, the non-text roles never take one, and a level
+// outside the enum is rejected.
+func TestValidateModelRoleEffort(t *testing.T) {
+	c, err := Validate([]byte(`{"models":{"threads":{"provider":"or","model":"m","effort":" max "},"chat":{"provider":"or","model":"m","effort":"medium"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Models.Threads.Effort != enum.EffortMax || c.Models.Chat.Effort != enum.EffortMedium {
+		t.Fatalf("efforts = %q/%q", c.Models.Threads.Effort, c.Models.Chat.Effort)
+	}
+	for _, raw := range []string{
+		`{"models":{"threads":{"provider":"or","model":"m","effort":"ultra"}}}`,
+		`{"models":{"threads":{"agent":"claude","effort":"high"}}}`,
+		`{"models":{"threads":{"effort":"high"}}}`,
+		`{"models":{"utility":{"provider":"or","model":"m","effort":"high"}}}`,
 	} {
 		if _, err := Validate([]byte(raw)); err == nil {
 			t.Fatalf("%s must fail validation", raw)

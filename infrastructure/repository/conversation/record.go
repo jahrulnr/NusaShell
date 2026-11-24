@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -44,6 +45,45 @@ type routingRecord struct {
 	ReplyToOrigin   bool `json:"replyToOrigin"`
 	MirrorFinal     bool `json:"mirrorFinal"`
 	NotifyApprovals bool `json:"notifyApprovals"`
+}
+
+// metaFor projects the aggregate onto its record. Record-level fields —
+// counters and timestamps — come from storage, so the caller sets them: Save
+// preserves what is stored, Clear zeroes the counters, and Fork copies the
+// source's.
+func metaFor(conv *aggregate.Conversation) metaRecord {
+	m := metaRecord{
+		ID:           conv.ID(),
+		Title:        conv.Title(),
+		ProviderID:   conv.ProviderID(),
+		ModelID:      conv.ModelID(),
+		Effort:       conv.Effort().String(),
+		Upstream:     conv.Upstream(),
+		Workspace:    conv.Workspace(),
+		Environment:  conv.Environment().String(),
+		AgentID:      conv.AgentID(),
+		ProjectID:    conv.ProjectID(),
+		Pinned:       conv.Pinned(),
+		MemoryOff:    conv.MemoryOff(),
+		Label:        conv.Label(),
+		AgentSession: conv.AgentSession(),
+		AgentOptions: conv.AgentOptions(),
+		AgentTitle:   conv.AgentTitle(),
+		Usage:        encodeUsage(conv.Usage()),
+		// SystemPrompt is deliberately absent: the prompt ships embedded in
+		// the binary, so it is applied in memory, never persisted.
+	}
+	if a := conv.AgentContext(); !a.IsZero() {
+		amount, currency, _ := a.Cost()
+		m.AgentContext = &agentContextRecord{Used: a.Used(), Size: a.Size(), CostAmount: amount, CostCurrency: currency}
+	}
+	if r := conv.Routing(); r != nil {
+		m.Routing = &routingRecord{ReplyToOrigin: r.ReplyToOrigin, MirrorFinal: r.MirrorFinal, NotifyApprovals: r.NotifyApprovals}
+	}
+	for _, t := range conv.Tools() {
+		m.Tools = append(m.Tools, encodeToolSchema(t))
+	}
+	return m
 }
 
 // agentContextRecord is the agent's last report about its session's context.

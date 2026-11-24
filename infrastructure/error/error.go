@@ -29,6 +29,10 @@ const (
 // frontend, Cause for internal diagnostics.
 type IAppError interface {
 	StatusCode() int
+	// Code is the contract's stable machine code when the error names one —
+	// a 409 that means "confirmation required" is not an invalid argument —
+	// and "" when the status alone classifies it.
+	Code() string
 	Error() string
 	Unwrap() error
 	Caused() string
@@ -40,9 +44,13 @@ type IAppError interface {
 // shared status — an upstream 429 is a provider rate limit, a local 429
 // is a full queue.
 type AppError struct {
-	Code    int
-	Message string
-	Cause   error
+	// Status is the HTTP status consumers route on.
+	Status int
+	// CodeName optionally names the stable machine code; the zero value
+	// lets the transport derive one from Status.
+	CodeName string
+	Message  string
+	Cause    error
 	// Upstream marks provider-originated failures so consumers can split a
 	// shared status — an upstream 429 is a provider rate limit, a local 429
 	// is a full queue.
@@ -57,6 +65,15 @@ func New(code int, message string, causedBy error) IAppError {
 	return new(code, message, causedBy)
 }
 
+// NewCoded builds an AppError that names its own stable code — for a status
+// whose derived code would say the wrong thing: a 409 "busy" or
+// "confirmation_required" is not an invalid argument.
+func NewCoded(code int, codeName, message string, causedBy error) IAppError {
+	e := new(code, message, causedBy)
+	e.CodeName = codeName
+	return e
+}
+
 // new normalizes the code and builds the value.
 func new(code int, message string, causedBy error) *AppError {
 	if code < 100 || code > 599 {
@@ -64,12 +81,13 @@ func new(code int, message string, causedBy error) *AppError {
 		causedBy = fmt.Errorf("invalid status code: %d", code)
 		code = StatusInternalServerError
 	}
-	return &AppError{Code: code, Message: message, Cause: causedBy}
+	return &AppError{Status: code, Message: message, Cause: causedBy}
 }
 
 func (e *AppError) Error() string   { return e.Message }
 func (e *AppError) Unwrap() error   { return e.Cause }
-func (e *AppError) StatusCode() int { return e.Code }
+func (e *AppError) StatusCode() int { return e.Status }
+func (e *AppError) Code() string    { return e.CodeName }
 
 // IsUpstream reports whether the failure originated at the provider.
 func (e *AppError) IsUpstream() bool { return e.Upstream }
@@ -85,7 +103,7 @@ func (e *AppError) Caused() string {
 	if cause == nil {
 		cause = errors.New("unknown")
 	}
-	return fmt.Sprintf("error %d: %s (caused by: %v)", e.Code, e.Message, cause)
+	return fmt.Sprintf("error %d: %s (caused by: %v)", e.Status, e.Message, cause)
 }
 
 // FromStatus adapts an upstream HTTP status into an AppError — the shared

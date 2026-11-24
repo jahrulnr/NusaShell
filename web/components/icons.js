@@ -44,6 +44,8 @@ const P = {
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01',
   layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
   compress: 'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',
+  eraser: 'M9 4h5l7 7-8 8H7l-4-4zM8 19l8-8',
+  branch: 'M6 4v10a4 4 0 0 0 4 4h9M16 15l3 3-3 3M6 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4',
   queue: 'M4 6h12M4 12h12M4 18h8M18 15v6M15 18h6',
   steer: 'M5 12h11M12 6l6 6-6 6',
   undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3',
@@ -75,9 +77,10 @@ export function Icon({ name, size = 16, class: cls = '', stroke = 1.75 }) {
     stroke="currentColor" stroke-width=${stroke} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${P[name] || ''} /></svg>`;
 }
 
+// Logo is the app's mark — the very file the browser tab shows as its icon,
+// so the tab, the README, and the in-app logo cannot drift apart. The
+// artwork carries its own rounded tile and transparent corners, so it needs
+// no background or clipping of its own.
 export function Logo({ size = 22 }) {
-  return html`<svg width=${size} height=${size} viewBox="0 0 32 32" aria-hidden="true">
-    <rect x="1" y="1" width="30" height="30" rx="9" fill="var(--accent)" />
-    <path d="M8 22c3-1 4-4 8-4s5 3 8 4M8 15c3-1 4-4 8-4s5 3 8 4" fill="none" stroke="var(--accent-fg)" stroke-width="2.4" stroke-linecap="round" />
-  </svg>`;
+  return html`<img src="/favicon.svg" width=${size} height=${size} alt="" draggable="false" decoding="async" class="shrink-0 select-none" />`;
 }

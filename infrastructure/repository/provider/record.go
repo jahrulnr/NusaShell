@@ -221,11 +221,12 @@ func decodeProvider(rec providerRecord, apiKey string) (*aggregate.Provider, err
 		m.SetMaxImages(mr.MaxImages)
 		var efforts []enum.Effort
 		for _, v := range mr.SupportedEfforts {
-			e, ok := enum.ParseEffort(v)
-			if !ok {
-				return nil, fmt.Errorf("provider %q: model %q: unknown supported effort %q", rec.ID, mr.ID, v)
+			// A level this build does not know (a newer catalog entry) is
+			// dropped, not fatal — the same tolerance the catalog import
+			// applies, so one unknown level never takes the provider down.
+			if e, ok := enum.ParseEffort(v); ok {
+				efforts = append(efforts, e)
 			}
-			efforts = append(efforts, e)
 		}
 		m.SetSupportedEfforts(efforts)
 		if mr.Pricing != nil {

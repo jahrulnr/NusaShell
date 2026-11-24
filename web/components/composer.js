@@ -10,9 +10,10 @@ import { api, errorText } from '../lib/api.js';
 import { Icon } from './icons.js';
 import { cx, Popover, Kbd, Spinner, Marker } from './ui.js';
 import { ModelPicker, WorkspacePicker, ContextMeter } from './pickers.js';
-import { AgentOptions, useCommands } from './agentbar.js';
+import { AgentOptions } from './agentbar.js';
 import { useReferenceChoices, ReferenceMenu } from './references.js';
 import { referenceTrigger, reconcileReferences, liveReferences, referenceLabel } from '../lib/references.js';
+import { useCommands, parseCommand, isNativeCommand, commandBusyLabel, firstEnabled, stepRow } from '../lib/commands.js';
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const MOD = isMac ? '⌘' : 'Ctrl';
@@ -169,7 +170,13 @@ export function Composer({ room, hero = false }) {
   const [dragging, setDragging] = useState(false);
   const uploading = r.files.some((f) => f.status === 'uploading');
   const readyFiles = r.files.filter((f) => f.status === 'ready');
-  const canSend = (hasText || readyFiles.length > 0 || r.quotes.length > 0 || r.recording) && !uploading;
+  // A native command runs on the server, so the composer waits while it does;
+  // the draft itself is the input, so a command needs no attachments.
+  const typed = parseCommand(r.draft);
+  // A quote rides above the draft, so a draft carrying one is a message, not
+  // a command line; only the draft's own first line can be a command.
+  const native = !r.quotes.length && typed && isNativeCommand(r, typed.name) ? typed.name : '';
+  const canSend = !r.command && (hasText || readyFiles.length > 0 || r.quotes.length > 0 || r.recording) && !uploading;
   // "@" and "/" open the reference picker at the caret; Tab or Enter
   // picks, Escape closes it until the caret leaves that word.
   const cmds = useCommands(r);
@@ -182,19 +189,27 @@ export function Composer({ room, hero = false }) {
   const choices = useReferenceChoices(r, open, cmds);
   const matches = choices.items;
   const [active, setActive] = useState(0);
-  useEffect(() => setActive(0), [matches.length, triggerKey]);
+  useEffect(() => setActive(firstEnabled(matches)), [matches.length, triggerKey]);
   useEffect(() => { if (dismissed && dismissed !== triggerKey) setDismissed(''); }, [triggerKey]);
   const refs = liveReferences(r.draft, r.refs);
   const trackCaret = (e) => setCaret(e.target.selectionStart === e.target.selectionEnd ? e.target.selectionStart : null);
   const pick = (c) => {
     const t = open;
     if (!t) return;
+    // A row the server switched off says why and stays a row: it is never
+    // picked, and never falls back to ordinary text.
+    if (c.enabled === false) { toast(c.reason || `/${c.name} is not available in this thread.`, 'info'); return; }
     const label = referenceLabel(c, t.prefix);
     const old = r.draft;
     const space = old.slice(t.end).startsWith(' ') ? '' : ' ';
     const next = old.slice(0, t.start) + label + space + old.slice(t.end);
     const kept = reconcileReferences(old, next, refs, t.start, t.end);
-    r.refs = [...kept, { kind: c.kind, id: c.id, label, start: t.start, end: t.start + label.length }].sort((a, b) => a.start - b.start);
+    // A native command is plain text, not a selection: the server decides at
+    // submit time from the draft's first line, so it carries no reference.
+    // An agent command is a reference the turn sends, as before.
+    r.refs = c.kind === 'command' && c.native
+      ? kept
+      : [...kept, { kind: c.kind, id: c.id, label, start: t.start, end: t.start + label.length }].sort((a, b) => a.start - b.start);
     r.draft = next;
     const at = t.start + label.length + space.length;
     setDismissed(t.start + ':' + t.prefix);
@@ -274,15 +289,27 @@ export function Composer({ room, hero = false }) {
       setDismissed(triggerKey);
       return;
     }
+    const option = open && matches.length ? matches[Math.min(active, matches.length - 1)] : null;
+    // A native command spelled out on the draft's first line runs on Enter:
+    // completing its name again would only add a space, and a command is an
+    // action, not a selection.
+    if (native && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      setDismissed(triggerKey);
+      primary();
+      return;
+    }
+    // With the menu open, the arrows walk the rows (skipping the ones that
+    // cannot run) and Tab or Enter takes the selected one.
     if (matches.length && !e.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        setActive((a) => (a + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length);
+        setActive((a) => stepRow(matches, a, e.key === 'ArrowDown' ? 1 : -1));
         return;
       }
       if ((e.key === 'Tab' || e.key === 'Enter') && !e.shiftKey) {
         e.preventDefault();
-        pick(matches[Math.min(active, matches.length - 1)]);
+        pick(option);
         return;
       }
     }
@@ -299,7 +326,8 @@ export function Composer({ room, hero = false }) {
   };
 
   const placeholder = canSteer ? 'Steer the running turn…' : busy ? 'Queue a follow-up…' : hero ? 'What should we work on?' : 'Reply…';
-  const primaryLabel = canSteer ? 'Steer now' : busy ? 'Add to queue' : 'Send';
+  const primaryLabel = r.command ? `Running /${r.command}…` : native ? `Run /${native}` : canSteer ? 'Steer now' : busy ? 'Add to queue' : 'Send';
+  const primaryTitle = r.command ? primaryLabel : primaryLabel + ' (Enter)';
 
   return html`<div class=${cx('w-full', hero ? '' : 'pb-[max(12px,env(safe-area-inset-bottom))]')}>
     <${Tray} room=${r} />
@@ -342,6 +370,9 @@ export function Composer({ room, hero = false }) {
           <button type="button" aria-label=${'Unselect ' + x.label} title="Keep the text, drop the selection" onClick=${() => unselect(x)}
             class="size-4 inline-flex items-center justify-center rounded text-faint hover:text-fg"><${Icon} name="x" size=${11} /></button>
         </span>`)}
+      </div>`}
+      ${r.command && html`<div class="flex items-center gap-1.5 px-3 pt-2 text-xs text-muted" role="status">
+        <${Spinner} size=${12} /> ${commandBusyLabel(r.command)}…
       </div>`}
       <textarea ref=${ta} rows=${hero ? 3 : 1} value=${r.draft} placeholder=${placeholder} aria-label="Message"
         role="combobox" aria-autocomplete="list" aria-expanded=${!!(open && (matches.length || choices.message))}
@@ -386,10 +417,10 @@ export function Composer({ room, hero = false }) {
           ${r.live.canceling ? html`<${Spinner} size=${13} />` : html`<${Icon} name="stop" size=${12} stroke=${3} />`}
         </button>`}
         <div class="relative flex items-center">
-          <button type="button" onClick=${primary} disabled=${!canSend} title=${primaryLabel + ' (Enter)'} aria-label=${primaryLabel}
+          <button type="button" onClick=${primary} disabled=${!canSend} title=${primaryTitle} aria-label=${primaryLabel}
             class=${cx('h-8 inline-flex items-center justify-center bg-fg text-bg hover:opacity-90 disabled:opacity-30 transition',
               canSteer ? 'w-8 rounded-l-full pl-1' : 'size-8 rounded-full')}>
-            <${Icon} name=${busy && !canSteer ? 'queue' : 'arrowUp'} size=${16} stroke=${2.25} />
+            ${r.command ? html`<${Spinner} size=${14} />` : html`<${Icon} name=${busy && !canSteer ? 'queue' : 'arrowUp'} size=${16} stroke=${2.25} />`}
           </button>
           ${canSteer && html`<button type="button" onClick=${() => setMenu(!menu)} aria-label="More send options" aria-expanded=${menu}
             class="h-8 w-6 inline-flex items-center justify-center rounded-r-full bg-fg text-bg border-l border-bg/20 hover:opacity-90">

@@ -104,8 +104,10 @@ type Deps struct {
 	Uploads conversation.Uploader
 	// Views keeps each thread's draft and side pane.
 	Views conversation.Viewer
-	// AgentSurface serves rooms' agent options and commands.
+	// AgentSurface serves rooms' agent options and approval rules.
 	AgentSurface conversation.AgentSurface
+	// Commands serves the slash-command catalog and runs one native command.
+	Commands conversation.CommandSurface
 	// Updates answers GET /api/update and POST /api/update/check; nil
 	// leaves both routes unregistered.
 	Updates  update.Checker
@@ -155,6 +157,7 @@ func NewHandler(d Deps) *gin.Engine {
 		Uploads:         d.Uploads,
 		Views:           d.Views,
 		Agent:           d.AgentSurface,
+		Commands:        d.Commands,
 		ActivityClearer: d.Control,
 	})
 	control.Register(api, control.Deps{Activity: d.Control})

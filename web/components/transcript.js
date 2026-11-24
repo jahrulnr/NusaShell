@@ -3,7 +3,7 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, group, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { historyItems, liveHistory, group, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
 import { ElicitationCard } from './elicitation.js';
@@ -13,7 +13,7 @@ import { emit, state } from '../lib/store.js';
 import { openPreview } from './preview.js';
 import { fileURL } from '../lib/api.js';
 import { Icon } from './icons.js';
-import { cx, Spinner, Button, ErrorBlock, Marker } from './ui.js';
+import { cx, Button, ErrorBlock, Marker } from './ui.js';
 
 // Expansion state survives re-renders and remounts, keyed by item id.
 const opened = new Map();
@@ -137,7 +137,7 @@ function Annotations({ list }) {
   </div>`;
 }
 
-function UserMessage({ room, msg, text, refs, files, recording, pending }) {
+function UserMessage({ room, msg, text, refs, files, recording, pending, steer }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
   const canEdit = msg && !isBusy(room);
@@ -163,7 +163,9 @@ function UserMessage({ room, msg, text, refs, files, recording, pending }) {
   }
   // A prompt from another thread leads with who sent it, and a chat reply
   // with what it answers; show the head as a card or a quote and the rest
-  // as the message, its selections moved to match.
+  // as the message, its selections moved to match. A steer is owner input
+  // too — the same text the composer sends mid-turn, relayed heads and all
+  // — so it renders through this same bubble, marked as steered.
   const relay = splitRelay(text);
   const reply = relay ? null : splitReplyQuote(text);
   const cut = (relay || reply)?.head || 0;
@@ -172,6 +174,7 @@ function UserMessage({ room, msg, text, refs, files, recording, pending }) {
   const shownRefs = cut ? stored.filter((r) => r.start >= cut).map((r) => ({ ...r, start: r.start - cut, end: r.end - cut })) : stored;
   const rec = recording || msg?.recording;
   return html`<div class="group flex flex-col items-end gap-1">
+    ${steer && html`<span class="text-[11px] text-faint">steered</span>`}
     <${Attachments} room=${room} list=${files ? files.filter((f) => !f.pickId) : msg?.attachments} />
     <${Annotations} list=${files ? files.filter((f) => f.pickId) : msg?.annotations} />
     ${rec && html`<span class="inline-flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-lg border border-line bg-panel text-[11px] text-muted" title=${'Browser recording ' + rec.id}>
@@ -181,7 +184,7 @@ function UserMessage({ room, msg, text, refs, files, recording, pending }) {
       <${RelayHead} relay=${relay} />
       ${shown && html`<div class="px-3.5 py-2.5"><${Markdown} text=${shown} room=${room} /></div>`}
     </div>`}
-    ${text && !relay && html`<div class=${cx('max-w-[85%] rounded-2xl bg-raised border border-line px-3.5 py-2 break-words', pending && 'opacity-70')}>
+    ${text && !relay && html`<div class=${cx('max-w-[85%] rounded-2xl bg-raised border border-line px-3.5 py-2 break-words', steer && 'border-dashed', pending && 'opacity-70')}>
       ${reply && html`<div class=${cx('border-l-2 border-accent/60 pl-2.5 text-[13px] leading-snug', shown && 'mb-2')}>
         <div class="text-[11px] text-faint">${reply.sender ? reply.sender + ' · ' : ''}In reply to</div>
         <div class="text-muted line-clamp-3 whitespace-pre-wrap" title=${reply.quote}>${reply.quote}</div>
@@ -331,17 +334,9 @@ function FailedCard({ room }) {
 // when earlier messages are prepended.
 export function Transcript({ room, scroller }) {
   const r = room;
-  let hist = historyItems(r.messages);
+  let hist = liveHistory(historyItems(r.messages), r.live);
   const lastTool = hist.findLast((x) => x.kind === 'tool');
   const cwd = r.sel.workspace || r.info?.workspace || lastTool?.cwd || '';
-  if (r.cutHistory && r.live) {
-    const at = hist.findLastIndex((x) => x.kind === 'user');
-    hist = hist.slice(0, at + 1);
-  }
-  if (r.live?.editOf) {
-    const at = hist.findIndex((x) => x.id === r.live.editOf);
-    if (at >= 0) hist = hist.slice(0, at);
-  }
   const liveItems = r.live ? r.live.segments : [];
   const items = group(hist);
   const liveGroups = group(liveItems);
@@ -403,11 +398,10 @@ export function Transcript({ room, scroller }) {
   const renderItem = (it, live) => {
     switch (it.kind) {
       case 'user': return html`<${UserMessage} key=${it.id} room=${r} msg=${it.msg} text=${it.msg.content} />`;
-      case 'steer': return html`<div key=${it.id} class="flex flex-col items-end gap-1">
-        <span class="text-[11px] text-faint">steered</span>
-        <${Attachments} room=${r} list=${it.attachments} />
-        ${it.text && html`<div data-quote="" class="max-w-[85%] rounded-2xl bg-raised border border-dashed border-line px-3.5 py-2 whitespace-pre-wrap break-words">${it.text}</div>`}
-      </div>`;
+      // A steered input is owner text sent mid-turn — what the composer
+      // wrote, including the head a relay from another thread adds — so it
+      // renders as the same bubble a sent message does, marked steered.
+      case 'steer': return html`<${UserMessage} key=${it.id} room=${r} text=${it.text} files=${it.attachments} steer />`;
       case 'note': return html`<details key=${it.id} class="text-[13px] text-muted">
         <summary class="cursor-pointer py-1">Context note</summary>
         <pre class="rawtext mt-1">${it.msg.content}</pre>

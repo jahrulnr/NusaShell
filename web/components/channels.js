@@ -1,7 +1,7 @@
 // Settings → Channels: WhatsApp and Telegram. Each card shows the live
 // status, connects or pairs, and edits who may write in. Allowlists fail
 // closed: an empty list lets nobody in.
-import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
+import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { askConfirm, toast } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
 import { Icon } from './icons.js';

@@ -31,7 +31,7 @@ export function LabelChip({ room: r }) {
       class="w-28 h-7 rounded-md bg-raised border border-accent px-1.5 text-[12px] font-mono outline-none" />`;
   }
   return html`<button type="button" onClick=${() => setEditing(true)}
-    title="Chats switch to this thread with /room @label — click to rename"
+    title="Rename · /room @label switches a chat here"
     class="hidden sm:inline-flex items-center h-6 px-1.5 rounded-md border border-line text-[12px] font-mono text-muted hover:text-fg hover:bg-hover shrink-0">
     ${label ? '@' + label : '+ label'}
   </button>`;

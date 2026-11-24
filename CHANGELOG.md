@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The app's mark is the icon the tab shows: the sidebar, the home view, sign-in, and first-run setup render `favicon.svg` itself, so the tab, the README, and the interface share one file. The old hand-drawn tile is gone.
+- WebUI assets answer an `ETag` and the icon is cached for four hours (`public, max-age=14400`); scripts and stylesheets still revalidate on every load, so a rebuilt binary shows up at once.
+
+### Fixed
+
+- The file tools expand a path before resolving it. `~/…` now reaches the owner's home instead of creating a literal `./~` folder in the workspace, a `file:` URL becomes the local path it names, and on Windows `%VAR%` becomes its value (an unset variable is an error naming it — never a literal `%APPDATA%` folder). `$HOME`, `${HOME}`, `~user` and a `~` inside a path stay literal. One helper (`infrastructure/system/patharg`) does it for the file tools, `read_media`, the media tools' input paths and the HTTP preview.
+- Tooltips are labels again: a bubble is a few words naming the control, leaves on its own after a few seconds, and never appears while the pointer is selecting text or dragging. The composer no longer explains slash commands in its `title` — a full sentence became a panel over the transcript.
+- "Jump to latest" appears only when the reader actually left the bottom. A layout nudge (the browser's scroll anchoring, a tool card settling, a pin whose scroll event arrives late) is no longer read as scrolling away; an upward wheel, touch drag, scroll key, or scrollbar press still leaves at once, and reaching the bottom follows again.
+- A live turn this tab did not start keeps the answer above it, and its prompt shows while it runs. The transcript used to trim history at the newest user message it had read, which — before the server wrote a relayed prompt — was the previous turn's, so the reply in front of the running turn disappeared until a reload.
+- Steered input renders as the owner's message: Markdown, a "From thread" card when another thread relayed it, attachments and copy, instead of raw text while the turn runs.
+
 ## [0.1.0] - 2026-11-24
 
 ### Added

@@ -68,6 +68,13 @@ func (r *appendGateRepo) AppendMessage(ctx context.Context, convID string, msg e
 // fixture wires real JSONL repos + a stub completion upstream.
 func fixture(t *testing.T, handler http.HandlerFunc) (*ConversationApp, *aggregate.Provider) {
 	t.Helper()
+	return fixtureWith(t, handler, nil)
+}
+
+// fixtureWith is fixture with the conversation store optionally wrapped — the
+// room-handle tests need a store whose room list answers from a stale view.
+func fixtureWith(t *testing.T, handler http.HandlerFunc, wrap func(drepo.Conversation) drepo.Conversation) (*ConversationApp, *aggregate.Provider) {
+	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
@@ -89,8 +96,12 @@ func fixture(t *testing.T, handler http.HandlerFunc) (*ConversationApp, *aggrega
 	if err := providers.Save(t.Context(), &prov); err != nil {
 		t.Fatal(err)
 	}
+	var convs drepo.Conversation = repoconversation.NewConversationRepository(t.TempDir())
+	if wrap != nil {
+		convs = wrap(convs)
+	}
 	app := New(
-		repoconversation.NewConversationRepository(t.TempDir()),
+		convs,
 		providers,
 		map[enum.Environment]appjob.EnvironmentDriver{enum.EnvironmentLocal: appjob.EnvironmentBundle{
 			Services: map[enum.Style]dservice.TextModelService{enum.StyleCompletion: textcompletion.New(coretext.Options{})},

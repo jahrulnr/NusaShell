@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newTurn, applyFrame, snapshotSegments, historyItems, group, toolSummary, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, group, toolSummary, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
 
 const turn = () => newTurn({ turnId: 't1', requestId: 'r1', conversationId: 'c1', kind: 'send' });
 const frame = (type, payload, seq) => ({ type, payload, seq });
@@ -287,4 +287,31 @@ test('turnEnds marks each turn\'s last item with the Markdown the turn said', ()
   ];
   assert.deepEqual([...turnEnds(items)], [[4, 'Looking.\n\n## Done\n\n- **one**'], [8, 'ok']]);
   assert.equal(turnEnds([]).size, 0);
+});
+
+test('liveHistory trims history only where the live turn replaces it', () => {
+  // A relayed prompt (another thread, a chat, another browser) lands in
+  // history after the turn opens. Until the room has read it, the newest
+  // prompt in history belongs to the previous turn — and the answer after
+  // it is content the live stream never reproduces, so a send keeps it.
+  const pending = [
+    { id: 'm1', kind: 'user', msg: { content: 'kalo di windows harusnya X:/ ga sih?' } },
+    { id: 'm2', kind: 'text', text: 'Betul — C:\\ cuma contoh.' },
+  ];
+  assert.deepEqual(liveHistory(pending, { kind: 'send', adopted: true }), pending);
+  const answered = [...pending, { id: 'm3', kind: 'user', msg: { content: 'and Z:?' } }, { id: 'm4', kind: 'text', text: 'also a drive' }];
+  // A send never trims: its prompt is the newest message, so anything
+  // history already holds is older than the live turn.
+  assert.deepEqual(liveHistory(answered, { kind: 'send' }), answered);
+  // A retry this tab started re-answers the newest prompt: the stored
+  // answer after it is what the live tail replaces, so history stops there.
+  assert.deepEqual(liveHistory(answered, { kind: 'resume' }).map((x) => x.id), ['m1', 'm2', 'm3']);
+  // A retry adopted from elsewhere cannot tell its prompt from an older one
+  // a stale page ends on, so it trims nothing.
+  assert.deepEqual(liveHistory(answered, { kind: 'resume', adopted: true }), answered);
+  // An edit replaces the message it names; history stops ahead of it.
+  assert.deepEqual(liveHistory(answered, { kind: 'edit', editOf: 'm3' }).map((x) => x.id), ['m1', 'm2']);
+  assert.deepEqual(liveHistory(answered, { kind: 'edit', editOf: 'gone' }), answered);
+  // No live turn leaves history alone.
+  assert.deepEqual(liveHistory(answered, null), answered);
 });
