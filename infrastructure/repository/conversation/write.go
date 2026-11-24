@@ -32,6 +32,12 @@ func (r *ConversationRepository) Save(ctx context.Context, conv *aggregate.Conve
 	}
 	defer unlock()
 
+	// A room whose clear was interrupted is parked: put it back before the
+	// directory is created, or an empty directory would take the name and the
+	// old history would look like debris.
+	if err := r.recoverRoom(conv.ID()); err != nil {
+		return err
+	}
 	dir := r.convDir(conv.ID())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

@@ -31,11 +31,13 @@ command is an **action, not a turn**: it creates no message and no `turn.*` fram
   `/` + name, matched **case-sensitively** against the catalog, then optional
   arguments separated by whitespace.
 - A name in the catalog always dispatches as a command; a name outside it stays
-  ordinary text (a path such as `/home/x`, an agent command, prose). A recognized
-  command never reaches a model or an agent, even when unavailable or refused.
+  ordinary text (a path such as `/home/x`, an agent command the room's session
+  does not offer, prose). A **native** name is reserved: it never reaches a model
+  or an agent, even when unavailable or refused. An `agent` row is a turn, not a
+  reserved word — the text still goes to that agent, which owns the command.
 - The client may insert the command as plain text; the dispatch decision is made
   when the message is submitted, from the drafted text, not from the reference
-  selections. Command names are therefore reserved words in line 1.
+  selections. Native command names are therefore reserved words in line 1.
 
 ### Catalog
 
@@ -53,6 +55,10 @@ native catalog merged with the room's agent commands, native first:
 
 - `source` is `native` or `agent`. An agent command whose name collides with a
   native one is **omitted** — native wins, one row per name.
+- An agent row exists only while the room's agent session reports it. The
+  process is reaped when idle, and a resumed session may not publish its
+  commands again, so the row can disappear from the menu until the next
+  session; only native rows are always listed.
 - `enabled`/`reason` are the server's verdict for this room; an agent command is
   always `enabled: true` (the agent decides), a native one follows the matrix below.
 - Without `conversationId`: native only, every row `enabled: false`,
@@ -139,8 +145,9 @@ Enter; it never falls back to sending the text.
 - Breaking change: `POST /api/conversations/{id}/compactions` and
   `GET /api/conversations/{id}/commands` go away; the header button and the
   composer both call the command endpoint.
-- Names in the catalog are reserved: a room cannot send a first-line `/compact`
-  as prose to its model. Documented in the composer hint.
+- Native names are reserved: a room cannot send a first-line `/compact` as
+  prose to its model. An agent name is not reserved — it still rides the turn.
+  Documented in the composer hint.
 - `fork` duplicates history and tool-output files on disk; storage grows with
   each fork, and deleting the fork later is the owner's cleanup.
 

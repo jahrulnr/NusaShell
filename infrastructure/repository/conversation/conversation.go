@@ -105,9 +105,14 @@ func (r *ConversationRepository) convDir(id string) string {
 
 // validID is the boundary guard: the id becomes a path segment, so the
 // domain's own rule (valueobject.ValidID) is re-asserted against this root.
+// The store's own staging area is not a name a room may take: the store keeps
+// half-built rooms there, and a room holding it would share its directory.
 func validID(id string) error {
 	if err := valueobject.ValidID(id); err != nil {
 		return apperror.New(400, "invalid id", fmt.Errorf("id %q: %w", id, err))
+	}
+	if id == stagingRoot {
+		return apperror.New(400, "invalid id", fmt.Errorf("id %q is reserved by the store", id))
 	}
 	return nil
 }
@@ -116,6 +121,11 @@ func validID(id string) error {
 // named target deterministically (the old fixed <path>.tmp staging name
 // once served that role).
 var writeFileAtomic = writeFileAtomicImpl
+
+// renamePath is a var for the same reason: a test can refuse the publish a
+// clear or a fork depends on and see what the store leaves behind. Every
+// directory publish goes through it.
+var renamePath = os.Rename
 
 // writeFileAtomicImpl writes via tmp+rename — a crash mid-write leaves the
 // old file or nothing, never a torn target. fsync before and after the
@@ -163,6 +173,15 @@ func writeFileAtomicImpl(path string, data []byte, perm os.FileMode) error {
 
 func (r *ConversationRepository) readMeta(id string) (metaRecord, error) {
 	m, err := r.readMetaUnvalidated(id)
+	if errors.Is(err, os.ErrNotExist) {
+		// The name is empty: a swap interrupted between its two renames
+		// parks the live room, and putting it back is what keeps a failed
+		// clear from making the room disappear. Callers hold the store
+		// lock, which the repair's renames need.
+		if rerr := r.recoverRoom(id); rerr == nil {
+			m, err = r.readMetaUnvalidated(id)
+		}
+	}
 	if err != nil {
 		return metaRecord{}, err
 	}
@@ -212,6 +231,12 @@ func (r *ConversationRepository) readMetaUnvalidated(id string) (metaRecord, err
 }
 
 func (r *ConversationRepository) writeMeta(id string, m metaRecord) error {
+	return writeMetaFile(r.convDir(id), m)
+}
+
+// writeMetaFile writes a record into one room directory — the live one the
+// store serves, or a staged copy waiting for its rename.
+func writeMetaFile(dir string, m metaRecord) error {
 	m.UpdatedAt = time.Now()
 	raw, err := json.Marshal(m)
 	if err != nil {
@@ -220,7 +245,7 @@ func (r *ConversationRepository) writeMeta(id string, m metaRecord) error {
 	// History is owner data: every file this store writes carries the
 	// conversation's private content, so the clamp is store-wide, same
 	// rule the provider and secret stores already apply.
-	return writeFileAtomic(filepath.Join(r.convDir(id), metaFile), raw, 0o600)
+	return writeFileAtomic(filepath.Join(dir, metaFile), raw, 0o600)
 }
 
 // --- line stream ------------------------------------------------------------

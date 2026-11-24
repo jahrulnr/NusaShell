@@ -140,7 +140,14 @@ export async function loadConversations(more = false) {
     // A refresh asks for as much as the reader has paged in (the server caps
     // a page at 100), so it can see which of those threads still exist.
     const limit = more ? 30 : Math.min(100, Math.max(30, c.items.length));
-    const page = await api.conversations(more ? c.items.length : 0, limit);
+    // A change applied here while this page was in flight is newer than the
+    // page: read again for one that carries it (twice at most).
+    let page;
+    for (let attempt = 0; ; attempt++) {
+      const seen = writes;
+      page = await api.conversations(more ? c.items.length : 0, limit);
+      if (writes === seen || attempt === 1) break;
+    }
     const items = more ? [...c.items, ...page.data.filter((x) => !c.items.some((y) => y.id === x.id))] : page.data;
     // A refresh that came back short saw the whole list, and a thread it does
     // not list is gone (deleted from here or elsewhere). Only a full page may
@@ -149,7 +156,9 @@ export async function loadConversations(more = false) {
     if (!more && items.length === limit && c.items.length > items.length) {
       for (const it of c.items.slice(items.length)) if (!items.some((x) => x.id === it.id)) items.push(it);
     }
-    Object.assign(c, { items, total: page.page.total, hasMore: items.length < page.page.total, status: 'ready', error: null });
+    const same = !more && items.length === c.items.length && items.every((x, i) => sameRecords(x, c.items[i]));
+    const next = { total: page.page.total, hasMore: items.length < page.page.total, status: 'ready', error: null };
+    Object.assign(c, same ? next : { ...next, items });
     if (!more) {
       c.at = Date.now();
       // The list row carries the room's live turn — a tab that missed
@@ -203,8 +212,15 @@ export const PROJECT_THREADS = 100;
 export async function loadProjectThreads(pid) {
   state.projectThreads = { ...state.projectThreads, [pid]: state.projectThreads[pid] || [] };
   try {
-    const page = await api.conversations(0, PROJECT_THREADS, pid);
-    state.projectThreads = { ...state.projectThreads, [pid]: page.data };
+    let page;
+    for (let attempt = 0; ; attempt++) {
+      const seen = writes;
+      page = await api.conversations(0, PROJECT_THREADS, pid);
+      if (writes === seen || attempt === 1) break;
+    }
+    const cur = state.projectThreads[pid] || [];
+    const same = page.data.length === cur.length && page.data.every((x, i) => sameRecords(x, cur[i]));
+    if (!same) state.projectThreads = { ...state.projectThreads, [pid]: page.data };
   } catch { /* the main list still shows what it has */ }
   emit();
 }
@@ -316,11 +332,21 @@ async function loadInfo(r, { force = false, created = false } = {}) {
   }
   if (!force && !r.infoStale && fresh(r.infoAt)) return;
   const flight = (async () => {
+    let raced = 0;
     do {
       r.infoAgain = false;
       for (let attempt = 0; ; attempt++) {
+        const seen = writes;
         try {
-          r.info = await api.conversation(r.id);
+          const info = await api.conversation(r.id);
+          // A change applied here while this read was in flight outranks the
+          // record it answered with: read again (twice at most, so a stream
+          // of changes cannot pin the header).
+          if (writes !== seen && raced++ < 2) {
+            r.infoAgain = true;
+            break;
+          }
+          if (!sameRecords(info, r.info)) r.info = info;
           r.infoStatus = 'ready';
           r.infoError = null;
           r.infoAt = Date.now();
@@ -492,16 +518,42 @@ export function setSelection(r, patch) {
   emit();
 }
 
-// applyRoomInfo stores a room's fresh record — the open room's info and the
-// list row that shows it. The row keeps the live-turn fields, which the
-// record projection does not carry, and replaces the rest rather than
-// merging, so a cleared project or pin disappears.
-function applyRoomInfo(info) {
+// writes counts the record changes this tab applied. The list and the room
+// record are read by pulls (activity storms, reconnects, a paging reader), and
+// a pull that started before a change answers with the state before it: the
+// count lets the reader tell that answer apart and read again instead of
+// putting the old title, pin, or project back over what the owner just did.
+let writes = 0;
+
+// recordKey is what a pulled record says about a room, as one comparable
+// string: the fields a row and a header show. A pull that answers with the
+// same key changed nothing, so nothing is written — replacing the row object
+// would re-render the list (and the header) for the same values, which is
+// what a stream of refreshes does all day. A different key is a change, and
+// the record is applied.
+const RECORD_FIELDS = ['title', 'projectId', 'pinned', 'memoryOff', 'label', 'providerId', 'modelId',
+  'agentId', 'effort', 'upstream', 'workspace', 'messageCount', 'activeTurnId', 'activeTurnKind'];
+const recordKey = (x) => (x ? RECORD_FIELDS.map((k) => x[k] ?? '').join('\u0000') : '');
+const sameRecords = (a, b) => !!a && !!b && recordKey(a) === recordKey(b);
+
+// applyRoomInfo stores a room's fresh record — the open room's info and every
+// list row that shows it. A row keeps the live-turn fields, which the record
+// projection does not carry, and replaces the rest rather than merging, so a
+// cleared project or pin disappears.
+export function applyRoomInfo(info) {
+  writes++;
   if (state.rooms[info.id]) state.rooms[info.id].info = info;
+  const row = (prev) => ({ ...info, activeTurnId: prev.activeTurnId, activeTurnKind: prev.activeTurnKind });
   const i = state.convs.items.findIndex((c) => c.id === info.id);
-  if (i < 0) return;
-  const { activeTurnId, activeTurnKind } = state.convs.items[i];
-  state.convs.items[i] = { ...info, activeTurnId, activeTurnKind };
+  if (i >= 0) state.convs.items[i] = row(state.convs.items[i]);
+  let lists = null;
+  for (const [pid, list] of Object.entries(state.projectThreads)) {
+    const j = list.findIndex((x) => x.id === info.id);
+    if (j < 0) continue;
+    lists = lists || { ...state.projectThreads };
+    lists[pid] = list.map((x, k) => (k === j ? row(x) : x));
+  }
+  if (lists) state.projectThreads = lists;
 }
 
 // persistSelection binds the room to what the picker shows, so a turn that
@@ -1263,7 +1315,7 @@ export async function answerElicitation(r, seg, action, content) {
 
 export async function rename(r, title) {
   try {
-    r.info = await api.annotate(r.id, { title });
+    applyRoomInfo(await api.annotate(r.id, { title }));
     refreshConversationsSoon();
   } catch (err) { toast('Rename failed: ' + errorText(err), 'error'); }
   emit();
@@ -1337,6 +1389,7 @@ export async function deleteAllRooms() {
 // the main list, every project's own list, the open room — and asks the server
 // for the counts, which those lists do not carry.
 function forgetThread(id) {
+  writes++;
   delete state.rooms[id];
   if (state.convs.items.some((c) => c.id === id)) state.convs.total = Math.max(0, state.convs.total - 1);
   state.convs.items = state.convs.items.filter((c) => c.id !== id);

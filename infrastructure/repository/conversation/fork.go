@@ -20,10 +20,11 @@ import (
 // reference. dst names the copy and supplies its bindings; the stored
 // messages come from srcID, which is only read.
 //
-// The copy is assembled in a staging directory and renamed into place, then
-// its record is written last — so Info, List, and Load report the new room
-// only once every stored line and file is there, and a failed fork leaves the
-// source untouched and nothing half-copied behind.
+// The copy is assembled in the staging area and its record is written there
+// last; a single rename then publishes it. Nothing is visible under the new
+// name until that record exists, so Info, List, and Load never find a
+// half-copied thread, and a failed fork leaves neither a published room nor an
+// orphan directory behind.
 func (r *ConversationRepository) Fork(ctx context.Context, srcID string, dst *aggregate.Conversation) error {
 	if err := validID(srcID); err != nil {
 		return err
@@ -50,7 +51,7 @@ func (r *ConversationRepository) Fork(ctx context.Context, srcID string, dst *ag
 	if _, err := os.Stat(dstDir); err == nil {
 		return apperror.New(409, "conversation "+dst.ID()+" already exists", nil)
 	}
-	stage, err := os.MkdirTemp(r.path, dst.ID()+".forking-")
+	stage, err := r.stageRoom(dst.ID())
 	if err != nil {
 		return err
 	}
@@ -70,16 +71,17 @@ func (r *ConversationRepository) Fork(ctx context.Context, srcID string, dst *ag
 	if err := copyTree(filepath.Join(srcDir, toolOutputDir), filepath.Join(stage, toolOutputDir)); err != nil {
 		return err
 	}
-	if err := os.Rename(stage, dstDir); err != nil {
-		return err
-	}
 
-	// The record lands last: until it exists the room is invisible to Info,
-	// List, and Load. The counters describe exactly the streams just copied.
+	// The record goes in before the rename: the publish is one atomic step, so
+	// a crash cannot leave a directory whose meta is missing, and the counters
+	// describe exactly the streams just copied.
 	m := metaFor(dst)
 	m.CreatedAt = time.Now()
 	m.MessageCount, m.ActiveCount, m.SealedSegments = src.MessageCount, src.ActiveCount, src.SealedSegments
-	return r.writeMeta(dst.ID(), m)
+	if err := writeMetaFile(stage, m); err != nil {
+		return err
+	}
+	return renamePath(stage, dstDir)
 }
 
 // copyStream rebuilds one stored stream for the copy. A line that references a

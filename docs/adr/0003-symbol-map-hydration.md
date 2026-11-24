@@ -2,11 +2,12 @@
 
 ## Status
 
-Proposed — the owner decided the cadence; the SA resolutions below are the
-binding reading once this is accepted. Decisions 11–13 answer the SA review
-(fold inside a turn, existing piles, final render); the open items — workspace
-rebind, relevance gate, channel and automation scope — stay with the owner.
-Supersedes nothing; composes with ADR-0002 for `/compact`, `/clear`, and `/fork`.
+Proposed — the owner decided the cadence and the gate; the SA resolutions
+below are the binding reading once this is accepted. Decisions 11–15 answer the
+SA review (fold inside a turn, existing piles, final render) and the owner's
+rulings (a workspace rebind re-hydrates, a marker-only gate, a fold as a
+technical reset). Supersedes nothing; composes with ADR-0002 for `/compact`,
+`/clear`, and `/fork`.
 
 ## Context
 
@@ -73,12 +74,15 @@ be paid once per conversation, not once per change.
    map as an orientation snapshot taken at the start of the conversation, to be
    verified with `read_file`/`search` before being trusted, with
    `symbol_map(path)` naming the refresh path — never as the current tree.
-8. **A workspace rebind re-hydrates.** The record cites the workspace it was
-   rendered for (its input is the workspace binding). A room whose workspace
-   changes no longer has a record for its workspace: the next step records one
-   for the new binding, replacing the orientation that would otherwise point at
-   another tree. This is the one exception to "presence alone decides", and it
-   is about correctness, not freshness.
+8. **A workspace rebind re-hydrates.** Detection is the record's own input: the
+   newest live `symbol_map` record cites `{path, folders}`, and when that no
+   longer matches the running binding the slot is void. The next step renders
+   one map for the new binding — in the same step as the `workspace changed`
+   pin — replacing the orientation that would otherwise point at another tree.
+   This is the one exception to "presence alone decides", and it is about
+   correctness, not freshness. A rebind to a root that fails the gate adds no
+   record at all (Decision 14): the slot stays void, the earlier map remains in
+   the tail as history, and the prompt's verification rule covers it.
 9. **Ownership.** The application owns the cadence (it is the only layer that
    sees the room's history); the tool declares that its record is one-shot and
    which render is provisional; the environment renders only the slots the
@@ -118,6 +122,53 @@ be paid once per conversation, not once per change.
     exactly one. A warm root (disk cache, or a process that already built the
     tree) hydrates on the first turn — the common case.
 
+14. **A root must pass the gate before anything is rendered.** The owner's
+    decision, final form — a root marker is the only evidence:
+
+    ```
+    hydrate if  root != fallback home root
+            and root has a project marker
+    else skip entirely
+    ```
+
+    - `root` is the turn workspace (the room's binding, else the driver's
+      fallback); the fallback home root is `EnvironmentDriver.FallbackRoot()`,
+      which `serve` sets to the owner's home.
+    - Markers, read at the root only: `go.mod`, `package.json`, `Cargo.toml`,
+      `pyproject.toml`, `pom.xml`, `build.gradle`, `build.gradle.kts`,
+      `composer.json`, `Gemfile`, `.git`, `.svn`, `.hg`, plus the root-level
+      name patterns `*.csproj`, `*.sln`, `build.gradle.*` — the same set the
+      index gate already probes, so one list serves both.
+    - A project binding is **not** evidence: a room in a project whose folder
+      has no marker is skipped like any other non-code root.
+    - Why (the owner's reason): while a root holds no project yet — an empty
+      folder, or one without a marker — the agent is still writing its
+      contents, so a map would only repeat what the agent already knows.
+      Injecting it is context spam, not orientation.
+    - A skipped root writes **nothing**: no record, no "map skipped" line, no
+      probe of the map. Zero tokens, zero build. The gate runs before any
+      render and adds the slot to the same skip set an already-hydrated slot
+      uses.
+    - The fallback home root is skipped even when it carries a marker: a home
+      directory that happens to be a dotfiles repo is not the project the room
+      works in.
+    - On-demand `symbol_map(path)` is not gated: the model may still map any
+      folder bound to the room. The gate governs the hydration record, not the
+      tool.
+    - Accepted consequence: a room whose first turns are gated out gets no map
+      until the next fold, even if the agent later writes code in that root.
+      The map was never owed to it — see Decision 15 for why the fold is the
+      next chance, not a periodic retry.
+
+15. **A fold is a technical reset, and re-hydrating after it is intended.**
+    Compaction leaves a room that is a new conversation in everything but id:
+    the tail keeps a handoff from the previous agent, the history that produced
+    the map is sealed. Orientation is useful again at that point, so the next
+    step hydrates exactly once — the same rule as the first turn (Decision 1),
+    not a refresh of a stale map (Decision 2). This pairing is deliberate:
+    nobody should "fix" the re-hydration as duplicate work, just as nobody
+    should add a per-turn retry to the gate.
+
 ### Why the environment port takes a skip set
 
 `ToolContexts` renders every system-callable tool *before* dedup decides
@@ -139,6 +190,9 @@ split the cadence would exist on paper while the cost it removes stayed in place
   marker, so compaction, clear, and fork need no cadence bookkeeping.
 - The model keeps a fast orientation while `search`/`read_file` stay the source
   of truth, which is what the prompt already prefers.
+- A chat, automation, or channel room whose root is the fallback home pays no
+  map at all: no record, no probe, no build — the gate removes the class of
+  rooms that never needed one.
 
 ### Negative
 
@@ -154,12 +208,20 @@ split the cadence would exist on paper while the cost it removes stayed in place
   is one map (≈3k tokens) smaller than the raw history delta suggests.
 - Rooms that accumulated maps before this rule keep paying for them until their
   next compaction; the rule does not reclaim the past.
+- A room rebound from a code root to a gated-out root keeps the earlier map in
+  its tail: nothing new is written, and only the prompt's verification rule
+  stands between the model and a map of the previous tree.
+- A room whose first turns are gated out never receives a map until the next
+  fold, even after the agent creates code in that root. Accepted deliberately:
+  the gate trades that first orientation for zero context spam in rooms that
+  are still being written.
+- The gate is evidence at one moment: a root that gains its marker later gets
+  no map until a fold (or a rebind) re-opens the slot.
 
 ## Non-goals
 
-- A relevance gate (only code rooms, only code turns): it would cut the first
-  cost for chat/automation rooms but adds a room-classification rule this ADR
-  does not decide.
+- A room-kind gate (skip because a room came from a channel, an automation, or
+  a project): the gate is root-based, so every room follows the same rule.
 - Epoch counters persisted in metadata; extending the same cadence to `skills`
   or other records; changing the token budget; auto-refreshing the map in the
   background; injecting a map for agent rooms differently from provider rooms.

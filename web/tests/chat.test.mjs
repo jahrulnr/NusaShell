@@ -1148,3 +1148,97 @@ test('a failed purge keeps every local thread trace', async () => {
   assert.equal(state.rooms.c_1.draft, 'keep me');
   assert.equal(state.convs.items.length, 1);
 });
+
+// ---------- a rename against a read already in flight ----------
+
+// A pull that started before a change must not put the old value back: the
+// thread list and the room record are pulls, and with several rooms live one
+// is almost always in flight when the owner renames.
+function heldReads() {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  return { gate, release };
+}
+
+test('a rename is not undone by a thread list that started before it', async () => {
+  const { gate, release } = heldReads();
+  let title = 'Old title';
+  mockApi({
+    'GET /api/conversations/c_1/messages': () => ({ messages: [], effectiveStart: 0, total: 0 }),
+    'GET /api/conversations/c_1': () => ({ id: 'c_1', title, workspace: '' }),
+    'GET /api/conversations': async () => {
+      const seen = title; // the page as the server had it when the read began
+      await gate;
+      return { data: [{ id: 'c_1', title: seen, activeTurnId: null, activeTurnKind: null }], page: { total: 1 } };
+    },
+    'GET /api/context': { estimate: 1, total: 2 },
+    'PATCH /api/conversations/c_1': (call) => { title = call.body.title; return { id: 'c_1', title, workspace: '' }; },
+    'GET /api/projects': { data: [] },
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(30);
+  const r = state.rooms.c_1;
+  const pending = chat.loadConversations(); // holds the pre-rename page
+  await sleep(10);
+  await chat.rename(r, 'New title');
+  assert.equal(r.info.title, 'New title');
+  release();
+  await pending;
+  await sleep(40);
+  assert.equal(r.info.title, 'New title', 'the room keeps the name it was given');
+  const row = state.convs.items.find((x) => x.id === 'c_1');
+  assert.equal(row?.title, 'New title', 'the list row shows the new name');
+});
+
+test('a rename is not undone by a room record read that started before it', async () => {
+  const { gate, release } = heldReads();
+  let title = 'Old title';
+  mockApi({
+    'GET /api/conversations/c_1/messages': () => ({ messages: [], effectiveStart: 0, total: 0 }),
+    'GET /api/conversations/c_1': async () => {
+      const seen = title; // the record as the server had it when the read began
+      await gate;
+      return { id: 'c_1', title: seen, workspace: '' };
+    },
+    'GET /api/conversations': { data: [{ id: 'c_1', title, activeTurnId: null, activeTurnKind: null }], page: { total: 1 } },
+    'GET /api/context': { estimate: 1, total: 2 },
+    'PATCH /api/conversations/c_1': (call) => { title = call.body.title; return { id: 'c_1', title, workspace: '' }; },
+    'GET /api/projects': { data: [] },
+  });
+  chat.navigate('#/c/c_1'); // its record read is held at the gate
+  await sleep(30);
+  const r = state.rooms.c_1;
+  await chat.rename(r, 'New title');
+  release();
+  await sleep(60);
+  assert.equal(r.info.title, 'New title', 'the late record does not overwrite the rename');
+  assert.equal(r.infoStatus, 'ready');
+});
+
+// Pulls keep coming; what they answer is compared with what is on screen. An
+// answer that says the same thing writes nothing — no new row object, no
+// header swap, no render — while a different answer is applied.
+test('a pull that answers with what is already shown writes nothing', async () => {
+  const thread = { id: 'c_1', title: 'Same title', activeTurnId: null, activeTurnKind: null };
+  mockApi({
+    'GET /api/conversations/c_1/messages': () => ({ messages: [], effectiveStart: 0, total: 0 }),
+    'GET /api/conversations/c_1': () => ({ id: 'c_1', title: 'Same title', workspace: '', messageCount: 3 }),
+    'GET /api/conversations': { data: [thread], page: { total: 1 } },
+    'GET /api/context': { estimate: 1, total: 2 },
+    'GET /api/projects': { data: [] },
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(40);
+  await chat.loadConversations(); // settle the list on this mock's answer
+  const r = state.rooms.c_1;
+  const row = state.convs.items.find((x) => x.id === 'c_1');
+  const info = r.info;
+  await chat.loadConversations(); // the same answer again
+  await sleep(20);
+  assert.equal(state.convs.items.find((x) => x.id === 'c_1'), row, 'the list keeps its row object');
+  r.infoStale = true;
+  await chat.openRoom('c_1');
+  await sleep(20);
+  assert.equal(r.info, info, 'the header keeps its record object');
+  assert.equal(r.info.title, 'Same title');
+});

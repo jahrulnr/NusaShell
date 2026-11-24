@@ -2,7 +2,6 @@ package repoconversation
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -10,15 +9,17 @@ import (
 )
 
 // Clear empties the room's stored dialogue: every sealed segment goes, the
-// live tail is truncated, and the conversation-owned tool output with it.
-// meta is rewritten from conv — the caller's post-state — so identity,
-// bindings, and accumulated usage survive while the counters start at zero
-// and the agent session is dropped.
+// live tail is emptied, and the conversation-owned tool output with it. meta
+// is written from conv — the caller's post-state — so identity, bindings, and
+// accumulated usage survive while the counters start at zero and the agent
+// session is dropped.
 //
-// The files are removed before the record is rewritten. An interrupted clear
-// therefore fails the store's archive check instead of serving a room whose
-// metadata still promises history that is gone; the remedy is the one every
-// interrupted surgery has: stop the app and restore from backup.
+// The cleared room is built in the staging area and swapped in, rather than
+// edited in place: a crash while the live directory is being emptied would
+// leave counters promising history that is already gone, and the store refuses
+// such an archive. With the swap, a failure before the publish leaves the live
+// room untouched, and a crash between the two renames is repaired by
+// recoverRoom on the next read — the room is never left missing or rejected.
 func (r *ConversationRepository) Clear(ctx context.Context, conv *aggregate.Conversation) error {
 	if err := validID(conv.ID()); err != nil {
 		return err
@@ -31,29 +32,52 @@ func (r *ConversationRepository) Clear(ctx context.Context, conv *aggregate.Conv
 	}
 	defer unlock()
 
+	// Reading the record first both validates the archive it is about to
+	// replace and finishes any earlier swap left behind.
 	meta, err := r.readMeta(conv.ID())
 	if err != nil {
 		return err
 	}
-	dir := r.convDir(conv.ID())
-	segs, err := sealedSegments(dir)
+
+	// Build the empty room beside the store's rooms. Nothing about the live
+	// directory changes until this one holds a complete record and an empty
+	// tail; a stage that never publishes is debris recoverRoom drops.
+	stage, err := r.stageRoom(conv.ID())
 	if err != nil {
 		return err
 	}
-	for _, seg := range segs {
-		if err := os.Remove(seg); err != nil {
-			return fmt.Errorf("clear %s: %w", conv.ID(), err)
-		}
-	}
-	if err := os.RemoveAll(filepath.Join(dir, toolOutputDir)); err != nil {
-		return fmt.Errorf("clear %s: tool output: %w", conv.ID(), err)
-	}
-	if err := writeFileAtomic(filepath.Join(dir, activeFile), nil, 0o600); err != nil {
-		return err
-	}
+	defer os.RemoveAll(stage)
 
 	m := metaFor(conv)
 	m.CreatedAt = meta.CreatedAt
 	m.MessageCount, m.ActiveCount, m.SealedSegments = 0, 0, 0
-	return r.writeMeta(conv.ID(), m)
+	if err := writeMetaFile(stage, m); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(filepath.Join(stage, activeFile), nil, 0o600); err != nil {
+		return err
+	}
+
+	// Swap: park the live room, publish the cleared one, drop the parked copy.
+	// The park is the point of no return — from here the name is free — so the
+	// publish follows at once, and a publish that fails puts the room back
+	// before the caller hears about it.
+	dir := r.convDir(conv.ID())
+	parked, err := r.parkedName(conv.ID())
+	if err != nil {
+		return err
+	}
+	if err := renamePath(dir, parked); err != nil {
+		return err
+	}
+	if err := renamePath(stage, dir); err != nil {
+		// The clear changed nothing: the room is exactly as it was, under its
+		// own name again.
+		_ = renamePath(parked, dir)
+		return err
+	}
+	// The cleared room owns the name now. The old contents are debris; a
+	// failure to drop them costs space, never readability.
+	_ = os.RemoveAll(parked)
+	return nil
 }

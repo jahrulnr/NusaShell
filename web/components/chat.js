@@ -20,8 +20,12 @@ export function MenuButton() {
 function Header({ room: r, browser, pane, setPane }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   const [confirm, setConfirm] = useState(false);
   const titleInput = useRef();
+  // settle records that this edit already ended: Enter closes the field and
+  // its own blur must not save it a second time.
+  const settle = useRef('');
   useEffect(() => { if (editing) { titleInput.current?.focus(); titleInput.current?.select(); } }, [editing]);
   const title = r.info?.title || 'Untitled thread';
   const ws = r.info?.workspace;
@@ -29,16 +33,27 @@ function Header({ room: r, browser, pane, setPane }) {
   // availability and reason are the server's, not a second rule here.
   const compact = useCommands(r).find((c) => c.name === 'compact');
 
-  const saveTitle = (v) => { setEditing(false); if (v.trim() !== (r.info?.title || '')) rename(r, v.trim()); };
+  // The field holds what is being typed, not the room's record: a refresh
+  // that lands mid-edit must not rewrite the text under the cursor, and the
+  // name only reaches the room when the owner commits it.
+  const editTitle = () => { settle.current = ''; setDraft(r.info?.title || ''); setEditing(true); };
+  const closeTitle = (how) => {
+    if (settle.current) return;
+    settle.current = how;
+    setEditing(false);
+    const next = draft.trim();
+    if (how === 'save' && next && next !== (r.info?.title || '')) rename(r, next);
+  };
   return html`<header class="flex items-center gap-1 h-12 px-2 sm:px-3 border-b border-line shrink-0">
     <${MenuButton} />
     <div class="flex-1 min-w-0 flex items-center gap-3">
       ${editing
-        ? html`<input ref=${titleInput} value=${r.info?.title || ''} aria-label="Thread title"
-            onKeyDown=${(e) => { if (e.key === 'Enter') saveTitle(e.target.value); if (e.key === 'Escape') setEditing(false); }}
-            onBlur=${(e) => saveTitle(e.target.value)}
+        ? html`<input ref=${titleInput} value=${draft} aria-label="Thread title"
+            onInput=${(e) => setDraft(e.target.value)}
+            onKeyDown=${(e) => { if (e.key === 'Enter') closeTitle('save'); if (e.key === 'Escape') closeTitle('cancel'); }}
+            onBlur=${() => closeTitle('save')}
             class="flex-1 min-w-0 h-8 rounded-lg bg-raised border border-accent px-2 outline-none" />`
-        : html`<button type="button" onClick=${() => setEditing(true)} title="Rename" class="min-w-0 truncate text-left font-medium hover:text-fg px-1 rounded">${title}</button>`}
+        : html`<button type="button" onClick=${editTitle} title="Rename" class="min-w-0 truncate text-left font-medium hover:text-fg px-1 rounded">${title}</button>`}
       <${LabelChip} room=${r} />
       ${r.info?.memoryOff && html`<span class="hidden sm:flex items-center gap-1 text-[11px] text-faint shrink-0" title="Memory is off for this thread">
         <${Icon} name="shield" size=${12} /> No memory</span>`}
@@ -53,7 +68,7 @@ function Header({ room: r, browser, pane, setPane }) {
     <div class="relative">
       <${IconButton} icon="more" label="Thread actions" onClick=${() => setMenu(!menu)} aria-expanded=${menu} />
       <${Popover} open=${menu} onClose=${() => setMenu(false)} placement="bottom-end" label="Thread actions" class="sm:w-56 py-1">
-        <button type="button" class="w-full flex items-center gap-2.5 px-3 h-9 hover:bg-hover" onClick=${() => { setMenu(false); setEditing(true); }}>
+        <button type="button" class="w-full flex items-center gap-2.5 px-3 h-9 hover:bg-hover" onClick=${() => { setMenu(false); editTitle(); }}>
           <${Icon} name="pencil" size=${15} /> Rename
         </button>
         <button type="button" disabled=${compact?.enabled === false || isBusy(r) || !!r.command}
