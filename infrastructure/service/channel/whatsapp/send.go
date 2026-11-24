@@ -159,12 +159,12 @@ func (c *Channel) SendJSON(ctx context.Context, raw json.RawMessage) (json.RawMe
 		if text == "" || req.MessageID == "" {
 			return nil, bad("edit needs messageId and text")
 		}
-		msg = client.BuildEdit(jid, types.MessageID(req.MessageID), &waE2E.Message{Conversation: new(markup.Render(text, markup.WhatsApp))})
+		msg = client.BuildEdit(jid, req.MessageID, &waE2E.Message{Conversation: new(markup.Render(text, markup.WhatsApp))})
 	case "revoke":
 		if req.MessageID == "" {
 			return nil, bad("revoke needs messageId")
 		}
-		msg = client.BuildRevoke(jid, types.EmptyJID, types.MessageID(req.MessageID))
+		msg = client.BuildRevoke(jid, types.EmptyJID, req.MessageID)
 	case "reaction":
 		if req.MessageID == "" || req.SenderID == "" {
 			return nil, bad("reaction needs messageId and senderId")
@@ -173,7 +173,7 @@ func (c *Channel) SendJSON(ctx context.Context, raw json.RawMessage) (json.RawMe
 		if err != nil {
 			return nil, bad("invalid senderId")
 		}
-		msg = client.BuildReaction(jid, sender, types.MessageID(req.MessageID), req.Text)
+		msg = client.BuildReaction(jid, sender, req.MessageID, req.Text)
 	case "sticker":
 		if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
 			return nil, bad("a sticker needs data: a base64 WebP image")
@@ -221,7 +221,7 @@ func (c *Channel) SendJSON(ctx context.Context, raw json.RawMessage) (json.RawMe
 		if err != nil {
 			return err
 		}
-		id = string(resp.ID)
+		id = resp.ID
 		c.indexSent(sendCtx, jid, resp, msg, true)
 		return nil
 	})

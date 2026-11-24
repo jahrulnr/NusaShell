@@ -71,9 +71,70 @@ func Value(v any) any {
 	}
 }
 
+// secretNeedles is the case-insensitive fast-reject list for String: each
+// valuePatterns alternative requires one of these ASCII needles verbatim,
+// so a string holding none of them cannot mask and can skip the regex
+// battery. Keep them lowercase — the scan folds subject bytes to compare.
+var secretNeedles = []string{
+	"akia", "asia", // AWS access key id prefixes
+	"aiza",            // Google API keys
+	"basic", "bearer", // Authorization schemes
+	"eyj",                   // JWT header
+	"github_pat_", "glpat-", // GitHub/GitLab PATs
+	"ghp_", "gho_", "ghu_", "ghs_", "ghr_", // GitHub tokens
+	"hf_", "npm_", "sk-", "whsec_", "xox", "ya29.", // provider tokens
+	"_live_", "_test_", // Stripe sk_live_/rk_test_
+	"private key", // PEM blocks
+}
+
+// needlesByFirstByte buckets secretNeedles by leading byte so the scan
+// compares only the handful of candidates that could start at a position.
+var needlesByFirstByte = func() (m [256][]string) {
+	for _, n := range secretNeedles {
+		m[n[0]] = append(m[n[0]], n)
+	}
+	return
+}()
+
+// mightContainSecret reports whether s holds a needle some secret pattern
+// needs. One alloc-free pass over ASCII-folded bytes — the common case
+// (payloads with no credential material) avoids seventeen regex scans.
+func mightContainSecret(s string) bool {
+	for i := 0; i < len(s); i++ {
+		for _, n := range needlesByFirstByte[lowerASCII(s[i])] {
+			if len(n) <= len(s)-i && foldHasPrefix(s[i:], n) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// foldHasPrefix reports whether s begins with the lowercase ASCII needle,
+// folding only ASCII letters — multibyte runes can never match a needle
+// byte, so they fall through harmlessly.
+func foldHasPrefix(s, n string) bool {
+	for i := 0; i < len(n); i++ {
+		if lowerASCII(s[i]) != n[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(b byte) byte {
+	if 'A' <= b && b <= 'Z' {
+		return b + ('a' - 'A')
+	}
+	return b
+}
+
 // String masks secret patterns inside a free-form string — the value of a
 // non-sensitive key may still contain a token.
 func String(s string) string {
+	if !mightContainSecret(s) {
+		return s
+	}
 	for _, p := range valuePatterns {
 		s = p.ReplaceAllString(s, Mask)
 	}
@@ -83,13 +144,14 @@ func String(s string) string {
 // WithoutBodies is a Logger Options.Redact policy: it keeps diagnostic
 // metadata without persisting conversation content. provider.request is
 // logged as unmarshaled JSON (the whole body), not a map with a "body"
-// key — omit it entirely. Response/error maps still drop only their
-// "body" field so status and request_id survive.
+// key — omit it entirely, and skip the deep scrub since every byte of it
+// is discarded anyway. Response/error maps still drop only their "body"
+// field so status and request_id survive.
 func WithoutBodies(kind string, e any) any {
-	e = Value(e)
 	if kind == "provider.request" {
 		return map[string]any{"omitted": true}
 	}
+	e = Value(e)
 	switch v := e.(type) {
 	case map[string]any:
 		delete(v, "body")

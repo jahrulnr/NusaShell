@@ -3,7 +3,6 @@ package acp
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -278,12 +277,6 @@ type EmbeddedResource struct {
 	Blob     string `json:"blob,omitempty"`
 }
 
-type ContentChunk struct {
-	MessageID string          `json:"messageId,omitempty"`
-	Content   json.RawMessage `json:"content"`
-	Meta      json.RawMessage `json:"_meta,omitempty"`
-}
-
 type TextContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -303,19 +296,6 @@ type ToolCall struct {
 	Name       string          `json:"name,omitempty"`
 	Kind       string          `json:"kind,omitempty"`
 	Status     string          `json:"status,omitempty"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	Locations  json.RawMessage `json:"locations,omitempty"`
-	RawInput   json.RawMessage `json:"rawInput,omitempty"`
-	RawOutput  json.RawMessage `json:"rawOutput,omitempty"`
-	Meta       json.RawMessage `json:"_meta,omitempty"`
-}
-
-type ToolCallUpdate struct {
-	ToolCallID string          `json:"toolCallId"`
-	Title      *string         `json:"title,omitempty"`
-	Name       *string         `json:"name,omitempty"`
-	Kind       *string         `json:"kind,omitempty"`
-	Status     *string         `json:"status,omitempty"`
 	Content    json.RawMessage `json:"content,omitempty"`
 	Locations  json.RawMessage `json:"locations,omitempty"`
 	RawInput   json.RawMessage `json:"rawInput,omitempty"`
@@ -345,13 +325,6 @@ type PermissionOutcome struct {
 	OptionID string `json:"optionId,omitempty"`
 }
 
-type SetConfigRequest struct {
-	SessionID string `json:"sessionId"`
-	ConfigID  string `json:"configId"`
-	Type      string `json:"type,omitempty"`
-	Value     any    `json:"value"`
-}
-
 type SetModeRequest struct {
 	SessionID string `json:"sessionId"`
 	ModeID    string `json:"modeId"`
@@ -359,11 +332,6 @@ type SetModeRequest struct {
 
 type SetConfigResult struct {
 	ConfigOptions json.RawMessage `json:"configOptions"`
-}
-
-type ListSessionsResult struct {
-	Sessions   []json.RawMessage `json:"sessions"`
-	NextCursor string            `json:"nextCursor,omitempty"`
 }
 
 type SessionUpdate struct {
@@ -453,11 +421,6 @@ func IsUnknownSession(err error) bool {
 		strings.Contains(strings.ToLower(re.Message+" "+string(re.Data)), "archived")
 }
 
-func IsMethodNotFound(err error) bool {
-	re, ok := err.(*RPCError)
-	return ok && re != nil && re.Code == CodeMethodNotFound
-}
-
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -507,23 +470,6 @@ func DefaultClientCapabilities() ClientCapabilities {
 	return caps
 }
 
-type FSReadRequest struct {
-	SessionID string `json:"sessionId"`
-	Path      string `json:"path"`
-	Line      *int   `json:"line,omitempty"`
-	Limit     *int   `json:"limit,omitempty"`
-}
-
-type FSReadResponse struct {
-	Content string `json:"content"`
-}
-
-type FSWriteRequest struct {
-	SessionID string `json:"sessionId"`
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-}
-
 type TerminalCreateRequest struct {
 	SessionID       string   `json:"sessionId"`
 	Command         string   `json:"command"`
@@ -553,26 +499,6 @@ type TerminalExitStatus struct {
 	Signal   *string `json:"signal,omitempty"`
 }
 
-type ElicitationCreateRequest struct {
-	SessionID       string          `json:"sessionId"`
-	ToolCallID      string          `json:"toolCallId,omitempty"`
-	Message         string          `json:"message"`
-	RequestedSchema json.RawMessage `json:"requestedSchema"`
-}
-
-type ElicitationResponse struct {
-	Action  string          `json:"action"`
-	Content json.RawMessage `json:"content,omitempty"`
-}
-
-//go:fix inline
-func IntPtr(n int) *int { return new(n) }
-
-func MustRaw(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
-}
-
 func ParsePermissionToolCall(raw json.RawMessage) ToolCall {
 	var tc ToolCall
 	_ = json.Unmarshal(raw, &tc)
@@ -584,19 +510,4 @@ func ParsePermissionToolCall(raw json.RawMessage) ToolCall {
 		}
 	}
 	return tc
-}
-
-func AnyString(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case json.Number:
-		return x.String()
-	case float64:
-		return strconv.FormatFloat(x, 'f', -1, 64)
-	case bool:
-		return strconv.FormatBool(x)
-	default:
-		return fmt.Sprint(x)
-	}
 }

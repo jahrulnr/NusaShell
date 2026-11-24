@@ -138,6 +138,21 @@
 .md td.md-code-cell { max-width: none; white-space: nowrap; }
 .md img { display: none; }
 .md .md-image { color: var(--muted); }
+/* A local picture, video, or sound a message shows with ![caption](path):
+   a click opens it in the preview overlay, where video and audio play.
+   Several on one line sit side by side. */
+.md .md-embed { display: inline-flex; flex-direction: column; gap: .3em; vertical-align: top; max-width: 100%; margin: .25em .5em .25em 0; }
+.md .md-embed > button { position: relative; display: block; max-width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); cursor: zoom-in; }
+.md .md-embed img, .md .md-embed video { display: block; max-width: min(100%, 520px); max-height: 360px; width: auto; height: auto; object-fit: contain; }
+.md .md-embed video { pointer-events: none; min-width: 160px; min-height: 90px; background: #000; }
+.md .md-embed .md-embed-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; background: rgb(0 0 0 / .25); }
+.md .md-embed .md-embed-play svg { width: 34px; height: 34px; fill: currentColor; filter: drop-shadow(0 1px 3px rgb(0 0 0 / .5)); }
+.md .md-embed .md-embed-audio { display: inline-flex; align-items: center; gap: .5em; height: 2.4em; padding: 0 .85em; border-radius: 10px; cursor: pointer; font-size: .93em; color: var(--fg); }
+.md .md-embed .md-embed-audio:hover { background: var(--hover); }
+.md .md-embed .md-embed-audio svg { color: var(--muted); flex-shrink: 0; }
+.md .md-embed .md-embed-audio span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22em; }
+.md .md-embed .md-embed-broken svg { color: var(--warn); }
+.md .md-embed .md-embed-caption { font-size: .85em; color: var(--muted); max-width: 520px; }
 .md dl { margin: .6em 0; } .md dt { font-weight: 600; margin-top: .5em; } .md dd { margin-left: 1.4em; }
 .md kbd { font-family: var(--font-mono); font-size: .82em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: .05em .4em; background: var(--raised); }
 .md mark { background: color-mix(in srgb, var(--warn) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 .15em; }

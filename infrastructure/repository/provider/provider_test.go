@@ -18,9 +18,6 @@ import (
 	reposecret "github.com/jahrulnr/nusashell/infrastructure/repository/secret"
 )
 
-//go:fix inline
-func ptr[T any](v T) *T { return new(v) }
-
 func newRepo(t *testing.T) drepo.Provider {
 	t.Helper()
 	secrets, err := reposecret.New(":memory:")

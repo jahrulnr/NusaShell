@@ -25,9 +25,6 @@ func newApp(t *testing.T) (*ProviderApp, drepo.SecretStore, string) {
 	return New(repo, secrets, nil), secrets, dir
 }
 
-//go:fix inline
-func strptr(s string) *string { return new(s) }
-
 func TestUpsertGetRoundtrip(t *testing.T) {
 	app, secrets, dir := newApp(t)
 	off := false

@@ -8,6 +8,8 @@ import DOMPurify from '/vendor/dompurify/purify.es.mjs';
 import hljs from '/vendor/highlight/highlight.min.mjs';
 import { mountDiagram, validateDiagramSource } from './diagram.js';
 import { markedUser, withRefSentinels, applyRefHighlights } from './usermark.js';
+import { renderImage, localTarget, baseName } from './mdlinks.js';
+import { fileURL } from './api.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const DIAGRAM_LANGS = new Set(['mermaid', 'mmd']);
@@ -27,9 +29,10 @@ marked.use({
         + `<button type="button" class="copybtn" data-copy>Copy</button></header>`
         + `<pre><code data-lang="${esc(language)}">${esc(text)}</code></pre></div>`;
     },
-    // Images are never fetched. Raw HTML passes through and is reduced to
-    // the allowlist below by DOMPurify.
-    image({ text }) { return `<span class="md-image">[image: ${esc(text)}]</span>`; },
+    // A local picture, video, or sound shows inline (lib/mdlinks.js); a
+    // remote one is never fetched. Raw HTML passes through and is reduced
+    // to the allowlist below by DOMPurify, so <img>/<video> never survive.
+    image: renderImage,
   },
   extensions: [{
     // GitHub-style footnote reference: [^id]. Definitions are lifted out of
@@ -93,26 +96,34 @@ const TAGS = [
   'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var',
 ];
 const ATTRS = ['href', 'title', 'type', 'checked', 'disabled', 'align', 'start', 'open', 'colspan', 'rowspan', 'target', 'rel',
-  'class', 'data-copy', 'data-lang', 'data-diagram', 'data-fn', 'data-fn-def', 'data-file'];
+  'class', 'data-copy', 'data-lang', 'data-diagram', 'data-fn', 'data-fn-def', 'data-file', 'data-media', 'data-kind'];
 // Only the renderer's own class names survive, so pasted HTML cannot reach
 // the app's utility classes (e.g. a fixed overlay over the UI).
-const OWN_CLASSES = new Set(['codeblock', 'copybtn', 'diagram', 'canvas', 'md-image', 'md-fnref', 'md-footnotes']);
+const OWN_CLASSES = new Set(['codeblock', 'copybtn', 'diagram', 'canvas', 'md-image', 'md-media', 'md-fnref', 'md-footnotes']);
 
-// Only http(s), mailto, and same-origin paths survive. Bare #fragments are
-// the app router's, so they are dropped too.
-const SAFE_URI = /^(?:https?:|mailto:|\/(?!\/)|\.\.?\/)/i;
-const FILE_LINK = /^(?:file:|\/(?!\/|api\/)|\.\.?\/|~\/)/i;
-// A link to a local file (file: URL, absolute, ~/ or ./relative path)
-// opens the file preview; its href serves the file for a middle click.
-// Read before sanitizing: the URI filter drops file: hrefs.
+// Only http(s), mailto, and same-origin paths (the app's /#/ thread links)
+// survive as they are. Bare #fragments are the app router's, so they are
+// dropped too.
+const SAFE_URI = /^(?:https?:|mailto:|\/(?!\/))/i;
+
+// fileHref serves a local file for the message being rendered: through its
+// thread, so a relative path resolves in the thread's workspace. Set per
+// render, like the footnotes.
+const globalFileHref = (path) => '/api/files?path=' + encodeURIComponent(path);
+let fileHref = globalFileHref;
+
+// A link to a local file (lib/mdlinks.js localTarget) opens the file
+// preview; its href serves the file for a middle click. The path is read
+// before sanitizing — the URI filter drops file: and scheme-shaped hrefs —
+// and parked on the node here: DOMPurify validates every attribute value
+// against its URI allowlist, so a data-file holding "notes.txt:3" would be
+// removed however it is declared. The after hook writes it back once the
+// attribute pass is over.
+const localFile = new WeakMap();
 DOMPurify.addHook('beforeSanitizeAttributes', (node) => {
   if (node.tagName !== 'A') return;
-  node.removeAttribute('data-file');
-  const href = node.getAttribute('href') || '';
-  if (!FILE_LINK.test(href)) return;
-  let path = href;
-  try { path = decodeURI(href); } catch { /* keep as written */ }
-  node.setAttribute('data-file', path);
+  const path = localTarget(node.getAttribute('href'));
+  if (path) localFile.set(node, path); else localFile.delete(node);
 });
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.hasAttribute?.('class')) {
@@ -122,9 +133,14 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'INPUT' && node.getAttribute('type') !== 'checkbox') node.remove();
   if (node.tagName === 'A') {
     const href = node.getAttribute('href') || '';
-    const file = node.getAttribute('data-file');
-    if (file) node.setAttribute('href', '/api/files?path=' + encodeURIComponent(file));
-    else if (!SAFE_URI.test(href)) node.removeAttribute('href');
+    const path = localFile.get(node);
+    if (path) {
+      node.setAttribute('data-file', path);
+      node.setAttribute('href', fileHref(path));
+    } else {
+      node.removeAttribute('data-file');
+      if (!SAFE_URI.test(href)) node.removeAttribute('href');
+    }
     node.setAttribute('target', '_blank');
     node.setAttribute('rel', 'noopener noreferrer');
   }
@@ -142,7 +158,82 @@ function renderBlock(token, links, inst = marked) {
   return wrap;
 }
 
-function decorate(wrap, final) {
+const svg = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const PLAY = svg('M7 5l12 7-12 7z');
+const SOUND = svg('M4 10v4h4l5 4V6l-5 4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11');
+const ALERT = svg('M12 3l10 18H2zM12 10v5M12 18h.01');
+
+// embedMedia builds what a ![caption](path) placeholder shows: a picture,
+// a video's first frame with a play mark, or a sound chip, each a button
+// the transcript opens in the preview overlay (data-media-url). Built
+// after sanitizing, from the path alone, so nothing the message wrote
+// reaches the element's attributes but the path.
+function embedMedia(path, kind, caption) {
+  const url = fileHref(path);
+  const name = baseName(path);
+  const box = document.createElement('span');
+  box.className = 'md-embed';
+  box.dataset.embed = url;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'md-embed-' + kind;
+  btn.dataset.mediaUrl = url;
+  btn.dataset.mediaName = name;
+  btn.title = caption ? caption + ' — ' + name : name;
+  const broken = () => {
+    btn.className = 'md-embed-audio md-embed-broken';
+    btn.title = name + ' — the file could not be loaded';
+    btn.innerHTML = ALERT;
+    const label = document.createElement('span');
+    label.textContent = name;
+    btn.append(label);
+  };
+  if (kind === 'image') {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = caption || name;
+    img.loading = 'lazy';
+    img.addEventListener('error', broken, { once: true });
+    btn.append(img);
+  } else if (kind === 'video') {
+    const video = document.createElement('video');
+    video.src = url + '#t=0.1';
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.addEventListener('error', broken, { once: true });
+    const mark = document.createElement('span');
+    mark.className = 'md-embed-play';
+    mark.innerHTML = PLAY;
+    btn.append(video, mark);
+  } else {
+    btn.innerHTML = SOUND;
+    const label = document.createElement('span');
+    label.textContent = caption || name;
+    btn.append(label);
+  }
+  box.append(btn);
+  if (caption && caption !== name) {
+    const cap = document.createElement('span');
+    cap.className = 'md-embed-caption';
+    cap.textContent = caption;
+    box.append(cap);
+  }
+  return box;
+}
+
+// decorate finishes a sanitized block. reuse holds the embeds of the block
+// it replaces, by URL: a streaming paragraph re-renders on every delta,
+// and its pictures and videos keep their element instead of reloading.
+function decorate(wrap, reuse) {
+  for (const ph of wrap.querySelectorAll('.md-media[data-media]')) {
+    const kind = ph.dataset.kind;
+    if (!['image', 'video', 'audio'].includes(kind)) { ph.replaceWith(ph.textContent); continue; }
+    const url = fileHref(ph.dataset.media);
+    const old = reuse?.get(url);
+    if (old) { reuse.delete(url); ph.replaceWith(old); continue; }
+    ph.replaceWith(embedMedia(ph.dataset.media, kind, ph.getAttribute('title') || ''));
+  }
   // A table gets its own sideways scroller, so a wide one scrolls instead
   // of squeezing its columns to the message's width. A cell that holds
   // nothing but one code span (a path, an identifier) is marked to read
@@ -182,7 +273,6 @@ function decorate(wrap, final) {
       box.querySelector('details').open = true;
     }
   }
-  wrap._final = final;
 }
 
 function dispose(node) {
@@ -207,21 +297,28 @@ function reconcile(root, blocks, sig, renderFn) {
     const next = renderFn(t);
     next._raw = t.raw;
     next._sig = sig;
-    decorate(next);
+    const reuse = new Map();
+    for (const e of have?.querySelectorAll?.('[data-embed]') ?? []) reuse.set(e.dataset.embed, e);
+    decorate(next, reuse);
     if (have) { dispose(have); root.replaceChild(next, have); } else root.appendChild(next);
   }
   for (let i = blocks.length; i < kids.length; i++) { dispose(kids[i]); kids[i].remove(); }
 }
 
+// fileHrefFor serves local files through a thread when there is one.
+const fileHrefFor = (conversationId) => (conversationId ? (path) => fileURL(conversationId, path) : globalFileHref);
+
 // renderInto reconciles `root` against `source`. Blocks keep their DOM when
 // their raw text is unchanged; the trailing block re-renders while streaming.
-export function renderInto(root, source) {
+// conversationId names the thread whose workspace local paths resolve in.
+export function renderInto(root, source, { conversationId = '' } = {}) {
   let tokens;
+  fileHref = fileHrefFor(conversationId);
   const { src, notes } = extractFootnotes(cleanFences(source));
   footnotes = notes;
   // Blocks re-render when the footnote set changes, since references in
   // them resolve against it.
-  const sig = [...notes].map(([id, v]) => id + '\u0001' + v.n + '\u0001' + v.text).join('\u0002');
+  const sig = conversationId + '\u0003' + [...notes].map(([id, v]) => id + '\u0001' + v.n + '\u0001' + v.text).join('\u0002');
   try { tokens = marked.lexer(src); } catch { tokens = [{ type: 'paragraph', raw: src, text: src, tokens: [{ type: 'text', raw: src, text: src }] }]; }
   const blocks = tokens.filter((t) => t.type !== 'space');
   if (notes.size) blocks.push({ type: 'footnotes', raw: '\u0000footnotes' });
@@ -232,12 +329,13 @@ export function renderInto(root, source) {
 // newlines break, a typed "[^id]:" or ```mermaid fence stays literal,
 // and reference selections ride the parse as sentinels so the same
 // sanitized block cache can reconcile them before they become spans.
-export function renderUserInto(root, source, refs) {
+export function renderUserInto(root, source, refs, { conversationId = '' } = {}) {
   let tokens;
+  fileHref = fileHrefFor(conversationId);
   const src = cleanFences(withRefSentinels(source, refs));
   try { tokens = markedUser.lexer(src); } catch { tokens = [{ type: 'paragraph', raw: src, text: src, tokens: [{ type: 'text', raw: src, text: src }] }]; }
   const blocks = tokens.filter((t) => t.type !== 'space');
-  reconcile(root, blocks, '', (t) => renderBlock(t, tokens.links, markedUser));
+  reconcile(root, blocks, conversationId, (t) => renderBlock(t, tokens.links, markedUser));
   applyRefHighlights(root, refs);
 }
 

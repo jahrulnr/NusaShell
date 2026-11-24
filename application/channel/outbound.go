@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -24,6 +25,10 @@ const maxOutboundFiles = 6
 // bare file:/// URI. A destination may hold spaces, quotes and angle
 // brackets: agents copy paths verbatim from their tools.
 var (
+	// remoteRe names a destination another host serves. A colon alone is
+	// not a scheme: "notes.txt:12" is a file with an editor position.
+	remoteRe   = regexp.MustCompile(`(?i)^(?:https?|wss?|ftp|mailto|data|blob|javascript|tel|sms):`)
+	lineSuffix = regexp.MustCompile(`(?::[0-9]+){1,2}$`)
 	fileLinkRe = regexp.MustCompile(`!?\[([^\]]{0,120})\]\(\s*([^()\n]+)\s*\)`)
 	fileURIRe  = regexp.MustCompile(`file:///[^\s)\]"'<>` + "`" + `]+`)
 )
@@ -37,10 +42,11 @@ type outbound struct {
 	files    []dservice.ChannelFile
 }
 
-// prepare reads the local files a reply links — markdown links to absolute
-// paths and file:// URIs — when they lie inside the folders the room's
-// turns work in, and the files an agent put in the reply itself (media).
-// A link that does not resolve stays in the text.
+// prepare reads the local files a reply links — markdown links and images
+// to absolute paths, paths relative to the room's first folder (as the web
+// UI resolves them), and file:// URIs — when they lie inside the folders
+// the room's turns work in, and the files an agent put in the reply itself
+// (media). A link that does not resolve stays in the text.
 func (a *App) prepare(ctx context.Context, convID, text string, media []valueobject.Attachment) outbound {
 	out := outbound{text: text, stripped: text}
 	if len(media) == 0 && !strings.Contains(text, "file://") && !strings.Contains(text, "](") {
@@ -49,6 +55,10 @@ func (a *App) prepare(ctx context.Context, convID, text string, media []valueobj
 	ws, roots, err := a.rooms.Roots(ctx, appconversation.Place{ConversationID: convID})
 	if err != nil || ws == nil {
 		return out
+	}
+	base := ""
+	if len(roots) > 0 {
+		base = roots[0]
 	}
 	sessions := map[string]drepo.WorkspaceSession{}
 	defer func() {
@@ -63,7 +73,7 @@ func (a *App) prepare(ctx context.Context, convID, text string, media []valueobj
 		if sent[ref] {
 			return
 		}
-		for _, p := range localPaths(ref) {
+		for _, p := range localPaths(ref, base) {
 			if read[p] {
 				sent[ref] = true
 				return
@@ -91,7 +101,7 @@ func (a *App) prepare(ctx context.Context, convID, text string, media []valueobj
 				if label = strings.TrimSpace(label); label != "" && filepath.Ext(label) != "" {
 					name = filepath.Base(label)
 				}
-				out.files = append(out.files, dservice.ChannelFile{Name: name, MediaType: http.DetectContentType(data), Data: data})
+				out.files = append(out.files, dservice.ChannelFile{Name: name, MediaType: mediaTypeOf(p, data), Data: data})
 				read[p], sent[ref] = true, true
 				return
 			}
@@ -140,8 +150,10 @@ func (a *App) prepare(ctx context.Context, convID, text string, media []valueobj
 
 // localPaths are the absolute paths a file:// URI or a path may name: as
 // written, then percent-decoded (markdown destinations are URLs, so agents
-// sometimes encode a space).
-func localPaths(ref string) []string {
+// sometimes encode a space), and without the editor position when one
+// trails it. A relative path resolves against base; a destination with a
+// remote scheme (https:, mailto:) names no file.
+func localPaths(ref, base string) []string {
 	spellings := []string{ref}
 	if strings.HasPrefix(ref, "file://") {
 		u, err := url.Parse(ref)
@@ -149,19 +161,39 @@ func localPaths(ref string) []string {
 			return nil
 		}
 		spellings = []string{u.Path}
+	} else if remoteRe.MatchString(ref) && !filepath.IsAbs(ref) {
+		return nil
 	} else if dec, err := url.PathUnescape(ref); err == nil && dec != ref {
 		spellings = append(spellings, dec)
 	}
 	var out []string
 	for _, p := range spellings {
 		if !filepath.IsAbs(p) {
-			continue
+			if base == "" || p == "" || strings.HasPrefix(p, "#") || strings.HasPrefix(p, "~") {
+				continue
+			}
+			p = filepath.Join(base, p)
 		}
 		if p = filepath.Clean(p); p != string(filepath.Separator) {
 			out = append(out, p)
+			// A file really named "a:12" wins by being tried first; the
+			// stripped spelling is the file an editor position names.
+			if bare := lineSuffix.ReplaceAllString(p, ""); bare != p {
+				out = append(out, bare)
+			}
 		}
 	}
 	return out
+}
+
+// mediaTypeOf names a file's type by its extension first, so a chat gets a
+// .mov or .m4a as a video or a sound rather than a document, and by its
+// bytes when the extension says nothing.
+func mediaTypeOf(path string, data []byte) string {
+	if t := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); t != "" {
+		return t
+	}
+	return http.DetectContentType(data)
 }
 
 // readPinned reads a file an agent sent that the room keeps as an upload,

@@ -45,12 +45,22 @@ function openThreadLink(ev) {
   navigate(a.getAttribute('href').slice(1));
   return true;
 }
-const onMarkdownClick = (e) => { if (!openThreadLink(e) && !openLinkedFile(e)) handleCopyClick(e); };
+// openEmbed opens a picture, video, or sound a message shows inline in
+// the preview overlay, where video and audio play.
+function openEmbed(ev) {
+  const b = ev.target.closest?.('[data-media-url]');
+  if (!b) return false;
+  openPreview(b.dataset.mediaUrl, b.dataset.mediaName);
+  return true;
+}
+const onMarkdownClick = (e) => { if (!openEmbed(e) && !openThreadLink(e) && !openLinkedFile(e)) handleCopyClick(e); };
 
-// quote marks a reply's prose as text the selection bar may quote.
-export function Markdown({ text, class: cls = '', quote = false }) {
+// quote marks a reply's prose as text the selection bar may quote. room
+// is the thread whose workspace the message's local paths resolve in.
+export function Markdown({ text, room, class: cls = '', quote = false }) {
   const ref = useRef();
-  useLayoutEffect(() => { renderInto(ref.current, text); }, [text]);
+  const conversationId = room?.id || '';
+  useLayoutEffect(() => { renderInto(ref.current, text, { conversationId }); }, [text, conversationId]);
   useEffect(() => () => ref.current && disposeTree(ref.current), []);
   return html`<div ref=${ref} class=${cx('md', cls)} data-quote=${quote ? '' : undefined} onClick=${onMarkdownClick}></div>`;
 }
@@ -59,10 +69,11 @@ export function Markdown({ text, class: cls = '', quote = false }) {
 // single newlines and typed footnote/mermaid syntax literal while the
 // reference selections highlight through the parse. Raw text stays the
 // source of truth — copy, edit, and send never read this DOM.
-function UserMarkdown({ text, refs }) {
+function UserMarkdown({ text, refs, room }) {
   const ref = useRef();
+  const conversationId = room?.id || '';
   const key = (refs || []).map((r) => r.start + ',' + r.end + ',' + r.kind + ',' + r.id).join(';');
-  useLayoutEffect(() => { renderUserInto(ref.current, text, refs); }, [text, key]);
+  useLayoutEffect(() => { renderUserInto(ref.current, text, refs, { conversationId }); }, [text, key, conversationId]);
   useEffect(() => () => ref.current && disposeTree(ref.current), []);
   return html`<div ref=${ref} class="md" data-quote="" onClick=${onMarkdownClick}></div>`;
 }
@@ -168,14 +179,14 @@ function UserMessage({ room, msg, text, refs, files, recording, pending }) {
     </span>`}
     ${text && relay && html`<div class=${cx('max-w-[85%] min-w-0 sm:min-w-72 rounded-2xl bg-raised border border-accent/25 overflow-hidden break-words', pending && 'opacity-70')}>
       <${RelayHead} relay=${relay} />
-      ${shown && html`<div class="px-3.5 py-2.5"><${UserMarkdown} text=${shown} refs=${shownRefs} /></div>`}
+      ${shown && html`<div class="px-3.5 py-2.5"><${UserMarkdown} text=${shown} refs=${shownRefs} room=${room} /></div>`}
     </div>`}
     ${text && !relay && html`<div class=${cx('max-w-[85%] rounded-2xl bg-raised border border-line px-3.5 py-2 break-words', pending && 'opacity-70')}>
       ${reply && html`<div class=${cx('border-l-2 border-accent/60 pl-2.5 text-[13px] leading-snug', shown && 'mb-2')}>
         <div class="text-[11px] text-faint">${reply.sender ? reply.sender + ' · ' : ''}In reply to</div>
         <div class="text-muted line-clamp-3 whitespace-pre-wrap" title=${reply.quote}>${reply.quote}</div>
       </div>`}
-      ${shown && html`<${UserMarkdown} text=${shown} refs=${shownRefs} />`}
+      ${shown && html`<${UserMarkdown} text=${shown} refs=${shownRefs} room=${room} />`}
     </div>`}
     <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
       <${CopyButton} text=${text} label="Copy message" />
@@ -185,7 +196,7 @@ function UserMessage({ room, msg, text, refs, files, recording, pending }) {
   </div>`;
 }
 
-function Thoughts({ item, live }) {
+function Thoughts({ room, item, live }) {
   const [open, setOpen] = useOpen(item.id);
   return html`<div>
     <button type="button" onClick=${() => setOpen(!open)} aria-expanded=${open}
@@ -194,7 +205,7 @@ function Thoughts({ item, live }) {
       <span class=${live ? 'shimmer' : ''}>${live ? 'Thinking' : 'Thoughts'}</span>
     </button>
     ${open && html`<div class="ml-[7px] pl-4 border-l border-line text-muted text-[13px] max-h-96 overflow-y-auto">
-      <${Markdown} text=${item.text} />
+      <${Markdown} text=${item.text} room=${room} />
     </div>`}
   </div>`;
 }
@@ -202,7 +213,7 @@ function Thoughts({ item, live }) {
 function Activity({ room, item, live, cwd }) {
   const [open, setOpen] = useOpen(item.id);
   const tools = item.items.filter((x) => x.kind === 'tool');
-  if (!tools.length) return item.items.map((x) => html`<${Thoughts} key=${x.id} item=${x} live=${live} />`);
+  if (!tools.length) return item.items.map((x) => html`<${Thoughts} key=${x.id} room=${room} item=${x} live=${live} />`);
   const failed = tools.filter((t) => t.status === 'failed' || (t.status === 'settled' && toolFailed(t.output))).length;
   const label = live ? `Working · ${tools.length} ${tools.length === 1 ? 'step' : 'steps'}` : `Used ${tools.length} ${tools.length === 1 ? 'tool' : 'tools'}`;
   const tail = !open && live ? item.items.slice(-1) : [];
@@ -219,7 +230,7 @@ function Activity({ room, item, live, cwd }) {
     ${(open || tail.length > 0) && html`<div class="ml-[7px] pl-4 border-l border-line flex flex-col">
       ${(open ? item.items : tail).map((x) => x.kind === 'tool'
         ? html`<${ToolRow} key=${x.id} room=${room} item=${x} cwd=${x.cwd || cwd} />`
-        : html`<${Thoughts} key=${x.id} item=${x} live=${live && x === item.items[item.items.length - 1]} />`)}
+        : html`<${Thoughts} key=${x.id} room=${room} item=${x} live=${live && x === item.items[item.items.length - 1]} />`)}
     </div>`}
   </div>`;
 }
@@ -401,7 +412,7 @@ export function Transcript({ room, scroller }) {
         <summary class="cursor-pointer py-1">Context note</summary>
         <pre class="rawtext mt-1">${it.msg.content}</pre>
       </details>`;
-      case 'text': return html`<${Markdown} key=${it.id} text=${it.text} quote />`;
+      case 'text': return html`<${Markdown} key=${it.id} text=${it.text} room=${r} quote />`;
       case 'activity': return html`<${Activity} key=${it.id} room=${r} item=${it} live=${live} cwd=${cwd} />`;
       case 'interrupted': return html`<div key=${it.id} class="text-xs text-faint">— interrupted</div>`;
       case 'resync': return html`<div key=${it.id} class="text-xs text-faint">${it.text}</div>`;

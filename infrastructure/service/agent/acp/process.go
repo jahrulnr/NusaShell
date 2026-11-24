@@ -372,7 +372,7 @@ func (p *Process) handleRequest(msg rpcMessage) {
 }
 
 func (p *Process) respond(id json.RawMessage, result any, rpcErr *RPCError) {
-	msg := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id)}
+	msg := map[string]any{"jsonrpc": "2.0", "id": id}
 	if rpcErr != nil {
 		msg["error"] = rpcErr
 	} else {

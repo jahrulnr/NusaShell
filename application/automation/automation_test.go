@@ -19,11 +19,6 @@ import (
 	"github.com/jahrulnr/nusashell/migration"
 )
 
-// ptr points at v, for the optional Input.Enabled.
-//
-//go:fix inline
-func ptr[T any](v T) *T { return new(v) }
-
 type call struct {
 	convID, provider, model, prompt string
 	opts                            appjob.SendOptions

@@ -506,6 +506,55 @@ func TestReplyFiles(t *testing.T) {
 	}
 }
 
+// A path relative to the room's first folder resolves there, as in the web
+// UI, whether written as a link or an image, and the file's type comes from
+// its extension before its bytes. A web image is no file.
+func TestReplyFilesRelativeAndTyped(t *testing.T) {
+	app, ch, _, rooms, _ := setup(t)
+	root := t.TempDir()
+	rooms.roots = []string{root}
+	if err := os.MkdirAll(filepath.Join(root, "out"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "out", "frame.png"), []byte("not really a png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.process(context.Background(), msg("42", "1", "here ![Frame 1](out/frame.png) and ![](https://x.dev/a.png) and [gone](out/missing.png)"))
+	got := ch.take()
+	if len(got) != 2 {
+		t.Fatalf("sent = %q", got)
+	}
+	if got[0] != "42: reply to here Frame 1 and ![](https://x.dev/a.png) and [gone](out/missing.png)" {
+		t.Fatalf("text = %q", got[0])
+	}
+	if !strings.HasPrefix(got[1], "42: file frame.png image/png ") {
+		t.Fatalf("file = %q", got[1])
+	}
+}
+
+// An editor position on a link names the file it points into: the file is
+// sent once and the link leaves the text, for a relative and an absolute
+// path alike.
+func TestReplyFilesLineSuffix(t *testing.T) {
+	app, ch, _, rooms, _ := setup(t)
+	root := t.TempDir()
+	rooms.roots = []string{root}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("one\ntwo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.process(context.Background(), msg("42", "1", "see [rel](notes.txt:2) and [abs]("+filepath.Join(root, "notes.txt")+":2)"))
+	got := ch.take()
+	if len(got) != 2 {
+		t.Fatalf("sent = %q", got)
+	}
+	if got[0] != "42: reply to see rel and abs" {
+		t.Fatalf("text = %q", got[0])
+	}
+	if !strings.HasPrefix(got[1], "42: file notes.txt text/plain") {
+		t.Fatalf("file = %q", got[1])
+	}
+}
+
 // A reply's media — what an agent put in it — goes to the chat in the
 // reply's order, whether it sits in the room's folders or was kept as an
 // upload; a kept file that changed since it was kept is not sent.

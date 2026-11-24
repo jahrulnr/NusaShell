@@ -141,3 +141,157 @@ func TestWithoutBodiesKeepsCredentialShapedFields(t *testing.T) {
 		t.Fatalf("non-credential free text must pass through, got %v", out["detail"])
 	}
 }
+
+// provider.request collapses to the placeholder before any scrub — no
+// byte of the body may survive, regardless of the entry's shape.
+func TestWithoutBodiesProviderRequestOmitsEverything(t *testing.T) {
+	for _, in := range []any{
+		map[string]any{
+			"model":   "m",
+			"api_key": "sk-live-123",
+			"messages": []any{
+				map[string]any{"role": "user", "content": "Authorization: Bearer sekrit"},
+			},
+		},
+		"a raw non-JSON string",
+		[]any{"chunk1", "chunk2"},
+		nil,
+	} {
+		out, ok := WithoutBodies("provider.request", in).(map[string]any)
+		if !ok || len(out) != 1 || out["omitted"] != true {
+			t.Fatalf("provider.request of %T must collapse to omitted, got %v", in, out)
+		}
+	}
+}
+
+// provider.response/provider.error still scrub: body drops, credential-
+// shaped keys mask, and free text masks embedded token shapes.
+func TestWithoutBodiesScrubsResponseAndError(t *testing.T) {
+	for _, kind := range []string{"provider.response", "provider.error"} {
+		in := map[string]any{
+			"status":       500,
+			"body":         "raw response body",
+			"access_token": "tok-secret",
+			"detail":       "upstream said Bearer abc.def.ghi",
+		}
+		out := WithoutBodies(kind, in).(map[string]any)
+		if _, has := out["body"]; has {
+			t.Fatalf("%s kept its body: %v", kind, out)
+		}
+		if out["access_token"] != Mask {
+			t.Fatalf("%s left access_token unmasked: %v", kind, out)
+		}
+		if out["detail"] != "upstream said "+Mask {
+			t.Fatalf("%s left embedded secret unmasked: %v", kind, out)
+		}
+		if out["status"] != 500 {
+			t.Fatalf("%s clobbered benign metadata: %v", kind, out)
+		}
+	}
+}
+
+// Every credential shape the value patterns own must still mask — the
+// prefilter can only skip a string when no pattern could match, and each
+// of these carries a needle the patterns require.
+func TestStringMasksEverySecretShape(t *testing.T) {
+	shapes := []struct{ name, in, want string }{
+		{"bearer", "Authorization: Bearer abc.def.ghi", "Authorization: " + Mask},
+		{"bearer lowercase", "authorization: bearer tok123", "authorization: " + Mask},
+		{"basic", "Authorization: Basic dXNlcjpwYXNz", "Authorization: " + Mask},
+		{"aws akia", "key=AKIA0123456789ABCDEF", "key=" + Mask},
+		{"aws asia", "key=ASIA0123456789ABCDEF", "key=" + Mask},
+		{"gitlab pat", "glpat-abcdefghij0123456789", Mask},
+		{"npm", "npm_0123456789abcdefghijklmnopqrstuvwxyz", Mask},
+		{"openai sk", "sk-liveabc123def456", Mask},
+		{"google aiza", "AIzaSyD4iE2xVSpkLLOXoyq2ueu", Mask},
+		{"github ghp", "ghp_abcdefghij0123456789abcdefghij", Mask},
+		{"github gho", "gho_abcdefghij0123456789abcdefghij", Mask},
+		{"github ghu", "ghu_abcdefghij0123456789abcdefghij", Mask},
+		{"github ghs", "ghs_abcdefghij0123456789abcdefghij", Mask},
+		{"github ghr", "ghr_abcdefghij0123456789abcdefghij", Mask},
+		{"github pat", "github_pat_11AAAAAAA0abcdefghij_0123456789abcdefghijklmnopqrstuvwxyzABCDE", Mask},
+		{"huggingface", "hf_abcdefghij0123456789abcdefghij", Mask},
+		{"slack xoxb", "xoxb-123456789012-abcdefghijklmnop", Mask},
+		{"slack xoxp", "xoxp-123456789012-abcdefghijklmnop", Mask},
+		{"stripe live", "sk_live_4eC39HqLyjWDarjtT1zdp7dc", Mask},
+		{"stripe restricted test", "rk_test_4eC39HqLyjWDarjtT1zdp7dc", Mask},
+		{"stripe webhook", "whsec_abcdefghij0123456789", Mask},
+		{"google oauth", "ya29.a0AfB_byAbCdEfGhIjKlMnOpQrStUv", Mask},
+		{"jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dozjgNryP4J3jVmNHl0w5N", Mask},
+		{"pem", "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----", Mask},
+	}
+	for _, c := range shapes {
+		if got := String(c.in); got != c.want {
+			t.Errorf("%s: String(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+// Clean text returns untouched, and marker-looking words still reach the
+// regexes — a false-negative needle would silently leak a credential.
+func TestStringCleanPassthrough(t *testing.T) {
+	clean := []string{
+		"plain text, no secrets",
+		`{"model":"x","messages":[{"role":"user","content":"hello"}]}`,
+		"a basic plan upgrade", // 'basic' needle, but no base64 credential follows
+		"skiing and sk-d",      // 'sk-' needle too short for the pattern
+		"unicode héllo wörld — naïve éèê",
+	}
+	for _, in := range clean {
+		if got := String(in); got != in {
+			t.Errorf("String(%q) = %q, want unchanged", in, got)
+		}
+	}
+}
+
+func BenchmarkRedactString(b *testing.B) {
+	clean := strings.Repeat("the quick brown fox jumps over the lazy dog. ", 100)
+	dirty := "request failed: Authorization: Bearer abc.def.ghi " +
+		"token sk-liveabc123def456 " + strings.Repeat("noise ", 200)
+	markerOnly := "a basic plan upgrade, nothing sensitive " + strings.Repeat("filler ", 100)
+	for _, c := range []struct {
+		name string
+		in   string
+	}{
+		{"clean", clean},
+		{"dirty", dirty},
+		{"marker-only", markerOnly},
+	} {
+		b.Run(c.name, func(b *testing.B) {
+			b.SetBytes(int64(len(c.in)))
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = String(c.in)
+			}
+		})
+	}
+}
+
+// provider.request bodies arrive fully unmarshaled (see repolog.Append);
+// the redactor's cost before omitting is what this measures.
+func BenchmarkWithoutBodies(b *testing.B) {
+	request := map[string]any{
+		"model": "provider-model",
+		"messages": []any{
+			map[string]any{"role": "system", "content": strings.Repeat("prompt ", 4000)},
+			map[string]any{"role": "user", "content": strings.Repeat("ask ", 8000)},
+			map[string]any{"role": "assistant", "content": strings.Repeat("answer ", 8000)},
+			map[string]any{"role": "user", "content": strings.Repeat("followup ", 8000)},
+		},
+		"tools": []any{
+			map[string]any{"name": "exec", "description": strings.Repeat("desc ", 1000)},
+		},
+	}
+	b.Run("provider.request", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = WithoutBodies("provider.request", request)
+		}
+	})
+	b.Run("provider.response", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = WithoutBodies("provider.response", request)
+		}
+	})
+}

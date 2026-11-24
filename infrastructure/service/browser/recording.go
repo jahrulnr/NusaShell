@@ -42,7 +42,7 @@ const (
 )
 
 // recCapture bundles the per-tab capture state for one recording epoch.
-// Watchers are bound to a ctx derived from the tab ctx, so swapTab's ctx
+// Watchers are bound to a ctx derived from the tab ctx, so inherit's ctx
 // teardown ends them; the waiter started in startRecordingCapture then
 // tears the bundle down exactly once. The network table and the
 // attributed-download set live here so a restarted epoch never reuses a
@@ -112,7 +112,7 @@ func linkCtx(parent, cap context.Context) context.Context {
 
 // startRecordingCapture arms every capture source on the current tab. The
 // bundle ends with the tab ctx or the recorder — whichever first — through
-// the once-guarded teardown, so swapTab just calls this again for the new
+// the once-guarded teardown, so inherit just calls this again for the new
 // target. All CDP calls are best-effort.
 func (s *Session) startRecordingCapture(r dservice.RecordingSink) {
 	s.mu.Lock()
@@ -148,7 +148,7 @@ func (s *Session) startRecordingCapture(r dservice.RecordingSink) {
 		s.mu.Unlock()
 	}()
 	// Wait for the previous bundle's teardown before touching the shared
-	// browser context: swapTab's old bundle restores the default download
+	// browser context: inherit's old bundle restores the default download
 	// behavior there, and an unordered restore would cancel this arm. A dead
 	// tabCtx cannot wedge the wait — its teardown has already run or fails
 	// fast on the dead context.

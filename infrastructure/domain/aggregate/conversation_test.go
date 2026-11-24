@@ -1,6 +1,7 @@
 package aggregate
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -273,17 +274,22 @@ func TestModelRoomIgnoresAnAgentReport(t *testing.T) {
 }
 
 func BenchmarkConversationEstimatedTokens(b *testing.B) {
-	c, _ := NewConversation("conv")
-	for range 200 {
-		m, _ := entity.NewMessage(enum.RoleUser, strings.Repeat("x", 2000))
-		tc, _ := entity.NewToolCall("id", "name", strings.Repeat("i", 500), enum.TooltypeOrigin)
-		tc.SetOutput(strings.Repeat("o", 3000))
-		m.AddToolCall(tc)
-		c.Append(m)
-	}
-	b.ResetTimer()
-	for b.Loop() {
-		_ = c.EstimatedTokens()
+	for _, outBytes := range []int{32 << 10, 64 << 10} {
+		b.Run(fmt.Sprintf("output=%dKiB", outBytes>>10), func(b *testing.B) {
+			c, _ := NewConversation("conv")
+			for range 200 {
+				m, _ := entity.NewMessage(enum.RoleUser, strings.Repeat("x", 2000))
+				tc, _ := entity.NewToolCall("id", "name", strings.Repeat("i", 500), enum.TooltypeOrigin)
+				tc.SetOutput(strings.Repeat("o", outBytes))
+				m.AddToolCall(tc)
+				c.Append(m)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				_ = c.EstimatedTokens()
+			}
+		})
 	}
 }
 

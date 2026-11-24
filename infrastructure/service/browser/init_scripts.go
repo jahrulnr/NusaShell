@@ -130,7 +130,7 @@ func (s *Session) RemoveInitScript(id string) bool {
 	// The removed script is already out of the list, so applyDocumentScripts
 	// cannot see its identifier; uninstall it here.
 	s.removeScriptIdentifier(stale)
-	if err := s.applyDocumentScripts(); err != nil && true {
+	if err := s.applyDocumentScripts(); err != nil {
 		s.log.Warn("init script removal not applied to the current tab", "id", id, "error", err)
 	}
 	return true
@@ -158,12 +158,4 @@ func (s *Session) InitScripts() []AgentInitScript {
 		out = append(out, AgentInitScript{ID: script.ID})
 	}
 	return out
-}
-
-// reinstallDocumentScripts restores the agent scripts and the WebSocket shim
-// after a tab swap. The old identifiers belonged to the closed target.
-func (s *Session) reinstallDocumentScripts() {
-	if err := s.applyDocumentScripts(); err != nil && true {
-		s.log.Warn("document scripts not re-installed after tab swap", "error", err)
-	}
 }

@@ -380,11 +380,10 @@ func TestImportModelsConcurrentMergeWindow(t *testing.T) {
 // the provider's endpoint while that fetch is in flight. Later fetches
 // answer immediately with no models.
 type gatedCatalog struct {
-	started  chan struct{}
-	release  chan struct{}
-	calls    sync.Once
-	start    sync.Once
-	releaseO sync.Once
+	started chan struct{}
+	release chan struct{}
+	calls   sync.Once
+	start   sync.Once
 }
 
 func (g *gatedCatalog) ListModels(context.Context, *aggregate.Provider) ([]dservice.CatalogModel, error) {

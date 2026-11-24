@@ -31,8 +31,6 @@ const (
 
 var (
 	ErrRecordingNotFound  = errors.New("recording not found")
-	ErrNoActiveRecording  = errors.New("no active recording for this session")
-	ErrRecordingActive    = errors.New("a recording is already active")
 	ErrSummaryUnavailable = errors.New("recording summary is not available yet")
 	ErrInvalidAction      = errors.New("the recording cannot do that now")
 )
@@ -91,8 +89,6 @@ func recTruncateStrings(v any) any {
 	}
 	return v
 }
-
-type RecCounts = drepo.RecordingCounts
 
 type RecMeta = drepo.RecordingMeta
 
@@ -444,18 +440,6 @@ func (r *Recorder) Abort() {
 	r.Shutdown()
 	if err := os.RemoveAll(r.dir); err != nil {
 		r.log.Warn("unpublished recording dir not removed", "recording", r.id, "error", err)
-	}
-}
-
-// claimConversation rebinds a recording created while the session was
-// unclaimed so conversation-scoped lookups see it after the draft
-// materializes.
-func (r *Recorder) ClaimConversation(conversationID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.meta.ConversationID == "" {
-		r.meta.ConversationID = conversationID
-		_ = r.writeMetaLocked()
 	}
 }
 

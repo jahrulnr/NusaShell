@@ -139,11 +139,3 @@ const (
 )
 
 func (s MemoryProposalStatus) String() string { return string(s) }
-
-func ParseMemoryProposalStatus(v string) (MemoryProposalStatus, bool) {
-	switch s := MemoryProposalStatus(v); s {
-	case MemoryProposalPending, MemoryProposalAccepted, MemoryProposalDismissed:
-		return s, true
-	}
-	return "", false
-}

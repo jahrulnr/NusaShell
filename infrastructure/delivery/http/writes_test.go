@@ -418,9 +418,6 @@ func TestPutProviderApiKeyTriState(t *testing.T) {
 	}
 }
 
-//go:fix inline
-func ptr(s string) *string { return new(s) }
-
 func TestDeleteProvider204(t *testing.T) {
 	fgw := &fakeGwWrites{}
 	h := newTestHandler(t, Deps{ProviderWrites: fgw})

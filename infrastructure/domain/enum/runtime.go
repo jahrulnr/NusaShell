@@ -12,11 +12,3 @@ const (
 )
 
 func (r Runtime) String() string { return string(r) }
-
-func ParseRuntime(v string) (Runtime, bool) {
-	switch r := Runtime(v); r {
-	case RuntimeModel, RuntimeAgent:
-		return r, true
-	}
-	return "", false
-}

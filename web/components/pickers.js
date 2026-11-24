@@ -50,12 +50,6 @@ function agentModelLabel(s, agentId, modelId) {
   return modelId ? `${m?.name || modelId}` : name;
 }
 
-export function modelLabel(providers, providerId, modelId) {
-  const g = providers.find((x) => x.id === providerId);
-  const m = g?.models.find((x) => x.id === modelId);
-  return m?.name || modelId || '';
-}
-
 export function ModelPicker({ room }) {
   const s = useStore();
   const [open, setOpen] = useState(false);

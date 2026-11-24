@@ -47,7 +47,7 @@ func (c *Channel) inboundFiles(ctx context.Context, msg *waE2E.Message, id types
 		}
 		fileName = filepath.Base(strings.TrimSpace(fileName))
 		if fileName == "" || fileName == "." || fileName == "/" {
-			fileName = stem + "-" + string(id) + extensionFor(mediaType, fallbackExt)
+			fileName = stem + "-" + id + extensionFor(mediaType, fallbackExt)
 		}
 		files = append(files, dservice.ChannelFile{Name: fileName, MediaType: mediaType, Data: data})
 	}
@@ -197,7 +197,7 @@ func (c *Channel) sendFile(ctx context.Context, jid types.JID, f dservice.Channe
 		if err != nil {
 			return err
 		}
-		id = string(resp.ID)
+		id = resp.ID
 		c.indexSent(sendCtx, jid, resp, msg, explicit)
 		return nil
 	})
@@ -276,7 +276,7 @@ func (c *Channel) sendPoll(ctx context.Context, jid types.JID, question string, 
 		if err != nil {
 			return err
 		}
-		id = string(resp.ID)
+		id = resp.ID
 		c.rememberPoll(jid.String(), id, names)
 		c.indexSent(sendCtx, jid, resp, msg, explicit)
 		return nil

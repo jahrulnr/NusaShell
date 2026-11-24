@@ -17,3 +17,18 @@ func TestWhatsApp(t *testing.T) {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// An image is never embedded in a chat: a web one is a link, and a local
+// path the reply did not send as a file reads as its label and the path.
+func TestImagesAndLocalLinks(t *testing.T) {
+	md := "![logo](https://x.dev/a.png) ![](https://x.dev/b.png) [render](out/a b.mp4) ![](/tmp/c.png)"
+	want := `<a href="https://x.dev/a.png">logo</a> <a href="https://x.dev/b.png">https://x.dev/b.png</a> [render](out/a b.mp4) <code>/tmp/c.png</code>`
+	if got := Render(md, TelegramHTML); got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	md = "[render](<out/a b.mp4>) and [notes](notes.md)"
+	want = "render (`out/a b.mp4`) and notes (`notes.md`)"
+	if got := Render(md, WhatsApp); got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}

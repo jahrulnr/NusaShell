@@ -95,8 +95,6 @@ func newSession(id, profile string, tabCtx context.Context, cancel context.Cance
 	return s
 }
 
-func (s *Session) tab() *chromedp.Target { return chromedp.FromContext(s.ctx).Target }
-
 func newID(prefix string) string { return prefix + "_" + strings.ToLower(rand.Text()[:10]) }
 
 // reload reloads the page and waits for it to load.

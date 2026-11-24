@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,28 +51,6 @@ func loadRecMeta(root, id string) (*RecMeta, error) {
 		return nil, fmt.Errorf("recording id mismatch: dir %q holds %q", id, meta.ID)
 	}
 	return &meta, nil
-}
-
-// claimSessionRecordings rebinds finalized recordings owned by sessionID whose
-// meta was written while the session had no conversation — a draft room can
-// record and stop before the message that materializes it.
-func claimSessionRecordings(root, sessionID, conversationID string, log *slog.Logger) {
-	if root == "" {
-		return
-	}
-	for _, meta := range listRecMetas(root) {
-		if meta.SessionID != sessionID || meta.ConversationID != "" {
-			continue
-		}
-		meta.ConversationID = conversationID
-		data, err := json.Marshal(meta)
-		if err == nil {
-			err = writeRecMeta(filepath.Join(root, meta.ID), data)
-		}
-		if err != nil {
-			log.Debug("claimed recording meta not rewritten", "recording", meta.ID, "error", err)
-		}
-	}
 }
 
 // listRecMetas scans the recordings dir; a bad meta in one dir does not stop

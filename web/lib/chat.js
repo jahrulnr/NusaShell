@@ -56,7 +56,6 @@ export function room(key) {
   return state.rooms[key];
 }
 export const freshRoom = () => room(FRESH);
-export const currentRoom = () => (state.route.view === 'chat' ? room(state.route.id) : state.route.view === 'home' ? freshRoom() : null);
 export const isBusy = (r) => !!(r.live || r.pendingOpen || r.settling);
 
 // ---------- routing ----------

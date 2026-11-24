@@ -12,6 +12,7 @@
 // markup the sentinels strip out and the label stays as written.
 import { Marked } from '/vendor/marked/marked.esm.js';
 import { KIND_LABEL } from './references.js';
+import { renderImage } from './mdlinks.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -24,8 +25,9 @@ markedUser.use({
         + `<button type="button" class="copybtn" data-copy>Copy</button></header>`
         + `<pre><code data-lang="${esc(language)}">${esc(text)}</code></pre></div>`;
     },
-    // Images are never fetched — same contract as assistant prose.
-    image({ text }) { return `<span class="md-image">[image: ${esc(text)}]</span>`; },
+    // A typed ![](path) shows a local file the same way assistant prose
+    // does; a remote address stays a link and is never fetched.
+    image: renderImage,
   },
 });
 

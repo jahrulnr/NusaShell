@@ -39,8 +39,6 @@ func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv 
 
 	var (
 		fallback []json.RawMessage
-		terminal *ResponseBody
-		stopSeen bool
 		logged   []json.RawMessage
 		text     strings.Builder
 		reason   strings.Builder
@@ -66,14 +64,12 @@ func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv 
 				emit(onEvent, event.NewErrorEvent(err))
 				return err
 			}
-			// stream closed — only commit when the terminal marker was
-			// seen; EOF without one means a truncated upstream stream.
-			if !stopSeen {
-				err := apperror.New(502, "upstream stream truncated", nil)
-				emit(onEvent, event.NewErrorEvent(err))
-				return err
-			}
-			return s.commitStream(conv, onEvent, terminal, fallback, logged)
+			// stream closed — terminal events commit from the event
+			// branch above, so EOF first means a truncated upstream
+			// stream.
+			err = apperror.New(502, "upstream stream truncated", nil)
+			emit(onEvent, event.NewErrorEvent(err))
+			return err
 		case ev := <-events:
 			timer.Reset(s.idle)
 			if len(ev.data) == 0 {
@@ -130,13 +126,10 @@ func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv 
 					noteFunctionCall(&fns, se.OutputIndex, se.Item, true)
 				}
 			case "response.completed", "response.incomplete":
-				stopSeen = true
-				terminal = se.Response
 				// The terminal event is the commit point — close now per
 				// the wire rules instead of waiting for server EOF.
-				return s.commitStream(conv, onEvent, terminal, fallback, logged)
+				return s.commitStream(conv, onEvent, se.Response, fallback, logged)
 			case "response.failed":
-				stopSeen = true
 				err := wire.WithRetryAfter(streamFailure(se.Response, ev.data), wire.RetryAfter(resp.Header.Get("Retry-After")))
 				s.logAppend(ctx, "provider.stream", logged)
 				emit(onEvent, event.NewErrorEvent(err))

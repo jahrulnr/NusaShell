@@ -381,7 +381,7 @@ func (c *Channel) handleReceipt(v *events.Receipt) {
 	}
 	ids := make([]string, 0, len(v.MessageIDs))
 	for _, id := range v.MessageIDs {
-		ids = append(ids, string(id))
+		ids = append(ids, id)
 	}
 	if c.index != nil {
 		if err := c.index.MarkReceipt(context.Background(), name, v.Chat.ToNonAD().String(), ids, receipt); err != nil {
@@ -446,9 +446,10 @@ func (c *Channel) handleMessage(evt *events.Message) {
 		mk := upd.GetPollCreationMessageKey()
 		// A poll the owner sent through a send request is ordinary chat
 		// content: its votes reach the room as text, not as an answer.
-		explicitNames, explicit := []string(nil), false
+		explicit := false
 		if mk.GetFromMe() {
-			if explicitNames, explicit = c.explicitPollOptions(ctx, info.Chat, mk.GetID()); explicit {
+			if explicitNames, ok := c.explicitPollOptions(ctx, info.Chat, mk.GetID()); ok {
+				explicit = true
 				c.rememberPoll(info.Chat.ToNonAD().String(), mk.GetID(), explicitNames)
 			}
 		}
@@ -479,7 +480,7 @@ func (c *Channel) handleMessage(evt *events.Message) {
 				names = append(names, n)
 			}
 		}
-		c.rememberPoll(info.Chat.String(), string(info.ID), names)
+		c.rememberPoll(info.Chat.String(), info.ID, names)
 	}
 	if add := m.GetPollAddOptionMessage(); add != nil {
 		text = joinText(text, c.rememberPollOption(add))
@@ -507,7 +508,7 @@ func (c *Channel) handleMessage(evt *events.Message) {
 		_ = client.MarkRead(ctx, []types.MessageID{info.ID}, time.Now(), info.Chat, info.Sender)
 	}
 	handler.HandleInbound(ctx, dservice.InboundMessage{
-		Chat: chat, MessageID: chatJID + ":" + string(info.ID),
+		Chat: chat, MessageID: chatJID + ":" + info.ID,
 		SenderID: info.Sender.ToNonAD().String(), SenderName: sender, ChatName: chatName,
 		Text: text, Quote: quoteOf(m), Group: info.IsGroup, Files: files, Vote: vote, At: info.Timestamp,
 	})
@@ -751,7 +752,7 @@ func (c *Channel) Send(ctx context.Context, chat valueobject.ChatRef, md string)
 		if err != nil {
 			return err
 		}
-		ids = []string{string(resp.ID)}
+		ids = []string{resp.ID}
 		c.indexSent(sendCtx, jid, resp, msg, false)
 		return nil
 	})

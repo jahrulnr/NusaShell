@@ -114,7 +114,7 @@ func (a *App) NoteTool(convID, tool string, args json.RawMessage) {
 	}
 	var data any = map[string]any{"name": tool}
 	if len(args) > 0 && json.Valid(args) {
-		data = map[string]any{"name": tool, "args": json.RawMessage(args)}
+		data = map[string]any{"name": tool, "args": args}
 	}
 	w.Append("agent", "tool", data)
 }

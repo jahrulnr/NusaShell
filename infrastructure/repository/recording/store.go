@@ -258,6 +258,14 @@ func (s *Store) Purge(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+	// The Done-watcher goroutine that removes an id from live is
+	// scheduled, not awaited — drop the ids here so a List right after
+	// Purge cannot see a just-stopped recorder.
+	s.mu.Lock()
+	for _, r := range live {
+		delete(s.live, r.id)
+	}
+	s.mu.Unlock()
 	if err := os.RemoveAll(s.root); err != nil {
 		return err
 	}

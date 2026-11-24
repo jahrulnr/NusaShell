@@ -101,7 +101,8 @@ func inline(s string, st Style) string {
 }
 
 var (
-	linkRe   = regexp.MustCompile(`\[([^\]]+)\]\((https?://[^\s)]+)\)`)
+	linkRe   = regexp.MustCompile(`!?\[([^\]]*)\]\(\s*(?:<([^<>\n]+)>|([^\s()<>]+))\s*\)`)
+	webRe    = regexp.MustCompile(`^https?://`)
 	boldRe   = regexp.MustCompile(`\*\*([^*\n]+?)\*\*|__([^_\n]+?)__`)
 	strikeRe = regexp.MustCompile(`~~([^~\n]+?)~~`)
 	italicRe = regexp.MustCompile(`(^|[^\w*])\*([^*\s][^*\n]*?)\*($|[^\w*])|(^|[^\w])_([^_\s][^_\n]*?)_($|[^\w])`)
@@ -113,7 +114,26 @@ func spans(s string, st Style) string {
 		return ""
 	}
 	if loc := linkRe.FindStringSubmatchIndex(s); loc != nil {
-		return spans(s[:loc[0]], st) + st.Link(spans(s[loc[2]:loc[3]], st), s[loc[4]:loc[5]]) + spans(s[loc[1]:], st)
+		// A link or an image: a web address is a link (an image is never
+		// embedded); a local path the reply did not send as a file reads
+		// as its label with the path in code, not as raw Markdown.
+		label, dest := sub(s, loc, 1), sub(s, loc, 2)
+		if dest == "" {
+			dest = sub(s, loc, 3)
+		}
+		var link string
+		switch {
+		case webRe.MatchString(dest):
+			if label == "" {
+				label = dest
+			}
+			link = st.Link(spans(label, st), dest)
+		case label == "" || label == dest:
+			link = st.Code(dest)
+		default:
+			link = spans(label, st) + st.Text(" (") + st.Code(dest) + st.Text(")")
+		}
+		return spans(s[:loc[0]], st) + link + spans(s[loc[1]:], st)
 	}
 	if loc := boldRe.FindStringSubmatchIndex(s); loc != nil {
 		inner := sub(s, loc, 1)

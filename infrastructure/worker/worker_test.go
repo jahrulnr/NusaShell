@@ -31,7 +31,6 @@ func (j *seqJob) Interrupt() {}
 type blockingJob struct {
 	started     chan struct{}
 	interrupted chan struct{}
-	err         error
 }
 
 func (j *blockingJob) Execute(ctx context.Context) error {

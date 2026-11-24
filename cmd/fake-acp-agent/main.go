@@ -610,6 +610,12 @@ func (s *server) infoDemo(id json.RawMessage) {
 // both outbound media paths.
 func (s *server) mediaDemo(id json.RawMessage, text string) {
 	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+	// The harness prepends its system prompt, which itself mentions file://
+	// as a link form; only the user's own words (from the scenario marker)
+	// can name a file to echo back.
+	if i := strings.Index(text, "send-media-test"); i > 0 {
+		text = text[i:]
+	}
 	s.chunk("Here is the media you asked for. ")
 	s.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{
 		"type": "image", "mimeType": "image/png", "data": pngB64, "name": "pixel.png",
@@ -939,7 +945,7 @@ func (s *server) notify(method string, params any) {
 
 func (s *server) respond(id json.RawMessage, result any) {
 	trace("respond " + string(id))
-	s.write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "result": result})
+	s.write(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
 }
 
 func (s *server) write(v any) {

@@ -416,7 +416,7 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 		// model deserves honest results — while context
 		// cancellation aborts the whole turn.
 		err := func() error {
-			out := ""
+			var out string
 			failed := false
 			var outAtts []valueobject.Attachment
 			permitted := false

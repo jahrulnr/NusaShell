@@ -109,10 +109,15 @@ function Code({ name, text, line }) {
     </div>`)}</code></pre>`;
 }
 
-function MarkdownDoc({ text }) {
+function MarkdownDoc({ text, conversationId }) {
   const ref = useRef();
-  useEffect(() => { renderInto(ref.current, text); return () => disposeTree(ref.current); }, [text]);
-  return html`<div ref=${ref} class="md" onClick=${handleCopyClick}></div>`;
+  useEffect(() => { renderInto(ref.current, text, { conversationId }); return () => disposeTree(ref.current); }, [text, conversationId]);
+  // A picture or video the document shows inline opens on its own.
+  const click = (e) => {
+    const b = e.target.closest?.('[data-media-url]');
+    if (b) openPreview(b.dataset.mediaUrl, b.dataset.mediaName); else handleCopyClick(e);
+  };
+  return html`<div ref=${ref} class="md" onClick=${click}></div>`;
 }
 
 export function FilePreview() {
@@ -121,6 +126,9 @@ export function FilePreview() {
   const st = usePreview(p);
   const close = () => { state.preview = null; emit(); };
   if (!p) return null;
+  // A thread's file URL names the room, so a relative path the document
+  // shows resolves in that room's workspace rather than nowhere.
+  const conversationId = /\/api\/conversations\/([^/?#]+)\/files/.exec(p.url || '')?.[1] || '';
   // A file still being attached is a local blob: it downloads as it is.
   const download = p.url.startsWith('blob:') ? p.url : p.url + (p.url.includes('?') ? '&' : '?') + 'download=1';
   const body = st.status === 'loading'
@@ -130,7 +138,7 @@ export function FilePreview() {
       : st.kind === 'image' ? html`<img src=${p.url} alt=${p.name} class="max-w-full max-h-[70dvh] mx-auto rounded-lg bg-white" />`
       : st.kind === 'video' || st.kind === 'audio' ? html`<${Player} key=${p.url} kind=${st.kind} src=${p.url} />`
       : st.kind === 'pdf' ? html`<iframe src=${st.src} title=${p.name} class="w-full h-[70dvh] rounded-lg border border-line bg-white"></iframe>`
-      : st.kind === 'markdown' ? html`<${MarkdownDoc} text=${st.text} />`
+      : st.kind === 'markdown' ? html`<${MarkdownDoc} text=${st.text} conversationId=${conversationId} />`
       : html`<${Code} name=${p.name} text=${st.text} line=${p.line} />`;
   return html`<${Dialog} open=${true} onClose=${close} backdrop=${true} title=${p.name} class="w-[min(1000px,calc(100vw-24px))]"
     footer=${html`

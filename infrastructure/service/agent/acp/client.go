@@ -2,7 +2,6 @@ package acp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -185,16 +184,6 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string) error {
 	return err
 }
 
-func (c *Client) ListSessions(ctx context.Context, cursor string) (ListSessionsResult, error) {
-	params := map[string]any{}
-	if cursor != "" {
-		params["cursor"] = cursor
-	}
-	var res ListSessionsResult
-	err := c.proc.Call(ctx, "session/list", params, &res)
-	return res, err
-}
-
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	return c.proc.Call(ctx, "session/delete", map[string]any{"sessionId": sessionID}, nil)
 }
@@ -243,10 +232,3 @@ func (c *Client) Kill() error {
 }
 
 func (c *Client) InitializeResult() InitializeResult { return c.init }
-
-func MarshalConfigOptions(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return "[]"
-	}
-	return string(raw)
-}

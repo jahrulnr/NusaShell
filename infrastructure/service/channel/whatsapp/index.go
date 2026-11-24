@@ -33,7 +33,7 @@ func (c *Channel) indexMessage(ctx context.Context, evt *events.Message, chatNam
 		return nil
 	}
 	chat := info.Chat.ToNonAD().String()
-	msg, id := evt.Message, string(info.ID)
+	msg, id := evt.Message, info.ID
 	if p := msg.GetProtocolMessage(); p != nil {
 		switch p.GetType() {
 		case waE2E.ProtocolMessage_REVOKE:

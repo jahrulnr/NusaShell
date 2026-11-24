@@ -489,7 +489,7 @@ func (c *Conversation) EstimatedTokens() int {
 			chars += len(v)
 		}
 		for _, tc := range m.ToolCalls() {
-			chars += len(tc.Input()) + len(tc.OutputWithUntrustedTag())
+			chars += len(tc.Input()) + tc.OutputWithUntrustedTagLen()
 			flat += len(tc.OutputAttachments()) * attachmentTokenEstimate
 		}
 	}

@@ -17,11 +17,3 @@ const (
 func (s TurnStatus) String() string {
 	return string(s)
 }
-
-func ParseTurnStatus(v string) (TurnStatus, bool) {
-	switch s := TurnStatus(v); s {
-	case TurnStatusRetryWait, TurnStatusCompacting:
-		return s, true
-	}
-	return "", false
-}

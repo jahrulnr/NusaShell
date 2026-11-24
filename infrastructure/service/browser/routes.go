@@ -376,24 +376,6 @@ func (s *Session) armRoutes() error {
 	return nil
 }
 
-// resetRoutes drops the interception state that belonged to the old tab. The
-// rules survive a profile migration; the new tab is armed from swapTab.
-func (s *Session) resetRoutes() {
-	s.routeMu.Lock()
-	s.routeArmed = false
-	s.routeWatching = false
-	s.routeMu.Unlock()
-}
-
-// rearmRoutes restores interception after a tab swap and reports whether the
-// rules survived with a live domain.
-func (s *Session) rearmRoutes() {
-	s.resetRoutes()
-	if err := s.armRoutes(); err != nil && true {
-		s.log.Warn("browser routes not re-armed after tab swap", "error", err)
-	}
-}
-
 // watchRoutes dispatches paused requests until the tab context ends. The event
 // iterator must keep draining, so each disposition runs on its own goroutine
 // with a bounded pool; the loop itself never calls CDP.
