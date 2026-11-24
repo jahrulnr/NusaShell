@@ -4,6 +4,11 @@
 //
 // Segment kinds: text | reasoning | tool | steer | user | approval | plan | elicitation | resync.
 
+// STEER_INPUT is the DTO field a steered input's user message carries: the
+// inputId of the turn.steer command that wrote it (the contract the backend
+// settled on). One constant, so a different final name is a one-line change.
+export const STEER_INPUT = 'inputId';
+
 export function newTurn({ turnId, requestId, conversationId, kind, startedAt }) {
   return {
     turnId, requestId, conversationId, kind,
@@ -36,6 +41,21 @@ function settleTools(t, why, definitive = false) {
   }
 }
 
+// unpersisted is a segment the store does not hold yet: streamed text or
+// reasoning, and a tool row still waiting for its result. One predicate, so
+// the tail a retry may discard is one rule rather than a list of exceptions.
+const unpersisted = (s) =>
+  s.kind === 'text' || s.kind === 'reasoning' || (s.kind === 'tool' && s.status !== 'success' && s.status !== 'failed');
+
+// dropUnpersisted trims the tail a failed attempt left behind, up to the
+// first segment the store already has. Everything before it is history the
+// retry continues from, not output it rewrites.
+function dropUnpersisted(t) {
+  let end = t.segments.length;
+  while (end > 0 && unpersisted(t.segments[end - 1])) end--;
+  if (end < t.segments.length) t.segments.length = end;
+}
+
 // applyFrame mutates `t`; replayed or doubled seq numbers are dropped.
 export function applyFrame(t, f) {
   if (typeof f.seq === 'number') {
@@ -65,9 +85,14 @@ export function applyFrame(t, f) {
       else t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'reasoning', text: p.text || '' });
       break;
     }
-    case 'turn.phase':
+    case 'turn.phase': {
       t.phase = { phase: p.phase, retryAfterMs: p.retryAfterMs, at: Date.now() };
+      // A retry re-runs a call that persisted nothing: everything the failed
+      // attempt streamed is about to be streamed again by the next one. Drop
+      // that tail now, or the two attempts splice into one answer.
+      if (p.phase === 'retry_wait') dropUnpersisted(t);
       break;
+    }
     case 'turn.tool_call':
       t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'tool', callId: p.callId, name: p.name, input: '', output: '', status: 'requested' });
       if (t.phase?.phase === 'reasoning') t.phase = null;
@@ -102,6 +127,12 @@ export function applyFrame(t, f) {
       if (s?.kind === 'steer' && !s.final && s.inputId === p.inputId) s.text += p.text || '';
       else { settleTools(t, 'Model activity resumed'); t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'steer', inputId: p.inputId, text: p.text || '', attachments: p.attachments || [] }); }
       if (p.final) last(t).final = true;
+      break;
+    }
+    case 'turn.steer_recalled': {
+      // The owner withdrew this input: its live bubble goes. A row the store
+      // already holds stays — the recall only unsends what was not used.
+      if (p.inputId) t.segments = t.segments.filter((s) => !(s.kind === 'steer' && s.inputId === p.inputId));
       break;
     }
     case 'turn.plan': {
@@ -254,13 +285,88 @@ export function liveHistory(items, live) {
   return items;
 }
 
+// liveSegments answers the live turn's segments as the transcript should draw
+// them, given what history already holds.
+//
+// Two things the record has are replayed to a tab that did not watch the turn
+// from its first frame (a reload, another tab, a resync). A steer is written to
+// history as an ordinary user message carrying the inputId of the turn.steer
+// command, so its line is in history AND its bubble comes back from the
+// journal. The record wins — it is the full copy, with the annotations and
+// uploads the frame never carried — but it is drawn where the live segment
+// sits, not where history parked it: text that streamed before the steer must
+// stay above it. The caller hides the row in its history place instead.
+//
+// And a turn that has already finished a step has that step's text and tool
+// calls in history, while the journal replays them from the beginning: drawn
+// twice, the same work appears as two separate "Used N tools" runs, split by
+// the duplicated prose, and only merges once the turn ends and the live copy
+// is dropped. So the live tail starts after the last tool call the record
+// holds — the leading run of replayed segments is the persisted prefix, and
+// only it goes. Segments after it are output the record does not have, and a
+// resync marker inside the dropped range is kept: it says what is missing
+// rather than duplicating it.
+export function liveSegments(live, items) {
+  const segments = live?.segments || [];
+  if (!segments.length) return segments;
+  const calls = new Set();
+  const rows = new Map();
+  for (const x of items || []) {
+    if (x.kind === 'tool' && x.callId) calls.add(x.callId);
+    if (x.kind === 'user' && x.steerInput) rows.set(x.steerInput, x);
+  }
+  if (!calls.size && !rows.size) return segments;
+  let cut = -1;
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    if (s.kind !== 'tool') continue;
+    // A tool call the record does not hold ends the persisted prefix: what
+    // follows is this tab's own tail, and what came before it cannot be
+    // assumed to be stored.
+    if (!s.callId || !calls.has(s.callId)) break;
+    cut = i;
+  }
+  const dropped = cut >= 0 ? segments.slice(0, cut + 1) : [];
+  const rest = cut >= 0 ? segments.slice(cut + 1) : segments;
+  const kept = [];
+  for (const s of rest) {
+    if (s.kind !== 'steer' || !s.inputId) { kept.push(s); continue; }
+    // The record's copy when it has one, the live bubble otherwise: an input
+    // the room has not written yet is only ever the live one.
+    kept.push(rows.get(s.inputId) || s);
+  }
+  return [...dropped.filter((s) => s.kind === 'resync'), ...kept];
+}
+
+// joinText folds neighbouring text items into one block. A part is a
+// persistence boundary — the server seals the text of a finished step so the
+// next step cannot attach to it — not a presentation one: drawn as separate
+// Markdown blocks, one sentence split at a step boundary becomes two
+// paragraphs, and a fenced block split there is parsed twice and comes out
+// broken. Joining keeps the first item's id, so the DOM key stays stable
+// while the text grows, and it runs before group(), so "Copy response" copies
+// the text as it was written. A tool, steer, plan, media, approval, or
+// elicitation between two texts is a real boundary and keeps them apart.
+export function joinText(items) {
+  const out = [];
+  for (const it of items || []) {
+    const prev = out[out.length - 1];
+    if (it.kind === 'text' && prev?.kind === 'text') {
+      out[out.length - 1] = { ...prev, text: prev.text + it.text };
+      continue;
+    }
+    out.push(it);
+  }
+  return out;
+}
+
 // historyItems flattens persisted messages into transcript items:
 // { kind: 'user', msg } | { kind: 'note', msg } | segment-like items.
 export function historyItems(messages, cwd = '') {
   const out = [];
   for (const m of messages) {
     if (m.role === 'user') {
-      out.push({ id: m.id, kind: m.userType === 'system' ? 'note' : 'user', msg: m });
+      out.push({ id: m.id, kind: m.userType === 'system' ? 'note' : 'user', msg: m, steerInput: m[STEER_INPUT] || '' });
       continue;
     }
     if (m.role !== 'assistant') continue;

@@ -218,7 +218,7 @@ func (m *Manager) MapSync(ctx context.Context, key, label string, open func(cont
 	defer deadline.Stop()
 	for {
 		out := m.Map(ctx, key, label, open)
-		if !strings.Contains(out, "is being built") {
+		if !IsBuilding(out) {
 			return out
 		}
 		m.mu.Lock()
@@ -342,6 +342,15 @@ func skipText(label, reason string) string {
 
 func buildingText(label string) string {
 	return "symbol map for " + label + " is being built — it will appear on a later turn."
+}
+
+// IsBuilding reports whether a render is provisional — the first-build
+// marker, or the wait MapSync appends to it when the build outlives the
+// call. Both say the map does not exist yet, so neither may become a
+// room's orientation record: the producer declares the render provisional
+// and the application retries on the next step.
+func IsBuilding(text string) bool {
+	return strings.Contains(text, "is being built") || strings.Contains(text, "still building")
 }
 
 // mapText renders the record: the fixed header first (so its shape

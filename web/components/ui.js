@@ -80,7 +80,7 @@ export function Popover({ open, onClose, children, class: cls = '', placement = 
     align === 'end' ? 'sm:right-0' : 'sm:left-0',
   );
   return html`
-    <div class="fixed inset-0 z-40 bg-black/40 sm:hidden" aria-hidden="true"></div>
+    <div class="fixed inset-0 z-40 bg-black/40 sm:hidden" aria-hidden="true" onClick=${onClose}></div>
     <div ref=${ref} role="dialog" aria-label=${label} style=${fit ? { maxHeight: fit.room + 'px' } : undefined}
       class=${cx('z-50 bg-raised border border-line rounded-xl shadow-pop text-[13px] overflow-auto',
         'fixed inset-x-2 bottom-2 max-h-[75dvh] sm:absolute sm:inset-x-auto sm:bottom-auto', pos, cls)}>

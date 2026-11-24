@@ -125,6 +125,30 @@ func TestRunTurnRetryExhaustion(t *testing.T) {
 	if want := int32(1 + len(sendRetryBackoff)); svc.calls != want {
 		t.Fatalf("calls = %d, want %d", svc.calls, want)
 	}
+	// Exhaustion persists nothing: no attempt appended a message, so history
+	// gains no assistant line — a retry cycle can never leave duplicates.
+	if got := assistantLines(conv.Messages()); len(got) != 0 {
+		t.Fatalf("in-memory assistants = %d, want none", len(got))
+	}
+	loaded, lerr := d.Convs.Load(t.Context(), "room")
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if got := assistantLines(loaded.Messages()); len(got) != 0 {
+		t.Fatalf("stored assistants = %d, want none", len(got))
+	}
+}
+
+// assistantLines lists the assistant messages in a history — what a retry
+// cycle must leave at most one of.
+func assistantLines(msgs []entity.Message) []entity.Message {
+	var out []entity.Message
+	for _, m := range msgs {
+		if m.Role() == enum.RoleAssistant {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // emitThenFailSvc streams a delta, then fails mid-read — output already
@@ -140,37 +164,120 @@ func (s *emitThenFailSvc) Send(_ context.Context, _ *aggregate.Conversation, _ *
 	return apperror.New(s.status, "upstream stream broken", errors.New("mid-read failure"))
 }
 
-// Emitted-but-uncommitted output makes the failure definitive: no
-// retry, no second copy of the delta on the stream.
-func TestRunTurnNoRetryAfterEmittedDelta(t *testing.T) {
+// streamThenRecoverSvc streams deltas and fails transiently on its first
+// call, then streams its own deltas and commits an answer.
+type streamThenRecoverSvc struct {
+	calls int32
+}
+
+func (s *streamThenRecoverSvc) Send(_ context.Context, conv *aggregate.Conversation, _ *aggregate.Provider, _ entity.Model, emit event.TurnEventHandler) error {
+	if atomic.AddInt32(&s.calls, 1) == 1 {
+		emit(event.NewDeltaEvent("failed segment"))
+		return apperror.New(502, "upstream stream broken", errors.New("mid-read failure"))
+	}
+	emit(event.NewDeltaEvent("answer"))
+	m, _ := entity.NewMessage(enum.RoleAssistant, "the answer")
+	m.SetFinishReason(enum.FinishReasonStop)
+	conv.Append(m)
+	return nil
+}
+
+// Deltas the client already watched do not block a retry: the failed
+// attempt persisted nothing, and the client drops its segment when it sees
+// retry_wait. History carries only the attempt that succeeded.
+func TestRunTurnRetriesAfterStreamedDeltas(t *testing.T) {
 	d := Deps{
 		SummaryTool: mustSummaryTool(t),
 		Convs:       repoconversation.NewConversationRepository(t.TempDir()),
 		Config:      config.ConversationConfig{MaxTurnStep: 4},
 	}
 	conv := seedRoom(t, d.Convs, "room", "hi")
-	svc := &emitThenFailSvc{status: 502}
-	var deltas int
+	svc := &streamThenRecoverSvc{}
+	var waits, deltas int
 	onEvent := func(e event.TurnEvent) {
-		if e.Kind() == enum.TurnEventDelta {
+		switch e.Kind() {
+		case enum.TurnEventStatus:
+			if e.Status() == enum.TurnStatusRetryWait {
+				waits++
+			}
+		case enum.TurnEventDelta:
 			deltas++
 		}
 	}
-	err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, onEvent, nil, valueobject.TurnOrigin{})
-	if err == nil {
-		t.Fatal("a mid-stream failure must fail the turn")
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, onEvent, nil, valueobject.TurnOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	if svc.calls != 2 {
+		t.Fatalf("calls = %d, want 2 — a transient failure after deltas still retries", svc.calls)
+	}
+	if waits != 1 {
+		t.Fatalf("retry_wait announcements = %d, want 1", waits)
+	}
+	if deltas != 2 {
+		t.Fatalf("deltas emitted = %d, want the failed attempt's and the retry's", deltas)
+	}
+
+	loaded, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistants := assistantLines(loaded.Messages())
+	if len(assistants) != 1 {
+		t.Fatalf("assistant messages = %d, want 1 — the failed attempt left nothing", len(assistants))
+	}
+	if m := assistants[0]; m.Content() != "the answer" || m.FinishReason() != enum.FinishReasonStop {
+		t.Fatalf("assistant message = %q/%q, want only the successful attempt", m.Content(), m.FinishReason())
+	}
+	if last := conv.Last(); last == nil || last.Content() != "the answer" {
+		t.Fatalf("in-memory tail = %+v, want the successful reply", conv.Last())
+	}
+}
+
+// commitThenFailSvc commits an assistant message, then fails transiently —
+// the call left a message behind, so replaying it would double the reply.
+type commitThenFailSvc struct {
+	calls  int32
+	status int
+}
+
+func (s *commitThenFailSvc) Send(_ context.Context, conv *aggregate.Conversation, _ *aggregate.Provider, _ entity.Model, _ event.TurnEventHandler) error {
+	atomic.AddInt32(&s.calls, 1)
+	m, _ := entity.NewMessage(enum.RoleAssistant, "committed")
+	conv.Append(m)
+	return apperror.New(s.status, "upstream failed after commit", errors.New("late failure"))
+}
+
+// A call that already appended a message is not retried, however transient
+// the failure: that message is the turn's outcome, and the error surfaces
+// instead of a second attempt.
+func TestRunTurnNoRetryAfterAppendedMessage(t *testing.T) {
+	d := Deps{
+		SummaryTool: mustSummaryTool(t),
+		Convs:       repoconversation.NewConversationRepository(t.TempDir()),
+		Config:      config.ConversationConfig{MaxTurnStep: 4},
+	}
+	conv := seedRoom(t, d.Convs, "room", "hi")
+	svc := &commitThenFailSvc{status: 502}
+	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err == nil {
+		t.Fatal("a failure after an appended message must fail the turn")
 	}
 	if svc.calls != 1 {
-		t.Fatalf("calls = %d, want 1 — emitted output blocks retry", svc.calls)
+		t.Fatalf("calls = %d, want 1 — an appended message blocks retry", svc.calls)
 	}
-	if deltas != 1 {
-		t.Fatalf("deltas emitted = %d, want exactly 1", deltas)
+	loaded, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := assistantLines(loaded.Messages()); len(got) != 0 {
+		t.Fatalf("stored assistants = %d, want none — the failed call persisted nothing", len(got))
 	}
 }
 
 // The text a failed stream already showed the owner survives the failure
-// as an interrupted reply, in memory and on disk. Without it a Retry
-// regenerates the answer and the partial the reader watched vanishes.
+// as an interrupted reply, in memory and on disk — after the transient
+// retries are spent, since only a persisted message ends them. Without it
+// a Retry regenerates the answer and the partial the reader watched
+// vanishes.
 func TestRunTurnKeepsStreamedTextOnFailure(t *testing.T) {
 	d := Deps{
 		SummaryTool: mustSummaryTool(t),
@@ -181,6 +288,9 @@ func TestRunTurnKeepsStreamedTextOnFailure(t *testing.T) {
 	svc := &emitThenFailSvc{status: 502}
 	if err := d.runTurn(t.Context(), "room", conv, EnvironmentBundle{}, nil, entity.Model{}, svc, nil, nil, valueobject.TurnOrigin{}); err == nil {
 		t.Fatal("a mid-stream failure must fail the turn")
+	}
+	if want := int32(1 + len(sendRetryBackoff)); svc.calls != want {
+		t.Fatalf("calls = %d, want %d — the transient failure retries before the partial is kept", svc.calls, want)
 	}
 	check := func(label string, c *aggregate.Conversation) {
 		t.Helper()

@@ -1,7 +1,9 @@
 package repoconversation
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +14,12 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
+
+// errInjectedRename marks the failure failRename installs, so a test can tell
+// the injected cause from the store's own wrapping.
+var errInjectedRename = errors.New("injected rename failure")
 
 // roomWithHistory stores a room with a custom identity, three messages of
 // which two are sealed, a usage total, and one tool-output file.
@@ -146,17 +153,27 @@ func stagingEntries(t *testing.T, repo *ConversationRepository, id string) []str
 	return out
 }
 
-// failRename refuses the renames match selects, for the span of one test.
-func failRename(t *testing.T, match func(from, to string) bool) {
+// failRename refuses the renames match selects until restore is called (or the
+// test ends).
+func failRename(t *testing.T, match func(from, to string) bool) (restore func()) {
 	t.Helper()
 	orig := renamePath
 	renamePath = func(from, to string) error {
 		if match(from, to) {
-			return errors.New("injected rename failure")
+			return errInjectedRename
 		}
 		return orig(from, to)
 	}
-	t.Cleanup(func() { renamePath = orig })
+	done := false
+	restore = func() {
+		if done {
+			return
+		}
+		done = true
+		renamePath = orig
+	}
+	t.Cleanup(restore)
+	return restore
 }
 
 // assertRoomUnchanged checks that a room still carries the history and
@@ -221,9 +238,10 @@ func TestClearPublishFailurePutsRoomBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := repo.convDir(room.ID())
-	failRename(t, func(from, to string) bool {
+	restore := failRename(t, func(from, to string) bool {
 		return strings.Contains(from, stagedMark) && to == dir
 	})
+	defer restore()
 
 	room.ClearHistory()
 	if err := repo.Clear(t.Context(), room); err == nil {
@@ -476,6 +494,281 @@ func TestSaveRestoresParkedRoomBeforeWriting(t *testing.T) {
 	}
 	if leftovers := stagingEntries(t, repo, room.ID()); len(leftovers) != 0 {
 		t.Fatalf("staging leftovers after recovery: %v", leftovers)
+	}
+}
+
+// A name held by something that is not a room does not mean the room was
+// replaced: recovery keeps the parked copy and refuses, so the last history is
+// never discarded. Once the stranger is gone the room comes back intact.
+func TestRecoverRefusesWhenNameIsNotARoom(t *testing.T) {
+	repo := newRepo(t).(*ConversationRepository)
+	room := roomWithHistory(t, repo, "c_stray")
+	before, err := repo.Info(t.Context(), room.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkRoom(t, repo, room)
+
+	// Something else took the name: a directory with no record in it.
+	if err := os.MkdirAll(repo.convDir(room.ID()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.convDir(room.ID()), "stray.txt"), []byte("not a room"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = repo.Info(t.Context(), room.ID())
+	if err == nil {
+		t.Fatal("a name holding a non-room must not read as the replaced room")
+	}
+	if ae := apperror.As(err); ae.StatusCode() != 500 || !strings.Contains(ae.Error(), "needs attention") {
+		t.Fatalf("recovery refusal = %d %q (%v)", ae.StatusCode(), ae.Error(), err)
+	}
+	// Nothing was deleted: the parked history is still there, and so is the
+	// stranger.
+	leftovers := stagingEntries(t, repo, room.ID())
+	if len(leftovers) != 1 || !strings.Contains(leftovers[0], parkedMark) {
+		t.Fatalf("parked copy after a refusal = %v", leftovers)
+	}
+	if _, err := os.Stat(filepath.Join(repo.path, stagingRoot, leftovers[0], metaFile)); err != nil {
+		t.Fatalf("parked record missing after a refusal: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo.convDir(room.ID()), "stray.txt")); err != nil {
+		t.Fatalf("the stranger was touched: %v", err)
+	}
+	// A listing refuses too, rather than quietly dropping the room.
+	if _, err := repo.List(t.Context()); err == nil {
+		t.Fatal("list must report the occupied name instead of dropping the room")
+	}
+
+	// The obstruction gone, the room comes back exactly as it was.
+	if err := os.RemoveAll(repo.convDir(room.ID())); err != nil {
+		t.Fatal(err)
+	}
+	after, err := repo.Info(t.Context(), room.ID())
+	if err != nil {
+		t.Fatalf("room not restored after the obstruction was cleared: %v", err)
+	}
+	if after.MessageCount != before.MessageCount || after.SealedSegments != before.SealedSegments {
+		t.Fatalf("restored room = %+v, before %+v", after, before)
+	}
+	if msgs, err := repo.LoadAt(t.Context(), room.ID(), 0, 0); err != nil || len(msgs) != before.MessageCount {
+		t.Fatalf("restored history = %d messages, %v (want %d)", len(msgs), err, before.MessageCount)
+	}
+	if leftovers := stagingEntries(t, repo, room.ID()); len(leftovers) != 0 {
+		t.Fatalf("staging leftovers after restore: %v", leftovers)
+	}
+}
+
+// refusedRoomMessage builds a parked room whose name `occupy` takes, and
+// answers the refusal Info reports — the one message every occupied-name shape
+// has to speak.
+func refusedRoomMessage(t *testing.T, id string, occupy func(t *testing.T, dir string)) string {
+	t.Helper()
+	repo := newRepo(t).(*ConversationRepository)
+	room := roomWithHistory(t, repo, id)
+	if _, err := repo.Info(t.Context(), room.ID()); err != nil {
+		t.Fatal(err)
+	}
+	parkRoom(t, repo, room)
+	occupy(t, repo.convDir(id))
+	_, err := repo.Info(t.Context(), room.ID())
+	if err == nil {
+		t.Fatal("an occupied name must not read as the replaced room")
+	}
+	return apperror.As(err).Error()
+}
+
+// A name held by a plain file fails a record read with ENOTDIR rather than
+// "not exist", and that shape gets the same refusal a directory-shaped
+// occupant gets: one message, the parked history kept, the occupant untouched,
+// and the room back once the obstruction is gone.
+func TestRecoverRefusesWhenNameIsARegularFile(t *testing.T) {
+	repo := newRepo(t).(*ConversationRepository)
+	room := roomWithHistory(t, repo, "c_file_occupant")
+	before, err := repo.Info(t.Context(), room.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkRoom(t, repo, room)
+	barrier := []byte("not a room")
+	if err := os.WriteFile(repo.convDir(room.ID()), barrier, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = repo.Info(t.Context(), room.ID())
+	if err == nil {
+		t.Fatal("a name holding a regular file must not read as the replaced room")
+	}
+	ae := apperror.As(err)
+	if ae.StatusCode() != 500 || !strings.Contains(ae.Error(), "needs attention") {
+		t.Fatalf("file-shaped occupant refusal = %d %q (%v)", ae.StatusCode(), ae.Error(), err)
+	}
+	if ae.Error() == "internal error" {
+		t.Fatal("a bare internal error is what this refusal replaced")
+	}
+	// One refusal, one message: the directory shape (in a store of its own,
+	// under the same room id) says exactly the same words.
+	dirMsg := refusedRoomMessage(t, room.ID(), func(t *testing.T, dir string) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "stray.txt"), []byte("not a room"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if dirMsg != ae.Error() {
+		t.Fatalf("occupied-name messages differ:\n file: %q\n dir:  %q", ae.Error(), dirMsg)
+	}
+	// A listing refuses in the same words instead of dropping the room.
+	if _, lerr := repo.List(t.Context()); lerr == nil || apperror.As(lerr).Error() != ae.Error() {
+		t.Fatalf("list refusal = %v, want the same message", lerr)
+	}
+	// Nothing was deleted: the parked history is intact, and so is the file.
+	leftovers := stagingEntries(t, repo, room.ID())
+	if len(leftovers) != 1 || !strings.Contains(leftovers[0], parkedMark) {
+		t.Fatalf("parked copy after a refusal = %v", leftovers)
+	}
+	if _, err := os.Stat(filepath.Join(repo.path, stagingRoot, leftovers[0], metaFile)); err != nil {
+		t.Fatalf("parked record missing after a refusal: %v", err)
+	}
+	if got, err := os.ReadFile(repo.convDir(room.ID())); err != nil || !bytes.Equal(got, barrier) {
+		t.Fatalf("the occupying file was touched: %q, %v", got, err)
+	}
+
+	// The obstruction gone, the room comes back exactly as it was.
+	if err := os.Remove(repo.convDir(room.ID())); err != nil {
+		t.Fatal(err)
+	}
+	after, err := repo.Info(t.Context(), room.ID())
+	if err != nil {
+		t.Fatalf("room not restored after the file was removed: %v", err)
+	}
+	if after.MessageCount != before.MessageCount || after.SealedSegments != before.SealedSegments {
+		t.Fatalf("restored room = %+v, before %+v", after, before)
+	}
+	if msgs, err := repo.LoadAt(t.Context(), room.ID(), 0, 0); err != nil || len(msgs) != before.MessageCount {
+		t.Fatalf("restored history = %d messages, %v (want %d)", len(msgs), err, before.MessageCount)
+	}
+	if leftovers := stagingEntries(t, repo, room.ID()); len(leftovers) != 0 {
+		t.Fatalf("staging leftovers after restore: %v", leftovers)
+	}
+}
+
+// A clear whose publish and whose rollback both fail reports both failures
+// instead of swallowing the second one — and the parked copy keeps the room
+// recoverable.
+func TestClearReportsFailedRollback(t *testing.T) {
+	repo := newRepo(t).(*ConversationRepository)
+	room := roomWithHistory(t, repo, "c_rollback")
+	before, err := repo.Info(t.Context(), room.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := repo.convDir(room.ID())
+	restore := failRename(t, func(from, to string) bool {
+		return (strings.Contains(from, stagedMark) && to == dir) ||
+			(strings.Contains(from, parkedMark) && to == dir)
+	})
+
+	room.ClearHistory()
+	err = repo.Clear(t.Context(), room)
+	restore()
+	if err == nil {
+		t.Fatal("a clear that cannot publish or put the room back must fail")
+	}
+	if !errors.Is(err, errInjectedRename) || !strings.Contains(err.Error(), "parked") {
+		t.Fatalf("rollback failure not reported: %v", err)
+	}
+	if _, statErr := os.Lstat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("room directory after a failed rollback: %v", statErr)
+	}
+	if leftovers := stagingEntries(t, repo, room.ID()); len(leftovers) != 1 || !strings.Contains(leftovers[0], parkedMark) {
+		t.Fatalf("parked copy after a failed rollback = %v", leftovers)
+	}
+
+	// The next read puts the room back: the failure cost the command, not the
+	// history.
+	after, err := repo.Info(t.Context(), room.ID())
+	if err != nil {
+		t.Fatalf("room not restored after a failed rollback: %v", err)
+	}
+	if after.MessageCount != before.MessageCount {
+		t.Fatalf("restored room = %+v, before %+v", after, before)
+	}
+	if msgs, err := repo.LoadAt(t.Context(), room.ID(), 0, 0); err != nil || len(msgs) != before.MessageCount {
+		t.Fatalf("restored history = %d messages, %v", len(msgs), err)
+	}
+}
+
+// The old copy a successful clear replaces is dropped best-effort: a failed
+// drop is logged with the room it belongs to, the cleared room still answers,
+// and the next read collects the leftover.
+func TestClearLeftoverOldCopyIsReportedAndCollected(t *testing.T) {
+	repo := newRepo(t).(*ConversationRepository)
+	room := roomWithHistory(t, repo, "c_clear_leftover")
+
+	var logged bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	orig := removeAllPath
+	dropped := 0
+	removeAllPath = func(path string) error {
+		if strings.Contains(path, parkedMark) {
+			dropped++
+			return errors.New("injected remove failure")
+		}
+		return orig(path)
+	}
+	t.Cleanup(func() { removeAllPath = orig })
+
+	room.ClearHistory()
+	if err := repo.Clear(t.Context(), room); err != nil {
+		t.Fatalf("a leftover old copy must not fail the clear: %v", err)
+	}
+	if dropped == 0 {
+		t.Fatal("the injected drop failure never ran")
+	}
+	if got := logged.String(); !strings.Contains(got, "old copy") || !strings.Contains(got, room.ID()) {
+		t.Fatalf("leftover not reported in the log: %q", got)
+	}
+	leftovers := stagingEntries(t, repo, room.ID())
+	if len(leftovers) != 1 || !strings.Contains(leftovers[0], parkedMark) {
+		t.Fatalf("leftover old copy = %v", leftovers)
+	}
+
+	// The cleared room answers, and the next listing collects the leftover.
+	after, err := repo.Info(t.Context(), room.ID())
+	if err != nil {
+		t.Fatalf("cleared room unreadable with a leftover: %v", err)
+	}
+	if after.MessageCount != 0 || after.SealedSegments != 0 {
+		t.Fatalf("cleared room = %+v", after)
+	}
+	list, err := repo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list with a leftover old copy: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != room.ID() || list[0].MessageCount != 0 {
+		t.Fatalf("list with a leftover old copy = %+v", list)
+	}
+	if leftovers := stagingEntries(t, repo, room.ID()); len(leftovers) != 0 {
+		t.Fatalf("leftover survived the next listing: %v", leftovers)
+	}
+}
+
+// parkRoom reproduces the state a crash between a clear's two renames leaves:
+// the live room moved into the staging area under its parked name.
+func parkRoom(t *testing.T, repo *ConversationRepository, room *aggregate.Conversation) {
+	t.Helper()
+	parked, err := repo.parkedName(room.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(repo.convDir(room.ID()), parked); err != nil {
+		t.Fatal(err)
 	}
 }
 

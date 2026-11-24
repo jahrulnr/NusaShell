@@ -2,6 +2,8 @@ package repoconversation
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -71,13 +73,21 @@ func (r *ConversationRepository) Clear(ctx context.Context, conv *aggregate.Conv
 		return err
 	}
 	if err := renamePath(stage, dir); err != nil {
-		// The clear changed nothing: the room is exactly as it was, under its
-		// own name again.
-		_ = renamePath(parked, dir)
+		// The clear changed nothing, but only if the room really is back: a
+		// rollback that fails must not be swallowed — the parked copy is then
+		// the room's only history, and the caller has to hear both failures.
+		if rerr := renamePath(parked, dir); rerr != nil {
+			return fmt.Errorf("clear %s: publish the cleared room: %w; putting the room back failed too, its contents stay parked and are restored on the next read: %w", conv.ID(), err, rerr)
+		}
 		return err
 	}
-	// The cleared room owns the name now. The old contents are debris; a
-	// failure to drop them costs space, never readability.
-	_ = os.RemoveAll(parked)
+	// The cleared room owns the name now. The old contents are debris and go;
+	// a failure to remove them costs space, never readability, but it is not
+	// silent — recovery drops the leftover on the next read, and the log says
+	// which copy stayed behind.
+	if err := removeAllPath(parked); err != nil {
+		slog.Warn("could not remove the cleared conversation's old copy",
+			"conversation", conv.ID(), "err", err)
+	}
 	return nil
 }

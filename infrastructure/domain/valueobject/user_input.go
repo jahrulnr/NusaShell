@@ -13,6 +13,11 @@ type UserInput struct {
 	Attachments []Attachment
 	Annotations []Annotation
 	Recording   *RecordingRef
+	// InputID is the submitting request's id when the transport issued one —
+	// a steer's requestId. An ordinary send submits as itself, so it carries
+	// none. The id rides into the user message a steer writes, where a
+	// reloaded history can match it against the live steering bubble.
+	InputID string
 }
 
 // Empty reports whether the input carries nothing — no text, uploads,

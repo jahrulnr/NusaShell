@@ -169,6 +169,13 @@ following never leave the server on any endpoint or frame:
   `parts`: answer text, raw or summarized reasoning text, and tool-call
   positions. Live reasoning crosses in order as `turn.reasoning` chunks.
   Provider replay artifacts in `optionalContent` remain internal.
+- **A steer's submitting request id.** A user message a `turn.steer` wrote
+  carries `inputId` — the requestId that submitted it — at the message's top
+  level. It is the join key between a reloaded history line and the live
+  steering bubble the turn journal replays, so one submission renders once;
+  a message from `turn.send` or `turn.edit` carries none. The id is owner-side
+  bookkeeping only: provider replay and agent prompts see the message content
+  alone.
 - **Attachment references, not bytes.** Message and tool-output
   attachments project `mediaType`, `modality`, `uri`, and optional
   `name` — the stored reference (including `file://` local paths)
@@ -505,6 +512,13 @@ shape in brief:
   bounded server journal; gaps, unknown turns, and expired journals
   answer `turn.resync_required`, after which the client re-reads via
   HTTP. Missing deltas are never fabricated.
+- A transient provider failure (`429`, `5xx`, transport) is retried after
+  a `turn.phase` with `phase: "retry_wait"` and `retryAfterMs`. The failed
+  attempt persisted nothing, so history keeps only the attempt that
+  succeeds and a client drops that attempt's streamed tail when the status
+  arrives; a `turn.watch` snapshot taken during or after the pause carries
+  only the surviving attempt's output. Withdrawn output is not counted as
+  partial recovery (`dropped`).
 - Disconnecting the socket never aborts a turn — sends run under a
   server-scoped context, and `userMessagePersisted` tells the truth
   about whether the user line committed.

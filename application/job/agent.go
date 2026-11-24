@@ -190,6 +190,12 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 			nextIn.Annotations = append(nextIn.Annotations, e.input.Annotations...)
 		}
 		nextIn.Text = text.String()
+		// A follow-up that carries exactly one steer names it, so a reloaded
+		// history line matches the journal's live bubble. A join of several
+		// inputs has no single submitting request, so it carries none.
+		if len(claimed) == 1 {
+			nextIn.InputID = claimed[0].input.InputID
+		}
 		next, err := entity.NewUserMessage(nextIn)
 		if err != nil {
 			return err

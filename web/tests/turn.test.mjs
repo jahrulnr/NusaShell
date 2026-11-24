@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, group, toolSummary, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
 
 const turn = () => newTurn({ turnId: 't1', requestId: 'r1', conversationId: 'c1', kind: 'send' });
 const frame = (type, payload, seq) => ({ type, payload, seq });
@@ -12,6 +12,45 @@ test('deltas extend one text segment; a tool call starts a new one after it', ()
   applyFrame(t, frame('turn.tool_call', { callId: 'a', name: 'exec' }, 2));
   applyFrame(t, frame('turn.delta', { text: 'done' }, 3));
   assert.deepEqual(t.segments.map((s) => [s.kind, s.text ?? s.name]), [['text', 'Hello'], ['tool', 'exec'], ['text', 'done']]);
+});
+
+test('a retry drops the tail the failed attempt streamed', () => {
+  const t = turn();
+  applyFrame(t, frame('turn.reasoning', { text: 'memikirkan' }, 0));
+  applyFrame(t, frame('turn.delta', { text: 'setengah jawaban' }, 1));
+  applyFrame(t, frame('turn.tool_call', { callId: 'a', name: 'exec' }, 2));
+  applyFrame(t, frame('turn.tool_input', { callId: 'a', text: '{"command":"ls"}' }, 3));
+  applyFrame(t, frame('turn.phase', { phase: 'retry_wait', retryAfterMs: 2000 }, 4));
+  assert.deepEqual(t.segments, [], 'nothing the failed attempt streamed survives');
+  assert.equal(t.phase.phase, 'retry_wait', 'the pause is what the status line reads');
+  // the next attempt fills the transcript from empty, so the two never splice
+  applyFrame(t, frame('turn.delta', { text: 'jawaban yang utuh' }, 5));
+  assert.deepEqual(t.segments.map((s) => [s.kind, s.text]), [['text', 'jawaban yang utuh']]);
+});
+
+test('a retry keeps what the store already holds', () => {
+  const t = turn();
+  // an answer the previous step committed, with its tool row settled
+  applyFrame(t, frame('turn.delta', { text: 'langkah pertama' }, 0));
+  applyFrame(t, frame('turn.tool_call', { callId: 'a', name: 'exec' }, 1));
+  applyFrame(t, frame('turn.tool_result', { callId: 'a', output: 'ok' }, 2));
+  applyFrame(t, frame('turn.delta', { text: 'jawaban yang gagal' }, 3));
+  applyFrame(t, frame('turn.tool_call', { callId: 'b', name: 'read_file' }, 4));
+  applyFrame(t, frame('turn.phase', { phase: 'retry_wait', retryAfterMs: 500 }, 5));
+  // the tail goes; the settled row and the text before it stay …
+  assert.deepEqual(t.segments.map((s) => [s.kind, s.text ?? s.name]), [['text', 'langkah pertama'], ['tool', 'exec']]);
+  assert.equal(t.segments[1].status, 'success', 'a result that landed is persistence, not attempt output');
+  // … and a second wait has nothing left to drop
+  applyFrame(t, frame('turn.phase', { phase: 'retry_wait', retryAfterMs: 500 }, 6));
+  assert.deepEqual(t.segments.map((s) => s.kind), ['text', 'tool']);
+});
+
+test('a retry leaves a settled tool at the end alone', () => {
+  const t = turn();
+  applyFrame(t, frame('turn.tool_call', { callId: 'a', name: 'exec' }, 0));
+  applyFrame(t, frame('turn.tool_result', { callId: 'a', output: 'ok' }, 1));
+  applyFrame(t, frame('turn.phase', { phase: 'retry_wait', retryAfterMs: 100 }, 2));
+  assert.deepEqual(t.segments.map((s) => [s.kind, s.status]), [['tool', 'success']]);
 });
 
 test('a replayed or doubled seq is dropped', () => {
@@ -314,4 +353,147 @@ test('liveHistory trims history only where the live turn replaces it', () => {
   assert.deepEqual(liveHistory(answered, { kind: 'edit', editOf: 'gone' }), answered);
   // No live turn leaves history alone.
   assert.deepEqual(liveHistory(answered, null), answered);
+});
+
+test('a steer already in history is not painted twice', () => {
+  // The server writes a steered input as an ordinary user message that
+  // carries the inputId of the turn.steer command (STEER_INPUT), and the
+  // journal replays the same steer. A tab that reloads mid-turn holds both.
+  const messages = [
+    { id: 'm1', role: 'user', content: 'start' },
+    { id: 'm2', role: 'user', content: 'tambahan', inputId: 'req-1', annotations: [{ marker: 1, comment: 'catatan' }] },
+  ];
+  const items = historyItems(messages);
+  assert.deepEqual(items.map((x) => x.kind), ['user', 'user']);
+  assert.equal(items[1].steerInput, 'req-1');
+  assert.equal(items[0].steerInput, '');
+  const live = {
+    segments: [
+      { id: 't:1', kind: 'text', text: 'jalan' },
+      { id: 't:2', kind: 'steer', inputId: 'req-1', text: 'tambahan' },
+      { id: 't:3', kind: 'steer', inputId: 'req-2', text: 'belum ditulis' },
+      { id: 't:4', kind: 'steer', text: 'dari CLI, tanpa inputId' },
+      { id: 't:5', kind: 'tool', name: 'exec' },
+    ],
+  };
+  // the row for req-1 is in history, so its live bubble is replaced by the
+  // record row in the live segment's place; the others stay
+  assert.deepEqual(liveSegments(live, items).map((s) => s.id), ['t:1', 'm2', 't:3', 't:4', 't:5']);
+  assert.equal(liveSegments(live, items)[1].msg.annotations.length, 1, 'drawn from the record, annotations and all');
+  // a page that has not been written yet leaves the live bubble in place
+  assert.deepEqual(liveSegments(live, historyItems([messages[0]])).map((s) => s.id), ['t:1', 't:2', 't:3', 't:4', 't:5']);
+  // nothing live, nothing to filter
+  assert.deepEqual(liveSegments(null, items), []);
+});
+
+// The record row of a steer belongs where the steer landed, not where history
+// parked it: the text that streamed before it must stay above it.
+test('a steer the record holds is drawn where its live segment sits', () => {
+  const messages = [
+    { id: 'm1', role: 'user', content: 'mulai' },
+    { id: 'm2', role: 'user', content: 'tambahan', inputId: 'req-x', annotations: [{ marker: 1, comment: 'catatan' }] },
+  ];
+  const items = historyItems(messages);
+  const live = {
+    segments: [
+      { id: 't:1', kind: 'text', text: 'sebelum' },
+      { id: 't:2', kind: 'steer', inputId: 'req-x', text: 'tambahan', final: true },
+      { id: 't:3', kind: 'text', text: 'sesudah' },
+    ],
+  };
+  const tail = liveSegments(live, items);
+  assert.deepEqual(tail.map((x) => x.kind), ['text', 'user', 'text'], 'the record sits between the texts');
+  assert.deepEqual(tail.map((x) => x.id), ['t:1', 'm2', 't:3']);
+  assert.equal(tail[1].msg.annotations.length, 1, 'drawn from the record, annotations intact');
+  // no live turn: there is no tail at all, so the row is drawn from history
+  assert.deepEqual(liveSegments(null, items), []);
+  assert.deepEqual(items.map((x) => x.id), ['m1', 'm2'], 'history keeps the row at its own place');
+  // a steer the record does not hold keeps its live bubble
+  const open = { segments: [{ id: 't:9', kind: 'steer', inputId: 'req-unknown', text: 'baru', final: true }] };
+  assert.deepEqual(liveSegments(open, items).map((x) => x.id), ['t:9']);
+});
+
+// A part boundary is where the store seals a step, not where the answer
+// breaks: two parts split mid-sentence or mid-fence must draw as one block.
+test('neighbouring text parts are one block, and a fenced block stays whole', () => {
+  const t = turn();
+  snapshotSegments(t, [
+    { kind: 'text', text: 'lihat ini:\n\n```js\nconst a = 1;\n' },
+    { kind: 'text', text: 'const b = 2;\n```\n\nselesai' },
+    { kind: 'reasoning', text: 'mempertimbangkan' },
+    { kind: 'text', text: 'penutup' },
+  ]);
+  const joined = joinText(t.segments);
+  assert.deepEqual(joined.map((x) => x.kind), ['text', 'reasoning', 'text']);
+  assert.equal(joined[0].text, 'lihat ini:\n\n```js\nconst a = 1;\nconst b = 2;\n```\n\nselesai');
+  assert.equal(joined[0].id, t.segments[0].id, 'the first id keeps the DOM key while the text grows');
+  // copied text is what was written: no separator inserted at the part boundary
+  const copied = [...turnEnds(group(joined)).values()][0];
+  assert.ok(copied.startsWith('lihat ini:\n\n```js\nconst a = 1;\nconst b = 2;\n```'), copied);
+  // a tool between two texts is a real boundary and keeps them apart
+  const split = joinText([
+    { id: 'a', kind: 'text', text: 'satu' },
+    { id: 'b', kind: 'tool', callId: 'c1', name: 'exec', status: 'success' },
+    { id: 'c', kind: 'text', text: 'dua' },
+  ]);
+  assert.deepEqual(split.map((x) => x.id), ['a', 'b', 'c']);
+});
+
+// A tab that reloads mid-turn replays the journal from its first frame while
+// history already holds the steps that finished before the reload. Drawn
+// together, one turn reads as two: the same prose twice, between two separate
+// "Used N tools" runs that never merge.
+test('a replayed step the record already holds is not drawn twice', () => {
+  const messages = [
+    { id: 'm1', role: 'user', content: 'go' },
+    {
+      id: 'm2', role: 'assistant', content: '', parts: [
+        { kind: 'text', text: 'Now the tests:' },
+        { kind: 'tool_call', toolCallId: 'c1' },
+      ], toolCalls: [{ id: 'c1', name: 'exec', input: '{}', output: 'ok' }],
+    },
+  ];
+  const items = historyItems(messages);
+  assert.ok(items.some((x) => x.callId === 'c1'), 'the record holds the call');
+  const replayed = {
+    segments: [
+      { id: 't:1', kind: 'text', text: 'Now the tests:' },
+      { id: 't:2', kind: 'tool', callId: 'c1', name: 'exec', status: 'success' },
+    ],
+  };
+  assert.deepEqual(liveSegments(replayed, items), [], 'the record already draws that step');
+
+  // the replay continues past the record: only the part it does not hold stays
+  const running = {
+    segments: [
+      { id: 't:1', kind: 'text', text: 'Now the tests:' },
+      { id: 't:2', kind: 'tool', callId: 'c1', name: 'exec', status: 'success' },
+      { id: 't:3', kind: 'text', text: 'hasilnya begini' },
+      { id: 't:4', kind: 'tool', callId: 'c2', name: 'exec', status: 'requested' },
+    ],
+  };
+  assert.deepEqual(liveSegments(running, items).map((s) => s.id), ['t:3', 't:4']);
+
+  // nothing of this turn in the record — the tab's own tail is untouched
+  const own = historyItems([{ id: 'm1', role: 'user', content: 'go' }]);
+  assert.deepEqual(liveSegments(running, own).map((s) => s.id), ['t:1', 't:2', 't:3', 't:4']);
+
+  // a marker saying output is missing survives: it reports the gap, it is not a copy
+  const marked = {
+    segments: [
+      { id: 't:0', kind: 'resync', text: 'Some earlier live output is unavailable' },
+      { id: 't:1', kind: 'text', text: 'Now the tests:' },
+      { id: 't:2', kind: 'tool', callId: 'c1', name: 'exec', status: 'success' },
+    ],
+  };
+  assert.deepEqual(liveSegments(marked, items).map((s) => s.kind), ['resync']);
+});
+
+test('a recalled steer leaves the live transcript, and its history row stays', () => {
+  const t = newTurn({ turnId: 't1', requestId: 'r1', conversationId: 'c1', kind: 'send' });
+  applyFrame(t, frame('turn.steer', { inputId: 'req-1', text: 'tambahan', final: true }, 1));
+  applyFrame(t, frame('turn.steer', { inputId: 'req-2', text: 'lain', final: true }, 2));
+  assert.deepEqual(t.segments.map((s) => s.inputId || s.kind), ['req-1', 'req-2']);
+  applyFrame(t, frame('turn.steer_recalled', { inputId: 'req-1' }, 3));
+  assert.deepEqual(t.segments.map((s) => s.inputId || s.kind), ['req-2']);
 });

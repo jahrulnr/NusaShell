@@ -118,9 +118,9 @@ export function ModelPicker({ room }) {
 
   const label = sel.agentId ? agentModelLabel(s, sel.agentId, sel.modelId) : cur ? (cur.name || cur.id) : sel.modelId || 'Choose model';
   const chosen = !!(sel.agentId || sel.modelId);
-  return html`<div class="relative">
+  return html`<div class="relative min-w-0">
     <button type="button" onClick=${() => setOpen(!open)} aria-haspopup="dialog" aria-expanded=${open}
-      class=${cx('flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] hover:bg-hover max-w-[44vw] sm:max-w-64', chosen ? 'text-fg' : 'text-warn')}>
+      class=${cx('flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] hover:bg-hover max-w-[44vw] sm:max-w-64', chosen ? 'text-fg' : 'text-warn')}>
       ${sel.agentId && html`<${Icon} name="bot" size=${14} class="text-faint shrink-0" />`}
       <span class="truncate">${label}</span>
       ${!sel.agentId && sel.effort && sel.effort !== 'default' && html`<span class="text-faint shrink-0">${sel.effort}</span>`}

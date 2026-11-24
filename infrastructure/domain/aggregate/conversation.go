@@ -46,6 +46,11 @@ type Conversation struct {
 	messages     []entity.Message
 	tools        []valueobject.ToolSchema
 	usage        valueobject.Usage
+	// symbolMapRefusedAt is the root whose marker probe refused this room's
+	// symbol-map record; "" = no verdict. It is keyed by root so a workspace
+	// rebind re-evaluates by comparison, and it is a cache of a deterministic
+	// probe, never a claim about the tree.
+	symbolMapRefusedAt string
 }
 
 // DefaultEnvironment is the execution binding every room starts with —
@@ -71,8 +76,8 @@ func NewConversation(id string) (*Conversation, error) {
 // The copy drops what belongs to one room rather than to its content — the
 // @label, reply routing, pin, the agent's own session handle and context
 // report, the title an agent gave the room, approval rules, the saved view,
-// and accumulated usage — and starts with no history: the repository copies
-// the stored messages in.
+// the symbol-map gate verdict, and accumulated usage — and starts with no
+// history: the repository copies the stored messages in.
 func (c Conversation) Fork() (*Conversation, error) {
 	fork, err := NewConversation("")
 	if err != nil {
@@ -147,6 +152,9 @@ func (c *Conversation) Compact(summary entity.Message, dropBefore int, retained 
 		retained = live
 	}
 	c.messages = append([]entity.Message{summary}, retained...)
+	// A fold is a technical reset: the new tail is a new conversation in
+	// everything but id, so the symbol-map verdict must not outlive it.
+	c.symbolMapRefusedAt = ""
 }
 
 func sameMessageIDs(live, retained []entity.Message) bool {
@@ -218,6 +226,7 @@ func (c *Conversation) RewriteFrom(msgID, content string) error {
 func (c *Conversation) ClearHistory() {
 	clear(c.messages)
 	c.messages = nil
+	c.symbolMapRefusedAt = ""
 	c.forgetSession()
 }
 
@@ -357,6 +366,27 @@ func (c *Conversation) SetUpstream(name string) {
 // selected driver's default workspace.
 func (c *Conversation) SetWorkspace(dir string) {
 	c.workspace = dir
+}
+
+// SymbolMapRefusedAt names the root whose marker probe refused this room's
+// symbol-map record, "" when no verdict is remembered. The gate reads it to
+// skip a root it already refused; the room's own transitions — Compact and
+// ClearHistory — drop it, and a different root re-evaluates by comparison,
+// which is how a rebind re-opens the question without a write.
+func (c *Conversation) SymbolMapRefusedAt() string {
+	return c.symbolMapRefusedAt
+}
+
+// RefuseSymbolMap remembers that root carries no project marker, so the room
+// pays one probe per episode rather than one per provider step.
+func (c *Conversation) RefuseSymbolMap(root string) {
+	c.symbolMapRefusedAt = root
+}
+
+// AllowSymbolMap drops a remembered refusal: the root now proves a project
+// (or the room folded, cleared, or moved, which voids the verdict anyway).
+func (c *Conversation) AllowSymbolMap() {
+	c.symbolMapRefusedAt = ""
 }
 
 // SetEnvironment binds this room to one execution environment. A registered

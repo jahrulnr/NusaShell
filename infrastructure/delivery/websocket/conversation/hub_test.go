@@ -1530,3 +1530,137 @@ func TestWatchTailStillReplays(t *testing.T) {
 		}
 	}
 }
+
+// A tab that reconnects holding every frame of a live turn reports the
+// seq it last saw. There is nothing to replay and nothing to resync, so
+// the watch answers no frame at all — but it must still attach: silence
+// plus no subscription would strand the tab without the rest of the
+// stream, the terminal included, until it reconnected again.
+func TestWatchAttachesWhenTheClientIsCaughtUp(t *testing.T) {
+	emit := make(chan event.TurnEvent)
+	release := make(chan struct{})
+	h := newHub(t, stubSender{fn: func(_ context.Context, convID, _, _, _ string,
+		onEvent event.TurnEventHandler) (appconversation.SendResult, error) {
+		for ev := range emit {
+			onEvent(ev)
+		}
+		<-release
+		return appconversation.SendResult{ConversationID: convID, UserMessagePersisted: true}, nil
+	}})
+	owner := dial(t, h)
+	sendCommand(t, owner, `{"type":"turn.send","requestId":"req-1","payload":{"content":"hi"}}`)
+	opened := readFrame(t, owner)
+	if opened.Type != "turn.opened" || opened.Seq == nil || *opened.Seq != 0 {
+		t.Fatalf("opened %+v", opened)
+	}
+	watch := func(socket *websocket.Conn, afterSeq int) {
+		t.Helper()
+		sendCommand(t, socket, fmt.Sprintf(
+			`{"type":"turn.watch","requestId":"req-w","conversationId":%q,"turnId":%q,"afterSeq":%d}`,
+			opened.ConversationID, opened.TurnID, afterSeq))
+	}
+	// stream emits one delta and reads it back on the owner socket, so the
+	// test knows the journal holds it before the next watch.
+	stream := func(text string, seq int) {
+		t.Helper()
+		emit <- event.NewDeltaEvent(text)
+		if f := readFrame(t, owner); f.Type != "turn.delta" || f.Seq == nil || *f.Seq != seq {
+			t.Fatalf("owner frame after %q = %+v, want the seq-%d delta", text, f, seq)
+		}
+	}
+	// attached waits for a watch to land on the turn's subscriber set —
+	// the property under test, and the only point a frame can race it.
+	attached := func(n int) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			h.mu.Lock()
+			got := len(h.turns[opened.TurnID].subscribed)
+			h.mu.Unlock()
+			if got >= n {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("subscribers = %d after the watch, want %d — the watch answered without attaching", got, n)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// The owner holds the turn's latest seq — a reconnecting tab's state.
+	stream("first", 1)
+
+	// Caught up: the answer is no frame, and the live stream continues.
+	caughtUp := dial(t, h)
+	watch(caughtUp, 1)
+	attached(2)
+	stream("second", 2)
+	if f := readFrame(t, caughtUp); f.Type != "turn.delta" || f.Seq == nil || *f.Seq != 2 {
+		t.Fatalf("caught-up watch first frame %+v, want the live seq-2 delta", f)
+	}
+
+	// One past the turn's latest seq (t.seq itself): a claim from beyond
+	// the journal, answered with the snapshot. The socket must still
+	// attach after it — a live turn that answered and left the tab
+	// unsubscribed would strand it without the rest of the stream.
+	ahead := dial(t, h)
+	watch(ahead, 3)
+	f := readFrame(t, ahead)
+	if f.Type != "turn.resync_required" {
+		t.Fatalf("ahead watch first frame %+v, want the bounded snapshot", f)
+	}
+	var snapshot resyncPayload
+	if err := json.Unmarshal(f.Payload, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Turn != "active" {
+		t.Fatalf("ahead watch snapshot = %q, want active", snapshot.Turn)
+	}
+	attached(3)
+	stream("third", 3)
+	if f := readFrame(t, ahead); f.Type != "turn.delta" || f.Seq == nil || *f.Seq != 3 {
+		t.Fatalf("ahead watch live frame %+v, want the seq-3 delta", f)
+	}
+
+	// The terminal reaches every attached socket.
+	close(emit)    // no further stream frames
+	close(release) // let the send finish
+	lastSeq := 0
+	for {
+		f := readFrame(t, caughtUp)
+		if f.Type == "turn.completed" {
+			lastSeq = *f.Seq
+			break
+		}
+		if f.Type == "turn.failed" || f.Type == "error" {
+			t.Fatalf("terminal frame %+v", f)
+		}
+	}
+
+	// A finished turn keeps its verdict on the table: a watch past its
+	// last seq still answers the retained snapshot, never silence.
+	late := dial(t, h)
+	watch(late, lastSeq+5)
+	f = readFrame(t, late)
+	if f.Type != "turn.resync_required" {
+		t.Fatalf("late watch frame = %+v, want resync_required", f)
+	}
+	var p resyncPayload
+	if err := json.Unmarshal(f.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Turn != "completed" || p.Terminal == nil {
+		t.Fatalf("late watch payload = %+v, want the retained completed verdict", p)
+	}
+
+	// A window that is genuinely behind still replays frame-for-frame —
+	// the attach branch must not swallow it.
+	behind := dial(t, h)
+	watch(behind, 1)
+	for seq := 2; seq <= lastSeq; seq++ {
+		f := readFrame(t, behind)
+		if f.Seq == nil || *f.Seq != seq {
+			t.Fatalf("replay frame %+v, want seq %d", f, seq)
+		}
+	}
+}

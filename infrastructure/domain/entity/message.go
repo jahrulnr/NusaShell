@@ -38,6 +38,12 @@ type Message struct {
 	// to see, never replayed to a model.
 	sentFiles []valueobject.Attachment
 	receipt   valueobject.Receipt
+	// inputID is the client request that submitted this message, when the
+	// transport issued one — a steer input's id. It lets a reloaded history
+	// line be matched against the live steering bubble the journal replays,
+	// so one submission renders once. Empty for every message a steer did
+	// not write.
+	inputID string
 }
 
 // MessagePart records the provider-independent order of assistant text,
@@ -145,6 +151,9 @@ func NewUserMessage(in valueobject.UserInput) (Message, error) {
 	}
 	m.SetAnnotations(in.Annotations)
 	m.SetRecording(in.Recording)
+	// Only a steer carries a submitting request id; the message keeps it so a
+	// reloaded history line can be matched against the journal's live bubble.
+	m.SetInputID(in.InputID)
 	return m, nil
 }
 
@@ -293,6 +302,16 @@ func (m *Message) SetCreatedAt(t time.Time) { m.createdAt = t }
 // SetID restores the persisted id. Repository hydration only — ids are
 // generated at construction, never reassigned.
 func (m *Message) SetID(id string) { m.id = id }
+
+// SetInputID records the id of the client request that submitted this
+// message — a steer's requestId. Only a steer sets one: an ordinary send or
+// an edit submits through the client itself, so its message carries none. The
+// id travels no further than the stored record and the owner-facing history
+// projection; a model replay never sees it.
+func (m *Message) SetInputID(id string) { m.inputID = id }
+
+// InputID is the submitting request's id, "" when no steer wrote this message.
+func (m Message) InputID() string { return m.inputID }
 
 // AddToolCall records a call on the message. The provider-issued id is
 // the only correlation key between a call and its output, so it must be

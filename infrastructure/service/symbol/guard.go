@@ -45,21 +45,17 @@ const (
 	SkipCacheTTL = 10 * time.Minute
 )
 
-// projectMarkers are root-level files whose presence proves the root is
-// a project: manifests plus the VCS dirs (".git" as dir answers through
-// ".git/HEAD"; as a worktree file through ".git" itself). They are
-// probed by ReadFile — cheap and remote-safe — before any walk runs.
-var projectMarkers = []string{
-	"go.mod", "package.json", "Cargo.toml", "pom.xml",
-	"build.gradle", "build.gradle.kts", "pyproject.toml",
-	"composer.json", "Gemfile",
-	".git", ".git/HEAD", ".svn", ".hg",
-}
+// ProjectMarkers lists the root-level names whose presence proves a folder
+// is a project. The list itself lives with the SymbolRoot port so the
+// hydration gate (application/job) reads the same definition without the
+// application depending on this adapter.
+func ProjectMarkers() []string { return svc.ProjectMarkers() }
 
-// markerGlobs are root-level name patterns matched from the walk —
-// ReadFile cannot glob, so these are best-effort on the names the probe
-// happens to see (root files are not guaranteed early in lexical order).
-var markerGlobs = []string{"*.csproj", "*.sln", "build.gradle.*"}
+// ProjectMarkerGlobs lists the root-level name patterns that prove a
+// project — ReadFile cannot glob, so these are matched against the names
+// the probe happens to see (root files are not guaranteed early in
+// lexical order).
+func ProjectMarkerGlobs() []string { return svc.ProjectMarkerGlobs() }
 
 // osRootDirs are skipped only when the indexed root IS a filesystem
 // root — a project's own var/ or usr/ subfolder stays indexable. Keys are
@@ -132,11 +128,18 @@ func SkipReason(rel string, size, maxBytes int64) string {
 }
 
 // hasMarker probes the fixed project markers through ReadFile — the
-// only port operation that can hit a file without listing a directory.
+// only port operation that can hit a file without listing a directory. A
+// ".git" directory answers through its HEAD; as a worktree file it
+// answers directly.
 func hasMarker(ctx context.Context, root svc.SymbolRoot) bool {
-	for _, name := range projectMarkers {
+	for _, name := range ProjectMarkers() {
 		if _, err := root.ReadFile(ctx, name); err == nil {
 			return true
+		}
+		if name == ".git" {
+			if _, err := root.ReadFile(ctx, ".git/HEAD"); err == nil {
+				return true
+			}
 		}
 	}
 	return false
@@ -144,7 +147,7 @@ func hasMarker(ctx context.Context, root svc.SymbolRoot) bool {
 
 // markerMatch applies the glob markers to a root-level file name.
 func markerMatch(name string) bool {
-	for _, g := range markerGlobs {
+	for _, g := range ProjectMarkerGlobs() {
 		if ok, _ := filepath.Match(g, name); ok {
 			return true
 		}

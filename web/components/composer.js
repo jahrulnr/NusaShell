@@ -168,6 +168,10 @@ export function Composer({ room, hero = false }) {
   const hasText = !!r.draft.trim();
   const fileInput = useRef();
   const [dragging, setDragging] = useState(false);
+  // On a phone the row is the field and its three buttons; the pickers live in
+  // a tray that folds out above them, the way a chat app stacks its extras,
+  // instead of being squeezed into one line.
+  const [options, setOptions] = useState(false);
   const uploading = r.files.some((f) => f.status === 'uploading');
   const readyFiles = r.files.filter((f) => f.status === 'ready');
   // A native command runs on the server, so the composer waits while it does;
@@ -389,15 +393,26 @@ export function Composer({ room, hero = false }) {
         onKeyDown=${onKey} onPaste=${onPaste}
         onKeyUp=${trackCaret} onClick=${trackCaret} onFocus=${trackCaret} onBlur=${() => setCaret(null)}
         class="composer-input"></textarea>
+      ${options && html`<div class="sm:hidden flex flex-wrap items-center gap-1.5 px-2 pt-2">
+        <${WorkspacePicker} room=${r} />
+        <${AgentOptions} room=${r} />
+        <${ContextMeter} room=${r} />
+      </div>`}
       <div class="flex items-center gap-1 px-2 pb-2 pt-1">
         <input ref=${fileInput} type="file" multiple class="hidden" onChange=${(e) => { attachFiles(r, [...e.target.files]); e.target.value = ''; }} />
         <button type="button" onClick=${() => fileInput.current?.click()} title="Attach files" aria-label="Attach files"
-          class="size-8 inline-flex items-center justify-center rounded-lg text-muted hover:text-fg hover:bg-hover"><${Icon} name="paperclip" size=${16} /></button>
-        <${WorkspacePicker} room=${r} />
-        <div class="flex-1"></div>
-        <${AgentOptions} room=${r} />
+          class="size-8 shrink-0 inline-flex items-center justify-center rounded-lg text-muted hover:text-fg hover:bg-hover"><${Icon} name="paperclip" size=${16} /></button>
         <${ModelPicker} room=${r} />
-        <${ContextMeter} room=${r} />
+        <div class="hidden sm:flex items-center gap-1 min-w-0"><${WorkspacePicker} room=${r} /></div>
+        <div class="flex-1"></div>
+        <div class="hidden sm:flex items-center gap-1 min-w-0">
+          <${AgentOptions} room=${r} />
+          <${ContextMeter} room=${r} />
+        </div>
+        <button type="button" onClick=${() => setOptions(!options)} aria-expanded=${options} aria-label="Composer options"
+          title="Model, workspace, context" class="sm:hidden size-8 shrink-0 inline-flex items-center justify-center rounded-lg hover:bg-hover ${options ? 'text-fg bg-hover' : 'text-muted'}">
+          <${Icon} name="sliders" size=${16} />
+        </button>
         ${canDictate() && (voice.phase === 'recording'
           ? html`<span class="flex items-center gap-1 h-8 pl-2 pr-0.5 rounded-full bg-bad/12 text-bad">
               <span class="size-2 rounded-full bg-bad animate-pulse" aria-hidden="true"></span>
@@ -409,21 +424,23 @@ export function Composer({ room, hero = false }) {
             </span>`
           : html`<button type="button" onClick=${voice.start} disabled=${voice.phase !== 'idle'}
               title=${voice.phase === 'transcribing' ? 'Transcribing…' : 'Dictate'} aria-label=${voice.phase === 'transcribing' ? 'Transcribing' : 'Dictate'}
-              class="size-8 inline-flex items-center justify-center rounded-lg text-muted hover:text-fg hover:bg-hover disabled:hover:bg-transparent">
+              class="size-8 shrink-0 inline-flex items-center justify-center rounded-lg text-muted hover:text-fg hover:bg-hover disabled:hover:bg-transparent">
               ${voice.phase === 'idle' ? html`<${Icon} name="mic" size=${16} />` : html`<${Spinner} size=${14} />`}
             </button>`)}
         ${live && html`<button type="button" onClick=${() => cancel(r)} disabled=${r.live.canceling} title="Stop this turn" aria-label="Stop this turn"
-          class="size-8 inline-flex items-center justify-center rounded-full border border-line text-fg hover:bg-hover disabled:opacity-50">
+          class="size-8 shrink-0 inline-flex items-center justify-center rounded-full border border-line text-fg hover:bg-hover disabled:opacity-50">
           ${r.live.canceling ? html`<${Spinner} size=${13} />` : html`<${Icon} name="stop" size=${12} stroke=${3} />`}
         </button>`}
         <div class="relative flex items-center">
           <button type="button" onClick=${primary} disabled=${!canSend} title=${primaryTitle} aria-label=${primaryLabel}
-            class=${cx('h-8 inline-flex items-center justify-center bg-fg text-bg hover:opacity-90 disabled:opacity-30 transition',
-              canSteer ? 'w-8 rounded-l-full pl-1' : 'size-8 rounded-full')}>
+            class=${cx('h-8 shrink-0 inline-flex items-center justify-center transition',
+              canSteer ? 'w-8 rounded-l-full pl-1' : 'size-8 rounded-full',
+              canSend ? 'bg-fg text-bg hover:opacity-90' : 'bg-panel text-faint border border-line')}>
             ${r.command ? html`<${Spinner} size=${14} />` : html`<${Icon} name=${busy && !canSteer ? 'queue' : 'arrowUp'} size=${16} stroke=${2.25} />`}
           </button>
           ${canSteer && html`<button type="button" onClick=${() => setMenu(!menu)} aria-label="More send options" aria-expanded=${menu}
-            class="h-8 w-6 inline-flex items-center justify-center rounded-r-full bg-fg text-bg border-l border-bg/20 hover:opacity-90">
+            class=${cx('h-8 w-6 shrink-0 inline-flex items-center justify-center rounded-r-full -ml-px',
+              canSend ? 'bg-fg text-bg border-l border-bg/20 hover:opacity-90' : 'bg-panel text-faint border border-line')}>
             <${Icon} name="chevronDown" size=${13} stroke=${2.25} />
           </button>`}
           <${Popover} open=${canSteer && menu} onClose=${() => setMenu(false)} placement="top-end" label="Send options" class="sm:w-60 py-1">

@@ -48,11 +48,11 @@ function Header({ room: r, browser, pane, setPane }) {
     <${MenuButton} />
     <div class="flex-1 min-w-0 flex items-center gap-3">
       ${editing
-        ? html`<input ref=${titleInput} value=${draft} aria-label="Thread title"
+        ? html`<input ref=${titleInput} value=${draft} aria-label="Thread title" enterkeyhint="done"
             onInput=${(e) => setDraft(e.target.value)}
             onKeyDown=${(e) => { if (e.key === 'Enter') closeTitle('save'); if (e.key === 'Escape') closeTitle('cancel'); }}
             onBlur=${() => closeTitle('save')}
-            class="flex-1 min-w-0 h-8 rounded-lg bg-raised border border-accent px-2 outline-none" />`
+            class="flex-1 min-w-0 h-8 rounded-lg bg-raised border border-accent px-2 outline-none text-base sm:text-[14px]" />`
         : html`<button type="button" onClick=${editTitle} title="Rename" class="min-w-0 truncate text-left font-medium hover:text-fg px-1 rounded">${title}</button>`}
       <${LabelChip} room=${r} />
       ${r.info?.memoryOff && html`<span class="hidden sm:flex items-center gap-1 text-[11px] text-faint shrink-0" title="Memory is off for this thread">
@@ -62,10 +62,10 @@ function Header({ room: r, browser, pane, setPane }) {
       </span>`}
     </div>
     ${r.command && html`<span class="flex items-center gap-1.5 text-xs text-muted"><${Spinner} size=${12} /> ${commandBusyLabel(r.command)}</span>`}
-    <${BrowserButton} browser=${browser} />
+    ${!editing && html`<${BrowserButton} browser=${browser} />
     <${PaneButtons} pane=${pane} setPane=${setPane} />
-    <${LinksButton} room=${r} />
-    <div class="relative">
+    <${LinksButton} room=${r} />`}
+    ${!editing && html`<div class="relative">
       <${IconButton} icon="more" label="Thread actions" onClick=${() => setMenu(!menu)} aria-expanded=${menu} />
       <${Popover} open=${menu} onClose=${() => setMenu(false)} placement="bottom-end" label="Thread actions" class="sm:w-56 py-1">
         <button type="button" class="w-full flex items-center gap-2.5 px-3 h-9 hover:bg-hover" onClick=${() => { setMenu(false); editTitle(); }}>
@@ -92,7 +92,7 @@ function Header({ room: r, browser, pane, setPane }) {
           <${Icon} name="trash" size=${15} /> Delete thread
         </button>
       </${Popover}>
-    </div>
+    </div>`}
     <${Dialog} open=${confirm} onClose=${() => setConfirm(false)} title="Delete this thread?"
       footer=${html`<${Button} kind="ghost" autofocus onClick=${() => setConfirm(false)}>Keep</${Button}>
         <${Button} kind="danger" onClick=${() => { setConfirm(false); removeRoom(r); }}>Delete</${Button}>`}>

@@ -178,8 +178,9 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 		}
 		// The environment renders its system tool snapshots each step;
 		// unchanged ones dedup away so only semantic change costs a
-		// record — volatile output (a ticking timestamp) never churns.
-		if err := d.appendToolContexts(ctx, convID, conv, driver); err != nil {
+		// record, and a one-shot record the tail already carries for this
+		// binding is skipped before its tool runs at all.
+		if err := d.appendToolContexts(ctx, convID, conv, driver, dir); err != nil {
 			return err
 		}
 		before := len(conv.Messages())
@@ -209,10 +210,15 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 		}
 		// Provider call — one attempt plus bounded retries for
 		// transient upstream failures (rate limit, 5xx, transport).
-		// A retry is only honest while nothing reached the client: a
-		// delta already emitted or a message already appended would
-		// duplicate on a second call, so those failures — like client
-		// statuses and cancels — stay definitive.
+		// A retry is judged by what the attempt *persisted*, not by what
+		// the client already watched: streamed deltas are rebuilt per
+		// attempt from that attempt's own stream, and a failed attempt
+		// commits nothing, so retrying it adds no second copy to history.
+		// Anti-duplication therefore has two owners — this loop persists
+		// only the attempt that succeeds, and the client drops the failed
+		// attempt's rendered segment when it sees the retry_wait status.
+		// A client cancel, a non-transient status, or a call that already
+		// appended a message still ends the retries.
 		var added []entity.Message
 		var err error
 		var canceled bool
@@ -226,8 +232,9 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 				conv.MediaCount(enum.ModalityImage), model.ID(), limit))
 		}
 		for attempt := 0; ; attempt++ {
-			// Output capture resets per attempt — a retried call
-			// rebuilds parts from its own stream only.
+			// Output capture resets per attempt: a retried call rebuilds
+			// parts from its own stream, so nothing the failed attempt
+			// showed can splice into the answer this one commits.
 			parts = nil
 			err = svc.Send(ctx, conv, prov, wireModel, captureEvent)
 			added = conv.Messages()[before:]
@@ -237,8 +244,10 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 			}
 			status := apperror.As(err).StatusCode()
 			transient := status == 429 || status >= 500
-			if !transient || attempt == len(sendRetryBackoff) ||
-				len(added) > 0 || len(parts) > 0 {
+			// Only a message the call already appended blocks the retry:
+			// streamed output alone is not persistence, and the client
+			// discards its segment on the retry_wait this loop announces.
+			if !transient || attempt == len(sendRetryBackoff) || len(added) > 0 {
 				break
 			}
 			// A provider-asked wait (Retry-After) wins over our own
@@ -271,9 +280,10 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 		if err != nil && !canceled && apperror.As(err).StatusCode() == 413 && len(added) == 0 && len(parts) == 0 && canFold() {
 			// The provider says overflow even though our estimate
 			// disagreed — believe the provider once: compact and retry.
-			// Retrying needs a clean call: with output already emitted
-			// or appended, the error propagates instead — the in-memory
-			// entry was never persisted.
+			// The fold-and-retry needs a call that left nothing behind:
+			// an appended message or streamed segments mean this attempt
+			// is the turn's outcome, and the failure surfaces instead
+			// (or becomes the interrupted reply the resume path builds on).
 			if err := fold(wireModel); err != nil {
 				return err
 			}

@@ -153,6 +153,9 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 			})
 		}
 		t.live.steer(inputID, ev.Delta(), atts)
+		// The job persisted this line before announcing it: a retry later in
+		// the turn must keep it in the live document.
+		t.live.markCommitted()
 		t.live.phase = nil
 		for i, chunk := range chunks {
 			p := steerPayload{
@@ -171,6 +174,10 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 	case enum.TurnEventFinished:
 		t.inReasoning = false
 		t.live.clearPhase()
+		// The attempt that reported this finish is the one the job keeps:
+		// its output is durable history now, so a later step's retry cannot
+		// withdraw it.
+		t.live.markCommitted()
 		if !h.emitLocked(t, "turn.step_finished", stepFinishedPayload{
 			FinishReason: ev.FinishReason().String(),
 			Usage:        dtransport.MarshalUsage(ev.Usage()),
@@ -182,6 +189,12 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 		// streams while it runs, so the owner is told why. The pause
 		// length is information, not a deadline the client enforces.
 		t.inReasoning = false
+		if ev.Status() == enum.TurnStatusRetryWait {
+			// The attempt that just failed is being replaced: the document a
+			// reconnecting tab receives must not carry its output, the same
+			// segment a watching client drops on this status.
+			t.live.truncateTail()
+		}
 		t.live.phase = &phasePayload{
 			Phase:        ev.Status().String(),
 			RetryAfterMs: ev.Wait().Milliseconds(),

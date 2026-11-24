@@ -3,7 +3,7 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, liveHistory, group, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { historyItems, liveHistory, liveSegments, joinText, group, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
 import { ElicitationCard } from './elicitation.js';
@@ -137,10 +137,13 @@ function Annotations({ list }) {
   </div>`;
 }
 
-function UserMessage({ room, msg, text, refs, files, recording, pending, steer }) {
+function UserMessage({ room, msg, text, refs, files, annotations, recording, pending, steer }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
-  const canEdit = msg && !isBusy(room);
+  // A steered input is not a prompt the owner can rewrite: it was folded into
+  // the turn that already consumed it, and the bubble drawn from the journal
+  // never offers an edit either.
+  const canEdit = msg && !steer && !isBusy(room);
   const agentRoom = !!(room.info?.agentId || selection(room).agentId);
   if (editing) {
     const save = () => { if (editMessage(room, msg.id, draft)) setEditing(false); };
@@ -176,7 +179,7 @@ function UserMessage({ room, msg, text, refs, files, recording, pending, steer }
   return html`<div class="group flex flex-col items-end gap-1">
     ${steer && html`<span class="text-[11px] text-faint">steered</span>`}
     <${Attachments} room=${room} list=${files ? files.filter((f) => !f.pickId) : msg?.attachments} />
-    <${Annotations} list=${files ? files.filter((f) => f.pickId) : msg?.annotations} />
+    <${Annotations} list=${annotations || (files ? files.filter((f) => f.pickId) : msg?.annotations)} />
     ${rec && html`<span class="inline-flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-lg border border-line bg-panel text-[11px] text-muted" title=${'Browser recording ' + rec.id}>
       <${Icon} name="video" size=${12} /> Browser recording · ${rec.status || 'unknown'}
     </span>`}
@@ -314,12 +317,15 @@ function Status({ room }) {
 function FailedCard({ room }) {
   const f = room.failed;
   const lastUser = [...room.messages].reverse().find((m) => m.role === 'user');
+  // What the provider said is the explanation; the status and machine code
+  // are the facts underneath it, never a substitute for it.
   return html`<div role="alert" class="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-[13px]">
     <div class="flex items-start gap-2.5">
       <${Icon} name="alert" class="text-bad mt-0.5" />
       <div class="flex-1 min-w-0">
-        <div class="font-medium">Turn failed${f.status ? ` (${f.status})` : ''}</div>
-        <div class="text-muted mt-0.5 break-words">${f.message}</div>
+        <div class="font-medium">Turn failed</div>
+        <div class="text-muted mt-0.5 break-words">${f.message || 'The frame carried no message — only the status below.'}</div>
+        ${(f.status || f.code) && html`<div class="text-faint text-[11px] mt-1 font-mono">${[f.status, f.code].filter(Boolean).join(' · ')}</div>`}
         ${room.queue.length > 0 && html`<div class="text-faint mt-1">${room.queue.length} queued ${room.queue.length === 1 ? 'message is' : 'messages are'} on hold.</div>`}
       </div>
     </div>
@@ -337,9 +343,16 @@ export function Transcript({ room, scroller }) {
   let hist = liveHistory(historyItems(r.messages), r.live);
   const lastTool = hist.findLast((x) => x.kind === 'tool');
   const cwd = r.sel.workspace || r.info?.workspace || lastTool?.cwd || '';
-  const liveItems = r.live ? r.live.segments : [];
-  const items = group(hist);
-  const liveGroups = group(liveItems);
+  // A steer already in history is drawn once, from the record — and where its
+  // live segment sits, so the text that streamed before it stays above it. The
+  // row is then not drawn again in its history place.
+  const liveItems = liveSegments(r.live, hist);
+  const moved = new Set(liveItems.filter((x) => x.kind === 'user').map((x) => x.id));
+  // Neighbouring text is one block: a part boundary is where the store seals a
+  // step, not where the answer breaks. Joining before group() also keeps the
+  // copy button's text identical to what was written.
+  const items = group(joinText(hist));
+  const liveGroups = group(joinText(liveItems));
   // A finished turn ends with a button that copies what it said, as the
   // Markdown it was written in; a running turn gets one once it ends.
   const histEnds = turnEnds(items);
@@ -397,11 +410,14 @@ export function Transcript({ room, scroller }) {
 
   const renderItem = (it, live) => {
     switch (it.kind) {
-      case 'user': return html`<${UserMessage} key=${it.id} room=${r} msg=${it.msg} text=${it.msg.content} />`;
+      // The record of a steer carries the inputId of the command that wrote
+      // it, so the row that wins over the journal replay is drawn as what it
+      // is — steered, dashed, no edit — with its annotations and uploads.
+      case 'user': return html`<${UserMessage} key=${it.id} room=${r} msg=${it.msg} text=${it.msg.content} steer=${!!it.steerInput} />`;
       // A steered input is owner text sent mid-turn — what the composer
       // wrote, including the head a relay from another thread adds — so it
       // renders as the same bubble a sent message does, marked steered.
-      case 'steer': return html`<${UserMessage} key=${it.id} room=${r} text=${it.text} files=${it.attachments} steer />`;
+      case 'steer': return html`<${UserMessage} key=${it.id} room=${r} text=${it.text} files=${it.attachments} annotations=${it.annotations} steer />`;
       case 'note': return html`<details key=${it.id} class="text-[13px] text-muted">
         <summary class="cursor-pointer py-1">Context note</summary>
         <pre class="rawtext mt-1">${it.msg.content}</pre>
@@ -434,7 +450,7 @@ export function Transcript({ room, scroller }) {
           </div>`}
     </div>`}
     ${empty && r.infoStatus === 'ready' && html`<p class="text-center text-faint text-[13px] py-10">This thread has no messages yet.</p>`}
-    ${items.map((it, i) => withCopy(histEnds)(it, i, false))}
+    ${items.map((it, i) => (moved.has(it.id) ? null : withCopy(histEnds)(it, i, false)))}
     ${!!(r.pendingOpen?.text || r.pendingOpen?.files?.length || r.pendingOpen?.recording) && r.pendingOpen.kind === 'send' && html`<${UserMessage} room=${r} text=${r.pendingOpen.text} refs=${r.pendingOpen.references} files=${r.pendingOpen.files} recording=${r.pendingOpen.recording} pending />`}
     ${!!(r.live?.userText || r.live?.userFiles?.length || r.live?.userRecording) && html`<${UserMessage} room=${r} text=${r.live.userText} refs=${r.live.userRefs} files=${r.live.userFiles} recording=${r.live.userRecording} pending=${!r.live.terminal} />`}
     ${liveGroups.map((it, i) => withCopy(liveEnds)(it, i, !r.live.terminal && i === liveGroups.length - 1))}

@@ -39,6 +39,9 @@ type metaRecord struct {
 	SealedSegments int                 `json:"sealedSegments"`
 	CreatedAt      time.Time           `json:"createdAt"`
 	UpdatedAt      time.Time           `json:"updatedAt"`
+	// SymbolMapRefusedAt is the root the symbol-map gate refused; absent
+	// means "never evaluated", so no migration is needed for older records.
+	SymbolMapRefusedAt string `json:"symbolMapRefusedAt,omitempty"`
 }
 
 type routingRecord struct {
@@ -70,6 +73,9 @@ func metaFor(conv *aggregate.Conversation) metaRecord {
 		AgentOptions: conv.AgentOptions(),
 		AgentTitle:   conv.AgentTitle(),
 		Usage:        encodeUsage(conv.Usage()),
+		// The symbol-map verdict is room state, not history: one root (or
+		// "" for none), dropped by the aggregate's own transitions.
+		SymbolMapRefusedAt: conv.SymbolMapRefusedAt(),
 		// SystemPrompt is deliberately absent: the prompt ships embedded in
 		// the binary, so it is applied in memory, never persisted.
 	}
@@ -124,10 +130,14 @@ type lineRecord struct {
 }
 
 type messageRecord struct {
-	ID              string              `json:"id"`
-	Role            string              `json:"role"`
-	Content         string              `json:"content"`
-	UserType        string              `json:"userType,omitempty"`
+	ID       string `json:"id"`
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	UserType string `json:"userType,omitempty"`
+	// InputID names the client request that submitted the message — a steer's
+	// requestId. Absent on every other message, and on records written before
+	// the field existed.
+	InputID         string              `json:"inputId,omitempty"`
 	FinishReason    string              `json:"finishReason,omitempty"`
 	Parts           []messagePartRecord `json:"parts,omitempty"`
 	CreatedAt       time.Time           `json:"createdAt"`
@@ -200,6 +210,7 @@ func encodeMessage(m entity.Message) messageRecord {
 		Role:            m.Role().String(),
 		Content:         m.Content(),
 		UserType:        m.UserType().String(),
+		InputID:         m.InputID(),
 		FinishReason:    m.FinishReason().String(),
 		CreatedAt:       m.CreatedAt(),
 		OptionalContent: m.OptionalContent(),
@@ -299,6 +310,7 @@ func decodeMessage(r messageRecord) (entity.Message, error) {
 		return entity.Message{}, err
 	}
 	m.SetID(r.ID)
+	m.SetInputID(r.InputID)
 	if r.UserType != "" {
 		ut, ok := enum.ParseLLMUserType(r.UserType)
 		if !ok {

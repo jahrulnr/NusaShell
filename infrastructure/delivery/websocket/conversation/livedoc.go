@@ -45,7 +45,17 @@ type liveDoc struct {
 	plan *livePart
 	// phase is the running turn's last reported phase — a status wait or
 	// a reasoning stretch — so a snapshot names what the turn is doing.
-	phase   *phasePayload
+	phase *phasePayload
+	// committed is where the current attempt's speculative output begins:
+	// everything before it is durable — a finished step or a steer line the
+	// job already persisted — and survives a retry's truncation.
+	committed int
+	// sealed is the part the last commit closed. Streamed text would
+	// otherwise fold into it — text() joins chunks into the tail part of
+	// the same kind — and a retry could not withdraw an attempt that
+	// shares a part with durable output. Sealing opens a new part instead,
+	// so the boundary stays part-aligned.
+	sealed  *livePart
 	bytes   int
 	dropped int
 }
@@ -89,6 +99,47 @@ func (d *liveDoc) last() *livePart {
 	return d.parts[len(d.parts)-1]
 }
 
+// markCommitted moves the durable boundary to the end of the document: the
+// step that just finished, or the steer line the job has persisted, is
+// history the turn will not replace. The tail part is sealed so the next
+// attempt's stream opens its own part rather than extending durable output.
+func (d *liveDoc) markCommitted() {
+	d.committed = len(d.parts)
+	d.sealed = d.last()
+}
+
+// truncateTail drops everything the current provider attempt streamed and
+// the turn is about to replace. A retry pauses before its next call, and a
+// tab that reconnects during or after that pause receives this document
+// instead of the journal it missed — it must not carry the failed attempt's
+// segment, since the client discards that segment on retry_wait and the
+// document has to agree with what history will say.
+//
+// Replaced output is withdrawn, not trimmed for space: it is counted out of
+// the byte total but not into dropped, which tells the client its recovery
+// was partial.
+func (d *liveDoc) truncateTail() {
+	for len(d.parts) > d.committed {
+		p := d.parts[len(d.parts)-1]
+		d.parts = d.parts[:len(d.parts)-1]
+		d.bytes -= partBytes(p)
+		// A later attempt can reuse a call id, so an index slot is cleared
+		// only while it still points at the part being withdrawn.
+		if d.tools[p.CallID] == p {
+			delete(d.tools, p.CallID)
+		}
+		if r, ok := p.Request.(approvalPayload); ok && d.approvals[r.ID] == p {
+			delete(d.approvals, r.ID)
+		}
+		if r, ok := p.Request.(elicitationPayload); ok && d.elicitations[r.ID] == p {
+			delete(d.elicitations, r.ID)
+		}
+		if d.plan == p {
+			d.plan = nil
+		}
+	}
+}
+
 // partBytes estimates a part's serialized size — every field the
 // snapshot marshals, not only the trimmable text — so card payloads and
 // plan entries hold memory inside the same bound as text does.
@@ -118,12 +169,13 @@ func (d *liveDoc) push(p *livePart) {
 }
 
 // text appends provider text to the tail part of the same kind, or
-// opens one — the same fold the client applies to streamed chunks.
+// opens one — the same fold the client applies to streamed chunks. A
+// sealed part (see markCommitted) is never extended.
 func (d *liveDoc) text(kind, delta string) {
 	if delta == "" {
 		return
 	}
-	if p := d.last(); p != nil && p.Kind == kind {
+	if p := d.last(); p != nil && p.Kind == kind && p != d.sealed {
 		p.Text += delta
 	} else {
 		d.parts = append(d.parts, &livePart{Kind: kind, Text: delta})
@@ -194,7 +246,8 @@ func (d *liveDoc) trim() {
 
 // drop removes the oldest part entirely — the fallthrough once its
 // trimmable fields are gone — clearing the index slots that fan-in
-// events look up, so a late resolution lands nowhere.
+// events look up, so a late resolution lands nowhere. The durable
+// boundary shifts with the slice it indexes.
 func (d *liveDoc) drop(p *livePart) {
 	n := partBytes(p)
 	d.bytes -= n
@@ -208,6 +261,12 @@ func (d *liveDoc) drop(p *livePart) {
 	}
 	if d.plan == p {
 		d.plan = nil
+	}
+	if d.sealed == p {
+		d.sealed = nil
+	}
+	if d.committed > 0 {
+		d.committed--
 	}
 	d.parts = d.parts[1:]
 }

@@ -239,3 +239,25 @@ func TestManagerSkipsUnsupportedFiles(t *testing.T) {
 type scopedIndex struct{ countingIndex }
 
 func (i *scopedIndex) IndexesFile(rel string) bool { return strings.HasSuffix(rel, ".go") }
+
+// IsBuilding is the provisional-render predicate the tool declares to the
+// application: the first-build marker and the wait line that follows it
+// are provisional, a real map and a skip verdict are final.
+func TestIsBuilding(t *testing.T) {
+	final := mapText("/ws", nil, probeResult{}, 0, 0, false, 0)
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"first build", buildingText("/ws"), true},
+		{"wait line", buildingText("/ws") + "\n… index still building — call again shortly", true},
+		{"final map", final, false},
+		{"skip verdict", skipText("/home/user", "is not a project root (no marker, >2000 files)"), false},
+	}
+	for _, tc := range cases {
+		if got := IsBuilding(tc.text); got != tc.want {
+			t.Errorf("%s: IsBuilding = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

@@ -51,7 +51,7 @@ func TestWireSymbolMapRecordFlow(t *testing.T) {
 	bundle := appjob.EnvironmentBundle{Tools: tools}
 	ctx := dservice.WithWorkspaceDir(context.Background(), dir)
 
-	records, err := bundle.ToolContexts(ctx)
+	records, err := bundle.ToolContexts(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestWireSymbolMapRecordFlow(t *testing.T) {
 	var prev string
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		records, err := bundle.ToolContexts(ctx)
+		records, err := bundle.ToolContexts(ctx, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +289,7 @@ done:
 
 func mustContexts(t *testing.T, b appjob.EnvironmentBundle, ctx context.Context) []appjob.ToolContext {
 	t.Helper()
-	recs, err := b.ToolContexts(ctx)
+	recs, err := b.ToolContexts(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,8 +29,11 @@ type EnvironmentDriver interface {
 	ToolSchemas() []valueobject.ToolSchema
 	// ToolContexts renders the system-owned context records a turn
 	// persists before each provider call — the enabled, system-callable
-	// tool snapshots, each under its real tool name.
-	ToolContexts(context.Context) ([]ToolContext, error)
+	// tool snapshots, each under its real tool name. skip names the slots
+	// the application already carries (or ruled out): their tool is not
+	// executed at all, so an orientation record costs neither its probe
+	// nor its build on a turn that does not need it.
+	ToolContexts(ctx context.Context, skip map[string]bool) ([]ToolContext, error)
 }
 
 // ToolContext is one environment-rendered record for the pre-call
@@ -38,12 +41,22 @@ type EnvironmentDriver interface {
 // verbatim as a TooltypeInjection call. Dedup, when set, normalizes both
 // the newest stored output and this render before the unchanged-record
 // comparison so volatile fields (a rendered timestamp) never trigger a
-// re-record — Output always persists at full fidelity.
+// re-record — Output always persists at full fidelity. Once and
+// Provisional carry the producer's cadence declaration: the application
+// decides what to do with them.
 type ToolContext struct {
 	Name   string
 	Input  string
 	Output string
 	Dedup  func(string) string
+	// Once marks a record the application writes at most once per live
+	// tail — orientation, not a claim about the tree. Presence alone
+	// skips it; only a fold, a clear, or a rebind re-opens the slot.
+	Once bool
+	// Provisional marks a render that must not be persisted: the tool
+	// answered before it had a real result. The slot stays open and the
+	// next step retries.
+	Provisional bool
 }
 
 // ToolDeduper is the optional contract a tool implements when its output
@@ -53,6 +66,23 @@ type ToolContext struct {
 // records dedup on the verbatim output.
 type ToolDeduper interface {
 	DedupKey(output string) string
+}
+
+// OneShotHydration is the optional contract a tool implements when its
+// pre-call record is orientation rather than a statement about the
+// current tree: the application records it once per live tail and leaves
+// it alone until a compaction seals it or the workspace binding changes.
+// The tool declares; the application owns the cadence.
+type OneShotHydration interface {
+	OneShotHydration() bool
+}
+
+// ProvisionalHydration is the optional contract a tool implements when
+// some of its renders are too early to keep — a first build still
+// running. The application drops such a record and retries on the next
+// step instead of freezing a placeholder into the room's orientation.
+type ProvisionalHydration interface {
+	ProvisionalHydration(output string) bool
 }
 
 // EnvironmentBundle is the basic driver built from injected ports. Backends
@@ -120,11 +150,15 @@ func (b EnvironmentBundle) ToolSchemas() []valueobject.ToolSchema {
 // deterministic. Agent-only tools never produce context; a tool that
 // errors still returns a record — its output carries the error text, the
 // same evidence the model would see from a failed call. A tool
-// implementing ToolDeduper attaches its normalizer to the record.
-func (b EnvironmentBundle) ToolContexts(ctx context.Context) ([]ToolContext, error) {
+// implementing ToolDeduper attaches its normalizer; a tool implementing
+// OneShotHydration or ProvisionalHydration marks its record so the job
+// can apply the cadence it owns. A name in skip is not executed: the
+// application already carries (or ruled out) that slot, and rendering it
+// would still pay the probe and any build the record exists to avoid.
+func (b EnvironmentBundle) ToolContexts(ctx context.Context, skip map[string]bool) ([]ToolContext, error) {
 	names := make([]string, 0, len(b.Tools))
 	for name, tool := range b.Tools {
-		if tool.Schema().CallableBySystem() {
+		if tool.Schema().CallableBySystem() && !skip[name] {
 			names = append(names, name)
 		}
 	}
@@ -161,6 +195,12 @@ func (b EnvironmentBundle) ToolContexts(ctx context.Context) ([]ToolContext, err
 		record := ToolContext{Name: name, Input: call.Input(), Output: result.Text}
 		if deduper, ok := tool.(ToolDeduper); ok {
 			record.Dedup = deduper.DedupKey
+		}
+		if oneShot, ok := tool.(OneShotHydration); ok && oneShot.OneShotHydration() {
+			record.Once = true
+		}
+		if provisional, ok := tool.(ProvisionalHydration); ok && provisional.ProvisionalHydration(result.Text) {
+			record.Provisional = true
 		}
 		contexts = append(contexts, record)
 	}

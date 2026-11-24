@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
 // The store keeps one entry of its own beside the room directories: the
@@ -66,6 +68,15 @@ func (r *ConversationRepository) parkedName(id string) (string, error) {
 	return filepath.Join(root, fmt.Sprintf("%s%s%d", id, parkedMark, time.Now().UnixNano())), nil
 }
 
+// namedNonDir reports whether a room's name exists as something other than a
+// directory — a regular file, a symlink to one, a socket. Reading a record
+// through such a name fails with ENOTDIR rather than "not exist", and the
+// repair has to see that shape as an occupied name, not a free one.
+func namedNonDir(dir string) bool {
+	info, err := os.Lstat(dir)
+	return err == nil && !info.IsDir()
+}
+
 // recoverRoom finishes a swap a crash interrupted. Clear parks the live room
 // and publishes the cleared one under the same name, so a crash between the
 // two renames leaves the name empty and the room's history parked. Restoring
@@ -73,6 +84,11 @@ func (r *ConversationRepository) parkedName(id string) (string, error) {
 // readable instead of missing; a stage is always debris — its room either
 // still owns the name (the clear failed before the swap) or has just been
 // restored — so it goes.
+//
+// The name decides what the parked copy is, and a name held by something that
+// is not a readable record does not count as "the room was replaced": the
+// store cannot know whether that thing is meant to stand in for the history
+// it would be discarding, so it keeps the parked copy and refuses instead.
 //
 // Callers hold the store lock.
 func (r *ConversationRepository) recoverRoom(id string) error {
@@ -100,20 +116,29 @@ func (r *ConversationRepository) recoverRoom(id string) error {
 		return nil
 	}
 	sort.Slice(parked, func(i, j int) bool { return plantedOrder(parked[i]) > plantedOrder(parked[j]) })
-	if _, err := os.Stat(r.convDir(id)); err == nil {
-		// The room owns its name: the swap completed, and the parked copy is
-		// the old contents of a room that has already been replaced.
+	dir := r.convDir(id)
+	_, liveErr := os.Lstat(dir)
+	switch {
+	case liveErr == nil:
+		// The name is taken. It only counts as "the room was replaced" when it
+		// holds this room's readable record; anything else may be all that is
+		// left of the room, so the parked copy stays and the store refuses.
+		if _, err := r.readMetaUnvalidated(id); err != nil {
+			return apperror.New(500,
+				"conversation "+id+" needs attention: its name is held by something that is not a conversation record, and the room's contents are kept in the store's staging area",
+				fmt.Errorf("recover %s: name occupied by a non-room (%v)", id, err))
+		}
 		for _, p := range parked {
 			if err := os.RemoveAll(p); err != nil {
 				return fmt.Errorf("recover %s: old copy: %w", id, err)
 			}
 		}
 		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+	case !errors.Is(liveErr, os.ErrNotExist):
+		return liveErr
 	}
 	// The name is free and the room is parked: put it back as it was.
-	if err := renamePath(parked[0], r.convDir(id)); err != nil {
+	if err := renamePath(parked[0], dir); err != nil {
 		return fmt.Errorf("recover %s: %w", id, err)
 	}
 	for _, leftover := range parked[1:] {

@@ -752,12 +752,21 @@ func (h *Hub) turnWatch(c *conn, cmd command) {
 		c.push(resyncFrame(cmd.RequestID, convID, cmd.TurnID, resyncPayload{Turn: "unknown"}))
 		return
 	}
-	// Newer-than-latest afterSeq: nothing honest to replay, but the
-	// retained verdict and receipt snapshot still cross.
+	// A client reports the last seq it received, so a caught-up one asks for
+	// t.seq-1 and replays nothing below. A claim from beyond the journal —
+	// afterSeq >= t.seq, a seq this turn never minted — is not evidence the
+	// client is current: it gets the bounded snapshot. A finished turn stops
+	// there (the verdict and receipt are the whole answer), while a live one
+	// still attaches, or the tab would sit without the rest of the stream,
+	// its terminal included.
 	if after > t.seq-1 {
-		p := h.resyncForLocked(t)
+		c.push(resyncFrame(cmd.RequestID, convID, t.id, h.resyncForLocked(t)))
+		if t.terminal {
+			h.mu.Unlock()
+			return // a finished turn has no live frames to attach for
+		}
+		t.subscribed[c] = struct{}{}
 		h.mu.Unlock()
-		c.push(resyncFrame(cmd.RequestID, convID, cmd.TurnID, p))
 		return
 	}
 	// Journal truncation check: the earliest retained seq must cover

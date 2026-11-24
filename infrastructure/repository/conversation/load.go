@@ -51,6 +51,9 @@ func (r *ConversationRepository) Load(ctx context.Context, convID string) (*aggr
 	}
 	c.SetPinned(meta.Pinned)
 	c.SetMemoryOff(meta.MemoryOff)
+	if meta.SymbolMapRefusedAt != "" {
+		c.RefuseSymbolMap(meta.SymbolMapRefusedAt)
+	}
 	if err := c.SetLabel(meta.Label); err != nil {
 		return nil, err
 	}

@@ -5,7 +5,7 @@ import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from '../lib/store.js';
 import * as chat from '../lib/chat.js';
-import { historyItems, liveHistory } from '../lib/turn.js';
+import { historyItems, liveHistory, liveSegments } from '../lib/turn.js';
 
 let ws;
 const sentTurns = () => ws.sent.filter((c) => c.type === 'turn.send');
@@ -1241,4 +1241,146 @@ test('a pull that answers with what is already shown writes nothing', async () =
   await sleep(20);
   assert.equal(r.info, info, 'the header keeps its record object');
   assert.equal(r.info.title, 'Same title');
+});
+
+// ---------- a steer the store already holds ----------
+
+// A tab that reloads mid-turn reads the room (the steered input is already a
+// user message there) and then replays the journal, which carries the same
+// steer. The transcript draws it once — from the record, annotations and all.
+test('a replayed steer is drawn once, from the history row that carries its inputId', async () => {
+  const messages = [
+    { id: 'm1', role: 'user', content: 'mulai' },
+    { id: 'm2', role: 'user', content: 'tambahan', inputId: 'req-1', annotations: [{ marker: 1, comment: 'catatan' }] },
+  ];
+  serveThread('c_1', { messages });
+  chat.navigate('#/c/c_1');
+  await sleep(40);
+  const r = state.rooms.c_1;
+  // another tab (or a reload) watches the running turn from its first frame
+  ws.serve({ type: 'conversation.activity', conversationId: 'c_1', turnId: 't9', payload: { state: 'opened', kind: 'send', requestId: 'req-other' } });
+  ws.serve({ type: 'turn.opened', conversationId: 'c_1', turnId: 't9', seq: 0, payload: { startedAt: Date.now() } });
+  ws.serve({ type: 'turn.steer', conversationId: 'c_1', turnId: 't9', seq: 1, payload: { inputId: 'req-1', text: 'tambahan', final: true } });
+  ws.serve({ type: 'turn.delta', conversationId: 'c_1', turnId: 't9', seq: 2, payload: { text: 'lanjut' } });
+  await sleep(30);
+  const hist = liveHistory(historyItems(r.messages), r.live);
+  // the live bubble is gone, and the record row takes its place in the tail —
+  // the text that follows the steer stays after the row, not before it
+  assert.deepEqual(liveSegments(r.live, hist).map((s) => s.id), ['m2', 't9:2'], 'no second bubble for the same steer');
+  const row = hist.find((x) => x.kind === 'user' && x.steerInput === 'req-1');
+  assert.ok(row, 'the history row is the steer');
+  assert.equal(row.msg.annotations.length, 1, 'its annotation is there');
+  assert.equal(liveSegments(r.live, hist)[0].id, row.id, 'drawn from the record, in the live position');
+
+  // the owner withdraws it: the live bubble goes, the record stays
+  ws.serve({ type: 'turn.steer_recalled', conversationId: 'c_1', turnId: 't9', seq: 3, payload: { inputId: 'req-1' } });
+  await sleep(20);
+  assert.deepEqual(r.live.segments.filter((s) => s.kind === 'steer'), []);
+  assert.ok(historyItems(r.messages).some((x) => x.steerInput === 'req-1'));
+});
+
+// The other direction: this tab watches a turn another tab steered. The store
+// writes the steered input at once, this tab's first pull lands that row, and
+// the journal replays the same steer after it — so the bubble would come back
+// on top of its own record. It is not drawn, and the row keeps its
+// annotation; a steer this tab did not send is never queued here either.
+test('a steer this tab sent draws the annotation picks its frame does not carry', async () => {
+  const { r } = await openBusyThread();
+  const files = [
+    { key: 'k1', status: 'ready', pickId: 'pk_1', marker: 1, comment: 'tombol ini', screenshot: true, name: '[1] <button>' },
+  ];
+  assert.equal(chat.submit(r, 'cek ini', [], files, 't2'), true);
+  const steer = ws.sent.at(-1);
+  // The fold writes the user message and the journal replays it: text plus the
+  // pick's screenshot, never the comment. This tab still holds what it sent.
+  ws.serve({
+    type: 'turn.steer', conversationId: 'c_1', turnId: 't2', seq: 1,
+    payload: { inputId: steer.requestId, text: 'cek ini', final: true, attachments: [{ uri: 'file:///shot.png', mediaType: 'image/png', modality: 'image', name: '[1] <button>' }] },
+  });
+  const seg = r.live.segments.find((s) => s.kind === 'steer' && s.inputId === steer.requestId);
+  assert.ok(seg, 'the bubble is in the turn');
+  assert.deepEqual(seg.annotations.map((a) => a.comment), ['tombol ini'], 'the bubble shows the mark it was sent with');
+  assert.deepEqual(seg.attachments.map((a) => a.uri), ['file:///shot.png'], 'and the shot stays a plain upload');
+  assert.equal(r.steers.length, 0, 'the final frame ends the queued chip');
+
+  // Another tab's steer has no local copy: its bubble carries the shot alone,
+  // and the comment arrives with the record row.
+  ws.serve({
+    type: 'turn.steer', conversationId: 'c_1', turnId: 't2', seq: 2,
+    payload: { inputId: 'req-other', text: 'lihat', final: true, attachments: [{ uri: 'file:///other.png', mediaType: 'image/png', modality: 'image', name: '[2] <a>' }] },
+  });
+  const other = r.live.segments.find((s) => s.kind === 'steer' && s.inputId === 'req-other');
+  assert.equal(other.annotations, undefined, 'nothing invented for a steer this tab never sent');
+});
+
+// The other direction: this tab watches a turn another tab steered. The store
+// writes the steered input at once, this tab's first pull lands that row, and
+// the journal replays the same steer after it — so the bubble would come back
+// on top of its own record. It is not drawn, and the row keeps its
+// annotation; a steer this tab did not send is never queued here either.
+test('a steer from another tab is drawn once when its record lands before the frame', async () => {
+  const messages = [
+    { id: 'm1', role: 'user', content: 'mulai' },
+    { id: 'm2', role: 'assistant', content: 'jalan' },
+  ];
+  serveThread('c_1', { messages });
+  chat.navigate('#/c/c_1');
+  await sleep(40);
+  const r = state.rooms.c_1;
+  ws.serve({ type: 'conversation.activity', conversationId: 'c_1', turnId: 't5', payload: { state: 'opened', kind: 'send', requestId: 'req-other' } });
+  ws.serve({ type: 'turn.opened', conversationId: 'c_1', turnId: 't5', seq: 0, payload: { startedAt: Date.now() } });
+  // the other tab's steer is in the store by the time this one reads the page
+  messages.push({ id: 'm3', role: 'user', content: 'tahan', inputId: 'req-s', annotations: [{ marker: 1, comment: 'catatan' }] });
+  messages.push({ id: 'm4', role: 'assistant', content: 'sebentar' });
+  ws.serve({ type: 'turn.delta', conversationId: 'c_1', turnId: 't5', seq: 1, payload: { text: 'sebentar' } });
+  await sleep(60);
+  assert.ok(r.messages.some((m) => m.id === 'm3'), 'the row landed mid-turn');
+  // the journal replay of that same steer arrives after it
+  ws.serve({ type: 'turn.steer', conversationId: 'c_1', turnId: 't5', seq: 2, payload: { inputId: 'req-s', text: 'tahan', final: true } });
+  await sleep(30);
+  assert.deepEqual(r.steers, [], 'the watching tab queues nothing');
+  const during = liveSegments(r.live, liveHistory(historyItems(r.messages), r.live));
+  assert.ok(r.live.segments.some((s) => s.kind === 'steer' && s.inputId === 'req-s'), 'the replay is in the turn');
+  assert.deepEqual(during.filter((s) => s.kind === 'steer'), [], 'but its record is what the transcript draws');
+
+  // the turn ends: the row is all that is left
+  ws.serve({ type: 'turn.completed', conversationId: 'c_1', turnId: 't5', seq: 3, payload: { userMessagePersisted: true } });
+  await sleep(80);
+  assert.equal(r.live, null, 'the turn is over');
+  const after = liveHistory(historyItems(r.messages), r.live);
+  const steers = after.filter((x) => x.steerInput === 'req-s');
+  assert.equal(steers.length, 1, 'one row, not two');
+  assert.equal(steers[0].msg.annotations.length, 1, 'the record keeps its annotation');
+});
+
+// A provider call is retried by what it persisted, not by what the tab
+// watched: the failed attempt committed nothing, so its streamed tail must go
+// before the next attempt streams over it.
+test('a retry_wait starts the answer over instead of splicing two attempts', async () => {
+  const { r } = await openBusyThread();
+  ws.serve({ type: 'turn.delta', conversationId: 'c_1', turnId: 't2', seq: 1, payload: { text: 'setengah jawaban' } });
+  ws.serve({ type: 'turn.phase', conversationId: 'c_1', turnId: 't2', seq: 2, payload: { phase: 'retry_wait', retryAfterMs: 2000 } });
+  await sleep(20);
+  assert.equal(r.live.phase.phase, 'retry_wait', 'the status line announces the pause');
+  assert.deepEqual(r.live.segments, [], 'the abandoned attempt left nothing behind');
+  ws.serve({ type: 'turn.delta', conversationId: 'c_1', turnId: 't2', seq: 3, payload: { text: 'jawaban yang utuh' } });
+  await sleep(20);
+  const items = liveSegments(r.live, liveHistory(historyItems(r.messages), r.live));
+  assert.deepEqual(items.map((s) => s.text), ['jawaban yang utuh'], 'one answer, from the attempt that counts');
+  assert.equal(r.live.phase, null, 'the pause ends with the first delta');
+});
+
+test('a failed turn keeps the message the provider sent', async () => {
+  const { r, cmd } = await openBusyThread();
+  terminal(cmd, 'turn.failed', 'c_1', { status: 502, code: 'upstream_error', message: 'upstream stream broken', userMessagePersisted: true }, 't2');
+  await sleep(60);
+  assert.deepEqual([r.failed.status, r.failed.code, r.failed.message], [502, 'upstream_error', 'upstream stream broken']);
+});
+
+test('a failure frame with no message keeps none, so the card can say so', async () => {
+  const { r, cmd } = await openBusyThread();
+  terminal(cmd, 'turn.failed', 'c_1', { status: 502, code: 'upstream_error', userMessagePersisted: true }, 't2');
+  await sleep(60);
+  assert.equal(r.failed.message, '', 'no invented explanation stands in for the provider');
+  assert.deepEqual([r.failed.status, r.failed.code], [502, 'upstream_error']);
 });

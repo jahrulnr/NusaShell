@@ -260,7 +260,7 @@ func TestSkillsHydrationReportsErrorsAndChecksSystemPermission(t *testing.T) {
 	conv := seedRoom(t, d.Convs, "skills-errors", "go")
 	driver, discovery := skillsDriver(t)
 	discovery.err = errors.New("discovery failed")
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, driver); err != nil {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, driver, driver.FallbackRoot()); err != nil {
 		t.Fatal(err)
 	}
 	if out := skillRecords(conv)[0].Output(); !strings.Contains(out, "discovery failed") {
@@ -268,7 +268,7 @@ func TestSkillsHydrationReportsErrorsAndChecksSystemPermission(t *testing.T) {
 	}
 	discovery.err = nil
 	discovery.schema, _ = valueobject.NewToolSchema("skills", "catalog", nil, true, enum.ToolPermissionAgent)
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, driver); err != nil {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, driver, driver.FallbackRoot()); err != nil {
 		t.Fatal(err)
 	}
 	if len(skillRecords(conv)) != 1 {
@@ -278,7 +278,7 @@ func TestSkillsHydrationReportsErrorsAndChecksSystemPermission(t *testing.T) {
 	cancel()
 	// Restore system permission: a canceled request must never persist a record.
 	discovery.schema, _ = valueobject.NewToolSchema("skills", "catalog", nil, true, enum.ToolPermissionGeneral)
-	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver); err != context.Canceled {
+	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver, driver.FallbackRoot()); err != context.Canceled {
 		t.Fatalf("cancel = %v", err)
 	}
 	if len(skillRecords(conv)) != 1 {

@@ -2,12 +2,13 @@
 
 ## Status
 
-Proposed — the owner decided the cadence and the gate; the SA resolutions
-below are the binding reading once this is accepted. Decisions 11–15 answer the
-SA review (fold inside a turn, existing piles, final render) and the owner's
-rulings (a workspace rebind re-hydrates, a marker-only gate, a fold as a
-technical reset). Supersedes nothing; composes with ADR-0002 for `/compact`,
-`/clear`, and `/fork`.
+Accepted — 2026-11-25. The owner decided the cadence (hydrate on the first
+turn, stale afterwards, re-hydrate after compaction), the workspace rebind, the
+marker-only gate, and that a fold is a technical reset; the remaining rulings
+are the SA's, made under the owner's delegation. Decisions 11–17 answer the SA
+review and close every open item; Decision 17 was added after the first
+implementation showed a stateless gate drifting from the gate's own reason.
+Supersedes nothing; composes with ADR-0002 for `/compact`, `/clear`, and `/fork`.
 
 ## Context
 
@@ -73,7 +74,14 @@ be paid once per conversation, not once per change.
 7. **The prompt says what the record is.** The system prompt must describe the
    map as an orientation snapshot taken at the start of the conversation, to be
    verified with `read_file`/`search` before being trusted, with
-   `symbol_map(path)` naming the refresh path — never as the current tree.
+   `symbol_map(path)` naming the refresh path — never as the current tree. The
+   final sentence (system prompt line 43):
+
+   > When a symbol map is in context, treat it as an orientation snapshot taken
+   > when the conversation started: it lists declarations, not usages, and it
+   > does not track later edits. Pick a file from it, then verify with
+   > `read_file`/`search` before trusting a path or a declaration; call
+   > `symbol_map(path)` to refresh a folder bound to this thread.
 8. **A workspace rebind re-hydrates.** Detection is the record's own input: the
    newest live `symbol_map` record cites `{path, folders}`, and when that no
    longer matches the running binding the slot is void. The next step renders
@@ -102,15 +110,16 @@ be paid once per conversation, not once per change.
     writes nothing; the room's next turn fills the slot in its first step. One
     rule, two owners, two tests.
 
-12. **No retroactive cleanup.** A room that already accumulated several
-    `symbol_map` records keeps them. This ADR stops new accumulation from the
-    moment it ships; the existing pile leaves the context at the room's next
-    compaction (the sealed copies stay in the archive as history and are never
-    replayed). Dropping older injection records by rewriting the tail is
-    rejected: the store is append-only outside the sanctioned edit and compact
-    paths, a second rewriting path would need its own repair story, and the
-    rewrite invalidates the provider's cached prefix — cost without a
-    correctness gain.
+12. **No retroactive cleanup — final.** A room that already accumulated
+    several `symbol_map` records keeps them. This ADR stops new accumulation
+    from the moment it ships; the existing pile leaves the context at the
+    room's next compaction (the sealed copies stay in the archive as history
+    and are never replayed). There is deliberately no retirement rule and no
+    migration: dropping older injection records by rewriting the tail would
+    need a second rewriting path with its own repair story, and it invalidates
+    the provider's cached prefix — cost without a correctness gain. The
+    bounded outcome is accepted: an existing room may carry its old maps until
+    its next fold.
 
 13. **Final render, precisely.** A render is provisional when it is the
     manager's "is being built" marker or the waiting form that ends in "index
@@ -156,9 +165,11 @@ be paid once per conversation, not once per change.
       folder bound to the room. The gate governs the hydration record, not the
       tool.
     - Accepted consequence: a room whose first turns are gated out gets no map
-      until the next fold, even if the agent later writes code in that root.
-      The map was never owed to it — see Decision 15 for why the fold is the
-      next chance, not a periodic retry.
+      until a fold, a clear, or a different root, even if the agent later gives
+      that root a marker. The verdict is remembered per root (Decision 17) — a
+      stateless gate would hand the room a map of the files the agent just
+      wrote, which is the spam this gate exists to prevent. See Decision 15 for
+      why the fold is the next chance, not a periodic retry.
 
 15. **A fold is a technical reset, and re-hydrating after it is intended.**
     Compaction leaves a room that is a new conversation in everything but id:
@@ -168,6 +179,49 @@ be paid once per conversation, not once per change.
     not a refresh of a stale map (Decision 2). This pairing is deliberate:
     nobody should "fix" the re-hydration as duplicate work, just as nobody
     should add a per-turn retry to the gate.
+
+16. **Rollout is two commits, and the gate is not observed before it ships.**
+    The cadence change (Decisions 1–13) and the gate (Decision 14) land as two
+    commits in one change: the first removes a measured cost without taking
+    anything away, the second removes a map from rooms that would have had one.
+    Two commits keep a regression bisectable and let the gate alone be reverted.
+    The work does not wait for production observation: the cost is measured
+    (≈3k tokens per record, one record per workspace change), the behaviour is
+    offline-testable, and the observation window would itself run on the old
+    behaviour.
+
+17. **A refusal is remembered for the root, not re-probed.** The gate caches
+    its verdict on the room as the root it refused — one nullable string — so a
+    gated-out room pays one probe per episode instead of one per provider step.
+    The state is conversation state, so the aggregate owns it and the
+    repository only persists it.
+
+    - Field: `Conversation.symbolMapRefusedAt` (the refused root, `""` = none),
+      with `SymbolMapRefusedAt()`, `RefuseSymbolMap(root)`, and
+      `AllowSymbolMap()`. Persisted as `symbolMapRefusedAt` (`omitempty`) in
+      `meta.json`, restored by `Load`; absent means "never evaluated", so no
+      migration.
+    - Cleared by the aggregate's own transitions: `Compact()` — both the manual
+      job and the automatic fold — and `ClearHistory()`, which is what `/clear`
+      rebuilds the record from. `SetWorkspace` deliberately does not clear it:
+      `Load` calls it, and the verdict is keyed by root, so a rebind to another
+      root re-evaluates by comparison without needing a write.
+    - `Fork()` does not copy it: a copy is a new room, and its first step
+      reaches the same verdict on the same root with one probe.
+    - A fallback-root refusal is never stored: the comparison is free, so the
+      state only ever holds a marker verdict.
+    - An unreadable root stores no verdict: a failed `store.Open`, a `Stat`
+      that fails for any reason but `fs.ErrNotExist`, and a failed or impossible
+      listing are all "not judged", not "no marker". Only proven absence is an
+      answer, so a transient mount, permission, or remote-backend failure is
+      retried on the next step instead of being remembered. Determinism holds
+      only for a root the gate actually read — opened and stat-able/listing-able
+      — which is why `TestRefusedRootIsNotReprobed` covers readable roots only
+      and `TestUnreadableRootIsNotRemembered` covers all three failure paths.
+    - The step that changes the verdict saves the room right away, so the
+      answer survives a turn that dies before its final save. A failed save
+      leaves the in-memory verdict; the next step re-probes and reaches the
+      same answer, because the gate is deterministic for a root.
 
 ### Why the environment port takes a skip set
 
@@ -186,13 +240,18 @@ split the cadence would exist on paper while the cost it removes stayed in place
   live tail no longer accrues maps that only compaction would remove.
 - The cost is predictable per conversation: at most one map per tail epoch
   (start, after a fold, after clear, after a workspace rebind).
-- No new persisted state: the record's presence in the live tail is the epoch
-  marker, so compaction, clear, and fork need no cadence bookkeeping.
+- No cadence bookkeeping in the tail: the record's presence is the epoch
+  marker, so compaction, clear, and fork need no counters. The one new field
+  (Decision 17) is a per-root verdict, not a counter.
 - The model keeps a fast orientation while `search`/`read_file` stay the source
   of truth, which is what the prompt already prefers.
 - A chat, automation, or channel room whose root is the fallback home pays no
   map at all: no record, no probe, no build — the gate removes the class of
   rooms that never needed one.
+- A gated-out room costs one marker probe per episode, not per provider step:
+  the fallback comparison is free and the refusal is cached for its root
+  (Decision 17). Without that cache a remote workspace driver would pay ~15
+  port calls on every step for a map it will never render.
 
 ### Negative
 
@@ -211,12 +270,14 @@ split the cadence would exist on paper while the cost it removes stayed in place
 - A room rebound from a code root to a gated-out root keeps the earlier map in
   its tail: nothing new is written, and only the prompt's verification rule
   stands between the model and a map of the previous tree.
-- A room whose first turns are gated out never receives a map until the next
-  fold, even after the agent creates code in that root. Accepted deliberately:
-  the gate trades that first orientation for zero context spam in rooms that
-  are still being written.
-- The gate is evidence at one moment: a root that gains its marker later gets
-  no map until a fold (or a rebind) re-opens the slot.
+- A room whose first turns are gated out never receives a map until a fold, a
+  clear, or a different root, even after the agent gives that root a marker.
+  Accepted deliberately: the gate trades that first orientation for zero
+  context spam in rooms that are still being written.
+- The room carries one nullable string for that verdict. It is the only new
+  persisted state this ADR adds, and it can outlive a real change (a marker
+  cloned into the folder later is ignored until the reset) — the intent, not a
+  defect.
 
 ## Non-goals
 
@@ -247,3 +308,17 @@ split the cadence would exist on paper while the cost it removes stayed in place
 - **No hydration at all, on-demand only** (closest to Claude Code): cheapest,
   but every room would start navigation from grep; the owner chose a one-shot
   orientation instead.
+- **A stateless gate** (evaluate on every step while the slot is open): no new
+  state, and a root that gains a marker later hydrates on the next step. It was
+  the first implementation and was rejected: it pays one probe per provider
+  step for a room that will not hydrate (≈15 port calls per step on a remote
+  driver), and it hands a room a map of the files its own agent just wrote —
+  the context spam the gate exists to prevent. It also made Decision 14's
+  stated consequence untrue.
+- **A short "map skipped" record** as the sticky marker: keeps every bit of
+  state in the append-only tail, so fold, clear, and fork already handle it.
+  Rejected: it is the record the owner explicitly excluded ("skip means no
+  record, zero tokens"), and it cannot be honest — either the tool renders it
+  (paying the probe it was meant to avoid) or the application fabricates a tool
+  call it never executed, breaking the rule that injection records come from
+  the tool that produced them.

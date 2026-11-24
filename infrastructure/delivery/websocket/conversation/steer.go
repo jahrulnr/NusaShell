@@ -199,6 +199,10 @@ func (h *Hub) turnSteer(c *conn, cmd command) {
 		c.push(errorFrame(cmd.RequestID, "queue_full", "turn steering submission bound reached"))
 		return
 	}
+	// The input remembers which request submitted it: the user message the
+	// fold writes carries the id, so a reloaded history and the journal's live
+	// bubble name the same submission.
+	in.InputID = cmd.RequestID
 	receipt := t.steering.Submit(in)
 	rec := &steerRecord{inputID: cmd.RequestID, content: in.Text, payload: payload, receipt: receipt}
 	t.steerRecords = append(t.steerRecords, rec)

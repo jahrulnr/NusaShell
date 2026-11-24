@@ -893,7 +893,7 @@ type contextScript struct {
 	err      error
 }
 
-func (s *contextScript) ToolContexts(context.Context) ([]ToolContext, error) {
+func (s *contextScript) ToolContexts(_ context.Context, _ map[string]bool) ([]ToolContext, error) {
 	return s.contexts, s.err
 }
 
@@ -907,7 +907,7 @@ func TestAppendToolContextsRecordsEachCallOnOneMessage(t *testing.T) {
 		{Name: "skills", Input: `{"path":"/ws"}`, Output: "catalog"},
 		{Name: "custom_tools", Input: `{"path":"/ws"}`, Output: "paths"},
 	}}
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, driver); err != nil {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, driver, ""); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -984,7 +984,7 @@ func TestAppendToolContextsDedupsOnNormalizedOutput(t *testing.T) {
 			Dedup:  dedup,
 		}}
 	}
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{contexts: contexts("2026-01-01T00:00:00Z", "nusashell")}); err != nil {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{contexts: contexts("2026-01-01T00:00:00Z", "nusashell")}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(conv.Messages()); got != 2 {
@@ -992,7 +992,7 @@ func TestAppendToolContextsDedupsOnNormalizedOutput(t *testing.T) {
 	}
 
 	// Same semantic payload behind a fresh timestamp: still one record.
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{contexts: contexts("2026-01-01T00:00:13Z", "nusashell")}); err != nil {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{contexts: contexts("2026-01-01T00:00:13Z", "nusashell")}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(conv.Messages()); got != 2 {
@@ -1000,7 +1000,7 @@ func TestAppendToolContextsDedupsOnNormalizedOutput(t *testing.T) {
 	}
 
 	// A semantic change re-records with the full output, timestamp and all.
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{contexts: contexts("2026-01-01T00:00:26Z", "nusashell 1.2")}); err != nil {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{contexts: contexts("2026-01-01T00:00:26Z", "nusashell 1.2")}, ""); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -1024,7 +1024,7 @@ func TestAppendToolContextsReRecordsOnlyChanged(t *testing.T) {
 			{Name: "skills", Input: `{"path":"/ws"}`, Output: skills},
 			{Name: "custom_tools", Input: `{"path":"/ws/a"}`, Output: pathsA},
 			{Name: "custom_tools", Input: `{"path":"/ws/b"}`, Output: pathsB},
-		}})
+		}}, "")
 	}
 	if err := pass("catalog", "bin-a", "bin-b"); err != nil {
 		t.Fatal(err)
@@ -1058,14 +1058,14 @@ func TestAppendToolContextsReRecordsOnlyChanged(t *testing.T) {
 func TestAppendToolContextsEmptyAndError(t *testing.T) {
 	d := Deps{Convs: repoconversation.NewConversationRepository(t.TempDir())}
 	conv := seedRoom(t, d.Convs, "room", "go")
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{}); err != nil {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(conv.Messages()); got != 1 {
 		t.Fatalf("empty contexts wrote a message — history = %d, want 1", got)
 	}
 	want := errors.New("production failed")
-	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{err: want}); !errors.Is(err, want) {
+	if err := d.appendToolContexts(t.Context(), conv.ID(), conv, &contextScript{err: want}, ""); !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v", err, want)
 	}
 	if got := len(conv.Messages()); got != 1 {
@@ -1125,7 +1125,7 @@ func TestBundleToolContextsRunsSystemToolsSorted(t *testing.T) {
 		"agent_only": &skillDiscovery{schema: agentSchema},
 	}}
 	ctx := dservice.WithWorkspaceDir(t.Context(), "/ws")
-	contexts, err := driver.ToolContexts(ctx)
+	contexts, err := driver.ToolContexts(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1145,10 +1145,10 @@ func TestBundleToolContextsRunsSystemToolsSorted(t *testing.T) {
 	}
 
 	// Two passes differing only in the ticking field record once.
-	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver); err != nil {
+	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver, "/ws"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver); err != nil {
+	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver, "/ws"); err != nil {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
@@ -1177,14 +1177,14 @@ func TestBundleToolContextsPinCarriesExtraFolders(t *testing.T) {
 	}}
 	ctx := dservice.WithWorkspaceDir(t.Context(), "/ws")
 	ctx = dservice.WithExtraFolders(ctx, []string{"/ws/other"})
-	contexts, err := driver.ToolContexts(ctx)
+	contexts, err := driver.ToolContexts(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(contexts) != 1 || contexts[0].Input != `{"path":"/ws","folders":["/ws/other"]}` {
 		t.Fatalf("context input = %+v, want the full pin shape", contexts)
 	}
-	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver); err != nil {
+	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver, "/ws"); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.appendWorkspaceContext(ctx, conv.ID(), conv, "/ws"); err != nil {
@@ -1195,7 +1195,7 @@ func TestBundleToolContextsPinCarriesExtraFolders(t *testing.T) {
 	}
 	dead, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := d.appendToolContexts(dead, conv.ID(), conv, driver); err != context.Canceled {
+	if err := d.appendToolContexts(dead, conv.ID(), conv, driver, "/ws"); err != context.Canceled {
 		t.Fatalf("cancel = %v", err)
 	}
 	if got := len(conv.Messages()); got != 2 {

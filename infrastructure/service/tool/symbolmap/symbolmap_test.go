@@ -141,6 +141,30 @@ func writeFile(t *testing.T, dir, name, body string) {
 	}
 }
 
+// The hydration gate is the application's rule, not the tool's: a folder
+// the gate keeps out of a room's orientation record still maps when the
+// model asks for it by path. Here the extra folder carries no project
+// marker at all — the on-demand call answers with its map anyway.
+func TestOnDemandMapWorksForGatedRoot(t *testing.T) {
+	ws, gated := t.TempDir(), t.TempDir()
+	writeFile(t, ws, "main.go", "package main\n\nfunc main() {}\n")
+	writeFile(t, gated, "draft.go", "package draft\n\nfunc Draft() {}\n")
+	tool := testTool(t, ws)
+	ctx := dservice.WithWorkspaceDir(context.Background(), ws)
+	ctx = dservice.WithExtraFolders(ctx, []string{gated})
+	call, err := entity.NewToolCall("call_test", "symbol_map", `{"path":"`+gated+`"}`, enum.TooltypeOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := tool.Execute(ctx, call, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Text, "is being built") || !strings.Contains(res.Text, "Draft") {
+		t.Fatalf("on-demand must map a gated root, got:\n%s", res.Text)
+	}
+}
+
 func TestExecuteYieldsMapAfterBuild(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {

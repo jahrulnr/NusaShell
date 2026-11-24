@@ -1015,7 +1015,17 @@ function onFrame(f) {
   // A fold just ended: the history is smaller than any size reported before
   // it, so the meter asks the server rather than keep showing the old one.
   if (compacting && r.live?.phase?.phase !== 'compacting') fetchContext(r, { force: true });
-  if (f.type === 'turn.steer' && f.payload?.final) r.steers = r.steers.filter((x) => x.inputId !== inputId);
+  if (f.type === 'turn.steer' && inputId) {
+    // The frame carries the input's text and uploads, not the annotation
+    // picks that went with it. The tab that submitted this steer still holds
+    // them, so the bubble it draws shows the marks it made instead of only
+    // the screenshot.
+    const mine = r.steers.find((x) => x.inputId === inputId);
+    const picks = (mine?.files || []).filter((x) => x.pickId);
+    const seg = r.live.segments.find((x) => x.kind === 'steer' && x.inputId === inputId);
+    if (seg && picks.length && !seg.annotations) seg.annotations = picks;
+    if (f.payload?.final) r.steers = r.steers.filter((x) => x.inputId !== inputId);
+  }
   // A provider call reports the size it was sent; an agent's figure comes from its own reports.
   if (f.type === 'turn.step_finished' && f.payload?.usage && r.ctx && !selection(r).agentId) r.ctx.live = f.payload.usage.totalInputTokens;
   if (f.type === 'turn.completed' || f.type === 'turn.failed') onTerminal(r, f);
@@ -1228,7 +1238,7 @@ async function onTerminal(r, f) {
     if (live?.kind === 'send' && (live.userText || live.userFiles?.length || live.userRecording) && p.userMessagePersisted === false) {
       restoreDraft(r, live.userText, live.userRefs, live.userFiles, live.userRecording);
     }
-    if (p.status !== 408) r.failed = { status: p.status, code: p.code, message: p.message || 'The turn failed.' };
+    if (p.status !== 408) r.failed = { status: p.status, code: p.code, message: p.message || '' };
     else if (!live?.canceling) toast('Turn was interrupted.', 'info');
   }
   r.settling = true;

@@ -145,16 +145,21 @@ func toAttachment(a valueobject.Attachment) attachmentDTO {
 }
 
 type messageDTO struct {
-	ID          string           `json:"id"`
-	Role        string           `json:"role"`
-	Content     string           `json:"content"`
-	Parts       []messagePartDTO `json:"parts,omitempty"`
-	UserType    string           `json:"userType,omitempty"`
-	Finish      string           `json:"finishReason,omitempty"`
-	ToolCalls   []toolCallDTO    `json:"toolCalls,omitempty"`
-	Attachments []attachmentDTO  `json:"attachments,omitempty"`
-	References  []referenceDTO   `json:"references,omitempty"`
-	Annotations []annotationDTO  `json:"annotations,omitempty"`
+	ID       string           `json:"id"`
+	Role     string           `json:"role"`
+	Content  string           `json:"content"`
+	Parts    []messagePartDTO `json:"parts,omitempty"`
+	UserType string           `json:"userType,omitempty"`
+	// InputID is the client request that submitted the message — a steer's
+	// requestId — so a reloaded history line can be matched against the live
+	// steering bubble the turn journal replays. Present on steer-written user
+	// messages only.
+	InputID     string          `json:"inputId,omitempty"`
+	Finish      string          `json:"finishReason,omitempty"`
+	ToolCalls   []toolCallDTO   `json:"toolCalls,omitempty"`
+	Attachments []attachmentDTO `json:"attachments,omitempty"`
+	References  []referenceDTO  `json:"references,omitempty"`
+	Annotations []annotationDTO `json:"annotations,omitempty"`
 	// Recording is the browser recording a user message attached; only
 	// id and status reach the UI — the summary is model context.
 	Recording *recordingDTO `json:"recording,omitempty"`
@@ -196,6 +201,7 @@ func toMessage(m entity.Message) messageDTO {
 	// input ("origin") vs synthetic artifacts like compaction checkpoints.
 	if m.Role() == enum.RoleUser {
 		out.UserType = m.UserType().String()
+		out.InputID = m.InputID()
 	}
 	for _, t := range m.ToolCalls() {
 		out.ToolCalls = append(out.ToolCalls, toToolCall(t))

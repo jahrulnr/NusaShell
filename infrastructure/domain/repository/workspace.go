@@ -29,8 +29,17 @@ type Workspace interface {
 }
 
 type WorkspaceSession interface {
+	// FS is the session's tree as an fs.FS. It reports a directory it
+	// cannot list as an error, never as an empty listing: a caller reading
+	// absence from a listing (the symbol-map gate) would otherwise turn a
+	// permission or transport failure into "this root has no marker".
 	FS() fs.FS
 	CreateFile(name string) (io.WriteCloser, error)
+	// Stat reports a missing name as an error wrapping fs.ErrNotExist.
+	// Callers that must tell "absent" from "unreadable" — the symbol-map
+	// gate decides whether a root proves a project — read only that
+	// sentinel as absence; any other error means the session could not
+	// answer, so a remote driver maps its own not-found onto it.
 	Stat(name string) (fs.FileInfo, error)
 	OpenRegular(name string) (io.ReadCloser, fs.FileInfo, error)
 	ReadFile(name string) ([]byte, error)

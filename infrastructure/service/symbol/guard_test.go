@@ -308,3 +308,32 @@ func TestSkipVerdictExpires(t *testing.T) {
 		t.Fatal("expired verdict should re-probe")
 	}
 }
+
+// The exported marker lists are exactly what the guard probes: every fixed
+// marker counts as a project once it exists, and every glob marker matches
+// a root-level name. The hydration gate reads the same lists, so this is
+// what keeps the two gates from disagreeing about what a project root is.
+func TestProjectMarkerListsAreTheGuardProbe(t *testing.T) {
+	for _, name := range ProjectMarkers() {
+		root := &memRoot{files: map[string]string{name: "x"}}
+		if !hasMarker(context.Background(), root) {
+			t.Errorf("marker %q is not honored by hasMarker", name)
+		}
+	}
+	// A ".git" directory is a directory, so ReadFile can only reach it
+	// through its HEAD — the probe covers that path too.
+	if !hasMarker(context.Background(), &memRoot{files: map[string]string{".git/HEAD": "ref: refs/heads/main\n"}}) {
+		t.Error("a .git directory is not honored by hasMarker")
+	}
+	for _, glob := range ProjectMarkerGlobs() {
+		name := strings.ReplaceAll(glob, "*", "app")
+		if !markerMatch(name) {
+			t.Errorf("glob %q does not match %q", glob, name)
+		}
+	}
+	for _, name := range []string{"main.go", "go.mod", "Gemfile"} {
+		if markerMatch(name) {
+			t.Errorf("markerMatch treats %q as a glob marker", name)
+		}
+	}
+}

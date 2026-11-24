@@ -100,7 +100,10 @@ func (h *Hub) Steer(convID, text string) bool {
 			inputID: inputID,
 			content: text,
 			payload: messageInputPayload{Content: text},
-			receipt: t.steering.Submit(valueobject.UserInput{Text: text}),
+			// The input remembers the id it was submitted under, so the user
+			// message the fold writes names the same submission the live
+			// bubble does.
+			receipt: t.steering.Submit(valueobject.UserInput{Text: text, InputID: inputID}),
 		}
 		t.steerRecords = append(t.steerRecords, rec)
 		t.steerByInput[inputID] = rec

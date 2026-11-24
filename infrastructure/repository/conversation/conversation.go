@@ -127,6 +127,11 @@ var writeFileAtomic = writeFileAtomicImpl
 // directory publish goes through it.
 var renamePath = os.Rename
 
+// removeAllPath drops a directory the store no longer serves — the copy a
+// clear replaced. It is a var so a test can make the drop fail and see that
+// the leftover is reported rather than forgotten.
+var removeAllPath = os.RemoveAll
+
 // writeFileAtomicImpl writes via tmp+rename — a crash mid-write leaves the
 // old file or nothing, never a torn target. fsync before and after the
 // rename matters as much as the rename: without it a crash can resurrect
@@ -173,14 +178,21 @@ func writeFileAtomicImpl(path string, data []byte, perm os.FileMode) error {
 
 func (r *ConversationRepository) readMeta(id string) (metaRecord, error) {
 	m, err := r.readMetaUnvalidated(id)
-	if errors.Is(err, os.ErrNotExist) {
-		// The name is empty: a swap interrupted between its two renames
-		// parks the live room, and putting it back is what keeps a failed
-		// clear from making the room disappear. Callers hold the store
+	if err != nil && (errors.Is(err, os.ErrNotExist) || namedNonDir(r.convDir(id))) {
+		// The name is empty, or held by something that is not a directory — a
+		// plain file fails this read with ENOTDIR, which is not os.ErrNotExist.
+		// Both shapes belong to the repair: a swap interrupted between its two
+		// renames parks the live room, and putting it back is what keeps a
+		// failed clear from making the room disappear. Callers hold the store
 		// lock, which the repair's renames need.
-		if rerr := r.recoverRoom(id); rerr == nil {
-			m, err = r.readMetaUnvalidated(id)
+		rerr := r.recoverRoom(id)
+		if rerr != nil {
+			// The repair refused — the name is held by something that is not
+			// this room's record. Say so instead of reporting the room gone,
+			// and in the same words whatever shape the occupant has.
+			return metaRecord{}, rerr
 		}
+		m, err = r.readMetaUnvalidated(id)
 	}
 	if err != nil {
 		return metaRecord{}, err
