@@ -76,6 +76,13 @@ type Uploads interface {
 	Recorded(ctx context.Context, convID, id string) (*valueobject.RecordingRef, error)
 }
 
+// PlanSink binds one room's update_plan calls to the running turn's
+// event stream — the same per-room registry role SessionStore plays for
+// exec sessions. *toolplan.Dispatcher satisfies it.
+type PlanSink interface {
+	Bind(convID string, sink event.TurnEventHandler) (unbind func())
+}
+
 // journaledFrame is one sequenced frame retained for turn.watch replay.
 type journaledFrame struct {
 	seq int
@@ -176,6 +183,10 @@ type Hub struct {
 	sender Sender
 	// uploads resolves a send's files; nil rejects sends that name any.
 	uploads Uploads
+	// planEvents is where a room's update_plan calls find the running
+	// turn's event stream; nil drops those events (the tool call and its
+	// output still record normally).
+	planEvents PlanSink
 
 	mu         sync.Mutex
 	turns      map[string]*turn
@@ -210,6 +221,10 @@ func NewHub(ctx context.Context, sender Sender) *Hub {
 // UseUploads sets how a send's uploads become attachments; without it a
 // send naming uploads is rejected.
 func (h *Hub) UseUploads(u Uploads) { h.uploads = u }
+
+// UsePlanEvents sets the registry update_plan resolves the room's live
+// turn through; without it plan events drop while the call still records.
+func (h *Hub) UsePlanEvents(p PlanSink) { h.planEvents = p }
 
 // SocketFull reports whether the socket bound is reached — the upgrade
 // edge checks it before upgrading so a full hub answers 503 problem+json
@@ -571,6 +586,11 @@ func (h *Hub) runTurn(t *turn) {
 		for _, fn := range listeners {
 			fn(t.conversationID, ev)
 		}
+	}
+	// update_plan emits on the same goroutine the send runs on, so its
+	// events land journaled between the call and result frames.
+	if h.planEvents != nil {
+		defer h.planEvents.Bind(t.conversationID, onEvent)()
 	}
 	var (
 		persisted bool

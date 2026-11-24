@@ -64,7 +64,7 @@ func New(opts coretext.Options) *Service {
 // Send performs one responses attempt — request marshal, POST, decode,
 // then append the assistant message and usage onto conv. Stream mode is
 // selected by prov; events reach onEvent uniformly either way.
-func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) error {
+func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) (retErr error) {
 	stream := prov.StreamMode()
 	body, err := encodeRequest(conv, model, stream, wire.MediaRoot{Dir: coretext.FileRoot(conv, s.fileRoot), Store: s.fileStore})
 	if err != nil {
@@ -75,6 +75,9 @@ func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *
 		return err
 	}
 	s.logAppend(ctx, "provider.request", json.RawMessage(raw))
+
+	att := coretext.NewAttempt(conv, prov, model.ID(), stream, len(raw), len(body.Input), len(body.Tools), body.Tools)
+	defer func() { att.LogStats(ctx, s.log, conv, retErr) }()
 
 	// prov.Endpoint() is the provider's base URL (e.g.
 	// https://api.openai.com/v1); this wire lives at /responses under it.
@@ -114,7 +117,7 @@ func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *
 	}
 
 	if stream {
-		return s.streamResponse(ctx, resp, conv, onEvent)
+		return s.streamResponse(ctx, resp, conv, onEvent, att)
 	}
 	return s.unaryResponse(ctx, resp, conv, onEvent)
 }

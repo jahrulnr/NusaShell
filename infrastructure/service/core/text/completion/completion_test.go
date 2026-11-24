@@ -1457,3 +1457,132 @@ func TestUnaryBodyChunksResetTheIdleDeadline(t *testing.T) {
 		t.Fatalf("answer lost: %+v", conv.Last())
 	}
 }
+
+// statsLog captures entries the way the JSONL sink writes them —
+// normalized through a marshal round-trip, so tests read the exact
+// record shape a log line would carry.
+type statsLog struct {
+	recs []statsRec
+}
+
+type statsRec struct {
+	kind  string
+	entry map[string]any
+}
+
+func (l *statsLog) Append(_ context.Context, kind string, entry any) error {
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	l.recs = append(l.recs, statsRec{kind, m})
+	return nil
+}
+
+func (l *statsLog) Close() error { return nil }
+
+func (l *statsLog) last(t *testing.T, kind string) map[string]any {
+	t.Helper()
+	for i := len(l.recs) - 1; i >= 0; i-- {
+		if l.recs[i].kind == kind {
+			return l.recs[i].entry
+		}
+	}
+	t.Fatalf("no %s record logged", kind)
+	return nil
+}
+
+// A settled unary attempt emits one provider.stats record carrying the
+// request shape, the attempt's usage delta, and the finish verdict.
+func TestProviderStatsUnary(t *testing.T) {
+	log := &statsLog{}
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"model": "m", "choices": []any{map[string]any{
+				"index":         0,
+				"message":       map[string]any{"role": "assistant", "content": "hi"},
+				"finish_reason": "stop"}},
+			"usage": map[string]any{"prompt_tokens": 1000, "completion_tokens": 50,
+				"total_tokens": 1050, "prompt_tokens_details": map[string]any{"cached_tokens": 900}},
+		})
+	})
+	svc.log = log
+
+	conv := newConv(t)
+	conv.SetSystemPrompt("be brief")
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	tool, _ := valueobject.NewToolSchema("get_time", "current time", json.RawMessage(`{"type":"object"}`), true, enum.ToolPermissionAgent)
+	conv.SetTools([]valueobject.ToolSchema{tool})
+	model, _ := entity.NewModel("m")
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec := log.last(t, "provider.stats")
+	if rec["model"] != "m" || rec["stream"] != false || rec["status"] != "ok" || rec["status_code"] != float64(200) {
+		t.Fatalf("identity fields: %v", rec)
+	}
+	if rec["finish_reason"] != "stop" {
+		t.Fatalf("finish_reason: %v", rec)
+	}
+	if rec["messages"] != float64(2) || rec["tools"] != float64(1) {
+		t.Fatalf("request shape: %v", rec)
+	}
+	if b, _ := rec["request_bytes"].(float64); b <= 0 {
+		t.Fatalf("request_bytes: %v", rec)
+	}
+	if b, _ := rec["tool_schema_bytes"].(float64); b <= 0 {
+		t.Fatalf("tool_schema_bytes: %v", rec)
+	}
+	// Inclusive usage normalizes: uncached input, cached read, output.
+	if rec["input"] != float64(100) || rec["cache_read"] != float64(900) || rec["output"] != float64(50) {
+		t.Fatalf("usage delta: %v", rec)
+	}
+	if rec["ttft_ms"] != float64(0) {
+		t.Fatalf("unary ttft_ms must be 0: %v", rec)
+	}
+	if d, _ := rec["duration_ms"].(float64); d < 0 {
+		t.Fatalf("duration_ms: %v", rec)
+	}
+	stats := 0
+	for _, r := range log.recs {
+		if r.kind == "provider.stats" {
+			stats++
+		}
+	}
+	if stats != 1 {
+		t.Fatalf("provider.stats must fire exactly once per attempt, got %d", stats)
+	}
+}
+
+// A failed attempt still emits provider.stats — with status/error_kind
+// and no finish verdict.
+func TestProviderStatsError(t *testing.T) {
+	log := &statsLog{}
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"slow down","type":"rate_limit_error"}}`))
+	})
+	svc.log = log
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err == nil {
+		t.Fatal("expected a 429 failure")
+	}
+	rec := log.last(t, "provider.stats")
+	if rec["status"] != "error" || rec["status_code"] != float64(429) || rec["error_kind"] != "too_many_requests" {
+		t.Fatalf("error fields: %v", rec)
+	}
+	if rec["finish_reason"] != "" || rec["input"] != float64(0) {
+		t.Fatalf("failed attempt must report no verdict or usage: %v", rec)
+	}
+}

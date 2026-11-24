@@ -32,7 +32,7 @@ const maxCallIndex = 1024
 // deltas in order, treat a terminal finish_reason/[DONE] as the only
 // commit point, and bail on idle past s.idle (reset per chunk) — reasoning
 // models are slow, dead connections are not.
-func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler) error {
+func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler, att *coretext.Attempt) error {
 	events := make(chan sse)
 	errs := make(chan error, 1)
 	done := make(chan struct{})
@@ -103,6 +103,9 @@ func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv 
 			return s.commitStream(conv, onEvent, content.String(), reasoning.String(), reasoningContent.String(), details, completeToolCalls(calls, true), finish, usage, logged)
 		case ev := <-events:
 			timer.Reset(s.idle)
+			if len(ev.data) > 0 || ev.done {
+				att.MarkFirst() // first payload or the [DONE] sentinel — never keepalive comments
+			}
 			if ev.done {
 				doneSeen = true
 				continue

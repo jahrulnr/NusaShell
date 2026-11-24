@@ -183,6 +183,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	// signal arrival. Deferred so an early Serve failure still closes it.
 	hub := wsconversation.NewHub(context.WithoutCancel(ctx), eng.conversations)
 	hub.UseUploads(eng.conversations)
+	hub.UsePlanEvents(eng.planEvents)
 	eng.conversations.UseShells(shell.Local{})
 	eng.agents.UseShells(shell.Local{})
 	eng.conversations.UseThreadViews(repothreadview.New(eng.db))

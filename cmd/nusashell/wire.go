@@ -59,6 +59,8 @@ import (
 	toolmcp "github.com/jahrulnr/nusashell/infrastructure/service/tool/mcp"
 	toolmedia "github.com/jahrulnr/nusashell/infrastructure/service/tool/media"
 	toolmemory "github.com/jahrulnr/nusashell/infrastructure/service/tool/memory"
+	toolplan "github.com/jahrulnr/nusashell/infrastructure/service/tool/plan"
+	toolproject "github.com/jahrulnr/nusashell/infrastructure/service/tool/project"
 	toolskill "github.com/jahrulnr/nusashell/infrastructure/service/tool/skill"
 	toolsummary "github.com/jahrulnr/nusashell/infrastructure/service/tool/summary"
 	toolexec "github.com/jahrulnr/nusashell/infrastructure/service/tool/terminal"
@@ -94,6 +96,9 @@ type engine struct {
 	toolOutputs drepo.ToolOutput
 	// mcpTools offers the tools of the owner's MCP servers.
 	mcpTools *toolmcp.Registry
+	// planEvents is the registry a room's update_plan calls resolve their
+	// live turn sink through; delivery binds one per running turn.
+	planEvents *toolplan.Dispatcher
 	// agentRepo resolves an agent's saved environment.
 	agentRepo drepo.Agent
 	// skills is the skill catalog reference search offers.
@@ -209,13 +214,28 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	if err != nil {
 		return nil, err
 	}
+	// project_context is the second harness-side hydration tool: the
+	// environment runs it before each provider call and persists the
+	// AGENTS.md + layout render as a deduped injection record.
+	projectContext, err := toolproject.NewProjectContextTool(workspaceStore, workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
 	// The compaction checkpoint contract rides no room catalog — the
 	// compaction job offers it alone inside its scratch dialogue.
 	summaryTool, err := toolsummary.NewSummaryTool()
 	if err != nil {
 		return nil, err
 	}
-	for _, tool := range []dservice.Tool{readFile, searchFiles, writeFile, patchFile, readMedia, execTool, execSession, writeStdin, workspaceRecord, skills, readSkill, customTools} {
+	// update_plan events reach the running turn's own event sink —
+	// delivery binds one per room through this registry, the role
+	// SessionStore plays for exec sessions.
+	planEvents := toolplan.NewDispatcher()
+	updatePlan, err := toolplan.NewUpdatePlanTool(planEvents)
+	if err != nil {
+		return nil, err
+	}
+	for _, tool := range []dservice.Tool{readFile, searchFiles, writeFile, patchFile, readMedia, execTool, execSession, writeStdin, workspaceRecord, projectContext, skills, readSkill, customTools, updatePlan} {
 		tools[tool.Schema().Name()] = tool
 	}
 	// Web search/fetch run locally through searchwire so the bound model
@@ -404,6 +424,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		tools:         tools,
 		toolOutputs:   toolOutputs,
 		mcpTools:      mcpTools,
+		planEvents:    planEvents,
 		agentRepo:     agentRepo,
 		skills:        skillStore,
 		memory:        memory,

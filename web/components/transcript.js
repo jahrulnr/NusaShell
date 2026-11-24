@@ -179,7 +179,7 @@ function UserMessage({ room, msg, text, refs, files, recording, pending }) {
     </span>`}
     ${text && relay && html`<div class=${cx('max-w-[85%] min-w-0 sm:min-w-72 rounded-2xl bg-raised border border-accent/25 overflow-hidden break-words', pending && 'opacity-70')}>
       <${RelayHead} relay=${relay} />
-      ${shown && html`<div class="px-3.5 py-2.5"><${UserMarkdown} text=${shown} refs=${shownRefs} room=${room} /></div>`}
+      ${shown && html`<div class="px-3.5 py-2.5"><${Markdown} text=${shown} room=${room} /></div>`}
     </div>`}
     ${text && !relay && html`<div class=${cx('max-w-[85%] rounded-2xl bg-raised border border-line px-3.5 py-2 break-words', pending && 'opacity-70')}>
       ${reply && html`<div class=${cx('border-l-2 border-accent/60 pl-2.5 text-[13px] leading-snug', shown && 'mb-2')}>

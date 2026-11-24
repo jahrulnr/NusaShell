@@ -67,7 +67,7 @@ func New(opts coretext.Options) *Service {
 // decode, then append the assistant message and usage onto conv. Stream
 // mode selects :streamGenerateContent?alt=sse; events reach onEvent
 // uniformly either way.
-func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) error {
+func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) (retErr error) {
 	stream := prov.StreamMode()
 	body, err := encodeRequest(conv, model, wire.MediaRoot{Dir: coretext.FileRoot(conv, s.fileRoot), Store: s.fileStore})
 	if err != nil {
@@ -78,6 +78,15 @@ func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *
 		return err
 	}
 	s.logAppend(ctx, "provider.request", json.RawMessage(raw))
+
+	// This wire wraps every declaration in a single tools entry — the
+	// schema count lives one level down in functionDeclarations.
+	decls := 0
+	for _, tb := range body.Tools {
+		decls += len(tb.FunctionDeclarations)
+	}
+	att := coretext.NewAttempt(conv, prov, model.ID(), stream, len(raw), len(body.Contents), decls, body.Tools)
+	defer func() { att.LogStats(ctx, s.log, conv, retErr) }()
 
 	// prov.Endpoint() is the API base (e.g.
 	// https://generativelanguage.googleapis.com/v1beta); the model id
@@ -124,7 +133,7 @@ func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *
 	}
 
 	if stream {
-		return s.streamResponse(ctx, resp, conv, onEvent)
+		return s.streamResponse(ctx, resp, conv, onEvent, att)
 	}
 	return s.unaryResponse(ctx, resp, conv, onEvent)
 }

@@ -22,7 +22,7 @@ import (
 // and adopt the latest signature), the last finishReason/usageMetadata
 // win, and EOF is the commit point. An idle past s.idle (reset per chunk)
 // is a dead connection — thinking phases run silent for minutes.
-func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler) error {
+func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler, att *coretext.Attempt) error {
 	events := make(chan []byte)
 	errs := make(chan error, 1)
 	done := make(chan struct{})
@@ -90,6 +90,7 @@ func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv 
 			if len(data) == 0 {
 				continue // keepalive heartbeat — traffic, not payload
 			}
+			att.MarkFirst() // first real payload — heartbeats are dropped above
 			logged = append(logged, data)
 			var rb ResponseBody
 			if err := json.Unmarshal(data, &rb); err != nil {

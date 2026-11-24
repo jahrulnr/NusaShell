@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
@@ -976,5 +977,87 @@ func TestStreamEmptyTerminalMessageUsesFallbackContent(t *testing.T) {
 	}
 	if got := conv.Last().Content(); got != "hello" {
 		t.Fatalf("content = %q, want fallback text hello", got)
+	}
+}
+
+// statsLog captures entries the way the JSONL sink writes them —
+// normalized through a marshal round-trip, so tests read the exact
+// record shape a log line would carry.
+type statsLog struct {
+	recs []statsRec
+}
+
+type statsRec struct {
+	kind  string
+	entry map[string]any
+}
+
+func (l *statsLog) Append(_ context.Context, kind string, entry any) error {
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	l.recs = append(l.recs, statsRec{kind, m})
+	return nil
+}
+
+func (l *statsLog) Close() error { return nil }
+
+func (l *statsLog) last(t *testing.T, kind string) map[string]any {
+	t.Helper()
+	for i := len(l.recs) - 1; i >= 0; i-- {
+		if l.recs[i].kind == kind {
+			return l.recs[i].entry
+		}
+	}
+	t.Fatalf("no %s record logged", kind)
+	return nil
+}
+
+// A settled stream attempt emits provider.stats: TTFT marks the first
+// event, usage comes off the terminal response object, and the verdict
+// maps to the domain finish.
+func TestProviderStatsStream(t *testing.T) {
+	log := &statsLog{}
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush() // headers now; the first event waits — TTFT must measure it
+		time.Sleep(30 * time.Millisecond)
+		w.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"status\":\"in_progress\"}}\n\n" +
+			"data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hi\"}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}],\"usage\":{\"input_tokens\":100,\"output_tokens\":15,\"input_tokens_details\":{\"cached_tokens\":40}}}}\n\n"))
+	})
+	svc.log = log
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	tool, _ := valueobject.NewToolSchema("get_time", "current time", json.RawMessage(`{"type":"object"}`), true, enum.ToolPermissionAgent)
+	conv.SetTools([]valueobject.ToolSchema{tool})
+	model, _ := entity.NewModel("gpt-x")
+
+	if err := svc.Send(context.Background(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec := log.last(t, "provider.stats")
+	if rec["model"] != "gpt-x" || rec["stream"] != true || rec["status"] != "ok" || rec["status_code"] != float64(200) {
+		t.Fatalf("identity fields: %v", rec)
+	}
+	if rec["finish_reason"] != "stop" {
+		t.Fatalf("finish_reason: %v", rec)
+	}
+	if rec["messages"] != float64(1) || rec["tools"] != float64(1) {
+		t.Fatalf("request shape: %v", rec)
+	}
+	if rec["input"] != float64(60) || rec["cache_read"] != float64(40) || rec["output"] != float64(15) {
+		t.Fatalf("usage delta: %v", rec)
+	}
+	if tf, _ := rec["ttft_ms"].(float64); tf < 20 {
+		t.Fatalf("ttft_ms must mark the delayed first event: %v", rec)
 	}
 }

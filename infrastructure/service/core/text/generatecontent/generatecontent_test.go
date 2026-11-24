@@ -1052,3 +1052,89 @@ func TestExplicitMaxOutputLeavesRoomForPrompt(t *testing.T) {
 			body.GenerationConfig.MaxOutput, input)
 	}
 }
+
+// statsLog captures entries the way the JSONL sink writes them —
+// normalized through a marshal round-trip, so tests read the exact
+// record shape a log line would carry.
+type statsLog struct {
+	recs []statsRec
+}
+
+type statsRec struct {
+	kind  string
+	entry map[string]any
+}
+
+func (l *statsLog) Append(_ context.Context, kind string, entry any) error {
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	l.recs = append(l.recs, statsRec{kind, m})
+	return nil
+}
+
+func (l *statsLog) Close() error { return nil }
+
+func (l *statsLog) last(t *testing.T, kind string) map[string]any {
+	t.Helper()
+	for i := len(l.recs) - 1; i >= 0; i-- {
+		if l.recs[i].kind == kind {
+			return l.recs[i].entry
+		}
+	}
+	t.Fatalf("no %s record logged", kind)
+	return nil
+}
+
+// A settled unary attempt emits provider.stats — contents entries count
+// the wire turns (the system prompt rides systemInstruction, not a
+// content), and usage normalizes off usageMetadata.
+func TestProviderStatsUnary(t *testing.T) {
+	log := &statsLog{}
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []any{map[string]any{
+				"content":      map[string]any{"role": "model", "parts": []any{map[string]any{"text": "hi"}}},
+				"finishReason": "STOP",
+			}},
+			"usageMetadata": map[string]any{
+				"promptTokenCount": 1000, "candidatesTokenCount": 40, "thoughtsTokenCount": 10,
+				"cachedContentTokenCount": 900,
+			},
+		})
+	})
+	svc.log = log
+
+	conv := newConv(t)
+	conv.SetSystemPrompt("be brief")
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	tool, _ := valueobject.NewToolSchema("get_time", "current time", json.RawMessage(`{"type":"object"}`), true, enum.ToolPermissionAgent)
+	conv.SetTools([]valueobject.ToolSchema{tool})
+	model, _ := entity.NewModel("gemini-x")
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec := log.last(t, "provider.stats")
+	if rec["model"] != "gemini-x" || rec["stream"] != false || rec["status"] != "ok" || rec["status_code"] != float64(200) {
+		t.Fatalf("identity fields: %v", rec)
+	}
+	if rec["finish_reason"] != "stop" {
+		t.Fatalf("finish_reason: %v", rec)
+	}
+	if rec["messages"] != float64(1) || rec["tools"] != float64(1) {
+		t.Fatalf("request shape: %v", rec)
+	}
+	if rec["input"] != float64(100) || rec["cache_read"] != float64(900) || rec["output"] != float64(50) {
+		t.Fatalf("usage delta: %v", rec)
+	}
+	if rec["ttft_ms"] != float64(0) {
+		t.Fatalf("unary ttft_ms must be 0: %v", rec)
+	}
+}

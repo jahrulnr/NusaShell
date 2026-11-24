@@ -47,7 +47,7 @@ type blockAcc struct {
 // cumulative usage, message_stop is the only commit point, and an idle
 // past s.idle (reset per event) is a dead connection — thinking phases
 // run minutes with no text output.
-func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler) error {
+func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv *aggregate.Conversation, onEvent event.TurnEventHandler, att *coretext.Attempt) error {
 	events := make(chan sse)
 	errs := make(chan error, 1)
 	done := make(chan struct{})
@@ -111,6 +111,7 @@ func (s *Service) streamResponse(ctx context.Context, resp *http.Response, conv 
 			if len(ev.data) == 0 {
 				continue
 			}
+			att.MarkFirst() // first real payload — keepalives are dropped above
 			var se StreamEvent
 			if err := json.Unmarshal(ev.data, &se); err != nil {
 				continue // partial/garbage lines are dropped, not fatal

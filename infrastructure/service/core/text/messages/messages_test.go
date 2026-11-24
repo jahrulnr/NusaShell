@@ -1230,3 +1230,90 @@ func TestLargeImageIsSentAsTheJPEGItBecame(t *testing.T) {
 		t.Fatalf("payload %d bytes is not smaller than the file %d", len(raw), enc.Len())
 	}
 }
+
+// statsLog captures entries the way the JSONL sink writes them —
+// normalized through a marshal round-trip, so tests read the exact
+// record shape a log line would carry.
+type statsLog struct {
+	recs []statsRec
+}
+
+type statsRec struct {
+	kind  string
+	entry map[string]any
+}
+
+func (l *statsLog) Append(_ context.Context, kind string, entry any) error {
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	l.recs = append(l.recs, statsRec{kind, m})
+	return nil
+}
+
+func (l *statsLog) Close() error { return nil }
+
+func (l *statsLog) last(t *testing.T, kind string) map[string]any {
+	t.Helper()
+	for i := len(l.recs) - 1; i >= 0; i-- {
+		if l.recs[i].kind == kind {
+			return l.recs[i].entry
+		}
+	}
+	t.Fatalf("no %s record logged", kind)
+	return nil
+}
+
+// A settled stream attempt emits provider.stats: TTFT marks the first
+// payload event, usage rides the last message_delta, and the verdict
+// comes off the committed message.
+func TestProviderStatsStream(t *testing.T) {
+	log := &statsLog{}
+	svc, prov, _ := newService(t, true, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush() // headers now; the first event waits — TTFT must measure it
+		time.Sleep(30 * time.Millisecond)
+		w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"content\":[],\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n" +
+			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n" +
+			"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":25,\"output_tokens\":15,\"cache_read_input_tokens\":7}}\n\n" +
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	})
+	svc.log = log
+
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "hi")
+	conv.Append(m)
+	tool, _ := valueobject.NewToolSchema("get_time", "current time", json.RawMessage(`{"type":"object"}`), true, enum.ToolPermissionAgent)
+	conv.SetTools([]valueobject.ToolSchema{tool})
+	model, _ := entity.NewModel("claude-x")
+
+	if err := svc.Send(context.Background(), conv, prov, model, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec := log.last(t, "provider.stats")
+	if rec["model"] != "claude-x" || rec["stream"] != true || rec["status"] != "ok" {
+		t.Fatalf("identity fields: %v", rec)
+	}
+	if rec["finish_reason"] != "stop" || rec["status_code"] != float64(200) {
+		t.Fatalf("outcome fields: %v", rec)
+	}
+	if rec["messages"] != float64(1) || rec["tools"] != float64(1) {
+		t.Fatalf("request shape: %v", rec)
+	}
+	if rec["input"] != float64(25) || rec["cache_read"] != float64(7) || rec["output"] != float64(15) {
+		t.Fatalf("usage delta: %v", rec)
+	}
+	if tf, _ := rec["ttft_ms"].(float64); tf < 20 {
+		t.Fatalf("ttft_ms must mark the delayed first event: %v", rec)
+	}
+	if d, _ := rec["duration_ms"].(float64); d < 20 {
+		t.Fatalf("duration_ms: %v", rec)
+	}
+}
