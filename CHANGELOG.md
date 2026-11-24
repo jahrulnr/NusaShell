@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-25
+
 ### Changed
 
 - The app's mark is the icon the tab shows: the sidebar, the home view, sign-in, and first-run setup render `favicon.svg` itself, so the tab, the README, and the interface share one file. The old hand-drawn tile is gone.
