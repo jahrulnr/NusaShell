@@ -27,6 +27,13 @@ func (j *Compact) Execute(execCtx context.Context) (err error) {
 	ctx := j.Cancellable(execCtx, j.Ctx)
 	d := j.Deps
 	convID := j.ConvID()
+	// The room is claimed while the fold runs, so a runtime pick taken now is
+	// answered (it waits for the next turn) instead of queuing behind a job that
+	// can take minutes. Nothing about the fold's own runtime changes.
+	if d.Turns != nil {
+		d.Turns.BeginTurn(convID)
+		defer d.Turns.EndTurn(convID)
+	}
 	err = func() error {
 		if err := ctx.Err(); err != nil {
 			return apperror.New(408, "compaction canceled", err)

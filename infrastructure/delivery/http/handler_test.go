@@ -317,6 +317,39 @@ func TestConversationDetailActiveTurn(t *testing.T) {
 // still learns the depth: the read carries the worker's count. A room with
 // nothing waiting stays silent, and a composition with no queue at all leaves
 // the field off the wire.
+// turnActive says work is executing in the room now — including a fold, which
+// has no stream to watch. An idle room keeps the old wire shape.
+func TestConversationRowsCarryTurnActive(t *testing.T) {
+	fc := &fakeConversations{infos: []drepo.ConversationInfo{mkInfo("c_1"), mkInfo("c_2")}}
+	h := newTestHandler(t, Deps{Conversations: fc, TurnActive: scriptedTurns{"c_1": true}})
+
+	doc := decodeBody(t, do(t, h, "GET", "/api/conversations/c_1", "", ""))
+	if doc["turnActive"] != true {
+		t.Fatalf("detail turnActive = %v, want true while a job runs", doc["turnActive"])
+	}
+	if _, ok := decodeBody(t, do(t, h, "GET", "/api/conversations/c_2", "", ""))["turnActive"]; ok {
+		t.Fatal("an idle room must omit turnActive")
+	}
+	for _, item := range decodeBody(t, do(t, h, "GET", "/api/conversations?limit=10", "", ""))["data"].([]any) {
+		m := item.(map[string]any)
+		switch m["id"] {
+		case "c_1":
+			if m["turnActive"] != true {
+				t.Fatalf("list item for the busy room = %v", m)
+			}
+		case "c_2":
+			if _, ok := m["turnActive"]; ok {
+				t.Fatalf("idle room's list item must omit turnActive: %v", m)
+			}
+		}
+	}
+	// A composition without the port leaves the field off entirely.
+	h = newTestHandler(t, Deps{Conversations: fc})
+	if _, ok := decodeBody(t, do(t, h, "GET", "/api/conversations/c_1", "", ""))["turnActive"]; ok {
+		t.Fatal("detail without a liveness port must omit turnActive")
+	}
+}
+
 func TestConversationRowsCarryTheRoomsWait(t *testing.T) {
 	fc := &fakeConversations{infos: []drepo.ConversationInfo{mkInfo("c_1"), mkInfo("c_2")}}
 	h := newTestHandler(t, Deps{Conversations: fc, Queue: scriptedQueue{"c_1": 2}})
@@ -353,6 +386,11 @@ func TestConversationRowsCarryTheRoomsWait(t *testing.T) {
 		}
 	}
 }
+
+// scriptedTurns answers which rooms are executing work, by room id.
+type scriptedTurns map[string]bool
+
+func (s scriptedTurns) TurnActive(convID string) bool { return s[convID] }
 
 type scriptedQueue map[string]int
 

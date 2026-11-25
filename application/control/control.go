@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -384,14 +383,14 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 		a.discardUploads(copies)
 		return nil, err
 	}
-	text = a.relayHead(ctx, self) + text
+	relay := a.relayOrigin(ctx, self)
 	// A busy room is not a refusal: the message waits in the room's own queue.
 	// It never folds into the live turn — steer writes no user-role record, and
 	// the provenance that tells a tab this prompt came from another thread
 	// rides that record. Trading "folded into the running turn" for a message
 	// the receiver can still attribute is the right trade.
 	if a.turns.Busy(info.ID) {
-		out, err := a.queueSend(ctx, self, info, text, attachments)
+		out, err := a.queueSend(ctx, self, info, text, attachments, relay)
 		if err != nil {
 			return refused(err)
 		}
@@ -400,13 +399,13 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 	if a.queue != nil && a.queue.QueueDepth(info.ID) > 0 {
 		// Someone else is already waiting: keep arrival order instead of
 		// starting a second turn ahead of them.
-		out, err := a.queueSend(ctx, self, info, text, attachments)
+		out, err := a.queueSend(ctx, self, info, text, attachments, relay)
 		if err != nil {
 			return refused(err)
 		}
 		return out, nil
 	}
-	a.start(info.ID, "", "", "", text, attachments, "", "")
+	a.start(info.ID, "", "", "", text, attachments, "", "", relay)
 	return map[string]any{"threadId": info.ID, "delivery": "turn", "afterSeq": info.MessageCount - 1,
 		"thread": a.thread(self, info)}, nil
 }
@@ -415,12 +414,13 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 // happened: it waits, at this position. Queued is an acceptance, not a promise
 // — nothing here says when the turn runs, and a stop before it does loses the
 // message.
-func (a *App) queueSend(ctx context.Context, self string, info drepo.ConversationInfo, text string, attachments []valueobject.Attachment) (map[string]any, error) {
+func (a *App) queueSend(ctx context.Context, self string, info drepo.ConversationInfo, text string, attachments []valueobject.Attachment, relay *valueobject.Relay) (map[string]any, error) {
 	if a.queue == nil {
 		return nil, apperror.New(503, "thread delivery is unavailable in this build", nil)
 	}
 	position, err := a.queue.Enqueue(ctx, info.ID, "", "", text, attachments, appjob.SendOptions{
 		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation},
+		Relay:  relay,
 	})
 	if err != nil {
 		// The app's refusal carries the code; a full queue also names the
@@ -510,7 +510,7 @@ func (a *App) Spawn(ctx context.Context, self string, in SpawnInput) (result map
 	}
 	target = conv.ID()
 	title := strings.TrimSpace(in.Title)
-	a.start(conv.ID(), agent, provider, model, a.relayHead(ctx, self)+text, nil, project, title)
+	a.start(conv.ID(), agent, provider, model, text, nil, project, title, a.relayOrigin(ctx, self))
 	// The row that starts a thread names it too: the room exists before its
 	// first save, so the title is the one asked for (empty when none was) and
 	// the label waits for the store to assign one.
@@ -522,52 +522,31 @@ func (a *App) Spawn(ctx context.Context, self string, in SpawnInput) (result map
 // creation options, so the fresh thread is named from its first save —
 // naming it after the turn left the first-message default in place for
 // the whole turn, and a relayed head could echo that prompt onward.
-func (a *App) start(convID, agent, provider, model, text string, attachments []valueobject.Attachment, project, title string) {
+func (a *App) start(convID, agent, provider, model, text string, attachments []valueobject.Attachment, project, title string, relay *valueobject.Relay) {
 	go func() {
 		_, _, err := a.turns.Run(a.ctx, convID, provider, model, text, attachments, appjob.SendOptions{Agent: agent, Project: project, Title: title,
-			Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}}, nil)
+			Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}, Relay: relay}, nil)
 		if err != nil {
 			a.log.Info("cross-thread turn ended with an error", "conversation", convID, "error", err)
 		}
 	}()
 }
 
-// relayHead names the sending thread at the top of a relayed prompt, so
-// the receiver knows who is asking. The receiver's answer stays in its own
-// thread, which the sender does not see, so the head also says how to
-// answer, should an answer be needed. The WebUI reads this head to show
-// the sender (web/lib/turn.js splitRelay); change both together.
-// relayNameRunes bounds the sender's name inside the head — the display
-// bound a title already obeys (aggregate's title normalization).
-const relayNameRunes = 80
-
-// relayBlocks is an embedded relay head quoted inside a title — an
-// unnamed thread's first-message title can start with one when its first
-// message was itself relayed, and the head must not echo a hop onward.
-var relayBlocks = regexp.MustCompile(`\[(?:From thread|From another thread|Your answer here)[^\]]*\]`)
-
-func (a *App) relayHead(ctx context.Context, self string) string {
+// relayOrigin names the thread this prompt comes from, as a record rather than a
+// head: the head a model reads is rendered from this record when a request is
+// built (valueobject.Relay.Head), so the body stays exactly what the owner wrote
+// and a surface draws its header from data. The name is the live one at send
+// time; the id, which is what makes a reply possible, never changes.
+func (a *App) relayOrigin(ctx context.Context, self string) *valueobject.Relay {
 	info, err := a.rooms.Info(ctx, self)
 	if err != nil {
-		return "[From another thread]\n\n"
+		// The sender's record is unreadable; the id still names it, and the
+		// receiver can answer there.
+		r := valueobject.NewRelay(self, "", "")
+		return &r
 	}
-	// The name rides one header line: shed embedded relay blocks, fold
-	// every newline, and bound it — a title inherited from a relayed
-	// prompt can be all three wrong at once.
-	name := relayBlocks.ReplaceAllString(info.Title, "")
-	name = strings.Join(strings.Fields(name), " ")
-	if r := []rune(name); len(r) > relayNameRunes {
-		name = strings.TrimSpace(string(r[:relayNameRunes-1])) + "…"
-	}
-	if info.Label != "" {
-		name = "@" + info.Label + " " + name
-	}
-	if name = strings.TrimSpace(name); name == "" {
-		name = info.ID
-	}
-	return fmt.Sprintf("[From thread %s (%s)]\n"+
-		"[Your answer here does not reach that thread. If it needs a reply, send one to %s with the conversation MCP tool send.]\n\n",
-		name, info.ID, info.ID)
+	r := valueobject.NewRelay(self, info.Label, info.Title)
+	return &r
 }
 
 // resolve finds a thread by id or by @label.

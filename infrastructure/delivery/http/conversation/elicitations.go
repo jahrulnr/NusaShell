@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,17 +24,22 @@ type elicitations struct{ svc Elicitor }
 // (schema) or a URL to visit. The message and schema are the agent's own
 // inert text.
 type ElicitationDTO struct {
-	ID      string          `json:"id"`
-	Mode    string          `json:"mode"`
-	Message string          `json:"message,omitempty"`
-	Schema  json.RawMessage `json:"schema,omitempty"`
-	URL     string          `json:"url,omitempty"`
+	ID        string          `json:"id"`
+	Mode      string          `json:"mode"`
+	Message   string          `json:"message,omitempty"`
+	Schema    json.RawMessage `json:"schema,omitempty"`
+	URL       string          `json:"url,omitempty"`
+	ExpiresAt *time.Time      `json:"expiresAt,omitempty"`
 }
 
 // ToElicitationDTO projects a request for the wire; the websocket
 // boundary uses the same shape.
 func ToElicitationDTO(e valueobject.Elicitation) ElicitationDTO {
-	return ElicitationDTO{ID: e.ID(), Mode: e.Mode(), Message: e.Message(), Schema: e.Schema(), URL: e.URL()}
+	dto := ElicitationDTO{ID: e.ID(), Mode: e.Mode(), Message: e.Message(), Schema: e.Schema(), URL: e.URL()}
+	if d := e.Deadline(); !d.IsZero() {
+		dto.ExpiresAt = &d
+	}
+	return dto
 }
 
 func (e *elicitations) list(c *gin.Context) {

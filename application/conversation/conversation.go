@@ -57,6 +57,9 @@ type ConversationApp struct {
 	deps        appjob.Deps
 	mu          sync.Mutex
 	workers     map[string]*worker.Worker
+	// turning counts the live turns per room: the gate a pick reads before it
+	// decides to apply now or wait.
+	turning map[string]int
 
 	uploads    drepo.Uploads
 	picks      drepo.Picks
@@ -124,8 +127,12 @@ func New(
 			SummaryTool:   summaryTool,
 		},
 		workers:   map[string]*worker.Worker{},
+		turning:   map[string]int{},
 		stopGrace: 10 * time.Second,
 	}
+	// The turn claim is the app's own: a job reports the room busy for exactly
+	// as long as its turn runs, which is what a pick has to respect.
+	app.deps.Turns = app
 	for _, opt := range opts {
 		opt(app)
 	}
@@ -238,7 +245,7 @@ func WithAgents(agents drepo.Agent, catalog drepo.AgentCatalogStore, runtime dse
 		app.deps.AgentCatalog = catalog
 		app.deps.AgentRuntime = runtime
 		app.deps.Approvals = appjob.NewApprovals()
-		app.deps.Elicitations = appjob.NewElicitations()
+		app.deps.Elicitations = appjob.NewElicitations(appjob.OwnerAnswerTimeout)
 	}
 }
 

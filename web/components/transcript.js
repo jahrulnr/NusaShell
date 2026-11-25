@@ -3,18 +3,18 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, userLayout, splitRelay, splitReplyQuote, turnEnds } from '../lib/turn.js';
+import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds } from '../lib/turn.js';
 import { queuedFor, queuedNote, watchQueued } from '../lib/queued.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
 import { ElicitationCard } from './elicitation.js';
 import { referencesFromStored } from '../lib/references.js';
-import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate, waitingPrompt } from '../lib/chat.js';
+import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate, waitingPrompt, workingBlind } from '../lib/chat.js';
 import { emit, state } from '../lib/store.js';
 import { openPreview } from './preview.js';
 import { fileURL } from '../lib/api.js';
 import { Icon } from './icons.js';
-import { cx, Button, ErrorBlock, Marker } from './ui.js';
+import { cx, Button, ErrorBlock, Marker, Spinner } from './ui.js';
 
 // Expansion state survives re-renders and remounts, keyed by item id.
 const opened = new Map();
@@ -79,17 +79,17 @@ function UserMarkdown({ text, refs, room }) {
   return html`<div ref=${ref} class="md" data-quote="" onClick=${onMarkdownClick}></div>`;
 }
 
-// RelayHead shows who sent a prompt that came from another thread, in
-// place of the head the relay wrote for the receiving model, and opens
-// that thread.
+// RelayHead shows who sent a prompt that came from another thread, drawn
+// from the provenance the server stored — the body it heads is only what
+// the sender wrote — and opens that thread.
 function RelayHead({ relay }) {
-  const name = relay.label || relay.title || 'Another thread';
+  const name = relayName(relay);
   const inner = html`
     <span class="flex items-center justify-center size-8 rounded-xl bg-accent/15 text-accent"><${Icon} name="bot" size=${16} /></span>
     <span class="min-w-0 flex-1 leading-tight">
-      <span class="block text-[10.5px] font-semibold uppercase tracking-[0.08em] text-accent">From thread</span>
+      <span class="block text-[10.5px] font-semibold uppercase tracking-[0.08em] text-accent">Relayed</span>
       <span class="flex items-baseline gap-1.5 min-w-0 text-[13px] mt-0.5">
-        <span class="font-medium text-fg shrink-0">${name}</span>
+        <span class="font-medium text-fg">${name}</span>
         ${relay.label && relay.title && html`<span class="text-muted truncate">${relay.title}</span>`}
       </span>
     </span>
@@ -172,15 +172,15 @@ function UserMessage({ room, msg, text, refs, files, annotations, recording, pen
       </div>
     </div>`;
   }
-  // A prompt from another thread leads with who sent it, and a chat reply
-  // with what it answers; show the head as a card or a quote and the rest
-  // as the message, its selections moved to match. A steer is owner input
-  // too — the same text the composer sends mid-turn, relayed heads and all
-  // — so it renders through this same bubble, marked as steered.
-  // The head is in the text; whether to lead with it is the layout's call.
-  const relay = layout.relayed ? splitRelay(text) : null;
+  // A prompt from another thread leads with who sent it — the provenance
+  // the server stored, not anything read back out of the text — and a chat
+  // reply with what it answers; show the head as a card or a quote and the
+  // rest as the message, its selections moved to match. A steer is owner
+  // input too — the same text the composer sends mid-turn — so it renders
+  // through this same bubble, marked as steered.
+  const relay = layout.relayed ? msg?.relay || null : null;
   const reply = relay ? null : splitReplyQuote(text);
-  const cut = (relay || reply)?.head || 0;
+  const cut = reply?.head || 0;
   const shown = text.slice(cut);
   const stored = referencesFromStored(text, refs || msg?.references);
   const shownRefs = cut ? stored.filter((r) => r.start >= cut).map((r) => ({ ...r, start: r.start - cut, end: r.end - cut })) : stored;
@@ -188,8 +188,11 @@ function UserMessage({ room, msg, text, refs, files, annotations, recording, pen
   // What the message carried, and the note that it was recorded: the owner's
   // own prompt shows them above its bubble; a prompt from another thread shows
   // them inside that block, under its head, where they read as its own.
-  const extras = html`<${Attachments} room=${room} list=${files ? files.filter((f) => !f.pickId) : msg?.attachments} start=${!own} />
-    <${Annotations} list=${annotations || (files ? files.filter((f) => f.pickId) : msg?.annotations)} />
+  const attList = files ? files.filter((f) => !f.pickId) : msg?.attachments;
+  const annList = annotations || (files ? files.filter((f) => f.pickId) : msg?.annotations);
+  const hasExtras = !!(attList?.length || annList?.length || rec);
+  const extras = html`<${Attachments} room=${room} list=${attList} start=${!own} />
+    <${Annotations} list=${annList} />
     ${rec && html`<span class="inline-flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-lg border border-line bg-panel text-[11px] text-muted" title=${'Browser recording ' + rec.id}>
       <${Icon} name="video" size=${12} /> Browser recording · ${rec.status || 'unknown'}
     </span>`}`;
@@ -198,7 +201,7 @@ function UserMessage({ room, msg, text, refs, files, annotations, recording, pen
     ${own && extras}
     ${text && relay && html`<div class=${cx('max-w-[85%] min-w-0 sm:min-w-72 rounded-2xl bg-raised border border-accent/25 overflow-hidden break-words', pending && 'opacity-70')}>
       <${RelayHead} relay=${relay} />
-      ${!own && html`<div class="px-3.5 pb-1 flex flex-col items-start gap-1">${extras}</div>`}
+      ${!own && hasExtras && html`<div class="px-3.5 pt-2 pb-1 flex flex-col items-start gap-1">${extras}</div>`}
       ${shown && html`<div class="px-3.5 py-2.5"><${Markdown} text=${shown} room=${room} /></div>`}
     </div>`}
     ${text && !relay && html`<div class=${cx('max-w-[85%] rounded-2xl bg-raised border border-line px-3.5 py-2 break-words', steer && 'border-dashed', pending && 'opacity-70')}>
@@ -355,6 +358,20 @@ function FailedCard({ room }) {
       <${Button} kind="ghost" onClick=${() => { room.failed = null; emit(); }}>Dismiss</${Button}>
       ${prompt && html`<${Button} onClick=${() => retry(room)}><${Icon} name="refresh" size=${14} /> Retry</${Button}>`}
     </div>
+  </div>`;
+}
+
+// WorkingLine is the room working without a live view, said once and
+// honestly: its record says a turn is active but names none to watch — a
+// queue job's start emits nothing, so until the next read lands the room
+// has work it can neither show nor stop. A spinner and a word, never a
+// bubble, never a Stop button; the tooltip carries the why.
+export function WorkingLine({ room }) {
+  if (!workingBlind(room)) return null;
+  return html`<div class="flex items-center gap-1.5 px-1 py-1 text-[12px] text-muted"
+    title="This turn is running without a live view; its output appears when it finishes.">
+    <${Spinner} size=${12} />
+    <span>Working</span>
   </div>`;
 }
 

@@ -128,8 +128,8 @@ func encodeMessage(m entity.Message, model entity.Model, fileRoot wire.MediaRoot
 	// answered by tool messages.
 	if m.Role() == enum.RoleSystem && len(injected) > 0 {
 		var msgs []MessageBody
-		if m.Content() != "" {
-			msgs = append(msgs, MessageBody{Role: m.Role().String(), Content: m.Content()})
+		if text := coretext.UserText(m); text != "" {
+			msgs = append(msgs, MessageBody{Role: m.Role().String(), Content: text})
 		}
 		calls := append(append([]entity.ToolCall(nil), injected...), origin...)
 		callMsg := MessageBody{Role: enum.RoleAssistant.String()}
@@ -154,7 +154,7 @@ func encodeMessage(m entity.Message, model entity.Model, fileRoot wire.MediaRoot
 
 	out := MessageBody{Role: m.Role().String()}
 	var text strings.Builder
-	text.WriteString(m.Content())
+	text.WriteString(coretext.UserText(m))
 	for _, tc := range injected {
 		if tc.HasOutput() {
 			text.WriteString("\n" + tc.OutputWithUntrustedTag()) // already an untrusted-evidence envelope

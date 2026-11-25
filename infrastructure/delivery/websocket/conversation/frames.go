@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"io"
 	"slices"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
@@ -403,11 +404,12 @@ type approvalPayload struct {
 // elicitationPayload is a request for input the running agent waits on:
 // a form (schema) or a URL to visit. The owner answers it over HTTP.
 type elicitationPayload struct {
-	ID      string          `json:"id"`
-	Mode    string          `json:"mode"`
-	Message string          `json:"message,omitempty"`
-	Schema  json.RawMessage `json:"schema,omitempty"`
-	URL     string          `json:"url,omitempty"`
+	ID        string          `json:"id"`
+	Mode      string          `json:"mode"`
+	Message   string          `json:"message,omitempty"`
+	Schema    json.RawMessage `json:"schema,omitempty"`
+	URL       string          `json:"url,omitempty"`
+	ExpiresAt *time.Time      `json:"expiresAt,omitempty"`
 }
 
 // elicitationResolvedPayload closes a request: action is the answer

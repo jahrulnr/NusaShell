@@ -27,6 +27,9 @@ globalThis.addEventListener = (type, fn) => {
 };
 globalThis.removeEventListener = (type, fn) => listeners.get(type)?.delete(fn);
 const fire = (type) => { for (const fn of listeners.get(type) || []) fn({ type }); };
+// fireEvent drives window/document listeners a test owns — visibilitychange
+// for the queue poll, where the harness alone decides when the tab hides.
+export const fireEvent = fire;
 
 const loc = { protocol: 'http:', host: 'localhost', pathname: '/', search: '', _hash: '' };
 Object.defineProperty(loc, 'hash', {

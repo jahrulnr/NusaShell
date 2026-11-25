@@ -73,20 +73,44 @@ func (app *ConversationApp) UseLiveTurns(fn func(convID string) bool) {
 	app.mu.Unlock()
 }
 
-// running reports whether the room's worker is executing anything — a turn, a
-// fold, a delete. A pick taken now would wait behind it, so it parks instead of
-// being applied.
+// running reports whether a turn is live in the room. A turn claims the room for
+// its whole run and releases it before its result reaches the caller, so a pick
+// taken right after a turn is over sees an idle room — the worker's own "what is
+// running" carries a moment past that and would park the pick for nothing.
 func (app *ConversationApp) running(convID string) bool {
 	app.mu.Lock()
-	w := app.workers[convID]
-	app.mu.Unlock()
-	if w == nil {
-		return false
+	defer app.mu.Unlock()
+	return app.turning[convID] > 0
+}
+
+// TurnActive reports whether work is executing in the room right now — a turn, a
+// fold, or a fork. It answers about execution only: a job waiting in the queue
+// has not started, so it does not count. The claim the jobs take is the single
+// definition; this is its read side.
+func (app *ConversationApp) TurnActive(convID string) bool {
+	return app.running(convID)
+}
+
+// BeginTurn records that a turn started in the room — the job calls it through
+// appjob.TurnGate.
+func (app *ConversationApp) BeginTurn(convID string) {
+	app.mu.Lock()
+	if app.turning == nil {
+		app.turning = map[string]int{}
 	}
-	// Only a turn forbids the change: a background job (a fold, a delete) does
-	// not fix a runtime, so a pick may still be applied while it runs.
-	turn, ok := w.Running().(interface{ IsTurn() bool })
-	return ok && turn.IsTurn()
+	app.turning[convID]++
+	app.mu.Unlock()
+}
+
+// EndTurn releases the claim.
+func (app *ConversationApp) EndTurn(convID string) {
+	app.mu.Lock()
+	if n := app.turning[convID]; n > 1 {
+		app.turning[convID] = n - 1
+	} else {
+		delete(app.turning, convID)
+	}
+	app.mu.Unlock()
 }
 
 // busy reports whether a transport turn is live in the room.

@@ -99,6 +99,10 @@ type SendOptions struct {
 	// existed — its mode, for one. They apply to the room this send opens;
 	// an existing room sets its own through the conversation.
 	AgentOptions valueobject.ConfigSelections
+	// Relay names the thread this prompt came from, when another thread sent
+	// it. The job records it on the user message; the head is rendered from it
+	// at request time, never stored.
+	Relay *valueobject.Relay
 	// References are the selections the owner made in the message text.
 	References []valueobject.Reference
 	// Annotations are the marks the owner made on the live page; their
@@ -164,6 +168,15 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 	ctx := j.Cancellable(execCtx, j.Ctx)
 	d := j.Deps
 	convID := j.ConvID()
+	// The room is claimed for exactly as long as this turn runs, and released by
+	// the deferred call before the result reaches the caller — the worker's own
+	// "what is running" carries a moment past that, which would park a pick
+	// taken right after the turn for nothing. A composition without a gate (the
+	// CLI's) simply has nothing to claim; ConversationApp always fills it.
+	if d.Turns != nil {
+		d.Turns.BeginTurn(convID)
+		defer d.Turns.EndTurn(convID)
+	}
 	err = func() error {
 		if err := ctx.Err(); err != nil {
 			return apperror.New(408, "send canceled", err)
@@ -318,6 +331,9 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		// says so and the message stays non-editable in the target.
 		if origin, ok := j.Opts.Origin.Normalized(); ok && origin.Kind == enum.TurnOriginConversation {
 			user.SetUserType(enum.LLMUserTypeRelay)
+			if j.Opts.Relay != nil {
+				user.SetRelay(*j.Opts.Relay)
+			}
 		}
 		conv.Append(user)
 		if fresh {

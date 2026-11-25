@@ -94,6 +94,7 @@ type run struct {
 	conv, provider, model, agent, project, text string
 	origin                                      valueobject.TurnOrigin
 	attachments                                 []valueobject.Attachment
+	relay                                       *valueobject.Relay
 }
 
 type fakeTurns struct {
@@ -118,7 +119,7 @@ func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string,
 	f.rooms.mu.Unlock()
 	f.rooms.add(convID, enum.RoleUser, text)
 	f.rooms.add(convID, enum.RoleAssistant, "done: "+text)
-	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text, opts.Origin, attachments}
+	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text, opts.Origin, attachments, opts.Relay}
 	f.mu.Lock()
 	gate := f.gate
 	f.mu.Unlock()
@@ -150,9 +151,11 @@ type fakeQueue struct {
 	// kept is what each accepted message carried, so a queued attachment can
 	// be judged without a real worker.
 	kept [][]valueobject.Attachment
+	// relays is the provenance each accepted message carried.
+	relays []*valueobject.Relay
 }
 
-func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, attachments []valueobject.Attachment, _ appjob.SendOptions) (int, error) {
+func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, attachments []valueobject.Attachment, opts appjob.SendOptions) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.stopping {
@@ -163,6 +166,7 @@ func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, attach
 	}
 	q.enqueued = append(q.enqueued, convID+": "+text)
 	q.kept = append(q.kept, attachments)
+	q.relays = append(q.relays, opts.Relay)
 	q.depth++
 	return q.depth, nil
 }
@@ -336,8 +340,11 @@ func TestSendStopAndSpawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := <-turns.runs
-	if r.conv != "c_other" || r.provider != "" || r.agent != "" || !strings.HasPrefix(r.text, "[From thread @otter Planner (c_self)]\n[Your answer here does not reach that thread. If it needs a reply, send one to c_self with the conversation MCP tool send.]\n\nship it") {
-		t.Fatalf("send ran %+v", r)
+	if r.conv != "c_other" || r.provider != "" || r.agent != "" || r.text != "ship it" {
+		t.Fatalf("send ran %+v — the body must be the owner's text alone", r)
+	}
+	if r.relay == nil || r.relay.ID != "c_self" || r.relay.Label != "otter" || r.relay.Title != "Planner" {
+		t.Fatalf("relay = %+v, want the sending thread's identity", r.relay)
 	}
 	if r.origin.Kind != enum.TurnOriginConversation {
 		t.Fatalf("send origin = %+v, want another thread", r.origin)
@@ -382,40 +389,28 @@ func TestSendStopAndSpawn(t *testing.T) {
 }
 
 func TestRelayHeadNeverEchoesAPromptTitle(t *testing.T) {
-	app, rooms, turns := setup(t)
-	ctx := context.Background()
-	// A room whose default title was a relayed spawn prompt: it leads
-	// with an embedded relay head and drags the prompt's lines behind.
-	rooms.mu.Lock()
-	rooms.infos = append(rooms.infos,
-		drepo.ConversationInfo{ID: "c_echo", Title: "[From thread @bear Nested echo (c_W1ABC)]\n" +
-			"[Your answer here does not reach that thread. If it needs a reply, send one to c_W1ABC with the conversation MCP tool send.]\n\n" +
-			"A long spawn prompt spanning " + strings.Repeat("many ", 40) + "lines\nlast"},
-		drepo.ConversationInfo{ID: "c_void", Title: "[From thread x (c_1)]"})
-	rooms.mu.Unlock()
-
-	if _, err := app.Send(ctx, "c_echo", SendInput{Thread: "c_self", Text: "report"}); err != nil {
-		t.Fatal(err)
+	// A room whose default title was a relayed spawn prompt: it leads with an
+	// embedded relay head and drags the prompt's lines behind. The record keeps
+	// one bounded line; the head renders from it alone.
+	noisy := "[From thread @bear Nested echo (c_W1ABC)]\n" +
+		"[Your answer here does not reach that thread. If it needs a reply, send one to c_W1ABC with the conversation MCP tool send.]\n\n" +
+		"A long spawn prompt spanning " + strings.Repeat("many ", 40) + "lines\nlast"
+	relay := valueobject.NewRelay("c_echo", "", noisy)
+	head := relay.Head()
+	first, body, _ := strings.Cut(head, "\n")
+	if !strings.HasPrefix(first, "[From thread ") || !strings.HasSuffix(first, " (c_echo)]") {
+		t.Fatalf("head shape: %q", first)
 	}
-	r := <-turns.runs
-	head, body, _ := strings.Cut(r.text, "\n")
-	if !strings.HasPrefix(head, "[From thread ") || !strings.HasSuffix(head, " (c_echo)]") {
-		t.Fatalf("head shape: %q", head)
-	}
-	if strings.Count(head, "[From thread") != 1 || strings.Contains(head, "[Your answer") || len([]rune(head)) > 110 {
+	if strings.Count(head, "[From thread") != 1 || strings.Count(head, "[Your answer") != 1 || len([]rune(first)) > 110 {
 		t.Fatalf("head carries an echo: %q", head)
 	}
-	if !strings.HasSuffix(body, "report") {
-		t.Fatalf("body: %q", body)
+	if !strings.Contains(body, "Your answer here does not reach that thread") {
+		t.Fatalf("the reply notice is part of the head: %q", head)
 	}
-
-	// A title that is nothing but relay blocks falls back to the id.
-	if _, err := app.Send(ctx, "c_void", SendInput{Thread: "c_self", Text: "ping"}); err != nil {
-		t.Fatal(err)
-	}
-	r = <-turns.runs
-	if head, _, _ := strings.Cut(r.text, "\n"); head != "[From thread c_void (c_void)]" {
-		t.Fatalf("fallback head: %q", head)
+	// A title that is nothing but a head leaves no name behind: the id names it.
+	void := valueobject.NewRelay("c_void", "", "[From thread x (c_1)]")
+	if first, _, _ := strings.Cut(void.Head(), "\n"); first != "[From thread c_void (c_void)]" {
+		t.Fatalf("a title that is only a head must fall back to the id: %q", first)
 	}
 }
 
@@ -463,8 +458,11 @@ func TestSendQueuesOnABusyThread(t *testing.T) {
 	if _, ok := out["afterSeq"]; ok {
 		t.Fatalf("queued carries afterSeq %v — an acceptance is not a promise", out["afterSeq"])
 	}
-	if len(q.enqueued) != 1 || !strings.Contains(q.enqueued[0], "and this") || !strings.HasPrefix(q.enqueued[0], "c_other: [From thread @otter") {
-		t.Fatalf("enqueued = %v, want the relay head and the text", q.enqueued)
+	if len(q.enqueued) != 1 || q.enqueued[0] != "c_other: and this" {
+		t.Fatalf("enqueued = %v, want the sender's text alone", q.enqueued)
+	}
+	if len(q.relays) != 1 || q.relays[0] == nil || q.relays[0].ID != "c_self" {
+		t.Fatalf("relays = %v, want the provenance carried beside the text", q.relays)
 	}
 
 	// A second message queues behind the first: arrival order, not a race.

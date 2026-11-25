@@ -69,6 +69,9 @@ func (s *server) list(c *gin.Context) {
 		if s.queue != nil {
 			dto.Waiting = s.queue.QueueDepth(i.ID)
 		}
+		if s.turns != nil {
+			dto.TurnActive = s.turns.TurnActive(i.ID)
+		}
 		if sel, ok, err := s.reads.Pending(context.Background(), i.ID); err != nil {
 			transport.RespondError(c, err)
 			return

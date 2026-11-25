@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, closeStatus, toolEnding, userLayout, formatDuration, toolClock, splitReplyQuote, splitRelay, turnEnds, toolRoom, shortHandle } from '../lib/turn.js';
+import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, closeStatus, toolEnding, userLayout, formatDuration, toolClock, splitReplyQuote, relayName, turnEnds, toolRoom, shortHandle } from '../lib/turn.js';
 
 const turn = () => newTurn({ turnId: 't1', requestId: 'r1', conversationId: 'c1', kind: 'send' });
 const frame = (type, payload, seq) => ({ type, payload, seq });
@@ -303,14 +303,28 @@ test('snapshotSegments rebuilds live content; live frames merge after it', () =>
   assert.equal(t.segments[2].output, 'halfway');
 });
 
-test('splitRelay reads the head one thread puts on a prompt to another', () => {
-  // The head application/control relayHead writes (control_test.go).
-  const relayed = '[From thread @otter Planner (c_self)]\n[Your answer here does not reach that thread. If it needs a reply, send one to c_self with the conversation MCP tool send.]\n\nship it';
-  assert.deepEqual(splitRelay(relayed), { label: '@otter', title: 'Planner', id: 'c_self', head: relayed.length - 7, body: 'ship it' });
-  assert.deepEqual(splitRelay('[From thread Untitled thing (c_A1)]\n\nhi\nthere'), { label: '', title: 'Untitled thing', id: 'c_A1', head: 37, body: 'hi\nthere' });
-  assert.deepEqual(splitRelay('[From another thread]\n\nhi'), { label: '', title: '', id: '', head: 23, body: 'hi' });
-  assert.equal(splitRelay('please read [From thread @x y (c_1)]'), null);
-  assert.equal(splitRelay('[In reply to: x]\nyes'), null);
+// A relayed prompt's header is drawn from the provenance the server stored
+// beside it — { id, label, title } — never from the message text. The body
+// is only what the sender wrote, so nothing is cut or parsed.
+test('a relay header is named by its provenance, not its text', () => {
+  const item = historyItems([{
+    id: 'm1', role: 'user', userType: 'relay', content: 'ship it',
+    relay: { id: 'c_self', label: 'otter', title: 'Planner' },
+  }])[0];
+  assert.equal(item.relayed, true);
+  assert.deepEqual(item.relay, { id: 'c_self', label: 'otter', title: 'Planner' });
+  assert.equal(item.msg.content, 'ship it', 'the body is only what the sender wrote');
+  assert.equal(relayName(item.relay), '@otter');
+  // label empty → title names the sender
+  assert.equal(relayName({ id: 'c_A1', label: '', title: 'Untitled thing' }), 'Untitled thing');
+  // both empty → a short form of the thread id
+  assert.equal(relayName({ id: 'c_A1', label: '', title: '' }), 'c_A1');
+  const long = relayName({ id: 'c_4TCLFPOTI7LSWB4FYSYZWY4V5N', label: '', title: '' });
+  assert.equal(long, 'c_4TCLFPOTI7…', 'a long id still shortens');
+  // no provenance at all renders nothing — a relay the server marks but
+  // whose record predates it is a plain message
+  const bare = historyItems([{ id: 'm2', role: 'user', userType: 'relay', content: 'older head-in-text' }])[0];
+  assert.equal(bare.relay, undefined, 'no head to draw from data');
 });
 
 test('turnEnds marks each turn\'s last item with the Markdown the turn said', () => {
@@ -698,11 +712,13 @@ test('a relayed prompt is told by its field, not by its text', () => {
   assert.equal(ownItem.relayed, false, 'the text does not decide it');
   assert.equal(userLayout(ownItem.relayed).editable, true, 'so its Edit stays');
 
-  // a relay the server marks but whose head is missing is still not editable
+  // a relay the server marks but whose provenance is missing (a record that
+  // predates the field) is still not editable — and renders as a plain
+  // message, its head not guessed from the text
   const bare = historyItems([{ id: 'm2', role: 'user', content: 'no head here', userType: 'relay' }])[0];
   assert.equal(bare.relayed, true);
+  assert.equal(bare.relay, undefined);
   assert.equal(userLayout(bare.relayed).editable, false);
-  assert.equal(splitRelay('no head here'), null, 'and there is no head to draw');
 
   // a note is not a prompt
   assert.equal(historyItems([{ id: 'm3', role: 'user', userType: 'system', content: 'note' }])[0].kind, 'note');

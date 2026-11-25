@@ -2359,7 +2359,7 @@ paths:
               additionalProperties: false
       responses:
         "200":
-          description: The options after the change.
+          description: The options after the change — the pick applied now.
           content:
             application/json:
               schema:
@@ -2367,6 +2367,19 @@ paths:
                 required: [data]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
+        "202":
+          description: |
+            The pick is taken but not applied yet. A turn fixes its runtime and
+            session options when it starts, so the next one carries it; the
+            body is the same list plus `pending`, naming the pick that waits.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
+                  pending: { $ref: "#/components/schemas/Pending" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3444,6 +3457,8 @@ components:
           type: integer
           minimum: 0
           description: Jobs queued behind the room's running turn — the same number the conversation.queued notice carries. Present on detail and on list items so a tab that missed that notice still opens on the real count; omitted when nothing waits and never part of persisted state.
+        pending:
+          $ref: "#/components/schemas/Pending"
       additionalProperties: false
 
     Page:
@@ -3492,8 +3507,22 @@ components:
           items: { $ref: "#/components/schemas/MessagePart" }
         userType:
           type: string
-          enum: [origin, system]
-          description: 'Present on `role: "user"` messages only — `origin` is real user input, `system` is a synthetic user-role artifact (e.g. a compaction checkpoint).'
+          enum: [origin, system, compaction, relay]
+          description: 'Present on `role: "user"` messages only — `origin` is real user input, `system` is a synthetic user-role artifact (e.g. a compaction instruction), `compaction` is the checkpoint a fold writes, `relay` is a prompt another thread sent.'
+        relay:
+          type: object
+          description: 'Present beside `userType: "relay"` and nowhere else: who sent this prompt. The stored body is the sender''s text alone — a client renders the header from this record, never by parsing the message; the head is assembled at request time only.'
+          required: [id, label, title]
+          properties:
+            id:
+              type: string
+              description: The sending thread''s conversation id — what a reply is sent to.
+            label:
+              type: string
+              description: The sender''s @handle when it had one, else empty. A snapshot taken when the message was written.
+            title:
+              type: string
+              description: The sender''s title at write time, else empty. A client falls back to the id when empty.
         inputId:
           type: string
           description: 'Present on a user message a steer wrote: the `turn.steer` requestId that submitted it. A reloaded history can match the line against the live steering bubble the turn journal replays, so one submission renders once. Absent on every other message — an ordinary send or an edit carries none.'
@@ -4418,6 +4447,7 @@ components:
         message: { type: string }
         schema: { type: object, additionalProperties: true, description: "The form's JSON Schema; only for `form`." }
         url: { type: string, description: "The address to visit; only for `url`." }
+        expiresAt: { type: string, format: date-time, description: "When the request resolves itself: past this moment the agent receives `cancel` and the transcript records the request as expired, never as the owner's refusal. Absent when the request has no deadline." }
     AgentOption:
       type: object
       required: [id, name, type, current]
@@ -4437,6 +4467,34 @@ components:
               value: { type: string }
               name: { type: string }
               description: { type: string }
+    Pending:
+      type: object
+      description: |
+        A pick the room has taken but not applied yet: a turn fixes its
+        runtime and session options when it starts, so the pick waits for the
+        next one. Detail and list projections include it — and the
+        agent-options `202` answers with it — so a client renders the same
+        "applies to the next turn" line before and after a reload. It is never
+        a claim that the pick is applied.
+      required: [acceptedAt]
+      properties:
+        agentId: { type: string, description: The bound agent, when the pick is an agent room's. }
+        modelId: { type: string, description: "The model either runtime picks: the agent-reported model beside `agentId`, the catalog entry beside `providerId`." }
+        providerId: { type: string, description: The provider, when the pick is a provider room's. }
+        effort: { type: string, description: The reasoning effort picked. }
+        upstream: { type: string, description: The aggregator backend picked. }
+        options:
+          type: array
+          description: Session-option picks waiting to apply, sorted by id — a map would reorder between reads and the surface showing it must not flicker.
+          items:
+            type: object
+            required: [id, value]
+            properties:
+              id: { type: string }
+              value: { type: string }
+            additionalProperties: false
+        acceptedAt: { type: string, format: date-time, description: When the pick was parked. Always present; every other field is omitted when the pick does not carry it. }
+      additionalProperties: false
     Command:
       type: object
       required: [name, source, enabled]

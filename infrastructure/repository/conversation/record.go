@@ -139,6 +139,9 @@ type messageRecord struct {
 	Role     string `json:"role"`
 	Content  string `json:"content"`
 	UserType string `json:"userType,omitempty"`
+	// Relay is a relayed prompt's provenance: who asked. Its own record, never
+	// text inside Content — the head is rendered at request time.
+	Relay *relayRecord `json:"relay,omitempty"`
 	// InputID names the client request that submitted the message — a steer's
 	// requestId. Absent on every other message, and on records written before
 	// the field existed.
@@ -222,6 +225,7 @@ func encodeMessage(m entity.Message) messageRecord {
 		Role:            m.Role().String(),
 		Content:         m.Content(),
 		UserType:        m.UserType().String(),
+		Relay:           relayOf(m.Relay()),
 		InputID:         m.InputID(),
 		FinishReason:    m.FinishReason().String(),
 		CreatedAt:       m.CreatedAt(),
@@ -329,6 +333,9 @@ func decodeMessage(r messageRecord) (entity.Message, error) {
 			return entity.Message{}, fmt.Errorf("unknown userType %q", r.UserType)
 		}
 		m.SetUserType(ut)
+	}
+	if r.Relay != nil {
+		m.SetRelay(valueobject.NewRelay(r.Relay.ID, r.Relay.Label, r.Relay.Title))
 	}
 	if r.FinishReason != "" {
 		fr, ok := enum.ParseFinishReason(r.FinishReason)

@@ -57,6 +57,11 @@ type conversationDTO struct {
 	// never saw a `conversation.queued` frame still opens on the real
 	// count; writes leave it empty, like the turn above. Not persisted.
 	Waiting int `json:"waiting,omitempty"`
+	// TurnActive says work is executing in this room now — a turn, a fold, or a
+	// fork. It is not ActiveTurnID: that names a turn a client can watch and
+	// stop, while a fold has no stream and still keeps the owner waiting. Absent
+	// on an idle room, so the wire shape does not change for one.
+	TurnActive bool `json:"turnActive,omitempty"`
 	// Pending is a pick the room has taken but not applied yet: a turn's
 	// runtime and session options are fixed when it starts, so the pick waits
 	// for the next one. Absent when nothing waits. Detail and list items set
@@ -215,6 +220,10 @@ type messageDTO struct {
 	Content  string           `json:"content"`
 	Parts    []messagePartDTO `json:"parts,omitempty"`
 	UserType string           `json:"userType,omitempty"`
+	// Relay is a relayed prompt's provenance: who asked, and the name it held
+	// then. Present beside userType ("relay") and nowhere else — the head is
+	// never stored, so a client renders its header from this record.
+	Relay *relayDTO `json:"relay,omitempty"`
 	// InputID is the client request that submitted the message — a steer's
 	// requestId — so a reloaded history line can be matched against the live
 	// steering bubble the turn journal replays. Present on steer-written user
@@ -267,6 +276,9 @@ func toMessage(m entity.Message) messageDTO {
 	if m.Role() == enum.RoleUser {
 		out.UserType = m.UserType().String()
 		out.InputID = m.InputID()
+		if r := m.Relay(); r.ID != "" {
+			out.Relay = &relayDTO{ID: r.ID, Label: r.Label, Title: r.Title}
+		}
 	}
 	for _, t := range m.ToolCalls() {
 		out.ToolCalls = append(out.ToolCalls, toToolCall(t))
@@ -324,4 +336,13 @@ type annotationDTO struct {
 	Comment    string                           `json:"comment,omitempty"`
 	Screenshot bool                             `json:"screenshot,omitempty"`
 	Descriptor valueobject.AnnotationDescriptor `json:"descriptor"`
+}
+
+// relayDTO is a relayed prompt's sender. Every field is a string, empty when
+// unknown: a title-less room relays with Title "" and the client falls back to
+// the id, so no consumer guards a null.
+type relayDTO struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Title string `json:"title"`
 }

@@ -534,8 +534,18 @@ func (s *server) prompt(id json.RawMessage, sessionID string, prompt []struct {
 		s.terminalDemo(id, sessionID, strings.Contains(text.String(), "timeline-background-test"))
 		return
 	}
+	if v := os.Getenv("FAKE_ACP_ELICIT"); v != "" {
+		s.elicitDemo(id, sessionID, v)
+		return
+	}
 	if strings.Contains(text.String(), "elicit-demo") {
-		s.elicitDemo(id, sessionID, strings.Contains(text.String(), "elicit-demo url"))
+		variant := "form"
+		if strings.Contains(text.String(), "elicit-demo url") {
+			variant = "url"
+		} else if strings.Contains(text.String(), "elicit-demo broken") {
+			variant = "broken"
+		}
+		s.elicitDemo(id, sessionID, variant)
 		return
 	}
 	if strings.Contains(text.String(), "fs-demo") {
@@ -1103,9 +1113,9 @@ func (p pipe) Close() error                { return p.w.Close() }
 
 // fsDemo writes a file through the client, reads it back, and tries a
 // write the client must refuse.
-// elicitDemo asks the client for a form (or a URL visit) and reports the
-// answer it got.
-func (s *server) elicitDemo(id json.RawMessage, sessionID string, byURL bool) {
+// elicitDemo asks the client for a form (or a URL visit, or a schema the
+// card cannot render) and reports the answer it got.
+func (s *server) elicitDemo(id json.RawMessage, sessionID string, variant string) {
 	params := map[string]any{
 		"sessionId": sessionID, "mode": "form", "message": "Which environment should I deploy to?",
 		"requestedSchema": map[string]any{
@@ -1119,8 +1129,16 @@ func (s *server) elicitDemo(id json.RawMessage, sessionID string, byURL bool) {
 			"required": []string{"environment", "replicas"},
 		},
 	}
-	if byURL {
+	switch variant {
+	case "url":
 		params = map[string]any{"sessionId": sessionID, "mode": "url", "message": "Sign in to continue.", "url": "https://example.com/login", "elicitationId": "demo"}
+	case "broken":
+		// A valid object schema whose property type no card can render —
+		// the fallback is the message plus decline.
+		params["requestedSchema"] = map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"pick": map[string]any{"type": "fancypicker", "title": "Pick one"}},
+		}
 	}
 	s.chunk("Asking you first. ")
 	raw := s.callClientWait("elicitation/create", params, 10*time.Minute)

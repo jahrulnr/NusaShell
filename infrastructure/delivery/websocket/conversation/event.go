@@ -250,6 +250,9 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 		t.live.clearPhase()
 		e := ev.Elicitation()
 		payload := elicitationPayload{ID: e.ID(), Mode: e.Mode(), Message: e.Message(), Schema: e.Schema(), URL: e.URL()}
+		if d := e.Deadline(); !d.IsZero() {
+			payload.ExpiresAt = &d
+		}
 		if !h.emitLocked(t, "turn.elicitation", payload, false) {
 			h.markOverflowedLocked(t)
 		}

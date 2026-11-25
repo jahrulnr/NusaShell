@@ -22,6 +22,7 @@ type Message struct {
 	role         enum.Role
 	content      string
 	userType     enum.LLMUserType
+	relay        valueobject.Relay // who relayed this prompt; empty id = not relayed
 	finishReason enum.FinishReason
 	parts        []MessagePart
 	toolCalls    []ToolCall
@@ -222,6 +223,7 @@ func (m *Message) SetRecording(ref *valueobject.RecordingRef) { m.recording = re
 func (m Message) Recording() *valueobject.RecordingRef { return m.recording }
 
 func (m Message) UserType() enum.LLMUserType         { return m.userType }
+func (m Message) Relay() valueobject.Relay           { return m.relay }
 func (m Message) FinishReason() enum.FinishReason    { return m.finishReason }
 func (m Message) Parts() []MessagePart               { return m.parts }
 func (m Message) ToolCalls() []ToolCall              { return m.toolCalls }
@@ -290,6 +292,13 @@ func (m *Message) SetOptionalContent(key, value string) {
 // vs a system payload such as compaction output.
 func (m *Message) SetUserType(t enum.LLMUserType) {
 	m.userType = t
+}
+
+// SetRelay records who relayed this prompt. The body stays exactly what the
+// sender wrote: the head another model reads is rendered from this record when a
+// request is built, never stored as text.
+func (m *Message) SetRelay(r valueobject.Relay) {
+	m.relay = r
 }
 
 // SetFinishReason records the normalized reason the model ended this turn.

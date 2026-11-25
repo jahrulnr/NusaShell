@@ -35,6 +35,7 @@ import (
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	"github.com/jahrulnr/nusashell/infrastructure/prompt"
 	"github.com/jahrulnr/nusashell/infrastructure/service/agent/acp"
+	coretext "github.com/jahrulnr/nusashell/infrastructure/service/core/text"
 	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
 	"github.com/jahrulnr/nusashell/infrastructure/system"
 )
@@ -243,11 +244,13 @@ func (r *Runtime) ensureProc(ctx context.Context, a *aggregate.Agent) (*proc, er
 	p := &proc{agentID: a.ID(), fingerprint: fp, autoStart: a.AutoStart(), lastUse: time.Now(),
 		sessions: map[string]*session{}, early: map[string][]earlyUpdate{}}
 	caps := acp.ClientCapabilities{}
-	// The only advertised flag: boolean config options (codex fast-mode gates
-	// on it). Everything else stays off — fs/terminal are dead surface on
-	// codex, elicitation waits for its own contract. Dropping this line
-	// reverts the handshake to no capabilities at all.
+	// The advertised surface: boolean config options (codex fast-mode
+	// gates on it) and form elicitation — the owner-answer contract now
+	// exists. Everything else stays off: fs/terminal are dead surface on
+	// codex, and url is not promised — its presentation still renders if
+	// a request arrives anyway, but no agent has been shown to send one.
 	caps.Session.ConfigOptions = &acp.SessionConfigOptionsCapabilities{Boolean: &struct{}{}}
+	caps.Elicitation = map[string]any{"form": map[string]any{}}
 	client, err := acp.Start(ctx, acp.ClientConfig{
 		Command:      a.Command(),
 		Args:         a.Args(),
@@ -853,8 +856,10 @@ func processError(p *proc, err error) error {
 // context. A slash command carries none of that, so the agent recognizes it
 // as a command; the preamble waits for the input after it.
 func (r *Runtime) promptBlocks(ctx context.Context, in dservice.AgentPrompt, s *session) (blocks []acp.ContentBlock, taken preamble) {
+	// A relayed prompt reaches the agent with its head, rendered here from the
+	// message'''s provenance record: the store keeps the sender'''s text alone.
 	user := r.userBlocks(ctx, valueobject.UserInput{
-		Text:        in.Input.Content(),
+		Text:        coretext.UserText(in.Input),
 		References:  in.Input.References(),
 		Attachments: in.Input.Attachments(),
 		Annotations: in.Input.Annotations(),

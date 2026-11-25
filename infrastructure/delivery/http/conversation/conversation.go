@@ -62,6 +62,14 @@ type LiveTurn interface {
 	ActiveTurn(conversationID string) (turnID, kind string, ok bool)
 }
 
+// TurnLiveness reports whether work is executing in a room right now. It is not
+// the same fact as LiveTurn: that names a turn a client can watch and stop, this
+// one says the room is busy at all — a fold or a fork is work with no stream.
+// Nil leaves the field off the projection.
+type TurnLiveness interface {
+	TurnActive(convID string) bool
+}
+
 // QueueDepth reports how many jobs wait behind a room's running turn —
 // the worker queue `conversation.queued` announces. The projection owns no
 // queue, and the frame is a nudge that a tab can miss: a read carries the
@@ -82,6 +90,10 @@ type Deps struct {
 	// Queue reports how many jobs wait behind a room's running turn for
 	// detail and list reads. Nil leaves the field off the projection.
 	Queue QueueDepth
+	// Turns reports whether work is executing in the room now — the busy
+	// signal a surface needs to say "working" when no turn is watchable. Nil
+	// leaves the field off the projection.
+	Turns TurnLiveness
 	// Approvals answers agent permission requests; nil leaves its routes
 	// unregistered.
 	Approvals Approver
@@ -120,7 +132,7 @@ func Register(api *gin.RouterGroup, d Deps) {
 	if jobs == nil {
 		jobs = context.Background()
 	}
-	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, queue: d.Queue, clearActivity: d.ActivityClearer, commands: d.Commands}
+	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, queue: d.Queue, turns: d.Turns, clearActivity: d.ActivityClearer, commands: d.Commands}
 	if d.Approvals != nil {
 		a := &approvals{svc: d.Approvals}
 		api.GET("/conversations/:id/approvals", a.list)
@@ -176,6 +188,7 @@ type server struct {
 	commands      CommandSurface
 	live          LiveTurn
 	queue         QueueDepth
+	turns         TurnLiveness
 	jobs          context.Context
 	clearActivity interface{ Clear() }
 }

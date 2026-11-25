@@ -565,26 +565,40 @@ func (t *turnSink) elicitation(ctx context.Context, params json.RawMessage) (val
 	done := t.done
 	t.mu.Unlock()
 	if done || t.elicit == nil {
-		return valueobject.ElicitationAnswer{Action: "decline"}, nil
+		// No answer surface: the request declines at once, recorded
+		// unattended so it never reads as an owner's refusal.
+		answer := valueobject.ElicitationAnswer{Action: "decline", ResolvedBy: "unattended"}
+		t.recordElicitation(e, answer)
+		return answer, nil
 	}
 	askCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(t.ctx, cancel)
 	defer stop()
-	// A request withdrawn unanswered is recorded with no action and
-	// cancelled for the agent.
 	answer, err := t.elicit(askCtx, e)
-	recorded := answer.Action
 	if err != nil {
-		answer, recorded = valueobject.ElicitationAnswer{Action: "cancel"}, ""
+		// The request died with its context — cancelled for the agent,
+		// recorded unanswered.
+		if answer.ResolvedBy == "" {
+			answer.ResolvedBy = "unanswered"
+		}
+		answer.Action, answer.Content = "cancel", nil
+	} else if answer.ResolvedBy == "" {
+		answer.ResolvedBy = "owner"
 	}
-	raw, _ := json.Marshal(map[string]string{"id": e.ID(), "mode": e.Mode(), "message": e.Message(), "url": e.URL(), "action": recorded})
+	t.recordElicitation(e, answer)
+	return answer, nil
+}
+
+// recordElicitation keeps the request and how it resolved — the wire
+// action plus its source — as a turn part; a finished turn records none.
+func (t *turnSink) recordElicitation(e valueobject.Elicitation, a valueobject.ElicitationAnswer) {
+	raw, _ := json.Marshal(map[string]string{"id": e.ID(), "mode": e.Mode(), "message": e.Message(), "url": e.URL(), "action": a.Action, "resolvedBy": a.ResolvedBy})
 	t.mu.Lock()
 	if !t.done {
 		t.parts = append(t.parts, entity.MessagePart{Kind: entity.MessagePartElicitation, Text: string(raw)})
 	}
 	t.mu.Unlock()
-	return answer, nil
 }
 
 // finish seals the turn into one assistant message. A turn that produced

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -102,8 +101,6 @@ func (a *App) relayAttachments(ctx context.Context, target drepo.ConversationInf
 	return out, created, nil
 }
 
-// relayFile builds the attachment for one regular file: a pinned path for a
-// local target, a stored copy otherwise.
 // relayFile builds the attachment for one regular file — a pinned path for a
 // local target, a stored copy otherwise — and answers the copy's id so a
 // refused send can take it back.
@@ -260,5 +257,3 @@ func humanBytes(n int64) string {
 	}
 	return fmt.Sprintf("%d B", n)
 }
-
-var _ = errors.Is

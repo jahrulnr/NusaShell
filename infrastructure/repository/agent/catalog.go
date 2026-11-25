@@ -11,13 +11,19 @@ import (
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 )
 
+// catalogSuffix marks the second JSON document per agent — the wire
+// catalog. One directory holds two document kinds: plain <id>.json is the
+// agent record, <id>+catalogSuffix is the catalog — List must read only
+// the first kind.
+const catalogSuffix = ".catalog.json"
+
 // The agent catalog — the offered surface the agent last reported — is a
 // second JSON document per agent, <path>/<agentID>.catalog.json, written
 // atomically. It carries only wire data (option/model names and values,
 // capabilities): no launch environment, no secrets.
 
 func (r *Repository) catalogFile(id string) string {
-	return filepath.Join(r.path, id+".catalog.json")
+	return filepath.Join(r.path, id+catalogSuffix)
 }
 
 // Catalog returns the agent's last seen offered surface; a missing catalog

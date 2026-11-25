@@ -53,6 +53,57 @@ func TestCatalogMissingReadsAsZero(t *testing.T) {
 	}
 }
 
+// A catalog document shares the directory List globs — it must not be
+// read back as an agent record (production: one stray catalog failed
+// every List and blanked the Agents page). Written after the agent's
+// save, the way a live session leaves it.
+func TestListSkipsCatalogDocuments(t *testing.T) {
+	repo := New(t.TempDir(), nil)
+	a, err := aggregate.NewAgent("codex", "Codex", "codex-acp", nil, enum.ApprovalPolicyAsk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(t.Context(), &a); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveCatalog(t.Context(), "codex", drepo.AgentCatalog{ProbedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.List(t.Context())
+	if err != nil || len(list) != 1 || list[0].ID() != "codex" {
+		t.Fatalf("List = %+v, %v — a catalog file must not be an agent record", list, err)
+	}
+}
+
+// A catalog with no agent record — orphaned by a hand-deleted record or
+// an interrupted delete — still cannot fail the list.
+func TestListSkipsAnOrphanCatalog(t *testing.T) {
+	repo := New(t.TempDir(), nil)
+	if err := repo.SaveCatalog(t.Context(), "ghost", drepo.AgentCatalog{ProbedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.List(t.Context())
+	if err != nil || len(list) != 0 {
+		t.Fatalf("List = %+v, %v — an orphan catalog must not fail it", list, err)
+	}
+}
+
+// An id ending in the catalog suffix writes <id>.json — the very file
+// List skips — so the agent could never appear. Refuse it at the boundary.
+func TestCatalogSuffixIDsAreRejected(t *testing.T) {
+	repo := New(t.TempDir(), nil)
+	a, err := aggregate.NewAgent("x.catalog", "X", "x-acp", nil, enum.ApprovalPolicyAsk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(t.Context(), &a); err == nil {
+		t.Fatal("an id ending in the catalog suffix was stored")
+	}
+	if err := repo.SaveCatalog(t.Context(), "x.catalog", drepo.AgentCatalog{}); err == nil {
+		t.Fatal("a catalog for a suffix id was stored")
+	}
+}
+
 // Deleting the agent takes its catalog with it.
 func TestCatalogRemovedWithTheAgent(t *testing.T) {
 	repo := New(t.TempDir(), nil)

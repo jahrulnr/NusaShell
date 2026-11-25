@@ -58,6 +58,11 @@ func validID(id string) error {
 	if err := valueobject.ValidID(id); err != nil {
 		return apperror.New(400, "invalid agent id", fmt.Errorf("id %q: %w", id, err))
 	}
+	// An id ending in the catalog suffix writes <id>.json — the file List
+	// skips as a catalog document — so the agent could never be listed.
+	if strings.HasSuffix(id, ".catalog") {
+		return apperror.New(400, "invalid agent id", fmt.Errorf("id %q ends in the catalog suffix", id))
+	}
 	return nil
 }
 
@@ -231,7 +236,11 @@ func (r *Repository) List(ctx context.Context) ([]aggregate.Agent, error) {
 	slices.Sort(matches)
 	out := make([]aggregate.Agent, 0, len(matches))
 	for _, m := range matches {
-		a, err := r.Inspect(ctx, strings.TrimSuffix(filepath.Base(m), ".json"))
+		base := filepath.Base(m)
+		if strings.HasSuffix(base, catalogSuffix) {
+			continue
+		}
+		a, err := r.Inspect(ctx, strings.TrimSuffix(base, ".json"))
 		if err != nil {
 			return nil, err
 		}

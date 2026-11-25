@@ -230,11 +230,11 @@ Full schemas, typed errors, and examples live in
 | `POST /api/agents/{id}/authenticate` · `POST /api/agents/{id}/logout` · `POST /api/agents/{id}/restart` | Sign the agent in with body `{methodId}` (starts it when needed; a `terminal` method is `400` — it runs through `sign-in`), sign it out and stop it (`400` when it does not support that), or stop its process so the next turn starts it again. Each answers `204`. A turn on an agent that needs a sign-in fails with `502 upstream_error`. |
 | `GET /api/conversations/{id}/approvals` · `POST /api/conversations/{id}/approvals/{requestId}` | Open permission requests of the room's agent, and answering one with body `{optionId}` (`204`; `404` when nothing waits under that id). Answering with an `allow_always` option stores an approval rule. |
 | `GET /api/conversations/{id}/approval-rules` · `DELETE /api/conversations/{id}/approval-rules/{ruleId}` | The room's "always allow" rules — `{ "data": [{ id, action, createdAt }] }`; the agent is not asked again for that kind of action — and forgetting one (`204`). |
-| `GET /api/conversations/{id}/elicitations` · `POST /api/conversations/{id}/elicitations/{elicitationId}` | Open requests for input from the room's agent (`[{id, mode, message, schema, url}]`, `mode` is `form` or `url`), and answering one with body `{action, content}`: `action` is `accept`, `decline`, or `cancel`; `content` (accept only) must match the form's schema — a missing required field, an unknown field, or a wrong type, length, range, pattern, or choice is `400` and the request stays open. `204`; `404` when nothing waits under that id. |
-| `GET /api/conversations/{id}/agent-options` · `PUT /api/conversations/{id}/agent-options` | The agent's session options for the room — `{ "data": [{ id, name, description, category, type, current, choices: [{value, name, description}] }] }`, its live session's when one runs, else the agent's defaults — and setting one with body `{id, value}` (answers the updated list). The room keeps its picks and applies them before each turn. |
+| `GET /api/conversations/{id}/elicitations` · `POST /api/conversations/{id}/elicitations/{elicitationId}` | Open requests for input from the room's agent (`[{id, mode, message, schema, url, expiresAt}]`, `mode` is `form` or `url`), and answering one with body `{action, content}`: `action` is `accept`, `decline`, or `cancel`; `content` (accept only) must match the form's schema — a missing required field, an unknown field, or a wrong type, length, range, pattern, or choice is `400` and the request stays open. `204`; `404` when nothing waits under that id. An open request carries a deadline — fifteen minutes — and one that runs out resolves itself as `cancel` marked `expired`, not as a refusal by the owner; `expiresAt` is absent when a request has no deadline. |
+| `GET /api/conversations/{id}/agent-options` · `PUT /api/conversations/{id}/agent-options` | The agent's session options for the room — `{ "data": [{ id, name, description, category, type, current, choices: [{value, name, description}] }] }`, its live session's when one runs, else the agent's defaults — and setting one with body `{id, value}`: `200` when the pick applies now, `202` with the same list plus `pending` when a turn is running and the pick waits for the next one. The room keeps its picks and applies them before each turn. |
 | `GET /api/commands?conversationId=` | The composer's slash-command catalog — `{ "data": [{ name, description, hint, source, enabled, reason }] }`: the native commands (compact, clear, fork) first, then the room's agent commands, one row per name with `source` saying which owns it (native wins a collision). `enabled`/`reason` are the server's verdict for this room; an agent command is always on. Without `conversationId` it answers the native set with every row off and `reason: "Send a message first"`. |
-| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Items include `activeTurnId` / `activeTurnKind` while a transport turn is in progress, and `waiting` while jobs queue behind it. `limit` default 30, max 100. |
-| `GET /api/conversations/{id}` | One projection. Detail adds `canCompact`, `activeTurnId` / `activeTurnKind` while a transport turn is in progress, and `waiting` for the jobs queued behind it. |
+| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Items include `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` while jobs queue behind it, and `pending` while a pick waits for the next turn. `limit` default 30, max 100. |
+| `GET /api/conversations/{id}` | One projection. Detail adds `canCompact`, `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` for the jobs queued behind it, and `pending` while a pick waits for the next turn. |
 | `GET /api/conversations/{id}/messages?start&limit` | Ranged history; `start >= 0` absolute, negative counts back from the end. `limit` max 100. |
 | `PATCH /api/conversations/{id}` | Any of `title`, `projectId` (`""` takes the room out of its project; an unknown id is `400`), `pinned`, `label` (the room's `@handle`: 1–24 of `a-z0-9` with inner hyphens, a leading `@` dropped; `""` clears; invalid `400`, taken by another room `409`), and `routing` (`{replyToOrigin, mirrorFinal, notifyApprovals}`; `null` returns to the defaults); absent fields keep their value. Queued on the room's worker, so it lands after a running turn. Answers the updated projection, which carries `label` and `routing` when set. |
 | `GET /api/conversations/{id}/export` | The whole thread as one JSON download (`Content-Disposition: attachment; filename=nusashell-<id>.json`): `{ exportedAt, conversation, messages }`, in the shapes the projection and messages routes serve. |
@@ -470,7 +470,9 @@ a UI can route on a closed set, never on provider error text.
 
 Success codes: `200` for reads and updates (`PATCH` rename, `PATCH`
 settings, `PUT` provider — upsert is idempotent so there is no `201`),
-`202` for an update install that started, `204` for deletes, `101` for the WS upgrade. Conversation detail includes
+`202` for work that was accepted but has not happened yet (an update
+install that started, an agent-option pick parked for the next turn),
+`204` for deletes, `101` for the WS upgrade. Conversation detail includes
 `canCompact`; it is true when the live tail is longer than the configured
 keep-tail, including after a checkpoint when that tail still exceeds it.
 The same response — and each item of the list projection — includes
@@ -483,7 +485,14 @@ worker queue the `conversation.queued` notice counts. The notice is a
 nudge a tab can miss — a fresh load, a reconnect, a socket dropped for
 being slow — so the read carries the number itself, and a client seeds
 its queue line from it. `waiting` is omitted when nothing waits and is
-not persisted either.
+not persisted either. They also carry `pending` when the room holds a
+pick it has taken but not applied — a turn fixes its runtime and
+session options when it starts, so an agent pick and its options wait
+for the next one. The object names what waits (`agentId`/`modelId` or
+`providerId`/`modelId`, `effort`, `upstream`, and `options` sorted by
+id), plus `acceptedAt`; the `202` from the agent-options `PUT` answers
+with the same shape. It is never a claim that the pick is applied, and
+it is omitted when nothing waits.
 
 ## WebSocket surface
 

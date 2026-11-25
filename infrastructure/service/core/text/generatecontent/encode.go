@@ -136,7 +136,7 @@ func encodeMessage(m entity.Message, model entity.Model, fileRoot wire.MediaRoot
 		}
 	}
 
-	text := m.Content()
+	text := coretext.UserText(m)
 	var injectedText strings.Builder
 	for _, tc := range injected {
 		if tc.HasOutput() {

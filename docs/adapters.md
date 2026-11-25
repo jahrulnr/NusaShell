@@ -387,6 +387,51 @@ part assembly stays inside each adapter.
 - `error.go`: `StatusError`, the shared status→`apperror` convention above,
   and `UpstreamError` for keeping raw bodies in `Cause`.
 
+## The agent adapter — `service/agent` (ACP)
+
+A room bound to an external agent does not go through a provider wire at all:
+`runtime.go` starts the agent as a child process, speaks ACP over its stdio, and
+mirrors the agent's session catalog into the room. Two writes keep that mirror
+correct, and they deliberately disagree about what a payload means.
+
+**A notification is the offered list — replace.** `config_option_update` carries
+every option the agent now offers. The handler (`runtime.go`, the
+`config_option_update` case) stores the list as given: an option the update does
+not name is gone, even one the room had picked, because keeping it would leave a
+ghost the next `session/set_config_option` fails on. An empty list is not a
+truncated one — the handler ignores a notification that carries no options
+rather than wiping the catalog.
+
+**A response is a patch — absorb.** `session/set_config_option` answers with only
+what the write changed, often one entry and often without the fields that
+define it. `absorbConfigResponse` (`models.go`) therefore merges per id: an
+option the response names replaces its stored entry, an id it does not name
+keeps what the session knew, and an entry carrying none of `name`, `type`,
+`options`, or `currentValue` says nothing and is ignored — a bare id must not
+erase a definition.
+
+**Order decides, not arrival.** Every frame the client reads takes one `wireSeq`
+from a single counter (`acp/process.go`), and the `session/new` response stamps
+the positions of the state it carries. Both sides then apply only a payload
+newer than the newest they hold: `if seq > s.configSeq` for the list, `if seq >
+s.modesSeq` for the modes. A notification dispatched before a response but run
+after it loses — which is the point, since the response is the newer wire
+position even when it was queued first.
+
+**Modes follow the same rule.** `current_mode_update` replaces the current mode
+id under the same `modesSeq` guard, and a legacy `session/set_mode` response
+(used when the agent reports modes but no config option carries their id) only
+lands when its wire position is newer. `s.modes == nil` means the agent
+reported no modes at all; the update is dropped there, because there is no
+catalog to keep correct.
+
+The asymmetry is the rule, not an implementation detail. Treating a response as
+authoritative deletes options the write never mentioned; treating a
+notification as a patch leaves options the agent has already removed, so the
+picker keeps offering a ghost and the next pick on it fails. Anything that
+mirrors an agent catalog — a new ACP method, a second agent runtime — copies
+these two shapes rather than inventing its own.
+
 ## `service/core` — capability map
 
 `core` is laid out by capability rather than by provider. Implemented today:

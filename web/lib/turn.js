@@ -250,17 +250,16 @@ export function splitReplyQuote(text) {
   return { sender: (m[1] || '').replace(/: $/, ''), quote: m[2], head: m[0].length, body: text.slice(m[0].length) };
 }
 
-// splitRelay reads the head appcontrol puts on a prompt one thread sends
-// another (application/control relayHead): "[From thread @label Title
-// (c_id)]" and the line telling the receiver how to answer, or "[From
-// another thread]" when the sender could not be named. It answers
-// { label, title, id, head, body }, head being the length of what it read,
-// or null for any other message.
-export function splitRelay(text) {
-  const m = /^\[From (?:thread (.*?) \((c_[A-Za-z0-9]+)\)|another thread)\](?:\r?\n\[Your answer here does not reach that thread\.[^\r\n]*\])?(?:\r?\n){0,2}/.exec(text || '');
-  if (!m) return null;
-  const [, label = '', title = ''] = /^(@\S+)?\s*(.*)$/.exec(m[1] || '');
-  return { label, title, id: m[2] || '', head: m[0].length, body: text.slice(m[0].length) };
+// relayName names the sender a relayed prompt's header shows, from the
+// provenance the server stored — never from the message text. The label it
+// was given (shown as "@label"), then its title, then a short form of the
+// thread id when that is all the room has.
+export function relayName(relay) {
+  if (!relay) return '';
+  if (relay.label) return '@' + relay.label;
+  if (relay.title) return relay.title;
+  const id = relay.id || '';
+  return id.length > 12 ? id.slice(0, 12) + '…' : id;
 }
 
 // toolEnding answers how a tool call ended — one value read by the row, its
@@ -309,10 +308,18 @@ export function toolEnding(item) {
 // userLayout answers how a user message is laid out. Whether it came from
 // another thread is the server's word — userType 'relay' on the stored message
 // — not something read back out of the text: a prompt the owner happens to
-// start with "[From thread …]" is still theirs. A relayed prompt carries what
+// start with the relay head's wording is still theirs. A relayed prompt carries what
 // it brought inside its own block, and is not the owner's to rewrite.
 export function userLayout(relayed) {
   return { relayed: !!relayed, extras: relayed ? 'relay' : 'own', editable: !relayed };
+}
+
+// isPrompt answers whether a stored line is a prompt the room owes an answer
+// to. Synthetic rows are never prompts: a note (system) is a report, a
+// compaction checkpoint is a boundary — the domain's SystemPayload(). A
+// relayed prompt stays a prompt: its answer is still this room's to give.
+export function isPrompt(m) {
+  return m.role === 'user' && m.userType !== 'system' && m.userType !== 'compaction';
 }
 
 // A tool's stored output signals failure by convention.
@@ -498,11 +505,13 @@ export function historyItems(messages, cwd = '') {
       out.push({
         // A compaction checkpoint is a boundary in the history, not the
         // owner's word — its own row, so it never renders as a message.
-        id: m.id, kind: m.userType === 'compaction' ? 'compaction' : m.userType === 'system' ? 'note' : 'user', msg: m,
+        id: m.id, kind: isPrompt(m) ? 'user' : m.userType === 'compaction' ? 'compaction' : 'note', msg: m,
         steerInput: m[STEER_INPUT] || '',
         // A prompt another thread sent is the server's to say (userType), never
-        // something the transcript guesses from the text.
+        // something the transcript guesses from the text. Its provenance rides
+        // as data — the header reads it, the body stays untouched.
         relayed: m.userType === 'relay',
+        relay: m.relay,
       });
       continue;
     }

@@ -138,8 +138,8 @@ func encodeMessage(m entity.Message, model entity.Model, fileRoot wire.MediaRoot
 	// message wrapper needed on this surface).
 	if m.Role() == enum.RoleSystem && len(injected) > 0 {
 		var items []json.RawMessage
-		if m.Content() != "" {
-			it, _ := marshalItem(ItemBody{Type: "message", Role: m.Role().String(), Content: m.Content()})
+		if text := coretext.UserText(m); text != "" {
+			it, _ := marshalItem(ItemBody{Type: "message", Role: m.Role().String(), Content: text})
 			items = append(items, it...)
 		}
 		calls := append(append([]entity.ToolCall(nil), injected...), origin...)
@@ -148,7 +148,7 @@ func encodeMessage(m entity.Message, model entity.Model, fileRoot wire.MediaRoot
 	}
 
 	var text strings.Builder
-	text.WriteString(m.Content())
+	text.WriteString(coretext.UserText(m))
 	for _, tc := range injected {
 		if tc.HasOutput() {
 			text.WriteString("\n" + tc.OutputWithUntrustedTag()) // already an untrusted-evidence envelope

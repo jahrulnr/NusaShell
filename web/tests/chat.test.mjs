@@ -1,6 +1,6 @@
 // The controller against a scripted server: real chat.js, real store and
 // turn projection, a fake socket and fetch.
-import { calls, mockApi, sleep, sockets } from './env.mjs';
+import { calls, mockApi, sleep, sockets, fireEvent } from './env.mjs';
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emitCount, state } from '../lib/store.js';
@@ -1530,6 +1530,20 @@ test('a tool-only step is not an answer to the prompt', () => {
   assert.equal(chat.waitingPrompt(room)?.id, 'm1', 'a step without text leaves the prompt unanswered');
   assert.equal(chat.waitingPrompt({ messages: [{ id: 'n1', role: 'user', userType: 'system', content: 'note' }] }), null);
   assert.equal(chat.waitingPrompt({ messages: [] }), null);
+  // synthetic rows are never prompts: a fold that fails after writing its
+  // checkpoint leaves a divider, not a prompt Retry could rerun — and a note
+  // is a report. A relayed prompt is still this room's to answer.
+  assert.equal(chat.waitingPrompt({ messages: [{ id: 'c1', role: 'user', userType: 'compaction', content: 'checkpoint' }] }), null);
+  assert.equal(chat.waitingPrompt({ messages: [
+    { id: 'p1', role: 'user', content: 'first' },
+    { id: 'a1', role: 'assistant', content: 'done' },
+    { id: 'c1', role: 'user', userType: 'compaction', content: 'checkpoint' },
+  ] }), null, 'the checkpoint is last but the prompt before it was answered');
+  assert.equal(chat.waitingPrompt({ messages: [
+    { id: 'p1', role: 'user', content: 'first' },
+    { id: 'c1', role: 'user', userType: 'compaction', content: 'checkpoint' },
+  ] })?.id, 'p1', 'a checkpoint does not answer the prompt before it');
+  assert.equal(chat.waitingPrompt({ messages: [{ id: 'r1', role: 'user', userType: 'relay', content: 'ship it' }] })?.id, 'r1', 'a relayed prompt still waits for this room\'s answer');
 });
 
 // The room's cross-thread queue: a notice, not a turn frame. It updates the
@@ -1624,7 +1638,7 @@ test('a drain reads the room once, and a second zero reads nothing', async () =>
   await sleep(10);
   assert.equal(queuedFor('c_q1'), 1);
   assert.equal(queuedNote(1), '1 waiting to run', 'the line reads what waits, not who sent it');
-  assert.equal(calls.length, 0, 'a count alone asks the room for nothing');
+  assert.equal(calls.length, 0, 'a count alone asks the room for nothing — the poll\'s slow clock does the reading');
 
   ws.serve({ type: 'conversation.queued', conversationId: 'c_q1', payload: { waiting: 0 } });
   await sleep(20);
@@ -1665,6 +1679,104 @@ test('an activity frame reads a room whose drain never came', async () => {
   ws.serve({ type: 'conversation.activity', conversationId: 'c_q4', turnId: 't_other', payload: { state: 'message' } });
   await sleep(20);
   assert.equal(calls.filter((c) => c.url.includes('/c_q4/messages')).length, 1, 'the room is read once');
+});
+
+// A turn that runs but names none to watch — turnActive without
+// activeTurnId — is work the room can neither show nor stop. It is marked
+// as working, never as a live turn: no stream, no Stop, no fake bubble.
+// isBusy stays the narrower question, so blind work earns none of that.
+test('workingBlind marks work without a live turn — and nothing else', () => {
+  assert.equal(chat.workingBlind({ info: { turnActive: true } }), true);
+  assert.equal(chat.workingBlind({ info: { turnActive: true, activeTurnId: 't1' } }), false, 'a live turn is never blind');
+  assert.equal(chat.workingBlind({ info: { activeTurnId: 't1' } }), false);
+  assert.equal(chat.workingBlind({ info: {} }), false, 'an absent flag is an idle room');
+  assert.equal(chat.workingBlind({}), false);
+  assert.equal(chat.isBusy({ info: { turnActive: true } }), false, 'blind work earns no Stop');
+});
+
+// turnActive rides the room record, so the dedupe rule must name it — a flip
+// sameRecords cannot see would leave the marker stuck on or off.
+test('a turnActive flip in the room record is applied, not deduped', async (t) => {
+  t.after(() => chat.navigate('#/'));
+  const info = { turnActive: true };
+  serveThread('c_t1', { info });
+  await chat.openRoom('c_t1');
+  const r = state.rooms.c_t1;
+  assert.equal(r.info.turnActive, true);
+  delete info.turnActive;
+  await chat.loadInfo(r, { force: true });
+  assert.equal(r.info.turnActive, undefined, 'dedupe does not swallow the flag going away');
+});
+
+// The queue poll: a queued job's *start* emits nothing — the turn it became
+// is simply there on the next read. While the open room has anything
+// waiting, its record is re-read on a slow clock; the poll retires the
+// moment the count is gone, the route moved on, the room was deleted, or
+// the tab hid.
+test('the queue poll re-reads the open room until its waiting drains', async (t) => {
+  t.after(() => chat.navigate('#/'));
+  const info = { waiting: 2 };
+  serveThread('c_p1', { info });
+  chat.navigate('#/c/c_p1');
+  await sleep(40);
+  const reads = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/conversations/c_p1').length;
+  const base = reads();
+  await sleep(3300);
+  assert.ok(reads() > base, 'a job\'s start is met on the next read, not by an event');
+  info.waiting = 0;
+  await sleep(3300);
+  const drained = reads();
+  await sleep(3300);
+  assert.equal(reads(), drained, 'an empty queue ends the polling');
+});
+
+test('a hidden tab polls nothing, and a visible one is owed one read at once', async (t) => {
+  t.after(() => { document.hidden = false; chat.navigate('#/'); });
+  const info = { waiting: 1 };
+  serveThread('c_p2', { info });
+  chat.navigate('#/c/c_p2');
+  await sleep(40);
+  const reads = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/conversations/c_p2').length;
+  document.hidden = true;
+  fireEvent('visibilitychange');
+  const hid = reads();
+  await sleep(3300);
+  assert.equal(reads(), hid, 'hidden means no polling, ever');
+  document.hidden = false;
+  fireEvent('visibilitychange');
+  await sleep(40);
+  assert.equal(reads(), hid + 1, 'one catch-up read now, not a wait for the clock');
+});
+
+test('the queue poll stops when the route moves on', async (t) => {
+  t.after(() => chat.navigate('#/'));
+  const info = { waiting: 1 };
+  serveThread('c_p3', { info });
+  chat.navigate('#/c/c_p3');
+  await sleep(40);
+  const reads = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/conversations/c_p3').length;
+  chat.navigate('#/');
+  await sleep(40);
+  const away = reads();
+  await sleep(3300);
+  assert.equal(reads(), away, 'nothing polls a room the owner left');
+});
+
+test('a deleted room retires its own poll', async (t) => {
+  t.after(() => chat.navigate('#/'));
+  let gone = false;
+  mockApi({
+    'GET /api/conversations/c_p4/messages': { messages: [], effectiveStart: 0, total: 0 },
+    'GET /api/conversations/c_p4': () => gone ? [404, { code: 'not_found', detail: 'gone' }] : { id: 'c_p4', title: 'T', waiting: 1 },
+  });
+  chat.navigate('#/c/c_p4');
+  await sleep(40);
+  const reads = () => calls.filter((c) => c.method === 'GET' && c.url === '/api/conversations/c_p4').length;
+  gone = true;
+  await sleep(3300);
+  const stood = reads();
+  await sleep(3300);
+  assert.equal(reads(), stood, 'a 404 retires the poll, not just the room');
 });
 
 // Frames sent while the socket was down are never replayed: a reconnect reads

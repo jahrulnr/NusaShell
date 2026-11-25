@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	repo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
@@ -143,4 +144,21 @@ func mergeSelection(stored, next repo.PendingSelection) repo.PendingSelection {
 		out.Options = merged
 	}
 	return out
+}
+
+// relayRecord is the stored provenance of a relayed prompt: the sender, and the
+// name it held when the prompt was written. Plain strings, empty when unknown.
+type relayRecord struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
+	Title string `json:"title,omitempty"`
+}
+
+// relayOf answers the record for a message's provenance, nil when it carries
+// none.
+func relayOf(r valueobject.Relay) *relayRecord {
+	if r.ID == "" {
+		return nil
+	}
+	return &relayRecord{ID: r.ID, Label: r.Label, Title: r.Title}
 }

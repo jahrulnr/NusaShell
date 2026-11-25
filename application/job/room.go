@@ -63,6 +63,13 @@ type Fork struct {
 func (j *Fork) Execute(execCtx context.Context) (err error) {
 	defer j.finish(&err)
 	ctx := j.Cancellable(execCtx, j.Ctx)
+	// The source room is claimed while its worker copies it: a pick taken now is
+	// answered instead of queueing behind the copy. The destination is a new
+	// room — nothing there waits on this.
+	if j.Deps.Turns != nil {
+		j.Deps.Turns.BeginTurn(j.ConvID())
+		defer j.Deps.Turns.EndTurn(j.ConvID())
+	}
 	err = func() error {
 		if err := ctx.Err(); err != nil {
 			return apperror.New(408, "fork canceled", err)

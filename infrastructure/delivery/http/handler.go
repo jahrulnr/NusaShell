@@ -123,6 +123,10 @@ type Deps struct {
 	// and list rows — the state behind the `conversation.queued` nudge.
 	// Nil omits the field.
 	Queue conversation.QueueDepth
+	// TurnActive reports whether work executes in a room now — a turn, a fold,
+	// a fork. It is what a surface reads to say "working" when no turn is
+	// watchable. Nil omits the field.
+	TurnActive conversation.TurnLiveness
 	// Authorities are configured host:port pairs accepted in Host and
 	// Origin headers. The listener address remains a separate loopback bind.
 	Authorities []string
@@ -156,6 +160,7 @@ func NewHandler(d Deps) *gin.Engine {
 		Jobs:            d.Jobs,
 		LiveTurns:       d.LiveTurns,
 		Queue:           d.Queue,
+		Turns:           d.TurnActive,
 		Approvals:       d.Approvals,
 		Elicitations:    d.Elicitations,
 		Workspace:       d.Workspace,

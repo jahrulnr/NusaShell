@@ -8,17 +8,19 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
 // Elicitation is an agent asking the owner for input mid-turn: a form
 // described by a JSON schema, or a URL to visit (a sign-in, a payment).
 type Elicitation struct {
-	id      string
-	mode    string // form or url
-	message string
-	schema  json.RawMessage
-	url     string
+	id       string
+	mode     string // form or url
+	message  string
+	schema   json.RawMessage
+	url      string
+	deadline time.Time
 }
 
 // NewElicitation validates a request: a form needs an object schema, a URL
@@ -49,6 +51,16 @@ func (e Elicitation) Mode() string            { return e.mode }
 func (e Elicitation) Message() string         { return e.message }
 func (e Elicitation) Schema() json.RawMessage { return e.schema }
 func (e Elicitation) URL() string             { return e.url }
+
+// WithDeadline stamps the owner's answer deadline — set by the broker that
+// parks the request, so every projection can say how long it still waits.
+func (e Elicitation) WithDeadline(t time.Time) Elicitation {
+	e.deadline = t
+	return e
+}
+
+// Deadline is when an unanswered request expires; zero when never parked.
+func (e Elicitation) Deadline() time.Time { return e.deadline }
 
 // Check validates an accepted answer's content against the form schema:
 // required fields present, no unknown fields, each value of its field's
@@ -163,10 +175,15 @@ func (e Elicitation) Check(content json.RawMessage) error {
 }
 
 // ElicitationAnswer is the owner's reply: accept (with content for a
-// form), decline, or cancel.
+// form), decline, or cancel. ResolvedBy records who produced it —
+// "owner", or the machine resolution "expired" (answer deadline),
+// "unanswered" (the turn died), "unattended" (no answer surface) — so the
+// transcript never reads a machine cancel as an owner's refusal. It never
+// reaches the agent's wire reply.
 type ElicitationAnswer struct {
-	Action  string          `json:"action"`
-	Content json.RawMessage `json:"content,omitempty"`
+	Action     string          `json:"action"`
+	Content    json.RawMessage `json:"content,omitempty"`
+	ResolvedBy string          `json:"-"`
 }
 
 // Valid reports a known action; only accept carries content.

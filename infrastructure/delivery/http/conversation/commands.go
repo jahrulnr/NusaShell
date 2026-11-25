@@ -85,6 +85,9 @@ func (s *server) project(ctx context.Context, info drepo.ConversationInfo) (conv
 	if s.queue != nil {
 		out.Waiting = s.queue.QueueDepth(info.ID)
 	}
+	if s.turns != nil {
+		out.TurnActive = s.turns.TurnActive(info.ID)
+	}
 	if sel, ok, err := s.reads.Pending(ctx, info.ID); err != nil {
 		return conversationDTO{}, err
 	} else if ok {

@@ -481,7 +481,7 @@ func DefaultClientCapabilities() ClientCapabilities {
 		FS:          FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
 		Terminal:    true,
 		Auth:        AuthClientCapabilities{Terminal: true},
-		Elicitation: map[string]any{"form": map[string]any{}, "url": map[string]any{}},
+		Elicitation: map[string]any{"form": map[string]any{}},
 		// Cursor only exposes model parameters (effort, fast, context, ...) to
 		// clients opting into its parameterized picker. These use the same
 		// config-option updates and setters as our existing dynamic picker.

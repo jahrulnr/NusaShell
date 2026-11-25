@@ -2,6 +2,8 @@ package job
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -128,6 +130,49 @@ func storedRecord(t *testing.T, d Deps) (string, string) {
 // A provider room that becomes an agent room drops the provider's picks. The
 // agent applies neither an effort nor an upstream, so a room that kept them
 // would show a value nothing honours — for good.
+// A relayed prompt is stored as the sender wrote it: the provenance rides its
+// own record, and the head a model reads is rendered at request time.
+func TestRelayedPromptStoresItsBodyAndItsProvenance(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	relay := valueobject.NewRelay("c_sender", "otter", "Planner")
+	j := &Send{Deps: d, Ctx: t.Context(), Receipt: NewPersistenceReceipt(),
+		ProviderID: "gw1", ModelID: "m1", Message: "ship it",
+		Opts: SendOptions{Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}, Relay: &relay},
+	}
+	j.Result = make(chan error, 1)
+	j.Bind("room", nil)
+	if err := j.Execute(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	conv, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored *entity.Message
+	for i, m := range conv.Messages() {
+		if m.Role() == enum.RoleUser {
+			stored = &conv.Messages()[i]
+		}
+	}
+	if stored == nil {
+		t.Fatalf("no user message stored: %+v", conv.Messages())
+	}
+	if got := stored.Content(); got != "ship it" {
+		t.Fatalf("stored body = %q, want the sender's text alone", got)
+	}
+	if got := stored.Relay(); got.ID != "c_sender" || got.Label != "otter" || got.Title != "Planner" {
+		t.Fatalf("stored relay = %+v", got)
+	}
+	if got := stored.UserType(); got != enum.LLMUserTypeRelay {
+		t.Fatalf("user type = %q, want relay", got)
+	}
+	// The head is nowhere in the record; it is what a request renders.
+	if strings.Contains(stored.Content(), "From thread") {
+		t.Fatalf("the head reached the body: %q", stored.Content())
+	}
+}
+
 func TestBindingAnAgentDropsTheProviderSelection(t *testing.T) {
 	spy := &selectionSpy{}
 	d := hydrationDeps(t, spy)
@@ -223,5 +268,62 @@ func TestUnsetThreadEffortLeavesTheModelAlone(t *testing.T) {
 				t.Fatalf("stored effort = %q, want none", effort)
 			}
 		})
+	}
+}
+
+// gateRecorder is a TurnGate that remembers what it heard.
+type gateRecorder struct {
+	mu     sync.Mutex
+	begins []string
+	ends   []string
+}
+
+func (g *gateRecorder) BeginTurn(convID string) {
+	g.mu.Lock()
+	g.begins = append(g.begins, convID)
+	g.mu.Unlock()
+}
+
+func (g *gateRecorder) EndTurn(convID string) {
+	g.mu.Lock()
+	g.ends = append(g.ends, convID)
+	g.mu.Unlock()
+}
+
+func (g *gateRecorder) Begun() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.begins...)
+}
+
+func (g *gateRecorder) Ended() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.ends...)
+}
+
+// A fork copies a room on that room's worker, so the source is what is busy —
+// its claim is what a surface reads. The destination is new; nothing there waits.
+func TestForkClaimsTheSourceRoom(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	gate := &gateRecorder{}
+	d.Turns = gate
+	src := seedRoom(t, d.Convs, "c_src", "hi")
+	dst, err := src.Fork()
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &Fork{Deps: d, Ctx: t.Context(), Dst: dst}
+	j.Result = make(chan error, 1)
+	j.Bind("c_src", nil)
+	if err := j.Execute(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := gate.Begun(); len(got) != 1 || got[0] != "c_src" {
+		t.Fatalf("claimed %v, want the source room", got)
+	}
+	if got := gate.Ended(); len(got) != 1 || got[0] != "c_src" {
+		t.Fatalf("released %v, want the source room", got)
 	}
 }

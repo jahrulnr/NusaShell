@@ -78,8 +78,10 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 		}
 		return optionID, err
 	}
+	// A request reaches the owner only where an answer surface exists;
+	// an automation run has none, so its requests decline at once.
 	var elicit dservice.Elicitor
-	if d.Elicitations != nil {
+	if d.Elicitations != nil && origin.Kind != enum.TurnOriginAutomation {
 		elicit = func(ectx context.Context, e valueobject.Elicitation) (valueobject.ElicitationAnswer, error) {
 			return d.Elicitations.ask(ectx, convID, e, emit)
 		}

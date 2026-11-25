@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -64,7 +65,7 @@ func Agent(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer func() { _ = b.Close() }()
-	app := appagent.New(repoagent.New(filepath.Join(b.cfg.Storage.Dir, "agents"), b.secrets), nil, serviceagent.Detector{})
+	app := appagent.New(repoagent.New(filepath.Join(b.cfg.Storage.Dir, "agents"), b.secrets), nil, serviceagent.Detector{}, slog.Default())
 	ctx := context.Background()
 
 	switch args[0] {

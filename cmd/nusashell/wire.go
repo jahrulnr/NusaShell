@@ -482,7 +482,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		conversations: conversations,
 		projects:      appproject.New(projectRepo, workspaceStore, conversations),
 		projectRepo:   projectRepo,
-		agents:        appagent.New(agentRepo, agentRuntime, serviceagent.Detector{}),
+		agents:        appagent.New(agentRepo, agentRuntime, serviceagent.Detector{}, slog.Default()),
 		agentRuntime:  agentRuntime,
 		auth:          auth,
 		db:            db,

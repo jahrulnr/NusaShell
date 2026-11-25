@@ -1,12 +1,17 @@
 package appagent
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
@@ -46,7 +51,7 @@ func fixture(t *testing.T) (*AgentApp, *stubRuntime) {
 		{ID: "mode", Name: "Mode", Type: "select", Choices: []dservice.OptionChoice{{Value: "plan"}, {Value: "build"}}},
 		{ID: "fast", Name: "Fast", Type: "boolean"},
 	}}
-	return New(repoagent.New(t.TempDir(), nil), rt, nil), rt
+	return New(repoagent.New(t.TempDir(), nil), rt, nil, nil), rt
 }
 
 func save(t *testing.T, app *AgentApp, in Input) error {
@@ -130,4 +135,26 @@ func TestResidentAgentsStartAtOnce(t *testing.T) {
 	if !v.AutoStart {
 		t.Fatal("the view does not say the agent is resident")
 	}
+}
+
+// A store failure used to leave WarmResident silent — the Agents page broke
+// with nothing in the log. The error must reach the diagnostic log.
+func TestWarmResidentReportsAListFailure(t *testing.T) {
+	var buf bytes.Buffer
+	repo := failingAgentRepo{err: errors.New("store down")}
+	app := New(repo, &stubRuntime{}, nil, slog.New(slog.NewTextHandler(&buf, nil)))
+	app.WarmResident(context.Background())
+	if got := buf.String(); !strings.Contains(got, "resident agents could not be listed") ||
+		!strings.Contains(got, "store down") {
+		t.Fatalf("log = %q, want the List failure reported", got)
+	}
+}
+
+type failingAgentRepo struct {
+	drepo.Agent
+	err error
+}
+
+func (r failingAgentRepo) List(context.Context) ([]aggregate.Agent, error) {
+	return nil, r.err
 }

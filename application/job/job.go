@@ -24,7 +24,17 @@ import (
 // Deps is everything a job may reach — the domain ports plus the
 // conversation config, injected at construction. Jobs never see the app
 // or the worker.
+// TurnGate hears a room's turn begin and end.
+type TurnGate interface {
+	BeginTurn(convID string)
+	EndTurn(convID string)
+}
+
 type Deps struct {
+	// Turns hears a room's turn begin and end. It is what answers "is a turn
+	// running here" — the worker's own "running" is a moment too long (it
+	// clears after the job returns, while the caller already has the result).
+	Turns        TurnGate
 	Convs        drepo.Conversation
 	Providers    drepo.Provider
 	Environments map[enum.Environment]EnvironmentDriver

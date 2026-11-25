@@ -565,6 +565,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		Jobs:        ctx,
 		LiveTurns:   hub,
 		Queue:       eng.conversations,
+		TurnActive:  eng.conversations,
 		WS:          wsdelivery.NewHandler(hub, authorities).Serve,
 		Authorities: authorities,
 		WebAssets:   webAssets(),

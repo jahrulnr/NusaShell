@@ -10,6 +10,7 @@ package appagent
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -30,13 +31,17 @@ type AgentApp struct {
 	runtime  dservice.AgentRuntime
 	detector dservice.AgentDetector
 	shells   dservice.Shells
+	log      *slog.Logger
 	mu       sync.Mutex
 }
 
 // New wires the management plane. runtime and detector may be nil: a CLI
 // process has no running agents to reload, and a test may skip discovery.
-func New(agents drepo.Agent, runtime dservice.AgentRuntime, detector dservice.AgentDetector) *AgentApp {
-	return &AgentApp{agents: agents, runtime: runtime, detector: detector}
+func New(agents drepo.Agent, runtime dservice.AgentRuntime, detector dservice.AgentDetector, log *slog.Logger) *AgentApp {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &AgentApp{agents: agents, runtime: runtime, detector: detector, log: log.With("component", "agents")}
 }
 
 // EnvVar is one launch variable in a view: its name and how its value is
@@ -209,6 +214,7 @@ func (app *AgentApp) WarmResident(ctx context.Context) {
 	}
 	agents, err := app.agents.List(ctx)
 	if err != nil {
+		app.log.Warn("resident agents could not be listed", "error", err)
 		return
 	}
 	for _, a := range agents {

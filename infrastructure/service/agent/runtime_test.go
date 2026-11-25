@@ -691,12 +691,14 @@ func TestElicitation(t *testing.T) {
 	if strings.Join(kinds, ",") != "text,elicitation,text" {
 		t.Fatalf("parts = %v", kinds)
 	}
-	if !strings.Contains(record, `"action":"accept"`) || strings.Contains(record, "staging") {
+	if !strings.Contains(record, `"action":"accept"`) || !strings.Contains(record, `"resolvedBy":"owner"`) ||
+		strings.Contains(record, "staging") {
 		t.Fatalf("record = %s", record)
 	}
 }
 
-// Without an elicitor the request is declined and the turn goes on.
+// Without an elicitor the request is declined and the turn goes on; the
+// record says the machine, not the owner, resolved it.
 func TestElicitationWithoutOwner(t *testing.T) {
 	rt, in := setup(t, "elicit-demo url")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -704,8 +706,40 @@ func TestElicitationWithoutOwner(t *testing.T) {
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if c := in.Conversation.Last().Content(); !strings.Contains(c, `"action":"decline"`) {
-		t.Fatalf("answer = %q", c)
+	var record string
+	for _, p := range in.Conversation.Last().Parts() {
+		if p.Kind == entity.MessagePartElicitation {
+			record = p.Text
+		}
+	}
+	if !strings.Contains(record, `"action":"decline"`) || !strings.Contains(record, `"resolvedBy":"unattended"`) {
+		t.Fatalf("record = %q, want decline/unattended", record)
+	}
+}
+
+// A broker that expired the request reports cancel recorded expired —
+// never mistaken for a refusal, and the agent still gets one action.
+func TestElicitationExpiredRecordsItsSource(t *testing.T) {
+	rt, in := setup(t, "elicit-demo")
+	in.Elicit = func(_ context.Context, e valueobject.Elicitation) (valueobject.ElicitationAnswer, error) {
+		return valueobject.ElicitationAnswer{Action: "cancel", ResolvedBy: "expired"}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var record string
+	for _, p := range in.Conversation.Last().Parts() {
+		if p.Kind == entity.MessagePartElicitation {
+			record = p.Text
+		}
+	}
+	if !strings.Contains(record, `"action":"cancel"`) || !strings.Contains(record, `"resolvedBy":"expired"`) {
+		t.Fatalf("record = %q, want cancel/expired", record)
+	}
+	if c := in.Conversation.Last().Content(); !strings.Contains(c, `"action":"cancel"`) {
+		t.Fatalf("the agent did not get the cancel: %q", c)
 	}
 }
 
@@ -1148,9 +1182,10 @@ func TestCatalogFileCarriesNoSecrets(t *testing.T) {
 	}
 }
 
-// The handshake advertises exactly one capability: session.configOptions.
-// boolean — the gate codex's fast-mode option reads. fs and terminal stay
-// off (dead surface on codex), elicitation stays off (no contract yet).
+// The handshake advertises exactly two capabilities: session.configOptions.
+// boolean — the gate codex's fast-mode option reads — and elicitation form,
+// the one mode the owner-answer contract covers. fs and terminal stay off
+// (dead surface on codex), url stays unpromised (nothing sends it yet).
 // The fake agent dumps what it received, so this proves the wire shape.
 func TestClientCapsAdvertiseOnlyBooleanConfigOptions(t *testing.T) {
 	rt, in := setup(t, "hello")
@@ -1169,8 +1204,13 @@ func TestClientCapsAdvertiseOnlyBooleanConfigOptions(t *testing.T) {
 	if err := json.Unmarshal(raw, &caps); err != nil {
 		t.Fatal(err)
 	}
-	if len(caps) != 4 || caps["fs"] == nil || caps["terminal"] == nil || caps["session"] == nil || caps["auth"] == nil {
-		t.Fatalf("clientCapabilities keys = %s, want exactly fs/terminal/session/auth", raw)
+	t.Logf("clientCapabilities on the wire: %s", raw)
+	if len(caps) != 5 || caps["fs"] == nil || caps["terminal"] == nil || caps["session"] == nil || caps["auth"] == nil || caps["elicitation"] == nil {
+		t.Fatalf("clientCapabilities keys = %s, want exactly fs/terminal/session/auth/elicitation", raw)
+	}
+	var elic map[string]json.RawMessage
+	if err := json.Unmarshal(caps["elicitation"], &elic); err != nil || len(elic) != 1 || string(elic["form"]) != "{}" {
+		t.Fatalf("elicitation caps = %s, want only form:{} — url stays unpromised", caps["elicitation"])
 	}
 	var sess map[string]json.RawMessage
 	if err := json.Unmarshal(caps["session"], &sess); err != nil || len(sess) != 1 {

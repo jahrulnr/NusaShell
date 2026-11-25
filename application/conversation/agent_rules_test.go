@@ -103,6 +103,9 @@ func TestElicitationBroker(t *testing.T) {
 	if p := app.PendingElicitations("c_form"); len(p) != 1 || p[0].ID() != e.ID() {
 		t.Fatalf("pending = %+v", p)
 	}
+	if p := app.PendingElicitations("c_form"); p[0].Deadline().IsZero() {
+		t.Fatal("a parked request carries no answer deadline for the card")
+	}
 	bad := valueobject.ElicitationAnswer{Action: "accept", Content: []byte(`{"env":"staging"}`)}
 	if err := app.AnswerElicitation("c_form", e.ID(), bad); apperror.As(err).StatusCode() != 400 {
 		t.Fatalf("an invalid choice = %v", err)
@@ -125,6 +128,40 @@ func TestElicitationBroker(t *testing.T) {
 	}
 	if len(resolved) != 1 || resolved[0] != "accept" || len(app.PendingElicitations("c_form")) != 0 {
 		t.Fatalf("resolved = %v", resolved)
+	}
+	// The first resolution stands — an answer for the settled request 404s.
+	if err := app.AnswerElicitation("c_form", e.ID(), valueobject.ElicitationAnswer{Action: "decline"}); apperror.As(err).StatusCode() != 404 {
+		t.Fatalf("an answer after resolution = %v, want 404", err)
+	}
+}
+
+// An automation run has no answer surface: its turn is not wired to the
+// broker, so a form request can never park waiting for a human.
+func TestElicitationAutomationDeclinesAtOnce(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	if _, err := app.Send(ctx, "c_auto", "", "", "fill the form", nil, appjob.SendOptions{
+		Agent:  "fake",
+		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginAutomation},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("an unattended elicitation waited instead of declining at once")
+	}
+	if len(rt.answers) != 0 {
+		t.Fatalf("answers = %+v — no surface means no ask", rt.answers)
+	}
+	rt.mu.Lock()
+	elicit := rt.prompts[0].Elicit
+	rt.mu.Unlock()
+	if elicit != nil {
+		t.Fatal("an automation turn was wired an elicitor — it would park forever")
+	}
+	if len(app.PendingElicitations("c_auto")) != 0 {
+		t.Fatal("a request parked on a run nobody watches")
 	}
 }
 

@@ -4,8 +4,8 @@
 import { state, emit, toast, dismissToast, askConfirm } from './store.js';
 import { api, errorText, ApiError } from './api.js';
 import { TurnSocket, newRequestId } from './socket.js';
-import { newTurn, applyFrame, snapshotSegments } from './turn.js';
-import { forgetQueued, resetQueued, setQueued } from './queued.js';
+import { newTurn, applyFrame, snapshotSegments, isPrompt } from './turn.js';
+import { forgetQueued, resetQueued, setQueued, queuedFor } from './queued.js';
 import { referencesForSend, referencesToDraft, liveReferences } from './references.js';
 import { parseCommand, isNativeCommand, catalogRow, loadCommands } from './commands.js';
 import { loadView, startViews } from './views.js';
@@ -95,6 +95,50 @@ export const isBusy = (r) => !!(r.live || r.pendingOpen || r.settling);
 // retry, and the header's Compact button ask.
 export const roomBusy = (r) => isBusy(r) || !!r.command;
 
+// workingBlind answers whether the room is working without a live view: its
+// record says a turn is active but names none to watch (activeTurnId always
+// wins — when it is there, the turn is live and this is not blind). Compact,
+// fork, and a queue job all arrive the same way, so the indicator only ever
+// says "working"; what kind is the turn's own business.
+export const workingBlind = (r) => !!r?.info?.turnActive && !r.info?.activeTurnId;
+
+// The queue poll closes the one gap the wire leaves: a room's waiting count
+// moves by event (`conversation.queued`) and by read, but a queued job's
+// *start* emits nothing — the turn it became is simply there on the next
+// read. So while the open room has anything waiting, its record is re-read
+// on a slow clock until the queue is empty. It answers to the open room
+// alone (other rooms' drains arrive as events), it stops the moment the
+// count is gone, the route moved on, the room is deleted, or the tab is
+// hidden — and a tab that becomes visible again is owed one read at once,
+// not after three seconds of staleness.
+const BLIND_POLL_MS = 3000;
+let blindPoll = null; // { id, timer }
+
+// syncBlindPoll arms or disarms the queue poll for whatever the route now
+// opens. Cheap to call on every queue change, room read, and navigation.
+function syncBlindPoll() {
+  const id = state.route.view === 'chat' ? state.route.id : null;
+  const waiting = id ? queuedFor(id) : 0;
+  if (!id || !waiting || document.hidden) {
+    if (blindPoll) { clearInterval(blindPoll.timer); blindPoll = null; }
+    return;
+  }
+  if (blindPoll?.id === id) return;
+  if (blindPoll) clearInterval(blindPoll.timer);
+  const timer = setInterval(() => {
+    // Every tick re-asks whether the room this poll serves is still the one
+    // on screen, still waiting, and still there — the poll retires itself
+    // rather than ever firing for a room that moved on.
+    const r = state.rooms[id];
+    if (state.route.id !== id || !queuedFor(id) || document.hidden || !r || r.infoStatus === 'notfound') {
+      syncBlindPoll();
+      return;
+    }
+    loadInfo(r, { force: true });
+  }, BLIND_POLL_MS);
+  blindPoll = { id, timer };
+}
+
 // ---------- routing ----------
 
 export function navigate(hash) {
@@ -135,6 +179,7 @@ function applyRoute() {
   state.sidebarOpen = false;
   if (state.route.view === 'chat') openRoom(state.route.id);
   if (state.route.view === 'home') fetchContext(freshRoom());
+  syncBlindPoll();
   emit();
 }
 
@@ -142,6 +187,14 @@ function applyRoute() {
 
 export function start() {
   window.addEventListener('hashchange', applyRoute);
+  // A hidden tab must not poll — the read would run unseen for as long as a
+  // queue lasts. Coming back is owed one read now, not after the interval.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { syncBlindPoll(); return; }
+    const r = state.route.view === 'chat' ? state.rooms[state.route.id] : null;
+    if (r && queuedFor(r.id)) loadInfo(r, { force: true });
+    syncBlindPoll();
+  });
   socket = new TurnSocket({
     onFrame,
     onState: (s, info) => { state.conn = s; if (s === 'closed') closeCode = info?.code; emit(); },
@@ -392,6 +445,7 @@ export async function loadInfo(r, { force = false, created = false } = {}) {
           // any frame that arrived before it, so it seeds the line — and a leaf
           // the record omits means the queue is empty, not unknown.
           setQueued(r.id, info.waiting ?? 0);
+          syncBlindPoll();
           r.infoStatus = 'ready';
           r.infoError = null;
           r.infoAt = Date.now();
@@ -712,7 +766,7 @@ let writes = 0;
 // what a stream of refreshes does all day. A different key is a change, and
 // the record is applied.
 const RECORD_FIELDS = ['title', 'projectId', 'pinned', 'memoryOff', 'label', 'providerId', 'modelId',
-  'agentId', 'effort', 'upstream', 'workspace', 'messageCount', 'activeTurnId', 'activeTurnKind', 'pending'];
+  'agentId', 'effort', 'upstream', 'workspace', 'messageCount', 'activeTurnId', 'activeTurnKind', 'pending', 'turnActive'];
 const recordKey = (x) => (x ? RECORD_FIELDS.map((k) => (typeof x[k] === 'object' && x[k] !== null ? JSON.stringify(x[k]) : x[k]) ?? '').join('\u0000') : '');
 const sameRecords = (a, b) => !!a && !!b && recordKey(a) === recordKey(b);
 
@@ -1008,11 +1062,13 @@ export function cancel(r) {
 
 // waitingPrompt answers the owner prompt the room has not answered: the
 // newest prompt with no assistant text after it. A room whose last word is an
-// answer has nothing left to retry, and a note (a synthetic user line) is not
-// a prompt. Null when there is no prompt at all.
+// answer has nothing left to retry, and a synthetic row — a note or a
+// compaction checkpoint — is not a prompt (isPrompt is the same rule the
+// transcript classifies rows by, and a failed fold must not leave a divider
+// offering Retry). Null when there is no prompt at all.
 export function waitingPrompt(room) {
   const msgs = (room.messages || []).filter((m) => m.role === 'user' || m.role === 'assistant');
-  const at = msgs.findLastIndex((m) => m.role === 'user' && m.userType !== 'system');
+  const at = msgs.findLastIndex(isPrompt);
   if (at < 0) return null;
   const answered = msgs.slice(at + 1).some((m) => m.role === 'assistant'
     && ((m.content || '').trim() !== '' || (m.parts || []).some((p) => p.kind === 'text' && (p.text || '').trim() !== '')));
@@ -1189,6 +1245,7 @@ function onFrame(f) {
       const drained = waiting === 0 && queuedRooms.delete(id);
       if (waiting) queuedRooms.add(id);
       setQueued(id, waiting);
+      syncBlindPoll();
       if (drained) readQueuedRoom(id, { force: true });
       return;
     }
