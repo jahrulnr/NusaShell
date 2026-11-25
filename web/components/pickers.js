@@ -16,6 +16,20 @@ import { editProject } from './projects.js';
 const ALL_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const upstreamCache = new Map();
 
+// upstreamControl decides what the upstream select renders from the loader
+// state. Once a model's list ever came back non-empty (`had`), the control
+// stays mounted for the rest of the panel session — across picks, refetches,
+// and the frame between a pick and its effect — because an unmounted select
+// is the flicker an owner reads as the popup closing and reopening. Its
+// content stays honest instead: the list renders only for the key it was
+// fetched for, so a model whose upstreams are still loading (or never had
+// any) offers 'Auto' alone, which is what the reset value already says.
+export const upstreamControl = (up, key) => ({
+  show: !!up.had,
+  list: up.key === key ? up.list || [] : [],
+  loading: up.status === 'loading',
+});
+
 // agentModelLabel names an agent choice: the picked model when there is
 // one, else the model the agent itself would run — the one it marks
 // current. Until the list says which that is, the button names the agent
@@ -50,6 +64,7 @@ export function ModelPicker({ room }) {
   // An agent room names its model in the button; fetch the names for it.
   useEffect(() => { if (sel.agentId) loadAgentModels(sel.agentId); }, [sel.agentId]);
   const efforts = cur?.supportedEfforts?.length ? cur.supportedEfforts : ALL_EFFORTS;
+  const upCtl = upstreamControl(upstreams, sel.providerId + '|' + sel.modelId);
 
   // Agent session options: every agent defines its own set — Claude Code's
   // plan/accept-edits/bypass modes, Devin's, and whatever config each
@@ -71,13 +86,18 @@ export function ModelPicker({ room }) {
   useEffect(() => {
     if (!open || sel.agentId || !sel.providerId || !sel.modelId) return;
     const key = sel.providerId + '|' + sel.modelId;
-    if (upstreamCache.has(key)) { setUpstreams({ status: 'ready', list: upstreamCache.get(key) }); return; }
-    setUpstreams({ status: 'loading', list: [] });
+    if (upstreamCache.has(key)) {
+      const list = upstreamCache.get(key);
+      setUpstreams((u) => ({ status: 'ready', key, list, had: u.had || list.length > 0 }));
+      return;
+    }
+    setUpstreams((u) => ({ ...u, status: 'loading', key }));
     let live = true;
     api.upstreams(sel.providerId, sel.modelId).then((r) => {
-      upstreamCache.set(key, r.data || []);
-      if (live) setUpstreams({ status: 'ready', list: r.data || [] });
-    }, () => live && setUpstreams({ status: 'error', list: [] }));
+      const list = r.data || [];
+      upstreamCache.set(key, list);
+      if (live) setUpstreams((u) => ({ status: 'ready', key, list, had: u.had || list.length > 0 }));
+    }, () => live && setUpstreams((u) => ({ ...u, status: 'error', key })));
     return () => { live = false; };
   }, [open, sel.providerId, sel.modelId]);
 
@@ -173,18 +193,22 @@ export function ModelPicker({ room }) {
             options=${[{ value: 'default', text: 'Default' }, ...efforts.map((e) => ({ value: e, text: e[0].toUpperCase() + e.slice(1) }))]}
             onChange=${(v) => setSelection(room, { effort: v })} />
         </label>
-        ${upstreams.status === 'ready' && upstreams.list.length > 0 && html`<label class="flex flex-col gap-1 min-w-0">
-          <span class="text-xs text-muted truncate">Upstream</span>
+        ${upCtl.show && html`<label class="flex flex-col gap-1 min-w-0">
+          <span class="text-xs text-muted truncate flex items-center gap-1.5">Upstream ${upCtl.loading && html`<${Spinner} size=${11} class="text-faint" />`}</span>
           <${Select} dense label="Upstream" class="w-full" search value=${sel.upstream || ''}
-            options=${[{ value: '', text: 'Auto' }, ...upstreams.list.map((p) => ({ value: p.slug, text: p.name }))]}
+            options=${[{ value: '', text: 'Auto' }, ...upCtl.list.map((p) => ({ value: p.slug, text: p.name }))]}
             onChange=${(v) => setSelection(room, { upstream: v })} />
         </label>`}
-        ${upstreams.status === 'loading' && html`<div class="col-span-2 flex items-center gap-2 text-faint text-xs"><${Spinner} size=${12} /> Checking upstreams…</div>`}
       </div>`}
       ${sel.agentId && html`<div class="shrink-0 border-t border-line px-3 py-2.5 flex flex-col gap-2">
         ${agentOpts.status === 'loading' && html`<div class="flex items-center gap-2 text-faint text-xs"><${Spinner} size=${12} /> Asking the agent…</div>`}
         ${agentOpts.status === 'error' && html`<p class="text-bad text-xs">${agentOpts.error}</p>`}
-        ${agentOpts.status === 'ready' && !agentOpts.list.length && html`<p class="text-faint text-xs">This agent offers no session options.</p>`}
+        ${agentOpts.status === 'ready' && !agentOpts.list.length && (agentOpts.report === 'empty'
+          ? html`<div class="flex items-center gap-2 text-faint text-xs">
+              <span class="flex-1">The agent reports no options right now.</span>
+              <button type="button" class="text-accent shrink-0" onClick=${() => loadAgentOptions(room, { force: true })}>Refresh</button>
+            </div>`
+          : html`<p class="text-faint text-xs">This agent offers no session options.</p>`)}
         ${agentOpts.list.length > 0 && html`<div class="grid grid-cols-2 gap-x-3 gap-y-2">
           ${agentOpts.list.map((o) => html`<label class="flex flex-col gap-1 min-w-0 only-of-type:col-span-full" key=${o.id}>
             <span class="flex items-center gap-1.5 text-xs text-muted min-w-0" title=${o.description || o.name}>

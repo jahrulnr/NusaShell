@@ -10,13 +10,16 @@ const (
 	TurnOriginChannel      TurnOriginKind = "channel"
 	TurnOriginAutomation   TurnOriginKind = "automation"
 	TurnOriginConversation TurnOriginKind = "conversation"
+	// TurnOriginCompletion is a turn the server started so a room reads a
+	// background completion. It carries no owner message behind it.
+	TurnOriginCompletion TurnOriginKind = "completion"
 )
 
 func (k TurnOriginKind) String() string { return string(k) }
 
 func ParseTurnOriginKind(v string) (TurnOriginKind, bool) {
 	switch k := TurnOriginKind(v); k {
-	case TurnOriginWeb, TurnOriginChannel, TurnOriginAutomation, TurnOriginConversation:
+	case TurnOriginWeb, TurnOriginChannel, TurnOriginAutomation, TurnOriginConversation, TurnOriginCompletion:
 		return k, true
 	}
 	return "", false

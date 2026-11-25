@@ -2,6 +2,7 @@ package appconversation
 
 import (
 	"context"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -35,6 +36,9 @@ func (app *ConversationApp) OnQueueChanged(fn func(convID string)) {
 // runs — a server that stops first loses the message, and its sender was told
 // only that it was accepted.
 func (app *ConversationApp) Enqueue(ctx context.Context, convID, providerID, modelID, text string, attachments []valueobject.Attachment, opts appjob.SendOptions) (int, error) {
+	if opts.Origin.Kind != enum.TurnOriginCompletion {
+		app.noteOwnerTurn(convID)
+	}
 	// The accepted message outlives the caller's turn: a sender that ends its
 	// own turn must not cancel the message it just handed over.
 	j := &appjob.Send{

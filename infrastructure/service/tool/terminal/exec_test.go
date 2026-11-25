@@ -185,6 +185,11 @@ func TestExecToolSchema(t *testing.T) {
 		len(params.Required) != 1 || params.Required[0] != "command" {
 		t.Fatalf("command not the required param: %s", s.Parameters())
 	}
+	// The advertised cap is the seam ceiling in milliseconds — the schema
+	// must never promise more than the deadline enforcing it.
+	if !strings.Contains(string(s.Parameters()), "capped at 240000") {
+		t.Fatalf("schema does not advertise the 240s cap: %s", s.Parameters())
+	}
 }
 
 func TestExecEcho(t *testing.T) {

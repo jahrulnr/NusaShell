@@ -29,6 +29,11 @@ import (
 // the cache at once.
 const cacheFor = 2 * time.Second
 
+// toolCallDeadline caps the test-run's tool call — a variable so a test
+// can prove the seam without sleeping four minutes. Production keeps the
+// domain ceiling; nothing else may set it.
+var toolCallDeadline = dservice.ToolCallDeadline
+
 // Settings writes the config file: SettingApp satisfies it.
 type Settings interface {
 	SetMany(values map[string]string) ([]byte, error)
@@ -473,11 +478,21 @@ func (a *App) Test(ctx context.Context, in TestInput) (TestResult, error) {
 	}
 	a.forget() // test what was just saved
 	start := a.now()
-	res, err := tool.Execute(ctx, call, nil)
+	// The one ceiling covers the test-run too — a hanging endpoint must
+	// not park the settings page. Its deadline is the run's own outcome:
+	// the shared timed-out text in the response body, never the parent
+	// cancel path.
+	deadlineCtx, deadlineStop := context.WithTimeout(ctx, toolCallDeadline)
+	res, err := tool.Execute(deadlineCtx, call, nil)
+	deadlineStop()
 	out := TestResult{DurationMS: a.now().Sub(start).Milliseconds()}
 	if err != nil {
 		// The tool masks keys; its message names the failing sources.
-		out.Error = err.Error()
+		if deadlineCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+			out.Error = dservice.ToolCallTimeoutText
+		} else {
+			out.Error = err.Error()
+		}
 		return out, nil
 	}
 	if json.Valid([]byte(res.Text)) {

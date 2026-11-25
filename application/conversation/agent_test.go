@@ -43,7 +43,9 @@ type scriptedAgent struct {
 	answers   []valueobject.ElicitationAnswer
 	// steerable makes a "wait for steer" prompt hold until Steer delivers.
 	steerable bool
-	steered   chan string
+	// steers is every text the agent took mid-turn, in order.
+	steers  []string
+	steered chan string
 	// report is the context account the agent gives before it finishes.
 	report *valueobject.AgentContext
 	// title is the name the agent suggests for the room.
@@ -242,6 +244,9 @@ func (a *scriptedAgent) Steer(_ context.Context, _ string, input valueobject.Use
 	if !a.steerable {
 		return false
 	}
+	a.mu.Lock()
+	a.steers = append(a.steers, input.Text)
+	a.mu.Unlock()
 	delivered()
 	a.steered <- input.Text
 	return true

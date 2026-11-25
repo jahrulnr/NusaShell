@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -63,6 +64,15 @@ func nativeCommands() []Command {
 	}
 }
 
+// UseTurnSurface wires the live-turn surface a queued job opens its journal
+// through: a turn no socket admitted still has an audience — its room. Nil leaves
+// those turns unjournaled, which is the CLI's composition.
+func (app *ConversationApp) UseTurnSurface(s appjob.TurnSurface) {
+	app.mu.Lock()
+	app.deps.TurnSurface = s
+	app.mu.Unlock()
+}
+
 // UseLiveTurns sets the source of "a transport turn is live in this room",
 // read on each command so a turn started anywhere — this browser, a chat, an
 // automation — refuses history commands. Nil reads every room as idle, which
@@ -110,6 +120,20 @@ func (app *ConversationApp) EndTurn(convID string) {
 	} else {
 		delete(app.turning, convID)
 	}
+	// Released after the turn's clear (the jobs clear inside Execute, this runs
+	// as its defer), so a failed save leaves both the file and the projection
+	// honest: the pick is visible again until a turn applies it.
+	delete(app.consumed, convID)
+	app.mu.Unlock()
+}
+
+// ConsumePending records the pick a turn just applied. EndTurn releases it.
+func (app *ConversationApp) ConsumePending(convID string, acceptedAt time.Time) {
+	app.mu.Lock()
+	if app.consumed == nil {
+		app.consumed = map[string]time.Time{}
+	}
+	app.consumed[convID] = acceptedAt
 	app.mu.Unlock()
 }
 

@@ -203,8 +203,24 @@ func (app *ConversationApp) parkSelection(ctx context.Context, convID string, a 
 }
 
 // Pending answers what the room waits to apply on its next turn.
+//
+// A pick a running turn already applied is in play, not waiting: it is hidden
+// until that turn ends. The comparison is by acceptedAt, so a pick taken after
+// the consumption is a different generation and stays visible. This is the only
+// filter — the turn jobs read Convs.PendingSelection directly, because a filtered
+// read would tell the applying turn that nothing waits.
 func (app *ConversationApp) Pending(ctx context.Context, convID string) (drepo.PendingSelection, bool, error) {
-	return app.depsSnapshot().Convs.PendingSelection(ctx, convID)
+	sel, ok, err := app.depsSnapshot().Convs.PendingSelection(ctx, convID)
+	if err != nil || !ok {
+		return sel, ok, err
+	}
+	app.mu.Lock()
+	consumed, inPlay := app.consumed[convID]
+	app.mu.Unlock()
+	if inPlay && !sel.AcceptedAt.IsZero() && sel.AcceptedAt.Equal(consumed) {
+		return drepo.PendingSelection{}, false, nil
+	}
+	return sel, true, nil
 }
 
 // AgentOptions lists the session options of the room's agent, with the

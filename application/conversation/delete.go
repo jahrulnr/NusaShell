@@ -20,6 +20,7 @@ import (
 // The repository delete runs under a background context: a caller who
 // abandons Delete mid-flight must not half-delete a room.
 func (app *ConversationApp) Delete(ctx context.Context, convID string) error {
+	app.forgetCompletions(convID)
 	res := make(chan error, 1)
 	j := &appjob.Delete{}
 	j.Result = res

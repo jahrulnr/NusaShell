@@ -19,18 +19,19 @@ const LIST = (current = 'code') => [MODE(current), { id: 'thinking', name: 'Thin
 // serveRoom answers the reads a room view makes, plus its agent options. The
 // option routes answer with the list a write produced, so the controller can be
 // checked against what the server would really say next.
-function serveRoom(id, { current = 'code', put = null, info = {}, get = null } = {}) {
+function serveRoom(id, { current = 'code', put = null, info = {}, get = null, options = null } = {}) {
   let mode = current;
   // mockApi matches a path prefix, so the longer paths come first: the option
   // routes live under the conversation route, not beside it.
   mockApi({
-    [`GET /api/conversations/${id}/agent-options`]: () => [200, { data: LIST(mode) }],
+    [`GET /api/conversations/${id}/agent-options`]: options || (() => [200, { data: LIST(mode) }]),
     [`PUT /api/conversations/${id}/agent-options`]: (call) => {
       if (put) return put(call, mode);
       mode = call.body.value;
       return [200, { data: LIST(mode) }];
     },
     [`GET /api/conversations/${id}/messages`]: { messages: [{ id: 'm1', role: 'user', content: 'hi' }], effectiveStart: 0, total: 1 },
+    [`PATCH /api/conversations/${id}`]: (call) => ({ id, title: 'Agent room', workspace: '', agentId: 'claude', ...info, ...call.body }),
     [`GET /api/conversations/${id}`]: get || { id, title: 'Agent room', workspace: '', agentId: 'claude', ...info },
     'GET /api/approval-rules': { data: [] },
   });
@@ -291,4 +292,84 @@ test('a change announced by the server is read once, not once per control', asyn
   assert.equal(optionReads('c_ao5'), 1, 'one read for the change, however many controls show it');
   assert.ok(flushes > 0, 'and the list the controls read was announced');
   off();
+});
+
+// The wire carries a status beside the list: 'ready' is definitive (an empty
+// list means the agent truly offers nothing), 'empty' is transient (nothing
+// right now — a later read may fill it). The report is the status, never a
+// guess from data.length.
+test('wire status empty reads as transient; a refresh can fill the list', async () => {
+  let payload = { data: [], status: 'empty' };
+  serveRoom('c_ao6', { options: () => [200, payload] });
+  chat.navigate('#/c/c_ao6');
+  await sleep(40);
+  const r = state.rooms.c_ao6;
+  assert.equal(r.agentOptions.status, 'ready');
+  assert.equal(r.agentOptions.list.length, 0);
+  assert.equal(r.agentOptions.report, 'empty', 'transient — the permanent sentence does not apply');
+
+  payload = { data: LIST('code'), status: 'ready' };
+  await chat.loadAgentOptions(r, { force: true });
+  assert.equal(r.agentOptions.report, 'ready');
+  assert.equal(r.agentOptions.list.length, 2, 'a transient empty fills again with nothing changing but time');
+});
+
+test('wire status ready with an empty list is the definitive empty', async () => {
+  serveRoom('c_ao7', { options: () => [200, { data: [], status: 'ready' }] });
+  chat.navigate('#/c/c_ao7');
+  await sleep(40);
+  const r = state.rooms.c_ao7;
+  assert.equal(r.agentOptions.list.length, 0);
+  assert.equal(r.agentOptions.report, 'ready', 'the agent truly offers no session options');
+});
+
+test('the report is the wire status, never a guess from data.length', async () => {
+  serveRoom('c_ao8', { options: () => [200, { data: LIST('code'), status: 'empty' }] });
+  chat.navigate('#/c/c_ao8');
+  await sleep(40);
+  const r = state.rooms.c_ao8;
+  assert.equal(r.agentOptions.list.length, 2, 'the data still rides');
+  assert.equal(r.agentOptions.report, 'empty', 'a filled list does not rewrite the wire status');
+});
+
+// The composer's chip shows when there is something to act on and hides only
+// for the definitive empty — the wire report decides, not the bare list.
+test('the composer chip hides only for a definitive empty', () => {
+  assert.equal(chat.agentChipVisible({ status: 'ready', list: [], report: 'empty' }), true, 'transient empty stays — the refresh is actionable');
+  assert.equal(chat.agentChipVisible({ status: 'ready', list: [], report: 'ready' }), false, 'definitive empty hides — nothing a click changes');
+  assert.equal(chat.agentChipVisible({ status: 'ready', list: [{ id: 'mode' }], report: 'ready' }), true, 'options to pick show as before');
+});
+
+// B-062: the picker's session options rebuilt on every model pick — the
+// "popup renders all over again" the owner saw. persistSelection clears
+// r.sel once the server echoes a pick, so r.sel.agentId is undefined in the
+// steady state; comparing the patch against it fired the options reset on
+// every pick, wiping the list and remounting the whole section. The reset
+// is only for a pick that lands on a DIFFERENT agent.
+test('a model pick inside the same agent keeps the options list mounted', async () => {
+  serveRoom('c_ao_keep');
+  chat.navigate('#/c/c_ao_keep');
+  await sleep(40);
+  const r = state.rooms.c_ao_keep;
+  assert.equal(r.agentOptions.status, 'ready');
+  assert.equal(r.agentOptions.list.length, 2);
+  assert.equal(r.sel.agentId, undefined, 'a freshly opened room carries no tab-local override');
+
+  // same agent, another model: the options belong to the agent, not the
+  // model — nothing about them changes, so nothing may be reset
+  chat.setSelection(r, { agentId: 'claude', providerId: '', modelId: 'opus', effort: 'default', upstream: '' });
+  assert.equal(r.agentOptions.status, 'ready', 'no reset inside the agent the room is bound to');
+  assert.equal(r.agentOptions.list.length, 2, 'the list the controls draw survives the pick');
+});
+
+test('a pick that lands on a different agent still resets the options', async () => {
+  serveRoom('c_ao_swap');
+  chat.navigate('#/c/c_ao_swap');
+  await sleep(40);
+  const r = state.rooms.c_ao_swap;
+  assert.equal(r.agentOptions.list.length, 2);
+
+  chat.setSelection(r, { agentId: 'other', providerId: '', modelId: 'm', effort: 'default', upstream: '' });
+  assert.equal(r.agentOptions.status !== 'ready' || r.agentOptions.list.length === 0, true,
+    'another agent offers another list: nothing of this one may show');
 });

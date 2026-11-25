@@ -4,8 +4,11 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
@@ -30,6 +33,8 @@ type SessionStore struct {
 	epoch       map[string]uint64 // bumped when a room is reaped
 	globalEpoch uint64            // bumped by TerminateAll
 	environment dservice.CommandEnvironment
+	// onExit hears every opted-in session's exit.
+	onExit dservice.CompletionSink
 }
 
 func NewSessionStore(environment dservice.CommandEnvironment) *SessionStore {
@@ -41,6 +46,15 @@ func NewSessionStore(environment dservice.CommandEnvironment) *SessionStore {
 }
 
 var errOpenReaped = errors.New("conversation terminated during session open")
+
+// OnExit registers the sink an opted-in session reports its exit to. The store
+// only says the session ended and how; whether the room is woken belongs to the
+// receiver.
+func (s *SessionStore) OnExit(fn dservice.CompletionSink) {
+	s.mu.Lock()
+	s.onExit = fn
+	s.mu.Unlock()
+}
 
 // Open spawns and registers the session before returning — the entry must
 // exist in the map before the caller's first Collect so a racing
@@ -81,7 +95,50 @@ func (s *SessionStore) Open(ctx context.Context, convID string, req dservice.Ter
 	for _, dead := range evicted {
 		dead.Terminate()
 	}
+	if req.Wake {
+		// Opt-in only, and off the caller's path: a session that did not ask wakes
+		// nothing, and an exit never waits on the sink.
+		go s.watchExit(convID, gen, global, sess)
+	}
 	return sess, nil
+}
+
+// completionTail bounds the output a session exit carries: enough to read what
+// happened, never the whole stream.
+const completionTail = 2000
+
+// watchExit reports one opted-in session's exit. A room reaped while the session
+// ran — TerminateConversation bumps its epoch — takes the callback with it, so a
+// deleted room never leaves an orphan record.
+func (s *SessionStore) watchExit(convID string, gen, global uint64, sess *terminalSession) {
+	<-sess.done
+	s.mu.Lock()
+	reaped := s.epoch[convID] != gen || s.globalEpoch != global
+	fn := s.onExit
+	s.mu.Unlock()
+	if reaped || fn == nil {
+		return
+	}
+	sess.mu.Lock()
+	tail := string(sess.pending)
+	code, signal := sess.exitCode, sess.signal
+	sess.mu.Unlock()
+	if len(tail) > completionTail {
+		tail = tail[len(tail)-completionTail:]
+	}
+	status, detail := "exited", fmt.Sprintf("exit %d", code)
+	switch {
+	case signal != "":
+		status, detail = "failed", "killed: "+signal
+	case code != 0:
+		status = "failed"
+	}
+	if trimmed := strings.TrimSpace(tail); trimmed != "" {
+		detail += "\n" + trimmed
+	}
+	fn(convID, dservice.Completion{
+		Source: "session", ID: strconv.Itoa(sess.id), Status: status, Detail: detail,
+	})
 }
 
 // Interact serializes one write/poll interaction against the session —

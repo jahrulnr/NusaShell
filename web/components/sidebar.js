@@ -3,7 +3,7 @@
 // Search filters both by name.
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, setPref } from '../lib/store.js';
-import { loadConversations, loadProjects, loadProjectThreads, PROJECT_THREADS, newThreadIn, annotateRoom, removeRoomById } from '../lib/chat.js';
+import { loadConversations, loadProjects, loadProjectThreads, PROJECT_THREADS, newThreadIn, annotateRoom, removeRoomById, watching } from '../lib/chat.js';
 import { api, errorText } from '../lib/api.js';
 import { toast } from '../lib/store.js';
 import { Icon, Logo } from './icons.js';
@@ -191,7 +191,7 @@ function ThreadRow({ thread: x, active, compact, projects, onDelete }) {
     aria-busy=${deleting || undefined}>
     <a href=${'#/c/' + encodeURIComponent(x.id)} aria-current=${active ? 'page' : undefined}
       class=${cx('flex-1 min-w-0 flex items-center gap-2 pl-2.5 pr-1 text-[13px]', compact ? 'h-7' : 'h-8', active ? 'text-fg' : 'text-muted hover:text-fg')}>
-      ${x.activeTurnId ? html`<span class="orb live" title="Working"></span>` : x.turnActive ? html`<span class="orb idle" title="Working — no live view yet"></span>` : compact ? null : html`<span class="size-2 shrink-0"></span>`}
+      ${watching(x) ? html`<span class="orb live" title="Working"></span>` : x.turnActive ? html`<span class="orb idle" title="Working — no live view yet"></span>` : compact ? null : html`<span class="size-2 shrink-0"></span>`}
       ${x.agentId && html`<${Icon} name="bot" size=${13} class="text-faint" />`}
       <span class="flex-1 truncate">${x.title || 'Untitled thread'}</span>
       ${x.pinned && compact && html`<${Icon} name="pin" size=${12} class="text-faint" />`}

@@ -145,8 +145,32 @@ type Conversation interface {
 	// PendingSelection reads what waits, reporting false when nothing does.
 	PendingSelection(ctx context.Context, convID string) (PendingSelection, bool, error)
 
-	// ClearPendingSelection drops it — called once a turn applied it and saved.
-	ClearPendingSelection(ctx context.Context, convID string) error
+	// ClearPendingSelection drops the pick a turn consumed and saved, identified
+	// by the acceptedAt it applied. A newer pick that arrived while that turn ran
+	// is left alone: it has not been applied yet, and removing the file would lose
+	// it silently.
+	ClearPendingSelection(ctx context.Context, convID string, acceptedAt time.Time) error
+
+	// SaveCompletions parks the asynchronous finishes a room has not read yet
+	// beside its record, merging with what already waits: a finish whose
+	// source+id is already known is the same exit reported twice and is not
+	// repeated. The write is atomic and survives the process that reported it —
+	// a restart between the exit and the turn that reads it must not lose it
+	// silently. The bool reports whether the finish was recorded now (false for
+	// a repeat), so the caller wakes only for news.
+	SaveCompletions(ctx context.Context, convID string, list []valueobject.Completion) (bool, error)
+
+	// PendingCompletions reads the finishes the room has not read, oldest first.
+	PendingCompletions(ctx context.Context, convID string) ([]valueobject.Completion, error)
+
+	// ClearCompletions drops the records a turn rendered, identified by
+	// Completion.Key. The keys stay known, so a producer that replays an exit
+	// already read does not park it again.
+	ClearCompletions(ctx context.Context, convID string, keys []string) error
+
+	// DropCompletions removes a deleted room's pending list with the room: no
+	// record outlives the room it belonged to.
+	DropCompletions(ctx context.Context, convID string) error
 
 	// Info returns the lightweight projection for one conversation.
 	Info(ctx context.Context, convID string) (ConversationInfo, error)

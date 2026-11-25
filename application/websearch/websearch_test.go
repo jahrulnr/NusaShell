@@ -295,3 +295,52 @@ func TestRunsTheRealTool(t *testing.T) {
 		t.Fatal("an unknown tool was run")
 	}
 }
+
+// hangingSearch blocks until its ctx dies — the shape of an endpoint that
+// never answers.
+type hangingSearch struct{ schema valueobject.ToolSchema }
+
+func newHangingSearch(t *testing.T) hangingSearch {
+	t.Helper()
+	schema, err := valueobject.NewToolSchema("websearch", "never answers",
+		json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`),
+		true, enum.ToolPermissionGeneral)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hangingSearch{schema}
+}
+
+func (h hangingSearch) Schema() valueobject.ToolSchema { return h.schema }
+
+func (h hangingSearch) Execute(ctx context.Context, _ entity.ToolCall, _ dservice.ToolEmitter) (dservice.ToolResult, error) {
+	<-ctx.Done()
+	return dservice.ToolResult{}, ctx.Err()
+}
+
+// The test-run seam: a search that outlives the ceiling answers the shared
+// timed-out text in the response body — not a transport error, not the
+// parent cancel. Mutation target: dropping the WithTimeout at this seam
+// leaves the parent ctx (2s below) as the only stopper, so Error carries
+// the ctx error text instead — red.
+func TestTryItDeadlineAnswersTimedOutText(t *testing.T) {
+	old := toolCallDeadline
+	toolCallDeadline = 150 * time.Millisecond
+	t.Cleanup(func() { toolCallDeadline = old })
+
+	app, _, _ := newApp(t)
+	app.UseTools(newHangingSearch(t), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := app.Test(ctx, TestInput{Tool: "search", Query: "anything"})
+	if err != nil {
+		t.Fatalf("a timed-out test-run is a response, not a transport error: %v", err)
+	}
+	if out.Error != dservice.ToolCallTimeoutText {
+		t.Fatalf("Error = %q, want the shared %q", out.Error, dservice.ToolCallTimeoutText)
+	}
+	if out.DurationMS >= 2000 {
+		t.Fatalf("the run waited for the parent ctx (%dms) — the seam deadline never fired", out.DurationMS)
+	}
+}

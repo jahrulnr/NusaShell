@@ -301,6 +301,10 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	eng.conversations.OnChanged(hub.RoomChanged)
 	// A command runs only in an idle room: the hub is the one place that knows
 	// whether a transport turn is live, so commands read it from there.
+	// A queued turn still has an audience — its room. The hub journals it like a
+	// turn a socket admitted, so a relay-driven room is watchable instead of
+	// looking idle behind "N waiting to run".
+	eng.conversations.UseTurnSurface(hub)
 	eng.conversations.UseLiveTurns(func(convID string) bool {
 		_, _, live := hub.ActiveTurn(convID)
 		return live
@@ -351,7 +355,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	eng.conversations.UseRecordings(recordings)
 	browsers.UseInstaller(browserMgr)
 	browsers.UseHistory(repobrowserhistory.New(eng.db))
-	control := appcontrol.New(context.WithoutCancel(ctx), eng.conversations, hub, eng.conversations, eng.uploads, eng.projectRepo, chats, eng.toolOutputs, slog.Default())
+	control := appcontrol.New(context.WithoutCancel(ctx), eng.conversations, hub, eng.conversations, eng.conversations, eng.uploads, eng.projectRepo, chats, eng.toolOutputs, slog.Default())
 	catalogs := []deliverymcp.Catalog{deliverymcp.Conversation(control), deliverymcp.Browser(browsers), deliverymcp.Memory(eng.memory)}
 	mcpPool := toolmcp.NewPool()
 	closeMCPPool := sync.OnceFunc(func() { mcpPool.Close() })

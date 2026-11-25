@@ -185,11 +185,18 @@ func (b EnvironmentBundle) ToolContexts(ctx context.Context, skip map[string]boo
 			return nil, err
 		}
 		tool := b.Tools[name]
-		result, err := tool.Execute(ctx, call, nil)
+		// The same seam deadline as the turn's own calls: a hydration tool
+		// that hits it is recorded as timed out and hydration continues;
+		// only the parent ctx dying aborts the build.
+		deadlineCtx, deadlineStop := context.WithTimeout(ctx, toolCallDeadline)
+		result, err := tool.Execute(deadlineCtx, call, nil)
+		deadlineStop()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if err != nil {
+		if deadlineCtx.Err() == context.DeadlineExceeded {
+			result.Text = dservice.ToolCallTimeoutText
+		} else if err != nil {
 			result.Text = "error: " + err.Error()
 		}
 		record := ToolContext{Name: name, Input: call.Input(), Output: result.Text}

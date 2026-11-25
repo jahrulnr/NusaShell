@@ -5,7 +5,7 @@ import { state, emit, toast, dismissToast, askConfirm } from './store.js';
 import { api, errorText, ApiError } from './api.js';
 import { TurnSocket, newRequestId } from './socket.js';
 import { newTurn, applyFrame, snapshotSegments, isPrompt } from './turn.js';
-import { forgetQueued, resetQueued, setQueued, queuedFor } from './queued.js';
+import { forgetQueued, resetQueued, setQueued, queuedFor, queuedNote } from './queued.js';
 import { referencesForSend, referencesToDraft, liveReferences } from './references.js';
 import { parseCommand, isNativeCommand, catalogRow, loadCommands } from './commands.js';
 import { loadView, startViews } from './views.js';
@@ -95,12 +95,46 @@ export const isBusy = (r) => !!(r.live || r.pendingOpen || r.settling);
 // retry, and the header's Compact button ask.
 export const roomBusy = (r) => isBusy(r) || !!r.command;
 
+// watching answers whether a room has a turn this tab can watch right now —
+// the fact every surface must read from the same source: the record's
+// activeTurnId, or the live stream on the room object (which a list record
+// structurally cannot see, so it is looked up by id). It accepts either a
+// room (live + info) or a bare list record ({id, activeTurnId}).
+export const watching = (x) => {
+  const r = state.rooms[x?.id];
+  const live = r?.live || x?.live;
+  const turnId = x?.activeTurnId ?? x?.info?.activeTurnId ?? r?.info?.activeTurnId;
+  return !!(turnId || live);
+};
+
 // workingBlind answers whether the room is working without a live view: its
 // record says a turn is active but names none to watch (activeTurnId always
-// wins — when it is there, the turn is live and this is not blind). Compact,
-// fork, and a queue job all arrive the same way, so the indicator only ever
-// says "working"; what kind is the turn's own business.
-export const workingBlind = (r) => !!r?.info?.turnActive && !r.info?.activeTurnId;
+// wins — when it is there, the turn is live and this is not blind; and a room
+// this tab is streaming is never blind — the transcript already claims
+// "Working…" for it). Compact, fork, and a queue job all arrive the same way,
+// so the indicator only ever says "working"; what kind is the turn's own
+// business.
+export const workingBlind = (r) => !!r?.info?.turnActive && !r.info?.activeTurnId && !r.live;
+
+// roomLine composes the one status line above the composer: at most two
+// clauses joined by " · " — a blind-work clause (only what the transcript
+// cannot show) and the worker's queue depth in queuedNote's words — or null
+// when neither is true. Data, not markup, so every state is testable without
+// a DOM: blind picks the orb-idle icon and the tooltip, the queue-only line
+// takes the queue icon, and truncation eats the queue tail first because the
+// work clause leads.
+export function roomLine(r, waiting) {
+  const blind = workingBlind(r);
+  const parts = [];
+  if (blind) parts.push('Working — no live view');
+  if (waiting === null || waiting > 0) parts.push(queuedNote(waiting));
+  if (!parts.length) return null;
+  return {
+    blind,
+    text: parts.join(' · '),
+    tip: blind ? 'This turn is running without a live view; its output appears when it finishes.' : null,
+  };
+}
 
 // The queue poll closes the one gap the wire leaves: a room's waiting count
 // moves by event (`conversation.queued`) and by read, but a queued job's
@@ -600,7 +634,11 @@ export function selection(r) {
 }
 
 export function setSelection(r, patch) {
-  const prevAgent = r.sel.agentId;
+  // The agent the room runs with now, through the whole fallback chain —
+  // not r.sel.agentId: persistSelection clears r.sel once the server echoes
+  // the pick back, so reading it here would reset the options on every
+  // pick, even inside the agent the room is already bound to.
+  const prevAgent = selection(r).agentId;
   r.sel = { ...r.sel, ...patch };
   // A different agent has different options; a choice staged for the last
   // one must not follow it.
@@ -687,7 +725,11 @@ export async function loadAgentOptions(r, { force = false } = {}) {
       try {
         const agentId = selection(r).agentId;
         const res = r.id ? await api.agentOptions(r.id) : await api.agentOptionsFor(agentId);
-        Object.assign(o, { status: 'ready', list: res.data || [], error: null, at: Date.now(), key });
+        // report carries the wire status: 'ready' is the agent's definitive
+        // answer (an empty list then means it truly offers no options), while
+        // 'empty' is transient — the agent has nothing right now and a later
+        // read may fill the list without anything changing.
+        Object.assign(o, { status: 'ready', list: res.data || [], report: res.status === 'empty' ? 'empty' : 'ready', error: null, at: Date.now(), key });
       } catch (e) {
         Object.assign(o, { status: o.list.length ? 'ready' : 'error', error: errorText(e) });
         if (o.list.length) toast('Could not refresh agent options: ' + errorText(e), 'error');
@@ -698,6 +740,12 @@ export async function loadAgentOptions(r, { force = false } = {}) {
   o.flight = flight;
   try { await flight; } finally { if (o.flight === flight) o.flight = null; }
 }
+
+// agentChipVisible answers whether the composer's options chip shows: it
+// hides only when the agent's definitive answer is an empty list — nothing a
+// click could change. A transient empty (report 'empty') stays visible,
+// because there is something to act on: the refresh.
+export const agentChipVisible = (o) => !(o?.status === 'ready' && !o?.list?.length && o?.report !== 'empty');
 
 // sessionOptionValue is what both controls read: the room's stored pick, or —
 // for a thread that does not exist yet — the one staged for it. A pick parked
@@ -733,7 +781,7 @@ export async function setSessionOption(r, optionId, value) {
   }
   try {
     const res = await api.setAgentOption(r.id, optionId, value);
-    Object.assign(o, { status: 'ready', list: res.data || [], error: null, at: Date.now(), key: agentOptionsKey(r) });
+    Object.assign(o, { status: 'ready', list: res.data || [], report: res.status === 'empty' ? 'empty' : 'ready', error: null, at: Date.now(), key: agentOptionsKey(r) });
     // A pick taken while the room was busy waits in the record's pending:
     // pull it so the controls name the stored value, not the running one.
     loadInfo(r, { force: true }).catch(() => { /* the next read shows it */ });

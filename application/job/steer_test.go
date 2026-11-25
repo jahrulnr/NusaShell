@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/config"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -488,5 +489,51 @@ func TestSendSteerUsesSuppliedMailbox(t *testing.T) {
 	plain.Steer("internal")
 	if got, ok := plain.steers.popLast(); !ok || got != "internal" {
 		t.Fatalf("unbound send keeps its internal mailbox: %q,%v", got, ok)
+	}
+}
+
+// A full mailbox refuses the submission and buffers nothing: the caller reports
+// the refusal instead of losing the input, and the inputs already waiting keep
+// their place.
+func TestSteeringMailboxRefusesBeyondItsBound(t *testing.T) {
+	s := NewSteeringInput()
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "first"}, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "second"}, 1, nil); !errors.Is(err, ErrMailboxFull) {
+		t.Fatalf("second submit = %v, want a full mailbox", err)
+	}
+	pending := s.claim()
+	if len(pending) != 1 || pending[0].input.Text != "first" {
+		t.Fatalf("a refused submit changed the mailbox: %+v", pending)
+	}
+}
+
+// The before hook runs before the turn is told the input arrived: a record the
+// delivery depends on is never written after the text went out.
+func TestSteeringBeforeHookRunsBeforeDelivery(t *testing.T) {
+	s := NewSteeringInput()
+	var order []string
+	var mu sync.Mutex
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "relay"}, 0, func() *entity.Message {
+		mu.Lock()
+		order = append(order, "record")
+		mu.Unlock()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.arrived():
+		mu.Lock()
+		order = append(order, "delivery")
+		mu.Unlock()
+	case <-time.After(time.Second):
+		t.Fatal("the mailbox never signalled")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != 2 || order[0] != "record" || order[1] != "delivery" {
+		t.Fatalf("order = %v, want the record before delivery", order)
 	}
 }

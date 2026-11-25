@@ -246,8 +246,16 @@ func queuedFrame(convID string, waiting int) serverFrame {
 // the opening command's own correlation id so the issuing tab
 // recognizes its notice — opaque to every other tab.
 type activityPayload struct {
-	State     string `json:"state"`
-	Kind      string `json:"kind"`
+	State string `json:"state"`
+	Kind  string `json:"kind"`
+	// Origin says where the turn came from — web, channel, automation,
+	// conversation, completion — so a surface marks a machine turn without
+	// parsing anything. Kind says what command opened it; the two are different
+	// facts, and a relayed send is kind "send" with origin "conversation".
+	Origin string `json:"origin,omitempty"`
+	// RequestID is present only when a socket command opened the turn: a tab
+	// matches its own pending bubble by it. A queue or machine turn carries an
+	// empty one, so no tab can claim it.
 	RequestID string `json:"requestId"`
 }
 
@@ -264,6 +272,7 @@ func activityFrame(t *turn, state string) serverFrame {
 		Payload: activityPayload{
 			State:     state,
 			Kind:      t.kind.String(),
+			Origin:    t.origin.Kind.String(),
 			RequestID: t.requestID,
 		},
 	}

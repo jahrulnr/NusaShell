@@ -80,9 +80,6 @@ func (d Deps) appendToolContexts(ctx context.Context, convID string, conv *aggre
 	if err != nil {
 		return err
 	}
-	if len(contexts) == 0 {
-		return nil
-	}
 
 	msg, err := entity.NewMessage(enum.RoleSystem, "")
 	if err != nil {
@@ -129,12 +126,68 @@ func (d Deps) appendToolContexts(ctx context.Context, convID string, conv *aggre
 			return err
 		}
 	}
+	// The room's unread finishes ride the same message as one record. They are
+	// data in the shape every other system record takes, so the model reads a
+	// status list — never words — and the room learns what finished without a
+	// turn of its own. A turn that was already running when the exit was reported
+	// renders it here, on this step: no job rides behind it.
+	rendered := d.appendCompletionRecord(convID, &msg)
 	if len(msg.ToolCalls()) == 0 {
 		return nil
 	}
 	conv.Append(msg)
-	_, err = d.Convs.AppendMessage(ctx, convID, msg)
-	return err
+	if _, err := d.Convs.AppendMessage(ctx, convID, msg); err != nil {
+		return err
+	}
+	if len(rendered) > 0 {
+		d.Completions.ClearCompletions(convID, rendered)
+	}
+	return nil
+}
+
+// appendCompletionRecord adds the room's pending finishes to the hydration message
+// and answers the keys it rendered, so the caller drops exactly what the model
+// read — a finish reported after this point keeps waiting.
+func (d Deps) appendCompletionRecord(convID string, msg *entity.Message) []string {
+	if d.Completions == nil {
+		return nil
+	}
+	pending := d.Completions.PendingCompletions(convID)
+	if len(pending) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(pending))
+	cited := make([]completionCitation, 0, len(pending))
+	for _, c := range pending {
+		keys = append(keys, c.Key())
+		cited = append(cited, completionCitation{Source: c.Source, ID: c.ID})
+	}
+	input, err := json.Marshal(struct {
+		Records []completionCitation `json:"records"`
+	}{Records: cited})
+	if err != nil {
+		return nil
+	}
+	id, err := valueobject.NewID("call", "")
+	if err != nil {
+		return nil
+	}
+	call, err := entity.NewToolCall(id.String(), CompletionRecord, string(input), enum.TooltypeInjection)
+	if err != nil {
+		return nil
+	}
+	call.SetStoredOutput(RenderCompletions(pending), "")
+	if err := msg.AddToolCall(call); err != nil {
+		return nil
+	}
+	return keys
+}
+
+// completionCitation is what a rendered record names: the finish it carries, so a
+// reader can tell which exit a record belongs to.
+type completionCitation struct {
+	Source string `json:"source"`
+	ID     string `json:"id"`
 }
 
 // oneShotNames lists the tools whose record the cadence governs: the

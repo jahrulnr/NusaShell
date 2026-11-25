@@ -25,7 +25,7 @@ func (o TurnOrigin) Normalized() (TurnOrigin, bool) {
 	}
 	o.Name = strings.TrimSpace(o.Name)
 	switch o.Kind {
-	case enum.TurnOriginWeb, enum.TurnOriginConversation:
+	case enum.TurnOriginWeb, enum.TurnOriginConversation, enum.TurnOriginCompletion:
 		o.Name = ""
 	case enum.TurnOriginChannel, enum.TurnOriginAutomation:
 	}
@@ -53,6 +53,8 @@ func (o TurnOrigin) Description() string {
 		return "automation " + strconv.Quote(o.Name)
 	case enum.TurnOriginConversation:
 		return "another NusaShell thread"
+	case enum.TurnOriginCompletion:
+		return "a background completion"
 	}
 	return ""
 }

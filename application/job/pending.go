@@ -3,8 +3,10 @@ package job
 import (
 	"context"
 	"fmt"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
@@ -140,4 +142,54 @@ func userReason(err error) string {
 		return e.Error()
 	}
 	return err.Error()
+}
+
+// applyPendingSelection folds the room's parked pick into conv — the turn that is
+// starting is the one it waited for — and tells the projection it is in play. It
+// answers whether anything was taken.
+//
+// It reads the store directly, never a projection accessor: a filtered read would
+// report "nothing pending" to the very turn that has to apply it.
+// It answers the generation it took (the pick's acceptedAt) so the caller can
+// clear exactly that one after its save — a pick parked while this turn ran is a
+// newer generation and must survive.
+func applyPendingSelection(ctx context.Context, d Deps, conv *aggregate.Conversation, onEvent event.TurnEventHandler) (consumedAt time.Time, applied bool, err error) {
+	sel, ok, err := d.Convs.PendingSelection(ctx, conv.ID())
+	if err != nil || !ok {
+		return time.Time{}, false, err
+	}
+	ApplyPendingSelection(ctx, d, conv, sel, onEvent)
+	if d.Turns != nil {
+		d.Turns.ConsumePending(conv.ID(), sel.AcceptedAt)
+	}
+	return sel.AcceptedAt, true, nil
+}
+
+// clearConsumedPending drops the parked file once the turn's own save landed.
+// Callers invoke it only on success: a failed save leaves the file, and the claim
+// release makes the pick visible again — both honest.
+func clearConsumedPending(ctx context.Context, d Deps, convID string, consumedAt time.Time, applied bool) {
+	if !applied {
+		return
+	}
+	if err := d.Convs.ClearPendingSelection(context.WithoutCancel(ctx), convID, consumedAt); err != nil {
+		slog.Warn("pending selection not cleared", "conversation", convID, "error", err)
+	}
+}
+
+// liveTurn answers the handler a turn job runs with: its own when it already has
+// one — a socket admitted turn carries the journal the hub opened — and the
+// live-turn surface's when it has none. The seal it answers runs on every exit,
+// including a failed turn: a journal left open holds a pool slot and its watchers
+// wait for a terminal that never comes. Without a surface both answers are
+// passthroughs, which is the CLI's composition.
+func liveTurn(d Deps, convID, kind string, origin valueobject.TurnOrigin, onEvent event.TurnEventHandler) (event.TurnEventHandler, func(persisted bool, err error)) {
+	if onEvent != nil || d.TurnSurface == nil {
+		return onEvent, func(bool, error) {}
+	}
+	handler, seal := d.TurnSurface.Open(convID, kind, origin)
+	if handler == nil {
+		return onEvent, func(bool, error) {}
+	}
+	return handler, seal
 }

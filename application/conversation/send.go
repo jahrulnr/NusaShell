@@ -3,6 +3,7 @@ package appconversation
 import (
 	"context"
 	"fmt"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -50,6 +51,11 @@ func (app *ConversationApp) Send(
 	opts appjob.SendOptions,
 	onEvent event.TurnEventHandler,
 ) (SendResult, error) {
+	if opts.Origin.Kind != enum.TurnOriginCompletion {
+		// An owner, relay, channel, or automation turn intervenes: the wake
+		// budget fills again.
+		app.noteOwnerTurn(convID)
+	}
 	in := valueobject.UserInput{
 		Text:        message,
 		Attachments: attachments,

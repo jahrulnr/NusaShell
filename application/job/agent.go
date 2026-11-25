@@ -174,49 +174,95 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 		if len(claimed) == 0 {
 			return nil
 		}
-		// One joined follow-up: texts concatenate with the established
-		// separator while each input's reference spans shift by the
-		// prefix ahead of it, and uploads and marks merge in order.
-		var text strings.Builder
-		var nextIn valueobject.UserInput
-		for i, e := range claimed {
-			if i > 0 {
-				text.WriteString("\n\n")
+		// One accepted message is one line, forever. An input the accept path
+		// already persisted keeps that line: the follow-up prompts with it
+		// instead of writing a second one for the same words.
+		var recorded, plain []steeringEntry
+		for _, e := range claimed {
+			if e.record != nil {
+				recorded = append(recorded, e)
+			} else {
+				plain = append(plain, e)
 			}
-			offset := text.Len()
-			text.WriteString(e.input.Text)
-			for _, ref := range e.input.References {
-				nextIn.References = append(nextIn.References, ref.Shifted(offset))
-			}
-			nextIn.Attachments = append(nextIn.Attachments, e.input.Attachments...)
-			nextIn.Annotations = append(nextIn.Annotations, e.input.Annotations...)
 		}
-		nextIn.Text = text.String()
-		// A follow-up that carries exactly one steer names it, so a reloaded
-		// history line matches the journal's live bubble. A join of several
-		// inputs has no single submitting request, so it carries none.
-		if len(claimed) == 1 {
-			nextIn.InputID = claimed[0].input.InputID
-		}
-		next, err := entity.NewUserMessage(nextIn)
+		next, err := followUpMessage(claimed, plain)
 		if err != nil {
 			return err
 		}
-		conv.Append(next)
-		committed, err := d.Convs.AppendMessage(ctx, convID, next)
+		committed := true
+		if next != nil {
+			conv.Append(*next)
+			committed, err = d.Convs.AppendMessage(ctx, convID, *next)
+			if err != nil {
+				return err
+			}
+		}
 		for _, in := range claimed {
 			if in.receipt != nil && committed {
 				in.receipt.markPersisted()
 			}
 		}
-		if err != nil {
-			return err
-		}
 		for _, in := range claimed {
 			emit(event.NewSteerEvent(in.input.Text, in.input.Attachments...))
 		}
-		input = next
+		// The prompt carries every text: the relayed ones live in their own
+		// records, and a join of plain inputs is the line written above. With
+		// nothing but records, the newest record is the prompt itself.
+		switch {
+		case len(recorded) == 0:
+			input = *next
+		case len(plain) == 0 && len(recorded) == 1:
+			input = *recorded[0].record
+		default:
+			joined, jerr := joinedInput(claimed)
+			if jerr != nil {
+				return jerr
+			}
+			input = joined
+		}
 	}
+}
+
+// followUpMessage answers the line a follow-up writes, nil when everything the
+// turn could not deliver already has one. Only inputs without a record join it —
+// a relayed prompt is never written twice.
+func followUpMessage(claimed, plain []steeringEntry) (*entity.Message, error) {
+	if len(plain) == 0 {
+		return nil, nil
+	}
+	next, err := joinedInput(plain)
+	if err != nil {
+		return nil, err
+	}
+	return &next, nil
+}
+
+// joinedInput folds inputs into one user message: texts concatenate with the
+// established separator while each input's reference spans shift by the prefix
+// ahead of it, and uploads and marks merge in order. A join of one keeps its
+// submitting request id; a join of several has no single submitter, so it
+// carries none.
+func joinedInput(entries []steeringEntry) (entity.Message, error) {
+	var text strings.Builder
+	var nextIn valueobject.UserInput
+	for i, e := range entries {
+		if i > 0 {
+			text.WriteString("\n\n")
+		}
+		offset := text.Len()
+		text.WriteString(e.input.Text)
+		for _, ref := range e.input.References {
+			nextIn.References = append(nextIn.References, ref.Shifted(offset))
+		}
+		nextIn.Attachments = append(nextIn.Attachments, e.input.Attachments...)
+		nextIn.Annotations = append(nextIn.Annotations, e.input.Annotations...)
+	}
+	nextIn.Text = text.String()
+	if len(entries) == 1 {
+		nextIn.InputID = entries[0].input.InputID
+		nextIn.Relay = entries[0].input.Relay
+	}
+	return entity.NewUserMessage(nextIn)
 }
 
 // agentOptions are the session options a turn applies, in order: the

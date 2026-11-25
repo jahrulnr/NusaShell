@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	repo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -75,9 +76,10 @@ func (r *ConversationRepository) PendingSelection(ctx context.Context, convID st
 	return sel, ok, nil
 }
 
-// ClearPendingSelection drops the parked selection. A room with none is not an
-// error: the caller reports that a turn took it.
-func (r *ConversationRepository) ClearPendingSelection(ctx context.Context, convID string) error {
+// ClearPendingSelection drops the parked selection a turn consumed — and only
+// that one. A pick parked while the turn ran has a newer acceptedAt: it waits for
+// its own turn, so the file stays.
+func (r *ConversationRepository) ClearPendingSelection(ctx context.Context, convID string, acceptedAt time.Time) error {
 	if err := validID(convID); err != nil {
 		return err
 	}
@@ -86,7 +88,16 @@ func (r *ConversationRepository) ClearPendingSelection(ctx context.Context, conv
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := os.Remove(filepath.Join(r.convDir(convID), pendingFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	dir := r.convDir(convID)
+	stored, ok, err := readPending(dir)
+	if err != nil {
+		return err
+	}
+	if ok && !acceptedAt.IsZero() && !stored.AcceptedAt.Equal(acceptedAt) {
+		// A newer pick is waiting: it was never applied by this turn.
+		return nil
+	}
+	if err := os.Remove(filepath.Join(dir, pendingFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil

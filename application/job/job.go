@@ -10,7 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	"sync/atomic"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/config"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
@@ -24,13 +27,35 @@ import (
 // Deps is everything a job may reach — the domain ports plus the
 // conversation config, injected at construction. Jobs never see the app
 // or the worker.
+// TurnSurface opens the live view of a turn that reached execution without a
+// client. A job without a socket still has an audience — its room — so a turn
+// shaped job (send, edit, resume) asks for a handler when it has none.
+//
+// It fills a surface that does not exist yet: it never replaces or duplicates
+// one. A turn a socket admitted already has its journal, and its handler rides
+// the job; opening another here would give one turn two journals. A refusal
+// answers a nil handler, and the turn runs unjournaled as before — the journal is
+// observability, never a gate on work.
+type TurnSurface interface {
+	Open(convID, kind string, origin valueobject.TurnOrigin) (event.TurnEventHandler, func(persisted bool, err error))
+}
+
 // TurnGate hears a room's turn begin and end.
 type TurnGate interface {
 	BeginTurn(convID string)
 	EndTurn(convID string)
+	// ConsumePending records the parked pick this turn applied, so a projection
+	// stops offering it while the turn runs. EndTurn releases the mark: a clear
+	// that failed leaves the file, and the released mark makes it visible again.
+	ConsumePending(convID string, acceptedAt time.Time)
 }
 
 type Deps struct {
+	// TurnSurface journals a turn no socket admitted. Nil runs it blind.
+	TurnSurface TurnSurface
+	// Completions is the pending-completion store a wake reads and clears. Nil
+	// disables wakes; the records still land on a natural turn.
+	Completions Completions
 	// Turns hears a room's turn begin and end. It is what answers "is a turn
 	// running here" — the worker's own "running" is a moment too long (it
 	// clears after the job returns, while the caller already has the result).

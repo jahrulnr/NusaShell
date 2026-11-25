@@ -478,6 +478,9 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		appconversation.WithProjects(projectRepo),
 		appconversation.WithUploads(uploads, picks))
 	conversations.UseMediaDescriptions(descriptions)
+	// A session the agent opted in to report ends here: its exit becomes a record
+	// the room reads, and — while idle and under the cap — a turn that reads it.
+	terminals.OnExit(conversations.OnCompletion)
 	return &engine{
 		conversations: conversations,
 		projects:      appproject.New(projectRepo, workspaceStore, conversations),

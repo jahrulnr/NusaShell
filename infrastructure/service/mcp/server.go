@@ -8,7 +8,14 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 )
+
+// toolCallDeadline caps one tools/call run — a variable so a test can
+// prove the seam without sleeping four minutes. Production keeps the
+// domain ceiling; nothing else may set it.
+var toolCallDeadline = dservice.ToolCallDeadline
 
 // Server is one tool server: its identity, its tools, and the handler that
 // runs a call. Call errors become isError results so the caller can read
@@ -111,11 +118,21 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, s Server) error {
 					mu.Unlock()
 					stop()
 				}()
+				// The seam deadline caps any tool this server runs —
+				// adapters carry no timeout of their own. When it fires
+				// the caller reads a timed-out result; the parent ctx
+				// dying stays the cancel path, never a tool timeout.
+				deadlineCtx, deadlineStop := context.WithTimeout(callCtx, toolCallDeadline)
+				defer deadlineStop()
 				var res Result
 				if strings.TrimSpace(p.Name) == "" {
 					res = ErrorResult("missing tool name")
-				} else if out, err := s.Call(callCtx, p.Name, p.Arguments); err != nil {
-					res = ErrorResult(err.Error())
+				} else if out, err := s.Call(deadlineCtx, p.Name, p.Arguments); err != nil {
+					if deadlineCtx.Err() == context.DeadlineExceeded && callCtx.Err() == nil {
+						res = ErrorResult(dservice.ToolCallTimeoutText)
+					} else {
+						res = ErrorResult(err.Error())
+					}
 				} else {
 					res = out
 				}

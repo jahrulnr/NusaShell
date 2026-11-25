@@ -450,3 +450,27 @@ func TestSetAgentOptionKeepsApplyOrder(t *testing.T) {
 		t.Fatalf("after clear picks = %v", got)
 	}
 }
+
+// A real switch still clears: binding a DIFFERENT agent drops the provider
+// binding and the picks that ride it — model, effort, upstream — because an
+// agent picks its own model and reasoning, and a room that kept them would
+// show a value nothing applies. Hydration ordering must not lose this.
+func TestRebindToADifferentAgentClearsTheProviderPicks(t *testing.T) {
+	c := agentRoom(t) // already bound to claude
+	c.SetProviderID("anthropic")
+	c.SetModelID("claude-haiku-5-5-medium")
+	c.SetEffort(enum.EffortXHigh)
+	c.SetUpstream("Alpha")
+	if err := c.BindAgent("codex"); err != nil {
+		t.Fatal(err)
+	}
+	if c.ProviderID() != "" || c.ModelID() != "" {
+		t.Fatalf("provider/model survived a real switch: %q %q", c.ProviderID(), c.ModelID())
+	}
+	if c.Effort() != enum.EffortDefault && c.Effort() != "" {
+		t.Fatalf("effort survived a real switch: %q", c.Effort())
+	}
+	if c.Upstream() != "" {
+		t.Fatalf("upstream survived a real switch: %q", c.Upstream())
+	}
+}

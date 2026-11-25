@@ -19,6 +19,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 )
 
@@ -49,6 +52,14 @@ type Job interface {
 type Steerable interface {
 	Steer(text string)
 	RecallSteer() (text string, ok bool)
+}
+
+// InputSteerable is a Steerable that also takes the full input form: text plus
+// the selections, uploads, marks and relay record a prompt carries. The worker
+// delivers it the same way — the job folds it at its own safe point.
+type InputSteerable interface {
+	Steerable
+	SteerInput(in valueobject.UserInput, before func() *entity.Message) bool
 }
 
 var (
@@ -175,6 +186,22 @@ func (w *Worker) Steer(text string) bool {
 
 // RecallSteer withdraws the newest un-fired input from the running job.
 // ok=false — nothing pending (or already consumed, or nothing running).
+// SteerInput buffers a full input on the running job. found is false when the
+// running job takes no steering at all — the caller falls back to its queue;
+// accepted is false when the job's mailbox was full and buffered nothing.
+func (w *Worker) SteerInput(in valueobject.UserInput, before func() *entity.Message) (found, accepted bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.unwind || w.dead {
+		return false, false
+	}
+	s, ok := w.running.(InputSteerable)
+	if !ok {
+		return false, false
+	}
+	return true, s.SteerInput(in, before)
+}
+
 func (w *Worker) RecallSteer() (string, bool) {
 	w.mu.Lock()
 	running := w.running

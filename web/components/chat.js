@@ -1,10 +1,10 @@
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, state, emit, toast } from '../lib/store.js';
-import { room, freshRoom, rename, removeRoom, runCommand, isBusy, openRoom, navigate, annotateRoom } from '../lib/chat.js';
+import { room, freshRoom, rename, removeRoom, runCommand, isBusy, openRoom, navigate, annotateRoom, watching } from '../lib/chat.js';
 import { useCommands, commandBusyLabel } from '../lib/commands.js';
 import { Icon, Logo } from './icons.js';
 import { Popover, IconButton, Dialog, Button, ErrorBlock, Spinner } from './ui.js';
-import { Transcript, QueuedLine, WorkingLine } from './transcript.js';
+import { Transcript, RoomLine } from './transcript.js';
 import { useFollow } from '../lib/follow.js';
 import { SetupWizard, needsSetup } from './setup.js';
 import { Composer } from './composer.js';
@@ -140,7 +140,7 @@ export function ChatView({ id }) {
         <${Icon} name="chevronDown" size=${15} /> ${isBusy(r) ? 'Follow latest' : 'Jump to latest'}
       </button>
     </div>`}
-    <div class="mx-auto w-full max-w-3xl px-4 sm:px-6 empty:hidden"><${WorkingLine} room=${r} /><${QueuedLine} room=${r} /></div>
+    <div class="mx-auto w-full max-w-3xl px-4 sm:px-6 empty:hidden"><${RoomLine} room=${r} /></div>
     <div class="mx-auto w-full max-w-3xl px-2 sm:px-4">
       <${Composer} room=${r} />
     </div>
@@ -203,7 +203,7 @@ export function HomeView() {
           <div class="grid sm:grid-cols-2 gap-2">
             ${recent.map((c) => html`<a key=${c.id} href=${'#/c/' + encodeURIComponent(c.id)}
               class="flex items-center gap-2 rounded-xl border border-line px-3 py-2.5 text-[13px] hover:bg-hover min-w-0">
-              ${c.activeTurnId ? html`<span class="orb live" title="Working"></span>` : c.turnActive ? html`<span class="orb idle" title="Working — no live view yet"></span>` : html`<${Icon} name="chevronRight" size=${14} class="text-faint" />`}
+              ${watching(c) ? html`<span class="orb live" title="Working"></span>` : c.turnActive ? html`<span class="orb idle" title="Working — no live view yet"></span>` : html`<${Icon} name="chevronRight" size=${14} class="text-faint" />`}
               <span class="truncate">${c.title || 'Untitled thread'}</span>
             </a>`)}
           </div>

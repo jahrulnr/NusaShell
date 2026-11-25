@@ -72,3 +72,61 @@ func TestLoadRefusesAnUnknownEffort(t *testing.T) {
 		t.Fatal("Load must refuse an unknown effort")
 	}
 }
+
+// An agent room's own picks come back after a reload: the agent bind is
+// part of the room's identity, not a change of agent — hydration binding
+// ""→the-stored-agent must not trigger the clearing a real switch owns.
+// Before the fix, Load restored provider/model/effort/upstream first and
+// bound the agent after, so the bind's deliberate clearing wiped exactly
+// the picks the room was saved with — and the next Save wrote the wipe.
+func TestAgentRoomPicksSurviveReload(t *testing.T) {
+	dir := t.TempDir()
+	repo := NewConversationRepository(dir)
+	conv := newConv(t, "room")
+	if err := conv.BindAgent("devin"); err != nil {
+		t.Fatal(err)
+	}
+	conv.SetModelID("claude-haiku-5-5-medium")
+	conv.SetProviderID("anthropic")
+	conv.SetEffort(enum.EffortXHigh)
+	conv.SetUpstream("Alpha")
+	conv.SetAgentSession("sess-9")
+	if err := conv.SetAgentOption("model", "claude-haiku-5-5-medium"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(t.Context(), conv); err != nil {
+		t.Fatal(err)
+	}
+
+	again := NewConversationRepository(dir) // a fresh process
+	loaded, err := again.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ModelID() != "claude-haiku-5-5-medium" {
+		t.Fatalf("model pick died in hydration: %q", loaded.ModelID())
+	}
+	if loaded.ProviderID() != "anthropic" || loaded.Effort() != enum.EffortXHigh || loaded.Upstream() != "Alpha" {
+		t.Fatalf("provider/effort/upstream died in hydration: %q %q %q", loaded.ProviderID(), loaded.Effort(), loaded.Upstream())
+	}
+	if loaded.AgentSession() != "sess-9" {
+		t.Fatalf("agent session = %q, want sess-9", loaded.AgentSession())
+	}
+	picks := loaded.AgentOptions()
+	if len(picks) != 1 || picks[0].Value != "claude-haiku-5-5-medium" {
+		t.Fatalf("agent options = %+v, want the model pick", picks)
+	}
+
+	// And the second generation does not write the wipe back: a save of the
+	// hydrated room keeps the picks on disk.
+	if err := again.Save(t.Context(), loaded); err != nil {
+		t.Fatal(err)
+	}
+	third, err := NewConversationRepository(dir).Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.ModelID() != "claude-haiku-5-5-medium" {
+		t.Fatalf("the reload-save-reload generation lost the pick: %q", third.ModelID())
+	}
+}

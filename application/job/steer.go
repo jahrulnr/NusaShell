@@ -1,11 +1,17 @@
 package job
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
+
+// ErrMailboxFull answers a submission the mailbox has no room for. Nothing was
+// buffered: the caller reports the refusal instead of losing the input.
+var ErrMailboxFull = errors.New("steering mailbox full")
 
 // SteeringState is the outcome slot one submitted input occupies.
 // Pending input still waits in the mailbox and can be recalled; claimed
@@ -66,9 +72,15 @@ func (r *SteeringReceipt) markClaimed() {
 // steeringEntry is one buffered input — text with its optional
 // selections, uploads and page marks — plus the optional receipt
 // tracking its outcome (receipt-free on the CLI's push path).
+//
+// record is the line already written for this input when the room's accept path
+// persisted it (an agent room's provenance row). A turn that later delivers the
+// same input must USE that line: one accepted message is one line, so nothing
+// downstream may write a second one for the same words.
 type steeringEntry struct {
 	input   valueobject.UserInput
 	receipt *SteeringReceipt
+	record  *entity.Message
 }
 
 // SteeringInput is the exact-turn mid-turn input mailbox shared by the
@@ -95,12 +107,57 @@ func NewSteeringInput() *SteeringInput { return &SteeringInput{} }
 // uploads and annotations — and returns the receipt that tracks its
 // outcome.
 func (s *SteeringInput) Submit(input valueobject.UserInput) *SteeringReceipt {
+	r, _ := s.SubmitBefore(input, 0, nil)
+	return r
+}
+
+// SubmitBefore is Submit with two bounds the relay path needs. A limit above
+// zero refuses the submission once that many inputs already wait, without
+// buffering anything. A before hook runs after the input is buffered and before
+// the turn is told it arrived, so a record the delivery depends on is never
+// written after the text went out.
+func (s *SteeringInput) SubmitBefore(input valueobject.UserInput, limit int, before func() *entity.Message) (*SteeringReceipt, error) {
 	r := newSteeringReceipt()
 	s.mu.Lock()
-	s.pending = append(s.pending, steeringEntry{input: input, receipt: r})
+	if limit > 0 && len(s.pending) >= limit {
+		s.mu.Unlock()
+		return nil, ErrMailboxFull
+	}
+	entry := steeringEntry{input: input, receipt: r}
+	s.pending = append(s.pending, entry)
 	s.mu.Unlock()
+	if before != nil {
+		if record := before(); record != nil {
+			// The line exists already: every later delivery of this input uses it
+			// instead of writing another. The entry is found by identity of its
+			// receipt, so a concurrent claim cannot take the wrong one.
+			s.mu.Lock()
+			for i := range s.pending {
+				if s.pending[i].receipt == r {
+					s.pending[i].record = record
+					break
+				}
+			}
+			s.mu.Unlock()
+		}
+	}
 	s.notify()
-	return r
+	return r, nil
+}
+
+// drainPending detaches the inputs no turn consumed — read at the end of a turn
+// so the caller can persist what would otherwise be lost.
+func (s *SteeringInput) drainPending() []steeringEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.pending
+	s.pending = nil
+	for _, e := range out {
+		if e.receipt != nil {
+			e.receipt.markRecalled()
+		}
+	}
+	return out
 }
 
 // push buffers receipt-free input — the worker's out-of-band Steer path,

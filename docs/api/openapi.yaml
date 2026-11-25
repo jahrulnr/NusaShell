@@ -1450,6 +1450,30 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/Internal" }
 
+  /api/agents/{agentId}/options:
+    parameters:
+      - { name: agentId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    get:
+      operationId: listAgentSessionOptions
+      tags: [agents]
+      summary: The agent's own session options
+      description: The session options (and legacy modes) the agent offers before any thread exists — from its stored catalog or a probe session — so a picker can show them; values are the agent's, and a thread's own overrides are read from its agent-options. Starts the agent on first use, which can take a while.
+      responses:
+        "200":
+          description: The options.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, status]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
+                  status: { $ref: "#/components/schemas/OptionsStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/Internal" }
+
   /api/agents/{agentId}/status:
     parameters:
       - { name: agentId, in: path, required: true, schema: { type: string, minLength: 1 } }
@@ -2337,9 +2361,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, status]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
+                  status: { $ref: "#/components/schemas/OptionsStatus" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
     put:
@@ -2364,9 +2389,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, status]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
+                  status: { $ref: "#/components/schemas/OptionsStatus" }
         "202":
           description: |
             The pick is taken but not applied yet. A turn fixes its runtime and
@@ -2376,9 +2402,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, status]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
+                  status: { $ref: "#/components/schemas/OptionsStatus" }
                   pending: { $ref: "#/components/schemas/Pending" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
@@ -4467,6 +4494,19 @@ components:
               value: { type: string }
               name: { type: string }
               description: { type: string }
+    OptionsStatus:
+      type: string
+      enum: [ready, empty]
+      description: |
+        What the offered list means. `ready` is the definitive answer — from
+        the live session, the stored catalog, or the probe session — and an
+        empty list then means the agent offers no session options; a client
+        may say so. `empty` is transient: the agent reports nothing right
+        now (a live session warming up or one that just retracted its
+        options), so a client must treat the list as able to change and
+        offer a refresh — never write a permanent "this agent has no
+        options" line. `unavailable` is never a wire value: a failure
+        answers as the HTTP error response with its message.
     Pending:
       type: object
       description: |

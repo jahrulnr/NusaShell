@@ -210,6 +210,13 @@ func setup(t *testing.T) (*App, *fakeRooms, *fakeTurns) {
 // New drops fails these tests instead of passing silently. A nil queue gets
 // the fake one; nil uploads wires none.
 func setupWith(t *testing.T, queue Queue, uploads drepo.Uploads) (*App, *fakeRooms, *fakeTurns) {
+	return setupSteer(t, queue, uploads, &fakeSteers{})
+}
+
+// setupSteer is setupWith with the steering seam the caller names: the busy-room
+// path is a steer first, and the queue is only the fallback for a turn that
+// takes no input.
+func setupSteer(t *testing.T, queue Queue, uploads drepo.Uploads, steers Steers) (*App, *fakeRooms, *fakeTurns) {
 	t.Helper()
 	rooms := &fakeRooms{msgs: map[string][]entity.Message{}, named: map[string]string{}, infos: []drepo.ConversationInfo{
 		{ID: "c_self", Label: "otter", Title: "Planner", ProviderID: "prov", ModelID: "m1"},
@@ -221,7 +228,7 @@ func setupWith(t *testing.T, queue Queue, uploads drepo.Uploads) (*App, *fakeRoo
 	if queue == nil {
 		queue = &fakeQueue{}
 	}
-	return New(context.Background(), rooms, turns, queue, uploads, fakeProjects{}, nil, nil, nil), rooms, turns
+	return New(context.Background(), rooms, turns, queue, steers, uploads, fakeProjects{}, nil, nil, nil), rooms, turns
 }
 
 type fakeChats struct {
@@ -251,7 +258,7 @@ func TestSearchExportReport(t *testing.T) {
 	}
 	chat, _ := valueobject.NewChatRef("telegram", "42", "")
 	chats := &fakeChats{origin: map[string]valueobject.ChatRef{"c_self": chat}}
-	app := New(context.Background(), rooms, turns, &fakeQueue{}, nil, fakeProjects{}, chats, outputs, nil)
+	app := New(context.Background(), rooms, turns, &fakeQueue{}, &fakeSteers{}, nil, fakeProjects{}, chats, outputs, nil)
 	ctx := context.Background()
 
 	out, err := app.Search(ctx, "c_self", SearchInput{Query: "BUILT"})
@@ -571,5 +578,88 @@ func TestSendQueuesBehindWaitingMessages(t *testing.T) {
 	out, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if err != nil || out["delivery"] != "queued" || out["position"] != 2 {
 		t.Fatalf("idle with a queue = %v, %v", out, err)
+	}
+}
+
+// fakeSteers stands in for a room's running turn: taken decides whether a live
+// turn accepts the input, err is the refusal it answers with (a full mailbox).
+type fakeSteers struct {
+	mu     sync.Mutex
+	taken  bool
+	err    error
+	inputs []valueobject.UserInput
+}
+
+func (f *fakeSteers) SteerInput(_ context.Context, _ string, in valueobject.UserInput) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return false, f.err
+	}
+	if !f.taken {
+		return false, nil
+	}
+	f.inputs = append(f.inputs, in)
+	return true, nil
+}
+
+// A busy room takes the prompt through its running turn: the tool reports a
+// steer, and nothing is written to the queue behind it.
+func TestSendToBusyRoomSteers(t *testing.T) {
+	steers := &fakeSteers{taken: true}
+	q := &fakeQueue{}
+	app, _, turns := setupSteer(t, q, nil, steers)
+	turns.busy["c_other"] = true
+	out, err := app.Send(t.Context(), "c_self", SendInput{Thread: "c_other", Text: "status please"})
+	if err != nil || out["delivery"] != "steer" {
+		t.Fatalf("send to a busy room = %v, %v, want a steer", out, err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("a steer also queued %v", q.enqueued)
+	}
+	if len(steers.inputs) != 1 || steers.inputs[0].Text != "status please" || steers.inputs[0].Relay == nil || steers.inputs[0].Relay.ID != "c_self" {
+		t.Fatalf("steered inputs = %+v, want the text with its sender's record", steers.inputs)
+	}
+}
+
+// A full steering mailbox is a refusal with nothing written: the message is not
+// in the room and not in its queue.
+func TestSendToBusyRoomWithAFullMailboxRefuses(t *testing.T) {
+	steers := &fakeSteers{err: apperror.New(429, "that thread's steering mailbox is full", nil)}
+	q := &fakeQueue{}
+	app, rooms, turns := setupSteer(t, q, nil, steers)
+	turns.busy["c_other"] = true
+	before, err := rooms.History(t.Context(), "c_other", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Send(t.Context(), "c_self", SendInput{Thread: "c_other", Text: "too much"}); apperror.As(err).StatusCode() != 429 {
+		t.Fatalf("full mailbox = %v, want 429", err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("a refused steer was queued: %v", q.enqueued)
+	}
+	after, err := rooms.History(t.Context(), "c_other", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("a refused steer wrote %d messages", len(after)-len(before))
+	}
+}
+
+// A turn that took no input leaves the message to the queue: the fallback is
+// still there for the race between "busy" and "the turn just ended".
+func TestSendFallsBackToTheQueueWhenNoTurnTakesIt(t *testing.T) {
+	steers := &fakeSteers{}
+	q := &fakeQueue{}
+	app, _, turns := setupSteer(t, q, nil, steers)
+	turns.busy["c_other"] = true
+	out, err := app.Send(t.Context(), "c_self", SendInput{Thread: "c_other", Text: "and this"})
+	if err != nil || out["delivery"] != "queued" {
+		t.Fatalf("no live turn took it: %v, %v, want queued", out, err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("enqueued = %v, want one", q.enqueued)
 	}
 }

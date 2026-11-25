@@ -4,17 +4,17 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
 import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds } from '../lib/turn.js';
-import { queuedFor, queuedNote, watchQueued } from '../lib/queued.js';
+import { queuedFor, watchQueued } from '../lib/queued.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
 import { ElicitationCard } from './elicitation.js';
 import { referencesFromStored } from '../lib/references.js';
-import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate, waitingPrompt, workingBlind } from '../lib/chat.js';
+import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate, waitingPrompt, roomLine } from '../lib/chat.js';
 import { emit, state } from '../lib/store.js';
 import { openPreview } from './preview.js';
 import { fileURL } from '../lib/api.js';
 import { Icon } from './icons.js';
-import { cx, Button, ErrorBlock, Marker, Spinner } from './ui.js';
+import { cx, Button, ErrorBlock, Marker } from './ui.js';
 
 // Expansion state survives re-renders and remounts, keyed by item id.
 const opened = new Map();
@@ -361,38 +361,30 @@ function FailedCard({ room }) {
   </div>`;
 }
 
-// WorkingLine is the room working without a live view, said once and
-// honestly: its record says a turn is active but names none to watch — a
-// queue job's start emits nothing, so until the next read lands the room
-// has work it can neither show nor stop. A spinner and a word, never a
-// bubble, never a Stop button; the tooltip carries the why.
-export function WorkingLine({ room }) {
-  if (!workingBlind(room)) return null;
-  return html`<div class="flex items-center gap-1.5 px-1 py-1 text-[12px] text-muted"
-    title="This turn is running without a live view; its output appears when it finishes.">
-    <${Spinner} size=${12} />
-    <span>Working</span>
-  </div>`;
-}
-
-// QueuedLine is the room's queue, said once and quietly: how many jobs wait in
-// it. The number is the worker's queue depth for this room, so an ordinary web
-// send or an edit counts too — it is not a count of messages from other
-// threads, and the line does not claim to know where they came from. It
-// subscribes to the count itself (lib/queued.js) and holds it in its own
-// state, so a new number re-renders this line and nothing else — and it is not
-// announced: a count that moves while the owner reads must not interrupt a
-// screen reader.
-export function QueuedLine({ room }) {
+// RoomLine is the one status line above the composer: what the transcript
+// cannot show, said once — blind work (a turn is active but names none to
+// watch, and this tab is not streaming it) and the worker's queue depth as a
+// second clause of the same sentence, never a second row. The work clause
+// leads, so at narrow widths truncation eats the queue tail and the icon and
+// the work clause survive; the icon follows the leading clause (orb idle,
+// the same token the sidebar and home rows use, else the queue icon). It is
+// not a live region: a count that moves while the owner reads must not
+// interrupt a screen reader — and the why lives in the title, not the text.
+// It subscribes to the count itself (lib/queued.js) so a new number re-renders
+// this line and nothing else.
+export function RoomLine({ room }) {
   const [waiting, setWaiting] = useState(() => queuedFor(room?.id));
   useEffect(() => {
     setWaiting(queuedFor(room?.id));
     return watchQueued((id, count) => { if (id === room?.id) setWaiting(count); });
   }, [room?.id]);
-  if (waiting === 0) return null;
-  return html`<div class="flex items-center gap-1.5 px-1 py-1 text-[12px] text-muted">
-    <${Icon} name="queue" size=${13} class="text-muted" />
-    <span>${queuedNote(waiting)}</span>
+  const line = roomLine(room, waiting);
+  if (!line) return null;
+  return html`<div class="flex items-center gap-1.5 px-1 py-1 text-[12px] text-muted whitespace-nowrap" title=${line.tip || undefined}>
+    ${line.blind
+      ? html`<span class="orb idle"></span>`
+      : html`<${Icon} name="queue" size=${13} class="text-muted shrink-0" />`}
+    <span class="truncate">${line.text}</span>
   </div>`;
 }
 

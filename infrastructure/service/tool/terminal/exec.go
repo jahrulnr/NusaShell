@@ -24,10 +24,11 @@ const (
 	// exec tool-output store on 25 Nov 2025 (4,905 calls): p50 5.4s, p90
 	// 53.4s, p99 120s, max 300s — only two runs ever passed 240s, and the old
 	// 600s bound never saved a legitimate run: the single call that reached it
-	// was a hung harness. Halving it halves the worst case a turn can sit in;
-	// the 530 calls that asked for more than 180s (520 of them finished
-	// normally) show the big numbers were a safety net, not a need.
-	maxExecTimeout    = 300 * time.Second
+	// was a hung harness. It IS dservice.ToolCallDeadline — the one ceiling
+	// every blocking tool call runs under: the exec clamp cannot be looser
+	// than the seam above it, and the store's own numbers say nothing
+	// legitimate ever needed the room.
+	maxExecTimeout    = service.ToolCallDeadline
 	maxExecSpillBytes = 32 << 20 // cap spill file growth
 	// waitDelay caps how long Wait may block on output pipes a stray
 	// grandchild inherited — without it a detached process stalls the
@@ -66,7 +67,7 @@ func NewExecTool(outputs drepo.ToolOutput, runner service.CommandRunner) (servic
 	schema, err := valueobject.NewToolSchema(
 		"exec",
 		"Run a shell command and return its combined stdout and stderr.",
-		json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"stdin":{"type":"string","description":"Optional input piped to the command's stdin — for programs that read scripted answers (e.g. sudo -S). One-shot, not an interactive session"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds — default 120000, capped at 300000"},"allow_broad_kill":{"type":"boolean","description":"Allow a command that stops every matching process (pkill, killall, fuser -k, kill -9 of a pattern). Off by default: it can kill other threads' work, an agent's process, or this server. kill -9 -1 stays refused either way"}},"required":["command"]}`),
+		json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"stdin":{"type":"string","description":"Optional input piped to the command's stdin — for programs that read scripted answers (e.g. sudo -S). One-shot, not an interactive session"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds — default 120000, capped at 240000"},"allow_broad_kill":{"type":"boolean","description":"Allow a command that stops every matching process (pkill, killall, fuser -k, kill -9 of a pattern). Off by default: it can kill other threads' work, an agent's process, or this server. kill -9 -1 stays refused either way"}},"required":["command"]}`),
 		true,
 		enum.ToolPermissionAgent,
 	)

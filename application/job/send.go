@@ -2,8 +2,8 @@ package job
 
 import (
 	"context"
-	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
@@ -99,6 +99,10 @@ type SendOptions struct {
 	// existed — its mode, for one. They apply to the room this send opens;
 	// an existing room sets its own through the conversation.
 	AgentOptions valueobject.ConfigSelections
+	// SystemPayload marks the message as a server record rather than the owner's
+	// words — a wake turn's completion record, for one. It rides a user-role
+	// message typed system: readable, never editable.
+	SystemPayload bool
 	// Relay names the thread this prompt came from, when another thread sent
 	// it. The job records it on the user message; the head is rendered from it
 	// at request time, never stored.
@@ -150,10 +154,39 @@ func (j *Send) mailbox() *SteeringInput {
 	return &j.steers
 }
 
+// rescueSteers writes the line a relayed prompt would have got from the fold,
+// for every relayed input this turn did not consume. An owner's steer keeps the
+// established rule — the caller decides what an unfired steer becomes — because
+// only a relay carries a record the receiving room did not type.
+func (j *Send) rescueSteers() {
+	for _, e := range j.mailbox().drainPending() {
+		if e.input.Relay == nil || e.record != nil {
+			// No relay, or the room already wrote its line at accept: history is
+			// the persistence, and a second one is the bug.
+			continue
+		}
+		msg, err := entity.NewUserMessage(e.input)
+		if err != nil {
+			continue
+		}
+		msg.SetUserType(enum.LLMUserTypeRelay)
+		msg.SetRelay(*e.input.Relay)
+		_, _ = j.Deps.Convs.AppendMessage(context.WithoutCancel(j.Ctx), j.ConvID(), msg)
+	}
+}
+
 // Steer buffers user input for the running turn — the worker's
 // out-of-band control path. The turn loop folds it at the next safe
 // point; it never interrupts the in-flight provider call.
 func (j *Send) Steer(text string) { j.mailbox().push(text) }
+
+// SteerInput buffers a full input — text with its selections, uploads, marks
+// and relay record — so the fold can write one line carrying all of it. It
+// reports whether the mailbox took it; a full mailbox buffered nothing.
+func (j *Send) SteerInput(in valueobject.UserInput, before func() *entity.Message) bool {
+	_, err := j.mailbox().SubmitBefore(in, j.Deps.Config.MailboxCap, before)
+	return err == nil
+}
 
 // RecallSteer withdraws the newest un-fired steering input.
 func (j *Send) RecallSteer() (string, bool) { return j.mailbox().popLast() }
@@ -165,6 +198,10 @@ func (*Send) IsTurn() bool { return true }
 
 func (j *Send) Execute(execCtx context.Context) (err error) {
 	defer j.finish(&err)
+	// A relayed prompt the turn never folded still has to reach the next one:
+	// history is the persistence, so the line is written once, here, and the
+	// fold that never ran leaves no second copy behind.
+	defer j.rescueSteers()
 	ctx := j.Cancellable(execCtx, j.Ctx)
 	d := j.Deps
 	convID := j.ConvID()
@@ -177,6 +214,11 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		d.Turns.BeginTurn(convID)
 		defer d.Turns.EndTurn(convID)
 	}
+	// A turn no socket admitted still has an audience — its room. The seal runs
+	// on every exit, so a failed turn closes its journal too.
+	onEvent, sealLive := liveTurn(d, convID, "send", j.Opts.Origin, j.OnEvent)
+	persisted := false
+	defer func() { sealLive(persisted, err) }()
 	err = func() error {
 		if err := ctx.Err(); err != nil {
 			return apperror.New(408, "send canceled", err)
@@ -198,15 +240,12 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		// it applies before anything reads the room's runtime, so the turn that
 		// runs next — from any thread — is the one it changes. A brand-new room
 		// has nothing parked.
+		var consumedAt time.Time
 		appliedPending := false
 		if !fresh {
-			sel, ok, err := d.Convs.PendingSelection(ctx, convID)
+			consumedAt, appliedPending, err = applyPendingSelection(ctx, d, conv, onEvent)
 			if err != nil {
 				return err
-			}
-			if ok {
-				ApplyPendingSelection(ctx, d, conv, sel, j.OnEvent)
-				appliedPending = true
 			}
 		}
 
@@ -329,6 +368,9 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		// A prompt another thread handed over carries its own relay head; the
 		// owner cannot rewrite that room's words from here, so the provenance
 		// says so and the message stays non-editable in the target.
+		if j.Opts.SystemPayload {
+			user.SetUserType(enum.LLMUserTypeSystem)
+		}
 		if origin, ok := j.Opts.Origin.Normalized(); ok && origin.Kind == enum.TurnOriginConversation {
 			user.SetUserType(enum.LLMUserTypeRelay)
 			if j.Opts.Relay != nil {
@@ -389,10 +431,10 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 			if j.ModelID != "" {
 				conv.SetModelID(j.ModelID)
 			}
-			err = d.runAgentTurn(ctx, convID, conv, driver, user, j.OnEvent, j.mailbox(), j.Opts.Origin)
+			err = d.runAgentTurn(ctx, convID, conv, driver, user, onEvent, j.mailbox(), j.Opts.Origin)
 			d.retireAgentSession(convID, prevAgent, prevSession, conv)
 		} else {
-			err = d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, j.mailbox(), j.Opts.Origin)
+			err = d.runTurn(ctx, convID, conv, driver, prov, model, svc, onEvent, j.mailbox(), j.Opts.Origin)
 		}
 		if err != nil {
 			// Route and model rebind only after success. Workspace and
@@ -415,14 +457,9 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		if err := d.Convs.Save(ctx, conv); err != nil {
 			return err
 		}
-		if appliedPending {
-			// The pick rode this turn's own save. A clear that fails must not
-			// fail the turn: the next one would simply apply it again, which is
-			// idempotent because the pick already holds.
-			if err := d.Convs.ClearPendingSelection(context.WithoutCancel(ctx), convID); err != nil {
-				slog.Warn("pending selection not cleared", "conversation", convID, "error", err)
-			}
-		}
+		// The pick rode this turn's own save; the claim release runs after this
+		// clear, so a failed save leaves both the file and the projection honest.
+		clearConsumedPending(ctx, d, convID, consumedAt, appliedPending)
 		if !agentRoom {
 			d.retireAgentSession(convID, prevAgent, prevSession, conv)
 		}

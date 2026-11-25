@@ -3,9 +3,12 @@ package job
 import (
 	"context"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"time"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	"github.com/jahrulnr/nusashell/infrastructure/prompt"
 )
@@ -36,6 +39,11 @@ type Resume struct {
 // Send.Steer.
 func (j *Resume) Steer(text string) { j.steers.push(text) }
 
+func (j *Resume) SteerInput(in valueobject.UserInput, before func() *entity.Message) bool {
+	_, err := j.steers.SubmitBefore(in, j.Deps.Config.MailboxCap, before)
+	return err == nil
+}
+
 // RecallSteer withdraws the newest un-fired steering input.
 func (j *Resume) RecallSteer() (string, bool) { return j.steers.popLast() }
 
@@ -53,6 +61,24 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 	ctx := j.Cancellable(execCtx, j.Ctx)
 	d := j.Deps
 	convID := j.ConvID()
+	applied := false
+	var consumedAt time.Time
+	// The room is claimed for the whole turn, like every other turn job: a pick
+	// taken now waits for the next one, and a surface reads the room as working.
+	if d.Turns != nil {
+		d.Turns.BeginTurn(convID)
+		defer d.Turns.EndTurn(convID)
+	}
+	// A turn no socket admitted still has an audience — its room.
+	onEvent, sealLive := liveTurn(d, convID, "resume", j.Opts.Origin, j.OnEvent)
+	defer func() { sealLive(false, err) }()
+	// Released after the closure returned nil only — i.e. after the turn's save —
+	// so a failed save leaves both the file and the projection honest.
+	defer func() {
+		if err == nil {
+			clearConsumedPending(ctx, d, convID, consumedAt, applied)
+		}
+	}()
 	err = func() error {
 		if err := ctx.Err(); err != nil {
 			return apperror.New(408, "resume canceled", err)
@@ -63,6 +89,12 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 		}
 		if len(conv.Messages()) == 0 {
 			return apperror.New(400, "nothing to resume", nil)
+		}
+		// A retry is a turn: the pick parked for the next turn belongs to it,
+		// applied before anything reads the room's runtime.
+		consumedAt, applied, err = applyPendingSelection(ctx, d, conv, onEvent)
+		if err != nil {
+			return err
 		}
 		if conv.SystemPrompt() == "" {
 			conv.SetSystemPrompt(prompt.SystemPrompt("conversation"))
@@ -81,7 +113,7 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 			if last.Role() != enum.RoleUser || !last.Editable() {
 				return apperror.New(409, "nothing to retry — send a new message to the agent", nil)
 			}
-			if err := d.runAgentTurn(ctx, convID, conv, driver, *last, j.OnEvent, &j.steers, j.Opts.Origin); err != nil {
+			if err := d.runAgentTurn(ctx, convID, conv, driver, *last, onEvent, &j.steers, j.Opts.Origin); err != nil {
 				return err
 			}
 			return d.Convs.Save(ctx, conv)
@@ -108,7 +140,7 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 		}
 		// File tools reach the project's other folders by absolute path.
 		ctx = dservice.WithExtraFolders(ctx, extra)
-		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, j.OnEvent, &j.steers, j.Opts.Origin); err != nil {
+		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, onEvent, &j.steers, j.Opts.Origin); err != nil {
 			return err
 		}
 		conv.SetProviderID(providerID)

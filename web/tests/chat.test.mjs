@@ -1692,6 +1692,61 @@ test('workingBlind marks work without a live turn — and nothing else', () => {
   assert.equal(chat.workingBlind({ info: {} }), false, 'an absent flag is an idle room');
   assert.equal(chat.workingBlind({}), false);
   assert.equal(chat.isBusy({ info: { turnActive: true } }), false, 'blind work earns no Stop');
+  // a turn this tab streams is never blind, however stale the record reads:
+  // the transcript already claims "Working…" for it — this is the owner's
+  // screenshot state, and dropping !r.live must turn it red.
+  assert.equal(chat.workingBlind({ live: { turnId: 't9' }, info: { turnActive: true } }), false, 'a streamed turn is never blind');
+});
+
+// The status line above the composer is one sentence of at most two clauses:
+// blind work leads (only what the transcript cannot show), the worker's queue
+// depth follows in queuedNote's words — or nothing at all.
+test('roomLine composes the blind clause, the queue clause, both, or nothing', () => {
+  const blindRoom = { info: { turnActive: true } };
+  assert.equal(chat.roomLine(blindRoom, 2).text, 'Working — no live view · 2 waiting to run');
+  assert.equal(chat.roomLine(blindRoom, null).text, 'Working — no live view · waiting to run', 'a lost count keeps the words, drops the number');
+  assert.equal(chat.roomLine(blindRoom, 0).text, 'Working — no live view');
+  assert.ok(chat.roomLine(blindRoom, 0).blind, 'the work clause leads — orb idle, tooltip');
+  assert.match(chat.roomLine(blindRoom, 0).tip, /output appears when it finishes/);
+
+  const idleRoom = { info: {} };
+  assert.equal(chat.roomLine(idleRoom, 2).text, '2 waiting to run');
+  assert.equal(chat.roomLine(idleRoom, 2).blind, false, 'queue alone takes the queue icon');
+  assert.equal(chat.roomLine(idleRoom, 2).tip, null, 'no blind clause, no tooltip');
+  assert.equal(chat.roomLine(idleRoom, null).text, 'waiting to run');
+  assert.equal(chat.roomLine({ live: { turnId: 't1' }, info: { turnActive: true } }, 2).text, '2 waiting to run', 'a watched turn adds no Working clause');
+
+  assert.equal(chat.roomLine(idleRoom, 0), null, 'idle and empty renders nothing');
+  assert.equal(chat.roomLine({ info: { turnActive: true, activeTurnId: 't1' } }, 0), null, 'a watchable turn is the transcript\'s claim, not the line\'s');
+});
+
+// A3 — the owner's screenshot: the tab streams its turn (r.live) while the
+// record still lags (turnActive true, activeTurnId absent). All three
+// surfaces must agree: the transcript claims "Working…", the line adds no
+// "Working" clause, and the sidebar/recent marker reads live — not "no live
+// view" — because watching() looks the room up by id. Removing the
+// state.rooms lookup must turn all three red, not one.
+test('a streamed room never reads blind on any of the three surfaces', () => {
+  state.rooms.c_a3 = { id: 'c_a3', live: { turnId: 't9' }, info: { turnActive: true } };
+  try {
+    const r = state.rooms.c_a3;
+    assert.equal(chat.workingBlind(r), false, 'transcript/line: not blind while streaming');
+    const line = chat.roomLine(r, 1);
+    assert.ok(!line || !line.text.startsWith('Working'), 'the line carries no Working clause');
+    assert.equal(line.text, '1 waiting to run', 'only the queue clause remains');
+
+    // the list record the sidebar and home rows read: a bare server shape —
+    // no live field exists on it, so only a lookup by id can see the stream
+    const x = { id: 'c_a3', turnActive: true };
+    assert.equal(chat.watching(x), true, 'the row reads live for a room being streamed');
+    const stranger = { id: 'c_elsewhere', turnActive: true };
+    assert.equal(chat.watching(stranger), false, 'a room nobody streams stays blind-marker territory');
+
+    assert.equal(chat.watching({ id: 'c_a4', activeTurnId: 't2' }), true, 'the record turn id still wins on its own');
+    assert.equal(chat.watching({ id: 'c_a5' }), false, 'nothing running anywhere is not watched');
+  } finally {
+    delete state.rooms.c_a3;
+  }
 });
 
 // turnActive rides the room record, so the dedupe rule must name it — a flip

@@ -4,7 +4,7 @@
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { toast, useStore } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
-import { selection, isBusy, loadAgentOptions, sessionModeName, setSessionOption, sessionOptionValue, agentOptionMap } from '../lib/chat.js';
+import { selection, isBusy, loadAgentOptions, sessionModeName, setSessionOption, sessionOptionValue, agentOptionMap, agentChipVisible } from '../lib/chat.js';
 import { Icon } from './icons.js';
 import { Popover, Select, Spinner, Toggle } from './ui.js';
 
@@ -33,7 +33,11 @@ export function AgentOptions({ room: r }) {
   // its own mode.
   useEffect(() => { load(); }, [r.id, sel.agentId]);
   useEffect(() => { if (!busyTurn) load(); }, [busyTurn]);
-  if (!r.id || !sel.agentId || (opts.status === 'ready' && !opts.list.length)) return null;
+  // The chip shows when there is something to act on: options to pick, or a
+  // transient empty the owner can refresh. It hides only when the agent's
+  // definitive answer is an empty list — nothing a click could change.
+  const empty = opts.status === 'ready' && !opts.list.length;
+  if (!r.id || !sel.agentId || !agentChipVisible(opts)) return null;
   const modeName = sessionModeName(r);
   const set = async (o, value) => {
     setBusy(o.id);
@@ -56,7 +60,11 @@ export function AgentOptions({ room: r }) {
       <div class="shrink-0 px-3 pt-2.5 pb-1 text-xs text-faint">Agent session</div>
       ${opts.status === 'loading' && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} size=${12} /> Asking the agent…</div>`}
       ${opts.status === 'error' && html`<p class="px-3 py-2 text-bad text-xs">${opts.error}</p>`}
-      <div class="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-2.5 text-[13px]">
+      ${empty && opts.report === 'empty' && html`<div class="flex items-center gap-2 px-3 py-2 text-faint text-xs">
+        <span class="flex-1">The agent reports no options right now.</span>
+        <button type="button" class="text-accent shrink-0" onClick=${() => loadAgentOptions(r, { force: true })}>Refresh</button>
+      </div>`}
+      ${opts.list.length > 0 && html`<div class="grid grid-cols-2 gap-x-3 gap-y-2.5 px-3 py-2.5 text-[13px]">
         ${opts.list.map((o) => html`<label key=${o.id} class="flex flex-col gap-1 min-w-0">
           <span class="flex items-center gap-1.5 text-xs text-muted min-w-0" title=${o.description || o.name}>
             <span class="truncate">${o.name}</span>
@@ -68,7 +76,7 @@ export function AgentOptions({ room: r }) {
             : html`<${Select} dense label=${o.name} class="w-full" value=${sessionOptionValue(r, o)}
                 options=${(o.choices || []).map((c) => ({ value: c.value, text: c.name }))} onChange=${(v) => set(o, v)} />`}
         </label>`)}
-      </div>
+      </div>`}
       ${rules.length > 0 && html`<div class="shrink-0 border-t border-line px-3 py-2.5 text-[13px]">
         <div class="text-xs text-faint mb-1.5">Always allowed in this thread</div>
         <div class="flex flex-wrap gap-1.5">
@@ -79,7 +87,7 @@ export function AgentOptions({ room: r }) {
           </span>`)}
         </div>
       </div>`}
-      <p class="shrink-0 border-t border-line px-3 py-2 text-xs text-faint">${hint || 'Kept for this thread and applied before each turn.'}</p>
+      ${!(empty && opts.report === 'empty') && html`<p class="shrink-0 border-t border-line px-3 py-2 text-xs text-faint">${hint || 'Kept for this thread and applied before each turn.'}</p>`}
     </${Popover}>
   </div>`;
 }

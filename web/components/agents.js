@@ -125,8 +125,10 @@ function DefaultOptions({ id, value, onChange }) {
   const picks = agentOptionMap(value);
   const load = async () => {
     setDoc({ status: 'loading' });
-    try { setDoc({ status: 'ready', options: (await api.agentOptionsFor(id)).data || [] }); }
-    catch (e) { setDoc({ status: 'error', error: errorText(e) }); }
+    try {
+      const res = await api.agentOptionsFor(id);
+      setDoc({ status: 'ready', options: res.data || [], report: res.status === 'empty' ? 'empty' : 'ready' });
+    } catch (e) { setDoc({ status: 'error', error: errorText(e) }); }
   };
   if (doc.status === 'idle') {
     return html`<div class="flex items-center gap-3"><${Button} kind="ghost" onClick=${load}>Choose defaults</${Button}>
@@ -134,6 +136,12 @@ function DefaultOptions({ id, value, onChange }) {
   }
   if (doc.status === 'loading') return html`<div class="flex items-center gap-2 text-muted"><${Spinner} /> Asking the agent for its options…</div>`;
   if (doc.status === 'error') return html`<${ErrorBlock} title="Could not read the agent's options" message=${doc.error} onRetry=${load} />`;
+  if (!doc.options?.length && doc.report === 'empty') {
+    return html`<div class="flex items-center gap-3">
+      <span class="flex-1 text-xs text-faint">The agent reports no options right now.</span>
+      <${Button} kind="ghost" onClick=${load}>Refresh</${Button}>
+    </div>`;
+  }
   if (!doc.options?.length) return html`<p class="text-xs text-faint">This agent offers no session options.</p>`;
   return html`<div class="flex flex-col gap-2">${doc.options.map((o) => {
     const choices = o.type === 'boolean' ? [{ value: 'true', text: 'On' }, { value: 'false', text: 'Off' }] : (o.choices || []).map((c) => ({ value: c.value, text: c.name || c.value }));

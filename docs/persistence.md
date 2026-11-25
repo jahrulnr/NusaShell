@@ -40,6 +40,8 @@ conventions:
 │       ├── meta.json           record + counters
 │       ├── 0.jsonl, 1.jsonl …  sealed archive segments (only after Compact)
 │       ├── active.jsonl        the live tail
+│       ├── pending-selection.json  a pick parked for the next turn (absent when nothing waits)
+│       ├── completions.json    async finishes no turn has read yet, plus the keys already read
 │       └── tool-output/        created on exec; full-output files only when result exceeds budget
 ├── logs/
 │   ├── active.jsonl            current diagnostic log

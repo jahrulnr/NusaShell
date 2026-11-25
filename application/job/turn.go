@@ -23,6 +23,13 @@ import (
 // definitive failure, not a stall to sit out.
 var sendRetryBackoff = []time.Duration{750 * time.Millisecond, 1500 * time.Millisecond}
 
+// toolCallDeadline caps one blocking tool call at every Execute seam in
+// this package — a variable so a test can prove the seam without sleeping
+// four minutes. Production keeps the domain ceiling; nothing else may set
+// it. A deadline that fires is the call's own outcome (a timed-out tool
+// result, the turn continues); only the parent ctx dying cancels the turn.
+var toolCallDeadline = dservice.ToolCallDeadline
+
 // The longest Retry-After the turn itself will sit out. Provider-asked
 // quiet is honored inside this window — beyond it the ask describes a
 // dead provider, not a pause (free-tier quotas can name weeks): the 429
@@ -132,9 +139,33 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 		// terminal snapshot reports them unconsumed.
 		if steers != nil {
 			for _, input := range steers.claim() {
+				if input.record != nil {
+					// The room wrote this line when it accepted the prompt. The
+					// turn appends it to its own view — so the model reads it on
+					// this call — and persists nothing: one accepted message is
+					// one line, and a restart can only postpone this call.
+					if !hasMessage(conv, input.record.ID()) {
+						conv.Append(*input.record)
+					}
+					if input.receipt != nil {
+						input.receipt.markPersisted()
+					}
+					if onEvent != nil {
+						onEvent(event.NewSteerEvent(input.input.Text, input.input.Attachments...))
+					}
+					continue
+				}
 				user, err := entity.NewUserMessage(input.input)
 				if err != nil {
 					return err
+				}
+				// A relayed prompt is born with its provenance: the line the
+				// model reads on the next call is the same one the transcript
+				// attributes to the sending thread, and there is only one of
+				// them — the head is rendered from the record, never stored.
+				if input.input.Relay != nil {
+					user.SetUserType(enum.LLMUserTypeRelay)
+					user.SetRelay(*input.input.Relay)
 				}
 				conv.Append(user)
 				committed, err := d.Convs.AppendMessage(ctx, convID, user)
@@ -492,7 +523,13 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 			case !registered:
 				out, failed = "error: unknown tool "+call.Name(), true
 			default:
-				res, err := tool.Execute(ctx, call, emit)
+				// The seam deadline caps any tool this turn runs — a call
+				// that hits it is recorded as its own timed-out outcome and
+				// the turn continues; only the parent ctx dying takes the
+				// cancel path below.
+				deadlineCtx, deadlineStop := context.WithTimeout(ctx, toolCallDeadline)
+				res, err := tool.Execute(deadlineCtx, call, emit)
+				deadlineStop()
 				switch {
 				case err == nil:
 					out, outAtts = res.Text, res.Attachments
@@ -504,6 +541,8 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 					out, outAtts = res.Text, res.Attachments
 				case ctx.Err() != nil:
 					return apperror.New(408, "turn canceled", ctx.Err())
+				case deadlineCtx.Err() == context.DeadlineExceeded:
+					out, failed = dservice.ToolCallTimeoutText, true
 				default:
 					out, failed = "error: "+err.Error(), true
 				}
@@ -758,6 +797,20 @@ func (d Deps) persistInterrupted(ctx context.Context, convID string, msg *entity
 		}
 	}
 	return nil
+}
+
+// hasMessage reports whether the turn's own view already carries a message id —
+// an accepted line folded into more than one step must not land twice.
+func hasMessage(conv *aggregate.Conversation, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, m := range conv.Messages() {
+		if m.ID() == id {
+			return true
+		}
+	}
+	return false
 }
 
 // appendWorkspaceContext records the turn's working directory as one

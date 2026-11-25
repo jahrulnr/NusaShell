@@ -46,6 +46,13 @@ type Turns interface {
 	Busy(convID string) bool
 }
 
+// Steers carries a prompt into a room's running turn. It answers whether a live
+// turn took it — false means there was none, and the caller falls back to the
+// room's queue — and reports a full mailbox as a 429, never as a silent drop.
+type Steers interface {
+	SteerInput(ctx context.Context, convID string, in valueobject.UserInput) (bool, error)
+}
+
 // Queue accepts a message for a busy room and names how many wait. The worker
 // owns the FIFO, so a queued message keeps its arrival order and the room
 // still runs one turn at a time.
@@ -77,9 +84,10 @@ const (
 
 // App is the cross-thread use case.
 type App struct {
-	rooms Rooms
-	turns Turns
-	queue Queue
+	rooms  Rooms
+	turns  Turns
+	queue  Queue
+	steers Steers
 	// uploads stores a copy for a target whose filesystem this sender cannot
 	// address; nil refuses that form instead of half-sending it.
 	uploads  drepo.Uploads
@@ -100,11 +108,11 @@ type App struct {
 
 // New wires the use case. ctx bounds the turns it starts. chats may be
 // nil (no channels); outputs holds exports as files of the calling thread.
-func New(ctx context.Context, rooms Rooms, turns Turns, queue Queue, uploads drepo.Uploads, projects drepo.Project, chats Chats, outputs drepo.ToolOutput, log *slog.Logger) *App {
+func New(ctx context.Context, rooms Rooms, turns Turns, queue Queue, steers Steers, uploads drepo.Uploads, projects drepo.Project, chats Chats, outputs drepo.ToolOutput, log *slog.Logger) *App {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &App{rooms: rooms, turns: turns, queue: queue, uploads: uploads, projects: projects, chats: chats, outputs: outputs,
+	return &App{rooms: rooms, turns: turns, queue: queue, steers: steers, uploads: uploads, projects: projects, chats: chats, outputs: outputs,
 		log: log.With("component", "control"), ctx: ctx, reported: map[string]time.Time{}}
 }
 
@@ -384,13 +392,20 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 		return nil, err
 	}
 	relay := a.relayOrigin(ctx, self)
-	// A busy room is not a refusal: the message waits in the room's own queue.
-	// It never folds into the live turn — steer writes no user-role record, and
-	// the provenance that tells a tab this prompt came from another thread
-	// rides that record. Trading "folded into the running turn" for a message
-	// the receiver can still attribute is the right trade.
+	// A busy room takes the message through its running turn: the fold writes
+	// one user-role line that carries the provenance record, so the receiver can
+	// attribute the prompt and reads it on its next model call. The queue stays
+	// the fallback for the moment no live turn can take input — a turn that just
+	// ended, a shutdown — never the default.
 	if a.turns.Busy(info.ID) {
-		out, err := a.queueSend(ctx, self, info, text, attachments, relay)
+		out, err := a.steerSend(ctx, self, info, text, attachments, relay)
+		if err != nil {
+			return refused(err)
+		}
+		if out != nil {
+			return out, nil
+		}
+		out, err = a.queueSend(ctx, self, info, text, attachments, relay)
 		if err != nil {
 			return refused(err)
 		}
@@ -408,6 +423,28 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 	a.start(info.ID, "", "", "", text, attachments, "", "", relay)
 	return map[string]any{"threadId": info.ID, "delivery": "turn", "afterSeq": info.MessageCount - 1,
 		"thread": a.thread(self, info)}, nil
+}
+
+// steerSend folds the prompt into the room's running turn. It answers nil with
+// no error when no live turn took it, so the caller falls back to the queue; an
+// error is the refusal itself — a full mailbox is a 429 and nothing was
+// written.
+func (a *App) steerSend(ctx context.Context, self string, info drepo.ConversationInfo, text string, attachments []valueobject.Attachment, relay *valueobject.Relay) (map[string]any, error) {
+	if a.steers == nil {
+		return nil, nil
+	}
+	taken, err := a.steers.SteerInput(ctx, info.ID, valueobject.UserInput{
+		Text:        text,
+		Attachments: attachments,
+		Relay:       relay,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !taken {
+		return nil, nil
+	}
+	return map[string]any{"threadId": info.ID, "delivery": "steer", "thread": a.thread(self, info)}, nil
 }
 
 // queueSend hands the message to the room's worker queue and reports only what

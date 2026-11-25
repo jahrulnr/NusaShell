@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 )
 
 func pair(t *testing.T, s Server) *Client {
@@ -113,4 +115,40 @@ func TestClientConnectionLost(t *testing.T) {
 		t.Fatalf("call after close = %v", err)
 	}
 	<-c.Done()
+}
+
+// The seam deadline turns a hanging tool into a timed-out RESULT — never a
+// transport error — while the server keeps answering. Mutation target:
+// removing the WithTimeout in Serve turns this red (the client ctx below
+// outlives the seam deadline, so only the seam can produce the result).
+func TestToolsCallDeadlineYieldsTimedOutResult(t *testing.T) {
+	old := toolCallDeadline
+	toolCallDeadline = 150 * time.Millisecond
+	t.Cleanup(func() { toolCallDeadline = old })
+
+	c := pair(t, Server{
+		Name: "demo", Version: "2",
+		Call: func(ctx context.Context, name string, args json.RawMessage) (Result, error) {
+			if name != "hang" {
+				return TextResult("quick"), nil
+			}
+			<-ctx.Done()
+			return Result{}, ctx.Err()
+		},
+	})
+	// Generous client ctx: only the seam's own deadline can fire first.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	res, err := c.Call(ctx, "hang", nil)
+	if err != nil {
+		t.Fatalf("a timed-out tool must be a result, never a transport error: %v", err)
+	}
+	if !res.IsError || res.Text() != dservice.ToolCallTimeoutText {
+		t.Fatalf("hanging tool = %+v — want an isError result carrying the shared timed-out text", res)
+	}
+	// The server keeps serving: the caller's turn continues.
+	res, err = c.Call(ctx, "quick", nil)
+	if err != nil || res.IsError || res.Text() != "quick" {
+		t.Fatalf("after the timeout the server must keep answering, got %+v, %v", res, err)
+	}
 }

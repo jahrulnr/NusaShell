@@ -3,6 +3,7 @@ package repoconversation
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,5 +106,61 @@ func TestPendingSelectionNeedsTheRoom(t *testing.T) {
 	r := NewConversationRepository(t.TempDir())
 	if err := r.SavePendingSelection(t.Context(), "c_missing", drepo.PendingSelection{AgentID: "dewey"}); err == nil {
 		t.Fatal("a pick for a missing room was written")
+	}
+}
+
+// A clear names the generation it consumed: a pick parked while that turn ran is
+// newer and stays, or a turn's own clear would lose an owner's choice silently.
+func TestClearPendingSelectionLeavesANewerGeneration(t *testing.T) {
+	r, _ := parkedRoom(t)
+	stored, ok, err := r.PendingSelection(t.Context(), "c_park")
+	if err != nil || !ok {
+		t.Fatalf("pending = %+v, %v, %v", stored, ok, err)
+	}
+	older := stored.AcceptedAt.Add(-time.Minute)
+	if err := r.ClearPendingSelection(t.Context(), "c_park", older); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := r.PendingSelection(t.Context(), "c_park"); err != nil || !ok {
+		t.Fatalf("clearing an older generation took the newer pick: %v, %v", ok, err)
+	}
+	// Its own generation still clears.
+	if err := r.ClearPendingSelection(t.Context(), "c_park", stored.AcceptedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := r.PendingSelection(t.Context(), "c_park"); err != nil || ok {
+		t.Fatalf("the consumed generation survived its own clear: %v, %v", ok, err)
+	}
+}
+
+// The compare and the remove share SavePendingSelection's lock, so a pick written
+// while an older clear runs survives. A sequential test cannot see that window —
+// this one interleaves a save with a clear and asserts the invariant after every
+// round: the newer generation is never lost.
+func TestClearAndSaveDoNotLoseANewerGeneration(t *testing.T) {
+	r, _ := parkedRoom(t)
+	effort := enum.EffortMax
+	for i := 0; i < 200; i++ {
+		stored, ok, err := r.PendingSelection(t.Context(), "c_park")
+		if err != nil || !ok {
+			t.Fatalf("round %d: pending = %+v, %v, %v", i, stored, ok, err)
+		}
+		older := stored.AcceptedAt.Add(-time.Minute)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = r.SavePendingSelection(t.Context(), "c_park", drepo.PendingSelection{
+				Effort: &effort, AcceptedAt: time.Now().UTC(),
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			_ = r.ClearPendingSelection(t.Context(), "c_park", older)
+		}()
+		wg.Wait()
+		if _, ok, err := r.PendingSelection(t.Context(), "c_park"); err != nil || !ok {
+			t.Fatalf("round %d lost the pick a concurrent save wrote: %v, %v", i, ok, err)
+		}
 	}
 }

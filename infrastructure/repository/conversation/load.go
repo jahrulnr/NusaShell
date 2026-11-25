@@ -34,6 +34,27 @@ func (r *ConversationRepository) Load(ctx context.Context, convID string) (*aggr
 	}
 	c.SetTitle(meta.Title)
 	c.RestoreAgentTitle(meta.AgentTitle)
+	// The agent bind comes first: on a fresh aggregate ""→the stored agent
+	// satisfies BindAgent's "the agent changed" branch, whose clearing of
+	// provider/model/effort/upstream is meant for real switches — run it
+	// before those fields are restored, or hydration wipes the room's own
+	// picks and the next Save writes the wipe back.
+	if meta.AgentID != "" {
+		if err := c.BindAgent(meta.AgentID); err != nil {
+			return nil, err
+		}
+		c.SetAgentSession(meta.AgentSession)
+		for _, pick := range meta.AgentOptions {
+			_ = c.SetAgentOption(pick.ID, pick.Value)
+		}
+		if r := meta.AgentContext; r != nil {
+			a, err := valueobject.NewAgentContext(r.Used, r.Size, r.CostAmount, r.CostCurrency)
+			if err != nil {
+				return nil, fmt.Errorf("conversation %s: agent context: %w", meta.ID, err)
+			}
+			c.ReportAgentContext(a)
+		}
+	}
 	c.SetProviderID(meta.ProviderID)
 	c.SetModelID(meta.ModelID)
 	effort, ok := enum.ParseEffort(meta.Effort)
@@ -59,22 +80,6 @@ func (r *ConversationRepository) Load(ctx context.Context, convID string) (*aggr
 	}
 	if r := meta.Routing; r != nil {
 		c.SetRouting(&valueobject.Routing{ReplyToOrigin: r.ReplyToOrigin, MirrorFinal: r.MirrorFinal, NotifyApprovals: r.NotifyApprovals})
-	}
-	if meta.AgentID != "" {
-		if err := c.BindAgent(meta.AgentID); err != nil {
-			return nil, err
-		}
-		c.SetAgentSession(meta.AgentSession)
-		for _, pick := range meta.AgentOptions {
-			_ = c.SetAgentOption(pick.ID, pick.Value)
-		}
-		if r := meta.AgentContext; r != nil {
-			a, err := valueobject.NewAgentContext(r.Used, r.Size, r.CostAmount, r.CostCurrency)
-			if err != nil {
-				return nil, fmt.Errorf("conversation %s: agent context: %w", meta.ID, err)
-			}
-			c.ReportAgentContext(a)
-		}
 	}
 	// systemPrompt is not restored: it is code (embedded templates), and
 	// older metas carrying a stamped copy are ignored so every room gets

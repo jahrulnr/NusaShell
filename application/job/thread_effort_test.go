@@ -5,13 +5,16 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoagent "github.com/jahrulnr/nusashell/infrastructure/repository/agent"
 )
 
@@ -273,9 +276,10 @@ func TestUnsetThreadEffortLeavesTheModelAlone(t *testing.T) {
 
 // gateRecorder is a TurnGate that remembers what it heard.
 type gateRecorder struct {
-	mu     sync.Mutex
-	begins []string
-	ends   []string
+	mu       sync.Mutex
+	begins   []string
+	ends     []string
+	consumed []string
 }
 
 func (g *gateRecorder) BeginTurn(convID string) {
@@ -287,6 +291,12 @@ func (g *gateRecorder) BeginTurn(convID string) {
 func (g *gateRecorder) EndTurn(convID string) {
 	g.mu.Lock()
 	g.ends = append(g.ends, convID)
+	g.mu.Unlock()
+}
+
+func (g *gateRecorder) ConsumePending(convID string, acceptedAt time.Time) {
+	g.mu.Lock()
+	g.consumed = append(g.consumed, convID)
 	g.mu.Unlock()
 }
 
@@ -325,5 +335,123 @@ func TestForkClaimsTheSourceRoom(t *testing.T) {
 	}
 	if got := gate.Ended(); len(got) != 1 || got[0] != "c_src" {
 		t.Fatalf("released %v, want the source room", got)
+	}
+}
+
+// parkAhead writes a pick that waits for the room's next turn.
+func parkAhead(t *testing.T, d Deps, convID string, effort enum.Effort) {
+	t.Helper()
+	upstream := "Alpha"
+	if err := d.Convs.SavePendingSelection(t.Context(), convID, drepo.PendingSelection{
+		Effort: &effort, Upstream: &upstream, AcceptedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An edit and a retry are turns: each takes the pick parked for the room's next
+// turn, applies it, and clears it once its own save landed.
+func TestEditAndResumeApplyThePendingPick(t *testing.T) {
+	for _, kind := range []string{"edit", "resume"} {
+		t.Run(kind, func(t *testing.T) {
+			spy := &selectionSpy{}
+			d := hydrationDeps(t, spy)
+			gate := &gateRecorder{}
+			d.Turns = gate
+			room := seedRoom(t, d.Convs, "room", "hi")
+			parkAhead(t, d, "room", enum.EffortMax)
+
+			var err error
+			switch kind {
+			case "edit":
+				j := &Edit{Deps: d, Ctx: t.Context(), MsgID: room.Messages()[0].ID(), Content: "rewritten", ProviderID: "gw1", ModelID: "m1"}
+				j.Result = make(chan error, 1)
+				j.Bind("room", nil)
+				err = j.Execute(t.Context())
+			case "resume":
+				j := &Resume{Deps: d, Ctx: t.Context(), ProviderID: "gw1", ModelID: "m1"}
+				j.Result = make(chan error, 1)
+				j.Bind("room", nil)
+				err = j.Execute(t.Context())
+			}
+			if err != nil {
+				t.Fatalf("%s: %v", kind, err)
+			}
+			if effort, _ := storedSelection(t, d); effort != enum.EffortMax {
+				t.Fatalf("%s: the parked pick did not reach the turn (effort %q)", kind, effort)
+			}
+			if _, ok, err := d.Convs.PendingSelection(t.Context(), "room"); err != nil || ok {
+				t.Fatalf("%s: the consumed pick was not cleared: %v, %v", kind, ok, err)
+			}
+			// The room is claimed for the whole turn: a pick taken then waits, and
+			// a surface reads the room as working.
+			if got := gate.Begun(); len(got) != 1 || got[0] != "room" {
+				t.Fatalf("%s: claimed %v, want the room", kind, got)
+			}
+			if got := gate.Ended(); len(got) != 1 || got[0] != "room" {
+				t.Fatalf("%s: released %v, want the room", kind, got)
+			}
+		})
+	}
+}
+
+// A fold is not a turn: it must leave the parked pick for the room's next turn.
+func TestCompactLeavesThePendingPick(t *testing.T) {
+	d := hydrationDeps(t, &selectionSpy{})
+	seedRoom(t, d.Convs, "room", "hi")
+	parkAhead(t, d, "room", enum.EffortMax)
+	conv, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fold that cannot run is enough: the rule is that it never touches the
+	// pick, on any path.
+	j := &Compact{Deps: d, Ctx: t.Context()}
+	j.Result = make(chan error, 1)
+	j.Bind("room", nil)
+	if err := j.Execute(t.Context()); err == nil {
+		t.Fatal("the fold was expected to refuse this room")
+	}
+	if _, ok, err := d.Convs.PendingSelection(t.Context(), "room"); err != nil || !ok {
+		t.Fatalf("the fold consumed the pick: %v, %v", ok, err)
+	}
+	if effort, _ := storedSelection(t, d); effort == enum.EffortMax {
+		t.Fatal("the fold applied the pick to the room")
+	}
+	_ = conv
+}
+
+// failingSave is a conversation store whose save fails, for the durability rule.
+type failingSave struct {
+	drepo.Conversation
+	fail bool
+}
+
+func (f *failingSave) Save(ctx context.Context, conv *aggregate.Conversation) error {
+	if f.fail {
+		return apperror.New(500, "the store refused the write", nil)
+	}
+	return f.Conversation.Save(ctx, conv)
+}
+
+// A pick is cleared only after the turn's own save landed: a failed save keeps
+// the file, so the next turn applies it again instead of losing it.
+func TestPendingSurvivesAFailedSave(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	store := &failingSave{Conversation: d.Convs}
+	d.Convs = store
+	seedRoom(t, d.Convs, "room", "hi")
+	parkAhead(t, d, "room", enum.EffortMax)
+
+	store.fail = true
+	j := &Send{Deps: d, Ctx: t.Context(), Receipt: NewPersistenceReceipt(), ProviderID: "gw1", ModelID: "m1", Message: "again"}
+	j.Result = make(chan error, 1)
+	j.Bind("room", nil)
+	if err := j.Execute(t.Context()); err == nil {
+		t.Fatal("the turn passed although the store refused the write")
+	}
+	if _, ok, err := d.Convs.PendingSelection(t.Context(), "room"); err != nil || !ok {
+		t.Fatalf("a failed save dropped the pick: %v, %v", ok, err)
 	}
 }

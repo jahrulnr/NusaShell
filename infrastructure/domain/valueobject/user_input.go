@@ -13,6 +13,11 @@ type UserInput struct {
 	Attachments []Attachment
 	Annotations []Annotation
 	Recording   *RecordingRef
+	// Relay is the provenance of a prompt another thread sent into this room:
+	// the sender's record, never text inside the body. A steered relay carries
+	// it so the line the turn folds is born with its provenance, and a reader
+	// renders the head from data.
+	Relay *Relay
 	// InputID is the submitting request's id when the transport issued one —
 	// a steer's requestId. An ordinary send submits as itself, so it carries
 	// none. The id rides into the user message a steer writes, where a

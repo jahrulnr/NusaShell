@@ -30,6 +30,9 @@ func (j *Compact) Execute(execCtx context.Context) (err error) {
 	// The room is claimed while the fold runs, so a runtime pick taken now is
 	// answered (it waits for the next turn) instead of queuing behind a job that
 	// can take minutes. Nothing about the fold's own runtime changes.
+	//
+	// A fold is not a turn, so it does NOT apply a parked pick: the pick belongs
+	// to the room's next turn, never to the model that writes the summary.
 	if d.Turns != nil {
 		d.Turns.BeginTurn(convID)
 		defer d.Turns.EndTurn(convID)

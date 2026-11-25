@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
 // ErrTerminalSessionGone reports an interaction against a session id that
@@ -64,10 +66,27 @@ type TerminalSession interface {
 // the default pipes backend is preferred for everything else because it
 // needs no terminal emulation, and its closed stdin gives readers a
 // deterministic EOF instead of blocking on input that can never arrive.
+// Completion is one asynchronous finish a producer reports — a terminal session
+// that ended, a media render that landed. It is data, never instruction: the
+// record a model reads is rendered from these fields, and the wake it may trigger
+// is a separate, rate-limited trigger. One completion, one record, ever.
+// Completion is one asynchronous finish a room has not read yet. It is the
+// value object itself: the sidecar that keeps it durable, the record a turn
+// renders, and the session watcher that reports it all name one type.
+type Completion = valueobject.Completion
+
+// CompletionSink hears every completion a producer reports. It must never block
+// the producer: an asynchronous exit reports and moves on.
+type CompletionSink func(conversationID string, c Completion)
+
 type TerminalOpenRequest struct {
 	Command string
 	Dir     string
 	TTY     bool
+	// Wake opts this session in to reporting its exit: the room then reads the
+	// completion on its next turn, and may be woken for it. Off by default — an
+	// agent that says nothing wakes nothing.
+	Wake bool
 }
 
 // TerminalPoll is one Collect result: the output drained since the previous

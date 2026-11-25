@@ -368,3 +368,149 @@ func TestPendingPickAnswersDuringACompact(t *testing.T) {
 		t.Fatal("the pending survived the turn that applied it")
 	}
 }
+
+// A pick already taken by the running turn is in play, not waiting: the
+// projection must stop offering it, or a surface keeps saying "next turn" for a
+// turn that already carries it.
+func TestPendingIsHiddenWhileItsTurnRuns(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_consume", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	release := busyTurn(t, app, rt, "c_consume")
+	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_consume", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+	})
+	if err != nil || !parked {
+		t.Fatalf("park = %v, %v", parked, err)
+	}
+	release()
+	waitIdle(t, app, "c_consume")
+
+	// The next turn takes it; hold that turn inside the agent to observe it.
+	entered, free := make(chan struct{}), make(chan struct{})
+	rt.mu.Lock()
+	rt.beforePrompt = func(context.Context) error { close(entered); <-free; return nil }
+	rt.mu.Unlock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := app.Send(ctx, "c_consume", "", "", "consume it", nil, appjob.SendOptions{Agent: "fake"}, nil)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the consuming turn never reached the agent")
+	}
+	if _, ok, _ := app.Pending(ctx, "c_consume"); ok {
+		t.Fatal("the projection still offers a pick the running turn already applied")
+	}
+	close(free)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the consuming turn never finished")
+	}
+	if _, ok, _ := app.Pending(ctx, "c_consume"); ok {
+		t.Fatal("the pick was not cleared after the turn saved")
+	}
+	if info, err := app.deps.Convs.Info(ctx, "c_consume"); err != nil || info.ModelID != "swe-2-1" {
+		t.Fatalf("record model = %q, %v", info.ModelID, err)
+	}
+}
+
+// A pick parked *after* the running turn took the previous one is a different
+// generation: it must stay visible.
+func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_gen", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Park a pick, and let the next turn consume it while we watch.
+	release := busyTurn(t, app, rt, "c_gen")
+	if parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_gen", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+	}); err != nil || !parked {
+		t.Fatalf("park = %v, %v", parked, err)
+	}
+	release()
+	waitIdle(t, app, "c_gen")
+
+	entered, free := make(chan struct{}), make(chan struct{})
+	rt.mu.Lock()
+	rt.beforePrompt = func(context.Context) error { close(entered); <-free; return nil }
+	rt.mu.Unlock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := app.Send(ctx, "c_gen", "", "", "consume it", nil, appjob.SendOptions{Agent: "fake"}, nil)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the consuming turn never reached the agent")
+	}
+	// A new pick, taken while that turn runs: another generation, and visible.
+	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_gen", Annotation{Effort: effortOf(enum.EffortMax)})
+	})
+	if err != nil || !parked {
+		t.Fatalf("second park = %v, %v", parked, err)
+	}
+	sel, ok, err := app.Pending(ctx, "c_gen")
+	if err != nil || !ok {
+		t.Fatalf("a pick parked during the turn is not visible: %v, %v", ok, err)
+	}
+	if sel.Effort == nil || sel.Effort.String() != "max" {
+		t.Fatalf("pending = %+v, want the new generation", sel)
+	}
+	close(free)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the consuming turn never finished")
+	}
+	rt.mu.Lock()
+	rt.beforePrompt = nil // the next turn must not re-enter the block above
+	rt.mu.Unlock()
+
+	// The turn that just ended consumed the *first* pick: its clear must not take
+	// the newer one, which was never applied.
+	after, still, err := app.Pending(ctx, "c_gen")
+	if err != nil || !still {
+		t.Fatalf("a newer pick was cleared by the older turn: %v, %v", still, err)
+	}
+	if after.Effort == nil || after.Effort.String() != "max" {
+		t.Fatalf("pending after the turn = %+v, want the newer generation", after)
+	}
+	// The surviving file merged the pick this turn took with the new one, so the
+	// next turn applies both — G1 again (idempotent) and G2 for the first time.
+	if after.AgentModel != "swe-2-1" {
+		t.Fatalf("pending lost the applied pick it must re-apply: %+v", after)
+	}
+	// The next turn applies it, and only then does it go.
+	if _, err := app.Send(ctx, "c_gen", "", "", "again", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	info, err := app.deps.Convs.Info(ctx, "c_gen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Effort != "max" || info.ModelID != "swe-2-1" {
+		t.Fatalf("record = effort %q model %q, want both picks the surviving file carried", info.Effort, info.ModelID)
+	}
+	if _, ok, _ := app.Pending(ctx, "c_gen"); ok {
+		t.Fatal("the applied pick was not cleared")
+	}
+}
+
+// effortOf answers a pointer to one effort, for an annotation field.
+func effortOf(e enum.Effort) *enum.Effort { return &e }

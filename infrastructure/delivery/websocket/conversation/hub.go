@@ -122,8 +122,11 @@ func (k turnKind) String() string {
 // subscriber set, and the job's own server-scoped context — disconnected
 // sockets never cancel it.
 type turn struct {
-	id             string
-	kind           turnKind
+	id   string
+	kind turnKind
+	// origin says where the turn came from; kind says what opened it. A turn a
+	// room job ran carries the job's origin with an empty requestID.
+	origin         valueobject.TurnOrigin
 	conversationID string
 	// admitted orders non-terminal turns for one room. The hub is the
 	// only owner of "a transport turn is running"; it is not conversation
@@ -194,14 +197,17 @@ type Hub struct {
 	// output still record normally).
 	planEvents PlanSink
 
-	mu         sync.Mutex
-	turns      map[string]*turn
-	admitSeq   int64
-	sockets    map[*conn]struct{}
-	wg         sync.WaitGroup
-	shutting   bool
-	turnGrace  time.Duration // bounded wait for turn terminals at shutdown
-	drainGrace time.Duration // bounded wait for socket writers to flush
+	mu       sync.Mutex
+	turns    map[string]*turn
+	admitSeq int64
+	sockets  map[*conn]struct{}
+	// journalRefusals counts the jobs that ran unjournaled per room, so the
+	// warning is one line per room per exhaustion episode, not a storm.
+	journalRefusals map[string]int
+	wg              sync.WaitGroup
+	shutting        bool
+	turnGrace       time.Duration // bounded wait for turn terminals at shutdown
+	drainGrace      time.Duration // bounded wait for socket writers to flush
 	// queueDepth reads how many messages wait in a room, so a queued notice
 	// names the count at emit time rather than a number kept beside the queue.
 	queueDepth func(convID string) int
@@ -217,13 +223,14 @@ type Hub struct {
 func NewHub(ctx context.Context, sender Sender) *Hub {
 	hctx, cancel := context.WithCancel(ctx)
 	return &Hub{
-		ctx:        hctx,
-		cancel:     cancel,
-		sender:     sender,
-		turns:      make(map[string]*turn),
-		sockets:    make(map[*conn]struct{}),
-		turnGrace:  shutdownTurnGrace,
-		drainGrace: shutdownDrainGrace,
+		ctx:             hctx,
+		cancel:          cancel,
+		sender:          sender,
+		turns:           make(map[string]*turn),
+		sockets:         make(map[*conn]struct{}),
+		journalRefusals: make(map[string]int),
+		turnGrace:       shutdownTurnGrace,
+		drainGrace:      shutdownDrainGrace,
 	}
 }
 
@@ -590,6 +597,9 @@ func (h *Hub) admitAndRun(c *conn, requestID, convID string, job turn) {
 	h.admitSeq++
 	t.admitted = h.admitSeq
 	t.subscribed = map[*conn]struct{}{c: {}}
+	// A turn a socket admitted came from the web: the notice says so, and its
+	// requestId is what lets that tab claim the frames.
+	t.origin = valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}
 	t.turnCtx, t.turnCancel = context.WithCancelCause(h.ctx)
 	t.startedAt = time.Now()
 	t.live = newLiveDoc()
@@ -642,15 +652,30 @@ func (h *Hub) runTurn(t *turn) {
 		err = h.sender.Resume(t.turnCtx, t.conversationID, t.providerID, t.modelID, t.opts, onEvent)
 	}
 
+	// The hub's own accounting happens before the seal: the caller that admitted
+	// this turn is waiting on its result, and the finished hooks name it.
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	defer h.evictJournalsLocked(time.Now())
 	if t.done != nil {
 		t.done <- runResult{receipt: receipt, err: err}
 	}
 	for _, fn := range h.finished {
 		go fn(t.conversationID, t.kind.String(), t.done != nil, err)
 	}
+	h.mu.Unlock()
+	h.sealTurn(t, persisted, err)
+}
+
+// sealTurn writes one turn's terminal frame and closes its journal. Both paths go
+// through it — a turn the hub admitted from a socket and a turn a room job ran —
+// so the terminal has exactly one shape and no watcher can tell them apart.
+//
+// It takes the hub lock itself and never depends on the turn's context: a
+// shutting-down server still lands the terminal of a job that is finishing its
+// persistence, or the room would look stuck after the restart.
+func (h *Hub) sealTurn(t *turn, persisted bool, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	defer h.evictJournalsLocked(time.Now())
 	if t.terminal {
 		return // already terminated
 	}

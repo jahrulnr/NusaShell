@@ -36,7 +36,7 @@ func NewExecSessionTool(store dservice.TerminalSessions) (dservice.Tool, error) 
 	schema, err := valueobject.NewToolSchema(
 		"exec_session",
 		"Run a shell command in a persistent terminal session. Waits yield_time_ms, then returns the output plus either the exit code or a session id for ongoing interaction through write_stdin. Use tty only for programs that require a real terminal or interactive stdin (isatty checks, password prompts, REPLs) — the default pipes backend suits everything else but has closed stdin, so write_stdin on it only accepts the Ctrl-C byte. Sessions survive turn interruption and die with the conversation.",
-		json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"tty":{"type":"boolean","description":"Allocate a pseudo-terminal — required for isatty-checking programs and any interactive stdin through write_stdin; default false"},"yield_time_ms":{"type":"integer","description":"Milliseconds to wait for initial output before returning the session id — default 10000, clamped 250-30000"},"allow_broad_kill":{"type":"boolean","description":"Allow a session command that stops every matching process (pkill, killall, fuser -k, kill -9 of a pattern). Off by default: it can kill other threads' work, an agent's process, or this server"}},"required":["command"]}`),
+		json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"tty":{"type":"boolean","description":"Allocate a pseudo-terminal — required for isatty-checking programs and any interactive stdin through write_stdin; default false"},"yield_time_ms":{"type":"integer","description":"Milliseconds to wait for initial output before returning the session id — default 10000, clamped 250-30000"},"wake":{"type":"boolean","description":"Report this session's exit to the room so the result is read on its next turn, waking it when it is idle. Off by default: a session that does not ask reports nothing"},"allow_broad_kill":{"type":"boolean","description":"Allow a session command that stops every matching process (pkill, killall, fuser -k, kill -9 of a pattern). Off by default: it can kill other threads' work, an agent's process, or this server"}},"required":["command"]}`),
 		true,
 		enum.ToolPermissionAgent,
 	)
@@ -62,6 +62,8 @@ func (tool *ExecSessionTool) Execute(ctx context.Context, call entity.ToolCall, 
 		Command     string `json:"command"`
 		TTY         bool   `json:"tty"`
 		YieldTimeMS int    `json:"yield_time_ms"`
+		// Wake opts this session in to reporting its exit; absent means off.
+		Wake bool `json:"wake"`
 		// AllowBroadKill is the explicit machine-wide stop; without it a
 		// pattern-kill opens nothing.
 		AllowBroadKill bool `json:"allow_broad_kill"`
@@ -83,6 +85,7 @@ func (tool *ExecSessionTool) Execute(ctx context.Context, call entity.ToolCall, 
 		Command: input.Command,
 		Dir:     dservice.WorkspaceDir(ctx),
 		TTY:     input.TTY,
+		Wake:    input.Wake,
 	})
 	if err != nil {
 		return dservice.ToolResult{}, fmt.Errorf("exec_session: %w", err)

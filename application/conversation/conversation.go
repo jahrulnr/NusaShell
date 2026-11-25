@@ -60,6 +60,17 @@ type ConversationApp struct {
 	// turning counts the live turns per room: the gate a pick reads before it
 	// decides to apply now or wait.
 	turning map[string]int
+	// machineTurns counts the consecutive completion turns that spend the wake
+	// budget, and wakeQueued marks a room whose wake turn is queued or running: a
+	// second one would read the same records twice. The records themselves live in
+	// the room's sidecar, not here — they must outlive this process.
+	wakeQueued   map[string]bool
+	machineTurns map[string]int
+	// consumed remembers the parked pick a running turn took, by acceptedAt: the
+	// projection stops offering it while that turn is in play, and EndTurn
+	// releases it. A pick parked after the consumption has another acceptedAt
+	// and stays visible.
+	consumed map[string]time.Time
 
 	uploads    drepo.Uploads
 	picks      drepo.Picks
@@ -126,13 +137,17 @@ func New(
 			Terminals:     terminals,
 			SummaryTool:   summaryTool,
 		},
-		workers:   map[string]*worker.Worker{},
-		turning:   map[string]int{},
-		stopGrace: 10 * time.Second,
+		workers:      map[string]*worker.Worker{},
+		turning:      map[string]int{},
+		consumed:     map[string]time.Time{},
+		wakeQueued:   map[string]bool{},
+		machineTurns: map[string]int{},
+		stopGrace:    10 * time.Second,
 	}
 	// The turn claim is the app's own: a job reports the room busy for exactly
 	// as long as its turn runs, which is what a pick has to respect.
 	app.deps.Turns = app
+	app.deps.Completions = app
 	for _, opt := range opts {
 		opt(app)
 	}
@@ -300,6 +315,8 @@ func (app *ConversationApp) post(convID string, j queuedJob) error {
 			x.Deps = deps
 		case *appjob.Annotate:
 			x.Deps = deps
+		case *appjob.Wake:
+			x.Deps = deps
 		}
 		if app.shuttingDown {
 			app.mu.Unlock()
@@ -316,6 +333,10 @@ func (app *ConversationApp) post(convID string, j queuedJob) error {
 					// zero waiting, read from the queue itself.
 					app.notifyQueue(convID)
 					app.evict(convID, idle)
+					// A record that arrived while the room worked had no turn
+					// to read it; the room going idle is what retries. The
+					// record waited, not the room.
+					app.wakeIfPending(convID)
 				},
 				OnTerminate: func(term *worker.Worker, drained []worker.Job) {
 					// A self-terminated worker (a delete job retired it):

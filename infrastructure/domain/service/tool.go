@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
@@ -41,6 +42,23 @@ type Tool interface {
 	Schema() valueobject.ToolSchema
 	Execute(ctx context.Context, call entity.ToolCall, emit ToolEmitter) (ToolResult, error)
 }
+
+// ToolCallDeadline is the one ceiling every blocking tool call runs under,
+// enforced at the Execute seams — not per tool, because MCP adapters carry
+// no timeout of their own. Two reasons, both measured against the provider
+// request gap: Anthropic's 5-minute prompt-cache TTL refreshes per request
+// start, so a call longer than the TTL minus its generation turns the next
+// request into a full-price cache miss; and a room parked on one call
+// cannot take a steer for minutes. 240s leaves ~60s of margin under the
+// TTL. When it fires, the call is recorded as a timed-out tool result and
+// the turn continues — only the parent ctx dying cancels the turn. Work
+// that cannot fit the ceiling runs as a session plus wake instead.
+const ToolCallDeadline = 240 * time.Second
+
+// ToolCallTimeoutText is the tool-result text recorded when the deadline
+// fires — one wording at every seam so a slow tool reads as its own
+// outcome, never confused with a turn interrupted by cancellation.
+const ToolCallTimeoutText = "timed out: the tool call reached the 4-minute ceiling"
 
 // workspaceCtxKey scopes a turn's working directory to directory-aware
 // tools (file sandbox, shell cwd) without widening the Execute signature.
@@ -143,9 +161,9 @@ func WithModelModalities(ctx context.Context, modalities []enum.Modality) contex
 	return context.WithValue(ctx, modelModalitiesCtxKey{}, modalities)
 }
 
-// ModelModalities returns the turn model's declared input modalities, nil
+// modelModalities returns the turn model's declared input modalities, nil
 // when the turn declared none.
-func ModelModalities(ctx context.Context) []enum.Modality {
+func modelModalities(ctx context.Context) []enum.Modality {
 	mods, _ := ctx.Value(modelModalitiesCtxKey{}).([]enum.Modality)
 	return mods
 }
@@ -155,7 +173,7 @@ func ModelModalities(ctx context.Context) []enum.Modality {
 // caller behaves as it did before the capability existed, and the encoder
 // degrades the attachment afterwards.
 func ModelAccepts(ctx context.Context, mod enum.Modality) (accepted, known bool) {
-	mods := ModelModalities(ctx)
+	mods := modelModalities(ctx)
 	if len(mods) == 0 {
 		return true, false
 	}
