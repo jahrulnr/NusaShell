@@ -23,6 +23,7 @@ type Config struct {
 	Log           LogConfig           `json:"log"`
 	Tools         ToolsConfig         `json:"tools"`
 	Models        ModelsConfig        `json:"models"`
+	Media         MediaConfig         `json:"media"`
 	Notifications NotificationsConfig `json:"notifications"`
 	Memory        MemoryConfig        `json:"memory"`
 	WebSearch     WebSearchConfig     `json:"websearch"`
@@ -42,6 +43,7 @@ func (c *Config) Normalize() {
 	c.Log.Normalize()
 	c.Tools.Normalize()
 	c.Models.Normalize()
+	c.Media.Normalize()
 	c.Notifications.Normalize()
 	c.Memory.Normalize()
 	c.WebSearch.Normalize()

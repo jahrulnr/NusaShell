@@ -5,7 +5,7 @@ import { state, emit, toast, dismissToast, askConfirm } from './store.js';
 import { api, errorText, ApiError } from './api.js';
 import { TurnSocket, newRequestId } from './socket.js';
 import { newTurn, applyFrame, snapshotSegments } from './turn.js';
-import { setQueued } from './queued.js';
+import { forgetQueued, resetQueued, setQueued } from './queued.js';
 import { referencesForSend, referencesToDraft, liveReferences } from './references.js';
 import { parseCommand, isNativeCommand, catalogRow, loadCommands } from './commands.js';
 import { loadView, startViews } from './views.js';
@@ -20,6 +20,24 @@ const ROOM_TTL = 5_000;
 
 // requestId -> { key, kind, text, messageId? } for commands awaiting a reply.
 const requests = new Map();
+
+// queuedRooms holds the rooms whose queue a frame said was not empty and whose
+// drain has not been handled yet. A drain is what says the job that waited has
+// finished, so the room is read once then — and read once again when an
+// activity frame or a reconnect is the only news that comes, because a job can
+// die with its worker and a server can stop before sending `waiting: 0`.
+const queuedRooms = new Set();
+
+// readQueuedRoom reads the room's history because its queue moved. It reads
+// only a room this tab holds and only the room on screen: another room loads
+// when it is opened, and this is a read, never a poll.
+function readQueuedRoom(id, { force = false } = {}) {
+  const r = state.rooms[id];
+  if (!r || r.live || state.route.view !== 'chat' || state.route.id !== r.id) return;
+  // force is for the drain itself: the read an activity frame just made can
+  // predate the message that ended the job, so the TTL must not answer for it.
+  loadHistory(r, { force }).catch(() => { /* the next read shows it */ });
+}
 let socket;
 
 // ---------- rooms ----------
@@ -34,7 +52,8 @@ function blankRoom(key, id) {
     // command is the native command running on this room right now (its name),
     // and catalog what the server says this room offers: the native commands
     // and its agent's own, with availability. Both follow the room, not a tab.
-    command: '', catalog: { status: 'idle', items: [], error: null }, catalogAt: 0,
+    // null: no command running; a receipt object while one is (see runCommand).
+    command: null, catalog: { status: 'idle', items: [], error: null }, catalogAt: 0,
     draft: '', refs: [], files: [], sel: {}, ctx: null, recording: null,
     // quotes are passages picked from a transcript to answer, each with
     // the owner's reply to it, riding above the draft until it is sent.
@@ -49,6 +68,11 @@ function blankRoom(key, id) {
     // not open), browserUrl the last page its browser showed, and view the
     // bookkeeping that keeps them, and the draft, on the server (views.js).
     pane: undefined, paneKept: '', browserUrl: '', view: null,
+    // agentOptions is the agent session options of this room: the one list the
+    // composer's chip and the picker's Session Mode both read (see
+    // loadAgentOptions). A room without an id keeps the agent's own probe here
+    // and stages the pick on `sel`.
+    agentOptions: { status: 'idle', list: [], error: null, at: 0, key: '' },
     // Load bookkeeping: *At stamps a successful read, *Stale marks what
     // a broadcast said changed while the room was out of view, *Flight
     // holds the running fetch so concurrent triggers share it.
@@ -63,6 +87,13 @@ export function room(key) {
 }
 export const freshRoom = () => room(FRESH);
 export const isBusy = (r) => !!(r.live || r.pendingOpen || r.settling);
+
+// roomBusy is what a composer answers to: the room is working, or a native
+// command it started is still running. A command is not a turn — it has no
+// live turn to hold — so Enter during one queues instead of sending into a
+// refusal. isBusy stays the narrower question (a turn is running), which edit,
+// retry, and the header's Compact button ask.
+export const roomBusy = (r) => isBusy(r) || !!r.command;
 
 // ---------- routing ----------
 
@@ -113,7 +144,7 @@ export function start() {
   window.addEventListener('hashchange', applyRoute);
   socket = new TurnSocket({
     onFrame,
-    onState: (s) => { state.conn = s; emit(); },
+    onState: (s, info) => { state.conn = s; if (s === 'closed') closeCode = info?.code; emit(); },
     onOpen: reattach,
   });
   loadConversations();
@@ -149,6 +180,9 @@ export async function loadConversations(more = false) {
       page = await api.conversations(more ? c.items.length : 0, limit);
       if (writes === seen || attempt === 1) break;
     }
+    // Every row carries the room's queue depth: seeding from the rows is what
+    // brings a lost count back without waiting for the next drain frame.
+    for (const it of page.data) setQueued(it.id, it.waiting ?? 0);
     const items = more ? [...c.items, ...page.data.filter((x) => !c.items.some((y) => y.id === x.id))] : page.data;
     // A refresh that came back short saw the whole list, and a thread it does
     // not list is gone (deleted from here or elsewhere). Only a full page may
@@ -316,6 +350,12 @@ export async function openRoom(id) {
   await Promise.all([loadInfo(r), loadHistory(r)]);
   if (r.info?.activeTurnId && !r.live) watch(r, r.info.activeTurnId, r.info.activeTurnKind, -1);
   fetchContext(r);
+  loadAgentOptions(r);
+  // A queue this room was left with (a command that moved the route, a turn
+  // that ended elsewhere) waits for the owner to come back: opening the room
+  // is that moment, so it sends rather than sitting there for good. A queue
+  // the owner put on hold stays held.
+  if (!r.held && !roomBusy(r) && r.queue.length) resumeQueue(r);
 }
 
 // fresh reports whether a load timestamp is still inside the TTL.
@@ -324,7 +364,7 @@ const fresh = (at) => at && Date.now() - at < ROOM_TTL;
 // loadInfo reads the room record — deduped (concurrent triggers share
 // one fetch) and TTL-gated: a fresh, un-staled read skips the request
 // entirely. force and a marked stale both defeat the TTL.
-async function loadInfo(r, { force = false, created = false } = {}) {
+export async function loadInfo(r, { force = false, created = false } = {}) {
   if (r.infoFlight) {
     // A need that lands mid-flight must not be answered by the older
     // data it returns — queue one follow-up behind the running fetch.
@@ -348,6 +388,10 @@ async function loadInfo(r, { force = false, created = false } = {}) {
             break;
           }
           if (!sameRecords(info, r.info)) r.info = info;
+          // The room's queue depth rides its own record. A read is newer than
+          // any frame that arrived before it, so it seeds the line — and a leaf
+          // the record omits means the queue is empty, not unknown.
+          setQueued(r.id, info.waiting ?? 0);
           r.infoStatus = 'ready';
           r.infoError = null;
           r.infoAt = Date.now();
@@ -497,6 +541,10 @@ export function setSelection(r, patch) {
   // one must not follow it.
   if (patch.agentId !== undefined && patch.agentId !== prevAgent && !patch.agentOptions) {
     r.sel = { ...r.sel, agentOptions: undefined };
+    // Another agent offers another list: the room's copy is read again, and
+    // until it is, nothing of the last agent's is shown.
+    r.agentOptions = { status: 'idle', list: [], error: null, at: 0, key: '' };
+    loadAgentOptions(r, { force: true });
   }
   if (patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined || patch.effort !== undefined || patch.upstream !== undefined) {
     const s = selection(r);
@@ -517,6 +565,104 @@ export function setSelection(r, patch) {
     }
   }
   emit();
+}
+
+// ---------- agent session options ----------
+//
+// One list per room, one loader, one writer. The composer's chip and the
+// picker's Session Mode read this and nothing else: a second copy is what made
+// the two disagree — each kept the answer it happened to have.
+
+// agentOptionsKey names what a room's list is read from: the room when it
+// exists, else the agent standing in for a thread that does not exist yet.
+const agentOptionsKey = (r) => {
+  const agentId = selection(r).agentId;
+  return r.id ? `c:${r.id}` : agentId ? `a:${agentId}` : '';
+};
+
+// loadAgentOptions reads the list the room shows. Deduped (one fetch in
+// flight, a need that lands mid-flight queues one follow-up) and TTL-gated, so
+// a frame, a component mounting, and a turn ending collapse into one read.
+export async function loadAgentOptions(r, { force = false } = {}) {
+  const o = r.agentOptions;
+  const key = agentOptionsKey(r);
+  if (!key) { o.status = 'idle'; o.list = []; return; }
+  if (o.flight) {
+    if (force) o.again = true;
+    return o.flight;
+  }
+  // A list read for another agent says nothing about this one.
+  if (o.key && o.key !== key) Object.assign(o, { status: 'idle', list: [], error: null, at: 0, key });
+  if (!force && o.status === 'ready' && o.key === key && fresh(o.at)) return;
+  const flight = (async () => {
+    do {
+      o.again = false;
+      if (o.status !== 'ready') { o.status = 'loading'; emit(); }
+      try {
+        const agentId = selection(r).agentId;
+        const res = r.id ? await api.agentOptions(r.id) : await api.agentOptionsFor(agentId);
+        Object.assign(o, { status: 'ready', list: res.data || [], error: null, at: Date.now(), key });
+      } catch (e) {
+        Object.assign(o, { status: o.list.length ? 'ready' : 'error', error: errorText(e) });
+        if (o.list.length) toast('Could not refresh agent options: ' + errorText(e), 'error');
+      }
+      emit();
+    } while (o.again);
+  })();
+  o.flight = flight;
+  try { await flight; } finally { if (o.flight === flight) o.flight = null; }
+}
+
+// sessionOptionValue is what both controls read: the room's stored pick, or —
+// for a thread that does not exist yet — the one staged for it.
+export function sessionOptionValue(r, o) {
+  if (r.id) return o.current ?? '';
+  const staged = r.sel.agentOptions || {};
+  return staged[o.id] ?? o.current ?? '';
+}
+
+// sessionModeName is the word the composer chip shows: the name of the value
+// the room stored, read from the same list the picker draws, so the two cannot
+// name different modes.
+export function sessionModeName(r) {
+  const mode = r.agentOptions.list.find((o) => o.category === 'mode');
+  if (!mode) return '';
+  return (mode.choices || []).find((c) => c.value === sessionOptionValue(r, mode))?.name || '';
+}
+
+// setSessionOption is the only writer. A pick for a room is stored on the
+// server, and the answer (the whole list) becomes what both controls show; a
+// pick for a thread that does not exist yet is staged on its selection and
+// rides the first turn. Nothing is ever shown as chosen before the server says
+// it is.
+export async function setSessionOption(r, optionId, value) {
+  const o = r.agentOptions;
+  const option = o.list.find((x) => x.id === optionId);
+  if (!option) return 'missing';
+  // A turn holds this room's worker: a write queued behind it would be
+  // canceled by this request's own timeout before it ran, losing the change
+  // without a trace. Refusing here is the same answer, said now.
+  if (isBusy(r)) return 'busy';
+  if (!r.id) {
+    setSelection(r, { agentOptions: { ...(r.sel.agentOptions || {}), [optionId]: value } });
+    return 'staged';
+  }
+  try {
+    const res = await api.setAgentOption(r.id, optionId, value);
+    Object.assign(o, { status: 'ready', list: res.data || [], error: null, at: Date.now(), key: agentOptionsKey(r) });
+    emit();
+    return 'saved';
+  } catch (e) {
+    // The stored value is the only one the controls may show: read it again
+    // and keep that. A refusal says why once; a write whose fate is unknown
+    // says it could not be confirmed and is not retried.
+    const refused = typeof e?.status === 'number' && e.status >= 400 && e.status < 500;
+    toast(refused
+      ? `Could not set ${option.name}: ${errorText(e)}`
+      : `Could not confirm ${option.name} — the room's options were read again.`, 'error');
+    await loadAgentOptions(r, { force: true }).catch(() => { /* the next read shows it */ });
+    return refused ? 'refused' : 'unknown';
+  }
 }
 
 // writes counts the record changes this tab applied. The list and the room
@@ -664,7 +810,14 @@ export function submit(r, text, refs = [], files = [], steerTurnId = '') {
   // spends it.
   const cmd = parseCommand(text);
   if (cmd && isNativeCommand(r, cmd.name)) {
-    runCommand(r, cmd.name, cmd.args, String(text || '').trim());
+    // The command is spent from the draft here, once: submit is the only
+    // place that knows the text it sent. What it carried — attachments,
+    // quotes, a recording — belongs to the next message, not to the command.
+    const sent = String(text || '').trim();
+    r.draft = '';
+    r.refs = [];
+    r.caret = 0;
+    runCommand(r, cmd.name, cmd.args, sent);
     return false;
   }
   if (files.some((f) => f.status === 'uploading')) {
@@ -697,10 +850,10 @@ export function submit(r, text, refs = [], files = [], steerTurnId = '') {
     emit();
     return true;
   }
-  if (isBusy(r) || r.queue.length) {
+  if (roomBusy(r) || r.queue.length) {
     r.queue.push({ ...message, id: newRequestId() });
     // An explicit send in an idle room releases a held queue, oldest first.
-    if (!isBusy(r)) resumeQueue(r);
+    if (!roomBusy(r)) resumeQueue(r);
     emit();
     return true;
   }
@@ -913,6 +1066,10 @@ function readLivePrompt(r) {
 // loaders refetch on the next real need. A send that never got its
 // turn.opened has unknown delivery — the text goes back to the draft and
 // the user decides after checking history.
+// closeCode is the code the last lost socket closed with: 1000 and 1012 are the
+// server saying it is going away (which takes every in-memory queue with it),
+// anything else — 1006 above all — is a drop nobody explained.
+let closeCode;
 let connectedOnce = false;
 function reattach() {
   if (!connectedOnce) { connectedOnce = true; return; }
@@ -955,6 +1112,15 @@ function reattach() {
   if (state.route.view === 'chat') {
     const r = room(state.route.id);
     if (!r.live && r.infoStatus !== 'ready' && r.hist.status !== 'ready') openRoom(state.route.id);
+    // A drain notice sent while the socket was down is gone, and frames are
+    // never replayed: the room it was about is read now instead. Its count went
+    // with the frames, so the line stops claiming one — and when the server
+    // said it was leaving, the queue it described cannot be there at all.
+    if (queuedRooms.has(r.id)) {
+      if (closeCode === 1000 || closeCode === 1012) forgetQueued(r.id);
+      else resetQueued(r.id);
+      readQueuedRoom(r.id, { force: true });
+    }
   }
   refreshConversationsSoon(5000);
   emit();
@@ -975,9 +1141,17 @@ function onFrame(f) {
     // never replayed, so the number is the current one — last frame wins, and
     // the line that shows it renders itself (lib/queued.js), which is why this
     // frame deliberately does not emit.
-    case 'conversation.queued':
-      setQueued(f.conversationId, f.payload?.waiting);
+    case 'conversation.queued': {
+      const id = f.conversationId;
+      const waiting = Math.max(0, Math.trunc(Number(f.payload?.waiting) || 0));
+      // Nothing to render when the room was drained before this tab heard it:
+      // only a notice that crossed a non-empty queue earns the read below.
+      const drained = waiting === 0 && queuedRooms.delete(id);
+      if (waiting) queuedRooms.add(id);
+      setQueued(id, waiting);
+      if (drained) readQueuedRoom(id, { force: true });
       return;
+    }
     case 'turn.opened': return onOpened(f);
     case 'error': return onError(f);
     case 'conversation.activity': return onActivity(f);
@@ -992,6 +1166,11 @@ function onFrame(f) {
       r.infoStale = true;
       r.histStale = true;
       if (state.route.view !== 'chat' || state.route.id !== r.id) { emit(); return; }
+      // A pick stored elsewhere is a room change like any other: the list that
+      // shows it is stale now, so the read that follows is a real one (and one
+      // per change, not one per control that shows it).
+      r.agentOptions.at = 0;
+      loadAgentOptions(r);
       if (r.infoStatus === 'ready') loadInfo(r);
       if (r.live || r.hist.status !== 'ready') { emit(); return; }
       readNewestPage(r).catch(() => { /* the next load shows it */ });
@@ -1207,6 +1386,10 @@ function onActivity(f) {
   // stale alone does not show them here, so the visible room reloads.
   if (p.state !== 'opened' && !r.live && state.route.view === 'chat' && state.route.id === r.id) {
     loadInfo(r);
+    // A room whose queue was announced waiting lands here too, and this is the
+    // read that covers it when the drain notice never comes (a job that dies
+    // with its worker, a server that stops): the frame marks history stale, so
+    // the read happens even when the last one was moments ago.
     loadHistory(r);
     // The room is idle again, so its commands are available again.
     loadCommands(r, { force: true });
@@ -1215,6 +1398,9 @@ function onActivity(f) {
 
 async function onTerminal(r, f) {
   requests.delete(f.requestId);
+  // A live session's options differ from the agent's probe, so the list the
+  // controls show is read again once the turn that used it ends.
+  loadAgentOptions(r, { force: true });
   const p = f.payload || {};
   const live = r.live;
   // A replayed terminal can confirm a retry whose opening reply was lost.
@@ -1317,7 +1503,7 @@ async function onTerminal(r, f) {
 }
 
 export function resumeQueue(r) {
-  if (isBusy(r) || !r.queue.length) return;
+  if (roomBusy(r) || !r.queue.length) return;
   const next = r.queue.shift();
   if (sendNow(r, next)) r.held = false;
   else {
@@ -1462,55 +1648,119 @@ function forgetThread(id) {
 // says is unavailable. A refusal — local or from the server — keeps the draft,
 // and only a 200 spends it. draft is the text that was submitted, so a draft
 // the owner rewrote while the command ran is left alone.
-export async function runCommand(r, name, args = '', draft = '') {
+export async function runCommand(r, name, args = '', text = '') {
+  const line = String(text || `/${name}${args ? ' ' + args : ''}`).trim();
+  // Refused before it ever started: nothing ran, so a command that came from
+  // the composer goes straight back to it — the owner never loses the text.
+  // (A command run from the header carries no text of its own.)
+  const refuse = (why) => {
+    toast(why, 'info');
+    if (text) { restoreCommandText(r, line); emit(); }
+    return false;
+  };
   if (!r.id) {
     const row = catalogRow(r, name);
-    toast(row?.reason || 'Send a message first.', 'info');
-    return false;
+    return refuse(row?.reason || 'Send a message first.');
   }
-  if (r.command) {
-    toast(`/${r.command} is still running.`, 'info');
-    return false;
-  }
+  if (r.command) return refuse(`/${r.command.name} is still running.`);
   const row = catalogRow(r, name);
-  if (row && row.enabled === false) {
-    toast(row.reason || `/${name} is not available in this thread.`, 'info');
-    return false;
-  }
-  r.command = name;
+  if (row && row.enabled === false) return refuse(row.reason || `/${name} is not available in this thread.`);
+  // The receipt: what was sent, still running (or failed), and whether a retry
+  // makes sense. A command is an action with no turn behind it, so this is the
+  // only thing that says it is working.
+  r.command = { name, text: line, args, phase: 'running', error: '', retry: true, startedAt: Date.now() };
   emit();
   let ok = false;
+  let navigated = false;
   try {
     let res;
     try {
       res = await api.runCommand(r.id, { name, args, confirm: false });
     } catch (err) {
       // A destructive command asks first: the dialog is the `confirm: true` the
-      // server wants, and cancelling keeps the draft untouched.
+      // server wants, and cancelling puts the word back where it came from.
       if (!(err instanceof ApiError && err.status === 409 && err.code === 'confirmation_required')) throw err;
-      if (!await confirmCommand(name)) return false;
+      if (!await confirmCommand(name)) {
+        r.command = null;
+        restoreCommandText(r, line);
+        emit();
+        return false;
+      }
       res = await api.runCommand(r.id, { name, args, confirm: true });
     }
-    // The server answered 200: the input is spent.
-    if (draft && r.draft.trim() === draft) {
-      r.draft = '';
-      r.refs = [];
-    }
+    const before = r.id;
     await applyCommand(r, res?.command || name, res?.conversation || null);
+    navigated = name === 'fork' || r.id !== before;
     ok = true;
   } catch (err) {
     // A refusal that names the room's state — busy, unavailable — also means
     // the catalog is out of date; read it again for the next attempt.
     if (err instanceof ApiError && err.status === 409) loadCommands(r, { force: true });
-    toast(err instanceof ApiError && (err.status === 400 || err.status === 409)
-      ? err.message
-      : `/${name} failed: ` + errorText(err), 'error');
+    settleCommandFailure(r, line, err);
   } finally {
-    r.command = '';
+    if (r.command?.phase !== 'failed') r.command = null;
     emit();
   }
   loadCommands(r, { force: true });
+  // The queue waited for the command, not for a turn: it moves now.
+  if (!navigated) resumeQueue(r);
   return ok;
+}
+
+// restoreCommandText puts a command the room did not take back at the head of
+// the draft, cursor at the end, where it can be sent again or edited — never
+// pushed into text the owner was already writing.
+function restoreCommandText(r, line) {
+  if (!line) return;
+  r.draft = r.draft ? line + '\n' + r.draft : line;
+  r.caret = line.length;
+}
+
+// settleCommandFailure decides where a refused command's text goes. A refusal
+// that names its reason (400/409 with a code) is final: if the box is free the
+// text goes back to it, otherwise the receipt stays and offers Retry. Anything
+// else — a dropped socket, a 5xx without a code — leaves the outcome unknown,
+// so the text goes back when the box is free and the receipt says so (no
+// Retry: resending an unknown action could run it twice).
+function settleCommandFailure(r, line, err) {
+  // The server answered and named a reason (any 4xx): the command did not run,
+  // and saying so is final. Anything else — a dropped socket, a 5xx — leaves
+  // the outcome unknown.
+  const named = err instanceof ApiError && err.status >= 400 && err.status < 500;
+  const message = err instanceof ApiError ? err.message : errorText(err);
+  const boxFree = !String(r.draft || '').trim();
+  if (named) {
+    if (boxFree) {
+      r.command = null;
+      restoreCommandText(r, line);
+      toast(message, 'error');
+      return;
+    }
+    r.command = { ...r.command, phase: 'failed', error: message, retry: true };
+    return;
+  }
+  if (boxFree) {
+    r.command = null;
+    restoreCommandText(r, line);
+    toast(`Could not confirm ${line} — check the thread.`, 'error');
+    return;
+  }
+  r.command = { ...r.command, phase: 'failed', error: message, retry: false };
+}
+
+// retryCommand runs a failed receipt's command again, once.
+export function retryCommand(r) {
+  const c = r.command;
+  if (!c || c.phase !== 'failed' || !c.retry) return;
+  r.command = null;
+  runCommand(r, c.name, c.args, c.text);
+}
+
+// dismissCommand clears a failed receipt without resending it.
+export function dismissCommand(r) {
+  if (r.command?.phase !== 'failed') return;
+  r.command = null;
+  emit();
 }
 
 // confirmCommand asks before a destructive command runs. The answer is the

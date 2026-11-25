@@ -3440,6 +3440,10 @@ components:
           type: string
           enum: [send, edit]
           description: Command that opened activeTurnId. Present only together with that field.
+        waiting:
+          type: integer
+          minimum: 0
+          description: Jobs queued behind the room's running turn — the same number the conversation.queued notice carries. Present on detail and on list items so a tab that missed that notice still opens on the real count; omitted when nothing waits and never part of persisted state.
       additionalProperties: false
 
     Page:

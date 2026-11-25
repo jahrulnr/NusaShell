@@ -91,6 +91,13 @@ var leaves = map[string]bool{
 	"models.video.model":              true,
 	"models.speech.provider":          true,
 	"models.speech.model":             true,
+	// The vision role and the send switch behind read_media: the Models page
+	// assigns who reads an image the turn's model cannot, and the switch says
+	// whether a file may be sent at all. Both readings — an image description
+	// and an audio transcript — sit under the one consent.
+	"models.vision.provider": true,
+	"models.vision.model":    true,
+	"media.reading_consent":  true,
 }
 
 // project reduces the persisted config document to the whitelisted

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, closeStatus, toolEnding, formatDuration, toolClock, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, closeStatus, toolEnding, userLayout, formatDuration, toolClock, splitReplyQuote, splitRelay, turnEnds, toolRoom, shortHandle } from '../lib/turn.js';
 
 const turn = () => newTurn({ turnId: 't1', requestId: 'r1', conversationId: 'c1', kind: 'send' });
 const frame = (type, payload, seq) => ({ type, payload, seq });
@@ -601,6 +601,26 @@ test('every status line exec writes is read, and none of it leaks into the outpu
   assert.equal(closeStatus(''), null);
 });
 
+// A slow run's hint sits ABOVE the status line, so the last line is still the
+// status the client reads. The reversed order — status, then hint — made a
+// failed 25-second command render as a success (B-019); both shapes are pinned
+// here.
+test('a long-run hint above the status line keeps the exit code readable', () => {
+  const failed = 'boom\nran 25s; use exec_session and poll for runs like this\n(exit 3, 25.0s)';
+  assert.deepEqual(closeStatus(failed).close, { kind: 'exit', code: 3, ms: 25000 });
+  assert.equal(toolFailed(failed), true);
+  const ending = toolEnding({ status: 'settled', output: failed });
+  assert.deepEqual([ending.kind, ending.code, ending.word], ['exit', 3, 'exit 3']);
+
+  const clean = 'done\nran 21s; use exec_session and poll for runs like this\n(exit 0, 21.0s)';
+  assert.equal(toolEnding({ status: 'settled', output: clean }).kind, 'ok');
+  assert.equal(toolFailed(clean), false);
+
+  // The shape the fix removed: a status line buried above a trailing hint is
+  // not a status the client can read, and the call would read as a success.
+  assert.equal(closeStatus('done\n(exit 3, 25.0s)\nran 25s; use exec_session and poll for runs like this'), null);
+});
+
 test('a command that exited nonzero counts as failed; one we stopped does not', () => {
   assert.equal(toolFailed('done\n(exit 0, 4.4s)'), false);
   assert.equal(toolFailed('done\n(exit 1, 43.2s)'), true);
@@ -659,4 +679,105 @@ test('a group counts failures and timeouts, never stops', () => {
   assert.deepEqual(kinds([clean, one, clean, clean]), ['ok', 'exit', 'ok', 'ok']);
   assert.deepEqual(kinds([clean, timeout, clean, clean]), ['ok', 'timeout', 'ok', 'ok']);
   assert.deepEqual(kinds([clean, stop, cancel, clean]), ['ok', 'stopped', 'canceled', 'ok']);
+});
+
+// Whether a prompt came from another thread is the server's word (userType
+// 'relay'), not something read back out of the text: a prompt the owner starts
+// with "[From thread …]" is still theirs to edit.
+test('a relayed prompt is told by its field, not by its text', () => {
+  const head = '[From thread @raven Audit (c_4TCLFPOTI7LSWB4FYSYZWY4V5N)]\n[Your answer here does not reach that thread. Use the send tool.]\n\nhere is the file';
+
+  // the server says relay: its artefacts stay inside the block, no edit
+  const relayed = userLayout(true);
+  assert.deepEqual(relayed, { relayed: true, extras: 'relay', editable: false });
+
+  // an owner message that merely starts like a relay is the owner's own
+  const own = userLayout(false);
+  assert.deepEqual(own, { relayed: false, extras: 'own', editable: true });
+  const ownItem = historyItems([{ id: 'm1', role: 'user', content: head }])[0];
+  assert.equal(ownItem.relayed, false, 'the text does not decide it');
+  assert.equal(userLayout(ownItem.relayed).editable, true, 'so its Edit stays');
+
+  // a relay the server marks but whose head is missing is still not editable
+  const bare = historyItems([{ id: 'm2', role: 'user', content: 'no head here', userType: 'relay' }])[0];
+  assert.equal(bare.relayed, true);
+  assert.equal(userLayout(bare.relayed).editable, false);
+  assert.equal(splitRelay('no head here'), null, 'and there is no head to draw');
+
+  // a note is not a prompt
+  assert.equal(historyItems([{ id: 'm3', role: 'user', userType: 'system', content: 'note' }])[0].kind, 'note');
+});
+
+// A tool row that points at another room shows a name, never a raw id: the
+// label, else the title, else the last six characters of the id as a handle.
+// The name is read from the tool's own result — the thread object the server
+// answered with — and while the call still runs, from what the input named.
+const thread = { id: 'c_LOAFF7RSKLSUR25VRMTZQIJEYI', label: 'dog', title: 'FE work' };
+
+test('a room tool reads the label and the title from its own result', () => {
+  const sent = toolRoom('conversation_send', '{"conversationId":"c_LOAFF7RSKLSUR25VRMTZQIJEYI","text":"hi"}',
+    JSON.stringify({ threadId: 'c_LOAFF7RSKLSUR25VRMTZQIJEYI', delivery: 'queued', position: 1, thread }));
+  assert.deepEqual(sent, { verb: 'Sent', detail: '', names: [{ label: 'dog', title: 'FE work', short: '' }] });
+  // one shape for every room tool, so they cannot drift apart
+  for (const name of ['conversation_stop', 'conversation_read', 'conversation_wait']) {
+    const out = toolRoom(name, '{"conversationId":"c_1"}', JSON.stringify({ thread }));
+    assert.deepEqual(out.names, [{ label: 'dog', title: 'FE work', short: '' }], name);
+  }
+});
+
+test('a thread with no label reads as its quoted title, with no at-sign to invent a handle', () => {
+  const out = toolRoom('conversation_read', '{"conversationId":"c_1"}', JSON.stringify({ thread: { id: 'c_1', title: 'Read file di luar folder' } }));
+  assert.deepEqual(out.names, [{ label: '', title: 'Read file di luar folder', short: '' }]);
+});
+
+test('a thread with neither label nor title reads as the last six of its id', () => {
+  const out = toolRoom('conversation_read', '{"conversationId":"c_1"}', JSON.stringify({ thread: { id: 'c_LOAFF7RSKLSUR25VRMTZQIJEYI', title: '' } }));
+  assert.deepEqual(out.names, [{ label: '', title: '', short: '@QIJEYI' }]);
+});
+
+test('a row still streaming shows the short id, and the result’s label replaces it', () => {
+  const input = '{"conversationId":"c_LOAFF7RSKLSUR25VRMTZQIJEYI","text":"hi"}';
+  // no output yet: never blank, and never a name guessed from the id
+  assert.deepEqual(toolRoom('conversation_send', input, '').names, [{ label: '', title: '', short: '@QIJEYI' }]);
+  // a partial input is still the id the caller asked for, said short until the rest arrives
+  assert.deepEqual(toolRoom('conversation_send', '{"conversationId":"c_LOAFF', '').names, [{ label: '', title: '', short: '@_LOAFF' }]);
+  // the result carries the name, so the handle goes away
+  const landed = toolRoom('conversation_send', input, JSON.stringify({ thread }));
+  assert.deepEqual(landed.names, [{ label: 'dog', title: 'FE work', short: '' }]);
+  // A label in the input is not a name: it is read as an opaque handle, so a
+  // model that writes a room's name cannot put that name in the transcript —
+  // and a call that fails never gets a result to correct it.
+  assert.deepEqual(toolRoom('conversation_stop', '{"conversationId":"@dog"}', '').names, [{ label: '', title: '', short: '@dog' }]);
+  assert.deepEqual(toolRoom('conversation_stop', '{"conversationId":"@jabberwocky"}', '').names, [{ label: '', title: '', short: '@rwocky' }],
+    'a longer one is visibly a handle, not the name it was written as');
+  assert.equal(shortHandle('c_LOAFF7RSKLSUR25VRMTZQIJEYI'), '@QIJEYI');
+  assert.equal(shortHandle(''), '');
+});
+
+test('one search result naming two rooms renders two names, in one shape', () => {
+  const out = toolRoom('conversation_search', '{"query":"prepend scroll"}', JSON.stringify({
+    hits: [
+      { threadId: 'c_A', label: 'dog', title: 'FE work', seq: 4, snippet: '…' },
+      { threadId: 'c_B', label: '', title: 'Read file di luar folder', seq: 9, snippet: '…' },
+      { threadId: 'c_C', title: '', seq: 2, snippet: '…' },
+    ],
+  }));
+  assert.equal(out.verb, 'Searched');
+  assert.equal(out.detail, 'prepend scroll', 'the query still says what was searched');
+  assert.deepEqual(out.names, [
+    { label: 'dog', title: 'FE work', short: '' },
+    { label: '', title: 'Read file di luar folder', short: '' },
+    { label: '', title: '', short: '@c_C' },
+  ]);
+});
+
+test('a tool that names no room keeps the summary of its arguments', () => {
+  assert.equal(toolRoom('exec', '{"command":"ls"}', 'out'), null);
+  assert.equal(toolRoom('conversation_list', '{}', '{}'), null, 'a listing is not a row about one room');
+  // a spawn answers the id it opened, before any name exists
+  assert.deepEqual(toolRoom('conversation_spawn', '{"prompt":"go"}', '{"threadId":"c_NEW123456"}').names,
+    [{ label: '', title: '', short: '@123456' }]);
+  // an export answers a file, not a thread object
+  assert.deepEqual(toolRoom('conversation_export', '{"conversationId":"c_1"}', '{"path":"out/a.jsonl","threads":1}'),
+    { verb: 'Exported', detail: 'out/a.jsonl', names: [] });
 });

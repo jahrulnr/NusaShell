@@ -450,7 +450,7 @@ func toolUseBlock(tc entity.ToolCall) ContentBlock {
 // — a missing file must not wedge the whole request.
 func attachmentBlock(a valueobject.Attachment, model entity.Model, fileRoot wire.MediaRoot) any {
 	if !model.AcceptsInput(a.Modality()) {
-		return ContentBlock{Type: "text", Text: "(" + a.Modality().String() + " attachment omitted: model does not accept it)"}
+		return ContentBlock{Type: "text", Text: wire.Omitted(a, fileRoot.Readers)}
 	}
 	b, err := encodeAttachment(a, fileRoot)
 	if err != nil {

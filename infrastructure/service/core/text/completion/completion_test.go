@@ -1586,3 +1586,168 @@ func TestProviderStatsError(t *testing.T) {
 		t.Fatalf("failed attempt must report no verdict or usage: %v", rec)
 	}
 }
+
+// An attachment the target model cannot read leaves a placeholder that names
+// the file and why it was dropped, and — per modality — the tool that can
+// actually help: read_media for images, transcribe for audio, nothing for
+// video. A model that cannot see must learn the file exists and which one name
+// to ask.
+func TestOmittedAttachmentPlaceholderNamesFileAndReader(t *testing.T) {
+	model, err := entity.NewModel("blind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.SetInputModalities([]enum.Modality{enum.ModalityText})
+	readers := textwire.Readers{Image: "read_media", Audio: "transcribe"}
+
+	cases := []struct {
+		name      string
+		mediaType string
+		fileName  string
+		readers   textwire.Readers
+		want      string
+	}{
+		{"image", "image/png", "screenshot.png", readers,
+			`(image "screenshot.png" omitted: model does not accept images; read_media can read it)`},
+		{"image without a reader", "image/png", "screenshot.png", textwire.Readers{},
+			`(image "screenshot.png" omitted: model does not accept images)`},
+		{"audio", "audio/mpeg", "voice.mp3", readers,
+			`(audio "voice.mp3" omitted: model does not accept audio; transcribe can read it)`},
+		{"video", "video/mp4", "clip.mp4", readers,
+			`(video "clip.mp4" omitted: model does not accept video)`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, err := entity.NewMessage(enum.RoleUser, "inspect this")
+			if err != nil {
+				t.Fatal(err)
+			}
+			att, err := valueobject.NewAttachment("file:///tmp/"+tc.fileName, tc.mediaType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			att.SetName(tc.fileName)
+			msg.AddAttachment(att)
+			msgs, err := encodeMessage(msg, model, textwire.MediaRoot{Readers: tc.readers})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts, ok := msgs[0].Content.([]any)
+			if !ok || len(parts) != 2 {
+				t.Fatalf("want text plus placeholder, got %#v", msgs[0].Content)
+			}
+			text, _ := parts[1].(map[string]any)["text"].(string)
+			if text != tc.want {
+				t.Fatalf("placeholder = %q, want %q", text, tc.want)
+			}
+		})
+	}
+}
+
+// The readers are wired through Options: a service built with MediaReaders
+// names the tool that fits the modality, and one built without it names only
+// the file.
+func TestSendNamesTheReaderOnlyWhenConfigured(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		readers  textwire.Readers
+		wantTool bool
+	}{
+		{"reader configured", textwire.Readers{Image: "read_media"}, true},
+		{"reader absent", textwire.Readers{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured RequestBody
+			_, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode: %v", err)
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"choices": []any{map[string]any{"index": 0,
+						"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+				})
+			})
+			svc := New(coretext.Options{FileStore: repoworkspace.NewLocal(), MediaReaders: tc.readers})
+			conv := newConv(t)
+			m, _ := entity.NewMessage(enum.RoleUser, "inspect this")
+			shot, _ := valueobject.NewAttachment("file:///tmp/screenshot.png", "image/png")
+			shot.SetName("screenshot.png")
+			m.AddAttachment(shot)
+			conv.Append(m)
+			model, _ := entity.NewModel("m")
+			model.SetInputModalities([]enum.Modality{enum.ModalityText})
+			if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+				t.Fatal(err)
+			}
+			parts, _ := captured.Messages[0].Content.([]any)
+			if len(parts) != 2 {
+				t.Fatalf("want text plus placeholder, got %#v", captured.Messages[0].Content)
+			}
+			text, _ := parts[1].(map[string]any)["text"].(string)
+			if !strings.Contains(text, "screenshot.png") {
+				t.Fatalf("placeholder %q does not name the file", text)
+			}
+			if got := strings.Contains(text, "read_media"); got != tc.wantTool {
+				t.Fatalf("placeholder %q names the reader = %v, want %v", text, got, tc.wantTool)
+			}
+		})
+	}
+}
+
+// A description arrives as an ordinary tool result: it replays as the tool
+// message answering read_media — never as an owner or assistant line — so the
+// next turn sees exactly what the vision model said.
+func TestReadMediaDescriptionReplaysAsAToolResult(t *testing.T) {
+	conv := newConv(t)
+	question, err := entity.NewMessage(enum.RoleUser, "what does the screenshot show?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv.Append(question)
+	assistant, err := entity.NewMessage(enum.RoleAssistant, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked, err := entity.NewToolCall("call_media", "read_media", `{"path":"shot.png"}`, enum.TooltypeOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assistant.AddToolCall(asked); err != nil {
+		t.Fatal(err)
+	}
+	const description = "A terminal shows the failing test and its stack trace."
+	if err := assistant.SetToolOutput(asked.ID(), description); err != nil {
+		t.Fatal(err)
+	}
+	assistant.SetFinishReason(enum.FinishReasonToolCalls)
+	conv.Append(assistant)
+
+	model, err := entity.NewModel("m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := encodeRequest(conv, model, false, textwire.MediaRoot{}, "http://unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tool *MessageBody
+	for i := range body.Messages {
+		if body.Messages[i].Role == "tool" && body.Messages[i].ToolCallID == asked.ID() {
+			tool = &body.Messages[i]
+		}
+	}
+	if tool == nil {
+		t.Fatalf("no tool result on the wire: %+v", body.Messages)
+	}
+	text, _ := tool.Content.(string)
+	if !strings.Contains(text, description) {
+		t.Fatalf("tool result = %q, want the description", text)
+	}
+	for _, m := range body.Messages {
+		if m.Role == "user" || m.Role == "assistant" {
+			if body, _ := m.Content.(string); strings.Contains(body, description) {
+				t.Fatalf("the description posed as a %s line: %q", m.Role, body)
+			}
+		}
+	}
+}

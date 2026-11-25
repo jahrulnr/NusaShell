@@ -60,13 +60,17 @@ export class TurnSocket {
       try { frame = JSON.parse(ev.data); } catch { return; }
       this.onFrame(frame);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.ws !== ws) return;
       clearTimeout(this.stableTimer);
       const openFor = this.openedAt ? Date.now() - this.openedAt : 0;
       const delay = backoffDelay(this.fails, openFor);
       this.fails++;
-      this.onState('closed');
+      // The close code is the only word the server gets to say about why it
+      // went away: a normal closure or a service restart is the server leaving
+      // (with every queue in its memory), while 1006 is a blip nobody
+      // explained. The controller reads it on the next open.
+      this.onState('closed', { code: ev?.code });
       setTimeout(() => this.connect(), delay);
     };
   }

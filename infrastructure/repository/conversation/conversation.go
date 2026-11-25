@@ -437,7 +437,10 @@ func messagesFromLines(lines [][]byte) ([]entity.Message, error) {
 		}
 		switch lr.Type {
 		case lineMessage:
-			m, err := decodeMessage(lr.Data)
+			if lr.Data == nil {
+				return nil, fmt.Errorf("message line without an envelope")
+			}
+			m, err := decodeMessage(*lr.Data)
 			if err != nil {
 				return nil, err
 			}

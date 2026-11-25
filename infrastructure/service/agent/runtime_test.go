@@ -399,6 +399,150 @@ func TestOptionsAndCommands(t *testing.T) {
 	}
 }
 
+// liveMode answers the room's mode option after a turn opened its session —
+// the option whose choices the agent announced.
+func liveMode(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentPrompt) dservice.AgentOption {
+	t.Helper()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range opts {
+		if o.Category == "mode" && len(o.Choices) > 1 {
+			return o
+		}
+	}
+	t.Fatalf("no mode with choices in %+v", opts)
+	return dservice.AgentOption{}
+}
+
+// currentOption answers one option's current value on the live session.
+func currentOption(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentPrompt, id string) string {
+	t.Helper()
+	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range opts {
+		if o.ID == id {
+			return o.Current
+		}
+	}
+	t.Fatalf("option %q is gone from %+v", id, opts)
+	return ""
+}
+
+// A value the option does not list is refused, not swallowed: a stale tab must
+// not look like it applied, and the caller must not record what the session
+// never took.
+func TestSetOptionRefusesAValueTheOptionDoesNotOffer(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	mode := liveMode(t, ctx, rt, in)
+	before := currentOption(t, ctx, rt, in, mode.ID)
+
+	err := rt.SetOption(ctx, in.Conversation.ID(), mode.ID, "ludicrous")
+	if code := apperror.As(err).StatusCode(); code != 400 {
+		t.Fatalf("a value the option does not list = %v (status %d), want 400", err, code)
+	}
+	if msg := err.Error(); !strings.Contains(msg, mode.ID) || !strings.Contains(msg, "ludicrous") {
+		t.Fatalf("the refusal must name the option and the value: %q", msg)
+	}
+	// Nothing was applied: the session still carries the value it had.
+	if got := currentOption(t, ctx, rt, in, mode.ID); got != before {
+		t.Fatalf("mode after a refused pick = %q, want %q untouched", got, before)
+	}
+	// A value the option does list applies as before.
+	next := ""
+	for _, c := range mode.Choices {
+		if c.Value != before {
+			next = c.Value
+			break
+		}
+	}
+	if err := rt.SetOption(ctx, in.Conversation.ID(), mode.ID, next); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentOption(t, ctx, rt, in, mode.ID); got != next {
+		t.Fatalf("mode after a listed pick = %q, want %q", got, next)
+	}
+}
+
+// An option this session never announced is skipped, not refused: it belonged
+// to another agent version, and refusing it would break a picker bound to a
+// stale agent record.
+func TestSetOptionSkipsAnOptionTheSessionDoesNotOffer(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in) // open the session
+	if err := rt.SetOption(ctx, in.Conversation.ID(), "from-another-agent-version", "x"); err != nil {
+		t.Fatalf("an option the session does not offer = %v, want it skipped", err)
+	}
+}
+
+// A pick stored before the agent narrowed its options is stale, not fatal: the
+// turn runs on the session's current value rather than failing on a record the
+// owner can no longer see.
+func TestPromptSkipsAStaleStoredPick(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	mode := liveMode(t, ctx, rt, in)
+	in.Options = map[string]string{mode.ID: "ludicrous"}
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatalf("a stale stored pick failed the turn: %v", err)
+	}
+}
+
+// A boolean option takes "true" or "false" and nothing else. A stale tab that
+// sends "yes" must be refused: coercing it to false would record a choice the
+// owner never made, and look like it applied.
+func TestSetOptionRefusesABooleanThatIsNotTrueOrFalse(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in) // open the session
+	before := currentOption(t, ctx, rt, in, "strict")
+
+	err := rt.SetOption(ctx, in.Conversation.ID(), "strict", "yes")
+	if code := apperror.As(err).StatusCode(); code != 400 {
+		t.Fatalf("a boolean pick of %q = %v (status %d), want 400", "yes", err, code)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "strict") || !strings.Contains(msg, "yes") {
+		t.Fatalf("the refusal must name the option and the value: %q", msg)
+	}
+	if got := currentOption(t, ctx, rt, in, "strict"); got != before {
+		t.Fatalf("strict after a refused pick = %q, want %q untouched", got, before)
+	}
+	// Both values it does take still apply.
+	for _, want := range []string{"true", "false"} {
+		if err := rt.SetOption(ctx, in.Conversation.ID(), "strict", want); err != nil {
+			t.Fatal(err)
+		}
+		if got := currentOption(t, ctx, rt, in, "strict"); got != want {
+			t.Fatalf("strict after picking %q = %q", want, got)
+		}
+	}
+}
+
+// A stored boolean pick that never was a boolean is stale like any other: the
+// turn runs instead of failing on it.
+func TestPromptSkipsAStaleStoredBoolean(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in) // open the session
+	in.Options = map[string]string{"strict": "yes"}
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatalf("a stale stored boolean failed the turn: %v", err)
+	}
+}
+
 // An agent's form request reaches the owner through Elicit, and the
 // owner's answer goes back to the agent. The record keeps the outcome,
 // never the content.

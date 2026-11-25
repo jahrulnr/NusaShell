@@ -293,13 +293,24 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		if err != nil {
 			return apperror.New(400, "invalid references", err)
 		}
+		// A prompt another thread handed over carries its own relay head; the
+		// owner cannot rewrite that room's words from here, so the provenance
+		// says so and the message stays non-editable in the target.
+		if origin, ok := j.Opts.Origin.Normalized(); ok && origin.Kind == enum.TurnOriginConversation {
+			user.SetUserType(enum.LLMUserTypeRelay)
+		}
 		conv.Append(user)
 		if fresh {
 			// Bind before the first write — a failed send still leaves a
 			// room that can retry with providerID/modelID "".
 			conv.SetProviderID(providerID)
 			conv.SetModelID(modelID)
-			rememberSelection(conv, j.Opts)
+			// An agent room has no provider call to apply an effort or an
+			// upstream to: the picker's or a channel's value is dropped
+			// here, the same way an existing room's is below.
+			if !agentRoom {
+				rememberSelection(conv, j.Opts)
+			}
 			// An explicit creation title names the room from its first
 			// save; otherwise the first message's head does — SetTitle
 			// normalizes either to one bounded line.

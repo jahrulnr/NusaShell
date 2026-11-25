@@ -415,7 +415,12 @@ func (c *Conversation) BindAgent(agentID string) error {
 	c.agentID = agentID
 	c.forgetSession()
 	c.agentOptions = nil
+	// The provider binding goes with what only a provider call can honour:
+	// its model, and the two picks that ride it — effort and upstream. An
+	// agent picks its own model and reasoning, so a room that kept them
+	// would show a value nothing applies and hand it back on a later unbind.
 	c.providerID, c.modelID = "", ""
+	c.effort, c.upstream = "", ""
 	return nil
 }
 

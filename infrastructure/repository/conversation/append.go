@@ -27,7 +27,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, convID strin
 	if err != nil {
 		return false, err
 	}
-	line := lineRecord{Type: lineMessage, Data: encodeMessage(msg)}
+	line := lineRecord{Type: lineMessage, Data: messageEnvelope(msg)}
 	if err := appendLine(filepath.Join(r.convDir(convID), activeFile), line); err != nil {
 		return false, err
 	}

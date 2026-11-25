@@ -501,6 +501,13 @@ func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent e
 	}
 	for id, value := range in.Options {
 		if err := r.applyOption(ctx, s, id, value); err != nil {
+			// The room's stored picks are applied before every turn. One the
+			// agent's options no longer list is stale — the agent narrowed
+			// its choices since — so the turn runs on the session's current
+			// value instead of failing on a record nothing here can fix.
+			if errors.Is(err, errOptionValueNotOffered) {
+				continue
+			}
 			return err
 		}
 	}
@@ -752,6 +759,19 @@ func (r *Runtime) attachmentBlocks(ctx context.Context, attachments []valueobjec
 					continue
 				}
 			}
+		}
+		// A reference is read by the agent itself, so the pin has to hold
+		// before the link crosses: a file that changed since it was sent is
+		// refused with a note, never served as a different picture through the
+		// door the inline path does not use.
+		if err := wire.VerifyPinnedFile(a); err != nil {
+			reason := "unreadable now"
+			if errors.Is(err, wire.ErrPinChanged) {
+				reason = "content changed since it was sent"
+			}
+			blocks = append(blocks, acp.ContentBlock{Type: "text",
+				Text: fmt.Sprintf("(attachment %q omitted: %s)", a.Name(), reason)})
+			continue
 		}
 		blocks = append(blocks, link)
 	}
@@ -1437,10 +1457,18 @@ func (r *Runtime) SetOption(ctx context.Context, conversationID, id, value strin
 	return r.applyOption(ctx, s, id, value)
 }
 
+// errOptionValueNotOffered marks a pick of an option the session does offer but
+// with another set of values. The picker refuses it (nothing may be recorded);
+// a turn that inherited such a pick from an older session skips it, because a
+// stale record must not fail a turn the owner can no longer fix from there.
+var errOptionValueNotOffered = errors.New("option value not offered")
+
 // applyOption sets one option when the session offers it with another
 // value: legacy modes through session/set_mode, config options through
 // session/set_config_option. Options the session does not offer are
-// skipped — they belonged to another agent version.
+// skipped — they belonged to another agent version. A value the offered
+// option does not list is not one of them: it is refused, so no caller can
+// record a pick the agent would never take.
 func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string) error {
 	s.mu.Lock()
 	opts := sessionOptions(s.configs, s.modes)
@@ -1450,8 +1478,15 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 		return nil
 	}
 	o := opts[i]
-	if o.Type == "select" && !slices.ContainsFunc(o.Choices, func(c dservice.OptionChoice) bool { return c.Value == value }) {
-		return nil
+	// A value the offered option does not list is refused, so no caller can
+	// record a pick the agent would never take. Offers is the same rule the
+	// picker validates against, so the two can never disagree.
+	if !o.Offers(value) {
+		message := fmt.Sprintf("option %q does not offer %q", id, value)
+		if o.Type == "boolean" {
+			message = fmt.Sprintf("option %q takes true or false, not %q", id, value)
+		}
+		return apperror.New(400, message, errOptionValueNotOffered)
 	}
 	// The synthetic mode option is legacy: no config option carries its id.
 	s.mu.Lock()

@@ -48,26 +48,6 @@ func TestFileReadToolRejects(t *testing.T) {
 	}
 }
 
-// The schema promises UTF-8 text, but the tool streams whatever bytes
-// the confined open yields — a small binary file is returned verbatim
-// into model context instead of being rejected with a redirect to
-// read_media, the same check read_media applies in reverse.
-func TestFileReadRejectsBinaryContent(t *testing.T) {
-	root := t.TempDir()
-	tool := mustReadTool(t, root)
-	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64)...)
-	if err := os.WriteFile(filepath.Join(root, "pic.png"), png, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := runRead(t, tool, `{"path":"pic.png"}`)
-	if err == nil {
-		t.Fatal("binary content returned as text — must redirect to read_media")
-	}
-	if !strings.Contains(err.Error(), "read_media") {
-		t.Fatalf("binary read error must point at read_media: %v", err)
-	}
-}
-
 // Text-sniffed bytes that are not valid UTF-8 (Latin-1 here) used to
 // pass the MIME gate and reach the model as U+FFFD replacement
 // characters — a corrupted document with no warning. The tool must
@@ -89,7 +69,7 @@ func TestFileReadRejectsNonUTF8Text(t *testing.T) {
 
 func mustReadTool(t *testing.T, root string) service.Tool {
 	t.Helper()
-	tool, err := NewFileReadTool(repoworkspace.NewLocal(), root)
+	tool, err := NewFileReadTool(repoworkspace.NewLocal(), root, MediaDeps{})
 	if err != nil {
 		t.Fatal(err)
 	}

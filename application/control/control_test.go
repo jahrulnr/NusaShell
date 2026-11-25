@@ -2,6 +2,7 @@ package appcontrol
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,9 @@ type fakeRooms struct {
 	msgs      map[string][]entity.Message
 	named     map[string]string
 	approvals map[string][]valueobject.ApprovalRequest
+	// env is where the target's workspace runs; the zero value is "", which the
+	// attachment path treats as remote/unknown.
+	env enum.Environment
 }
 
 func (f *fakeRooms) List(context.Context) ([]drepo.ConversationInfo, error) {
@@ -57,6 +61,12 @@ func (f *fakeRooms) History(_ context.Context, id string, start, end int) ([]ent
 	return append([]entity.Message(nil), f.msgs[id][start:end]...), nil
 }
 
+func (f *fakeRooms) Environment(context.Context, string) (enum.Environment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.env, nil
+}
+
 func (f *fakeRooms) PendingApprovals(convID string) []valueobject.ApprovalRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -83,6 +93,7 @@ func (f *fakeRooms) add(id string, role enum.Role, text string) {
 type run struct {
 	conv, provider, model, agent, project, text string
 	origin                                      valueobject.TurnOrigin
+	attachments                                 []valueobject.Attachment
 }
 
 type fakeTurns struct {
@@ -97,7 +108,7 @@ type fakeTurns struct {
 	steerRefuses bool
 }
 
-func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string, _ []valueobject.Attachment, opts appjob.SendOptions, _ event.TurnEventHandler) (string, appconversation.SendResult, error) {
+func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string, attachments []valueobject.Attachment, opts appjob.SendOptions, _ event.TurnEventHandler) (string, appconversation.SendResult, error) {
 	f.rooms.mu.Lock()
 	known := false
 	for _, i := range f.rooms.infos {
@@ -111,7 +122,7 @@ func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string,
 	f.rooms.mu.Unlock()
 	f.rooms.add(convID, enum.RoleUser, text)
 	f.rooms.add(convID, enum.RoleAssistant, "done: "+text)
-	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text, opts.Origin}
+	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text, opts.Origin, attachments}
 	f.mu.Lock()
 	gate := f.gate
 	f.mu.Unlock()
@@ -143,7 +154,6 @@ func (f *fakeTurns) Busy(convID string) bool {
 // busy and counts what waits, so the four outcomes can be driven without a
 // real worker.
 type fakeQueue struct {
-	turns    *fakeTurns
 	mu       sync.Mutex
 	enqueued []string
 	full     bool
@@ -151,9 +161,12 @@ type fakeQueue struct {
 	// accepted keeps the depth the way the worker's queue does: it grows on
 	// each accepted message and resets when a test drains it.
 	depth int
+	// kept is what each accepted message carried, so a queued attachment can
+	// be judged without a real worker.
+	kept [][]valueobject.Attachment
 }
 
-func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, _ appjob.SendOptions) (int, error) {
+func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, attachments []valueobject.Attachment, _ appjob.SendOptions) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.stopping {
@@ -163,6 +176,7 @@ func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, _ appj
 		return 0, apperror.New(429, "conversation queue full", nil)
 	}
 	q.enqueued = append(q.enqueued, convID+": "+text)
+	q.kept = append(q.kept, attachments)
 	q.depth++
 	return q.depth, nil
 }
@@ -172,6 +186,15 @@ func (q *fakeQueue) QueueDepth(string) int {
 	defer q.mu.Unlock()
 	return q.depth
 }
+
+// perRoomQueue answers the depth per room, the way the worker does — the
+// shared fake answers one number for every room.
+type perRoomQueue struct {
+	*fakeQueue
+	waits map[string]int
+}
+
+func (q perRoomQueue) QueueDepth(convID string) int { return q.waits[convID] }
 
 func (q *fakeQueue) drain() {
 	q.mu.Lock()
@@ -195,6 +218,15 @@ func (f fakeProjects) List(ctx context.Context) ([]aggregate.Project, error) {
 
 func setup(t *testing.T) (*App, *fakeRooms, *fakeTurns) {
 	t.Helper()
+	return setupWith(t, nil, nil)
+}
+
+// setupWith builds the app through New with the queue and upload store the
+// caller names, so a branch is exercised through the composition: a parameter
+// New drops fails these tests instead of passing silently. A nil queue gets
+// the fake one; nil uploads wires none.
+func setupWith(t *testing.T, queue Queue, uploads drepo.Uploads) (*App, *fakeRooms, *fakeTurns) {
+	t.Helper()
 	rooms := &fakeRooms{msgs: map[string][]entity.Message{}, named: map[string]string{}, infos: []drepo.ConversationInfo{
 		{ID: "c_self", Label: "otter", Title: "Planner", ProviderID: "prov", ModelID: "m1"},
 		{ID: "c_other", Label: "crow", Title: "Builder", AgentID: "claude", ProjectID: "p1"},
@@ -202,7 +234,10 @@ func setup(t *testing.T) (*App, *fakeRooms, *fakeTurns) {
 	rooms.add("c_other", enum.RoleUser, "build it")
 	rooms.add("c_other", enum.RoleAssistant, "built")
 	turns := &fakeTurns{runs: make(chan run, 4), busy: map[string]bool{}, rooms: rooms}
-	return New(context.Background(), rooms, turns, &fakeQueue{turns: turns}, fakeProjects{}, nil, nil, nil), rooms, turns
+	if queue == nil {
+		queue = &fakeQueue{}
+	}
+	return New(context.Background(), rooms, turns, queue, uploads, fakeProjects{}, nil, nil, nil), rooms, turns
 }
 
 type fakeChats struct {
@@ -232,7 +267,7 @@ func TestSearchExportReport(t *testing.T) {
 	}
 	chat, _ := valueobject.NewChatRef("telegram", "42", "")
 	chats := &fakeChats{origin: map[string]valueobject.ChatRef{"c_self": chat}}
-	app := New(context.Background(), rooms, turns, &fakeQueue{turns: turns}, fakeProjects{}, chats, outputs, nil)
+	app := New(context.Background(), rooms, turns, &fakeQueue{}, nil, fakeProjects{}, chats, outputs, nil)
 	ctx := context.Background()
 
 	out, err := app.Search(ctx, "c_self", SearchInput{Query: "BUILT"})
@@ -424,7 +459,8 @@ func TestWait(t *testing.T) {
 // when it cannot, the message waits in the room's queue and the caller is told
 // its position — never "wait and try again".
 func TestSendSteersOrQueuesOnABusyThread(t *testing.T) {
-	app, _, turns := setup(t)
+	q := &fakeQueue{}
+	app, _, turns := setupWith(t, q, nil)
 	ctx := context.Background()
 	turns.busy["c_other"] = true
 
@@ -438,9 +474,8 @@ func TestSendSteersOrQueuesOnABusyThread(t *testing.T) {
 	}
 
 	// A turn that takes no input (a resume, or full steer capacity): queued.
+	// The queue arrived through the constructor, like a real composition's.
 	turns.steerRefuses = true
-	q := &fakeQueue{turns: turns}
-	app.queue = q
 	out, err = app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "and this"})
 	if err != nil {
 		t.Fatal(err)
@@ -480,11 +515,10 @@ func TestSendRefusesAWaitingApproval(t *testing.T) {
 
 // A full queue is refused with the depth, and nothing is written.
 func TestSendRefusesAFullQueue(t *testing.T) {
-	app, _, turns := setup(t)
+	q := &fakeQueue{full: true, depth: 7}
+	app, _, turns := setupWith(t, q, nil)
 	turns.busy["c_other"] = true
 	turns.steerRefuses = true
-	q := &fakeQueue{turns: turns, full: true, depth: 7}
-	app.queue = q
 	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if code := apperror.As(err).StatusCode(); code != 429 {
 		t.Fatalf("full queue = %v (status %d), want 429", err, code)
@@ -499,10 +533,9 @@ func TestSendRefusesAFullQueue(t *testing.T) {
 
 // A stopping server refuses instead of accepting a message it cannot keep.
 func TestSendRefusesWhileStopping(t *testing.T) {
-	app, _, turns := setup(t)
+	app, _, turns := setupWith(t, &fakeQueue{stopping: true}, nil)
 	turns.busy["c_other"] = true
 	turns.steerRefuses = true
-	app.queue = &fakeQueue{turns: turns, stopping: true}
 	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if code := apperror.As(err).StatusCode(); code != 503 {
 		t.Fatalf("stopping = %v (status %d), want 503", err, code)
@@ -512,10 +545,9 @@ func TestSendRefusesWhileStopping(t *testing.T) {
 // Stop cuts the live turn only: accepted messages keep waiting, and the count
 // says so — a Stop that silently dropped them would be the bigger surprise.
 func TestStopKeepsTheQueueAndReportsIt(t *testing.T) {
-	app, _, turns := setup(t)
+	q := &fakeQueue{depth: 3}
+	app, _, turns := setupWith(t, q, nil)
 	turns.busy["c_other"] = true
-	q := &fakeQueue{turns: turns, depth: 3}
-	app.queue = q
 	out, err := app.Stop(context.Background(), "c_self", StopInput{Thread: "c_other"})
 	if err != nil {
 		t.Fatal(err)
@@ -523,17 +555,52 @@ func TestStopKeepsTheQueueAndReportsIt(t *testing.T) {
 	if out["stopped"] != true || out["waiting"] != 3 {
 		t.Fatalf("stop = %v, want stopped with 3 waiting", out)
 	}
+	// The thread row counts through the same queue, so the two can never
+	// disagree about what survived the Stop.
+	if th, ok := out["thread"].(Thread); !ok || th.Waiting != 3 {
+		t.Fatalf("stop thread = %v, want the same 3 waiting", out["thread"])
+	}
 	if q.QueueDepth("c_other") != 3 {
 		t.Fatal("Stop dropped the queue")
+	}
+}
+
+// Every thread row names the room's wait, so a caller that never saw a
+// conversation.queued frame still reads the count; an idle room carries no
+// field at all.
+func TestThreadRowsCarryTheRoomsWait(t *testing.T) {
+	app, _, _ := setupWith(t, perRoomQueue{&fakeQueue{}, map[string]int{"c_other": 2}}, nil)
+	out, err := app.List(context.Background(), "c_self", ListInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := out["threads"].([]Thread)
+	if len(rows) != 2 {
+		t.Fatalf("threads = %v", rows)
+	}
+	for _, row := range rows {
+		want := 0
+		if row.ID == "c_other" {
+			want = 2
+		}
+		if row.Waiting != want {
+			t.Fatalf("%s waiting = %d, want %d", row.ID, row.Waiting, want)
+		}
+	}
+	// The wire form is the contract: nothing waiting means no field.
+	raw, err := json.Marshal(Thread{ID: "c_self", Title: "Planner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "waiting") {
+		t.Fatalf("an idle thread row carries a waiting field: %s", raw)
 	}
 }
 
 // An idle room with someone already waiting queues behind them instead of
 // starting a second turn ahead of the queue.
 func TestSendQueuesBehindWaitingMessages(t *testing.T) {
-	app, _, _ := setup(t)
-	q := &fakeQueue{depth: 1}
-	app.queue = q
+	app, _, _ := setupWith(t, &fakeQueue{depth: 1}, nil)
 	out, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if err != nil || out["delivery"] != "queued" || out["position"] != 2 {
 		t.Fatalf("idle with a queue = %v, %v", out, err)

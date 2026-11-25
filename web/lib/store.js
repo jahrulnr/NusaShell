@@ -33,7 +33,9 @@ export const state = {
 const subs = new Set();
 let queued = false;
 let version = 0;
+let asked = 0;
 export function emit() {
+  asked++;
   if (queued) return;
   queued = true;
   // rAF batches deltas per frame; the timeout keeps hidden tabs (where
@@ -52,6 +54,15 @@ export function emit() {
 export function subscribe(fn) {
   subs.add(fn);
   return () => subs.delete(fn);
+}
+
+// emitCount answers how many changes the store was asked to render, coalesced
+// or not. A flush count taken across a wait mixes in whatever else changed
+// meanwhile (a toast dismissing on its own timer, a background refresh), so a
+// check that only one action asked for a render reads this count on both sides
+// of that action instead.
+export function emitCount() {
+  return asked;
 }
 
 export function useStore() {

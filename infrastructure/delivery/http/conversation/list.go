@@ -55,14 +55,18 @@ func (s *server) list(c *gin.Context) {
 	}
 	for _, i := range page {
 		dto := toConversation(i)
-		// The live transport turn rides list items too — a freshly
-		// loaded sidebar marks active rooms without per-room detail
-		// reads. Nil hub leaves the fields off the wire.
+		// The live transport turn and the wait behind it ride list items
+		// too — a freshly loaded sidebar marks active rooms and their
+		// queues without per-room detail reads. Nil lookups leave the
+		// fields off the wire.
 		if s.live != nil {
 			if turnID, kind, ok := s.live.ActiveTurn(i.ID); ok {
 				dto.ActiveTurnID = turnID
 				dto.ActiveTurnKind = kind
 			}
+		}
+		if s.queue != nil {
+			dto.Waiting = s.queue.QueueDepth(i.ID)
 		}
 		out.Data = append(out.Data, dto)
 	}

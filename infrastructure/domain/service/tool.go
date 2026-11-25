@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
@@ -124,4 +126,38 @@ func WithWebProvider(ctx context.Context, p WebProvider) context.Context {
 func WebProviderFrom(ctx context.Context) (WebProvider, bool) {
 	p, ok := ctx.Value(webProviderCtxKey{}).(WebProvider)
 	return p, ok
+}
+
+type modelModalitiesCtxKey struct{}
+
+// WithModelModalities binds the turn model's declared input modalities for
+// the tools that must choose a path by them: a file tool attaches what the
+// model can read and reads it for the model when it cannot. An empty or
+// absent list means the turn declared nothing — callers keep the behaviour
+// they had before the capability existed (attach), and the encoder degrades
+// the attachment afterwards.
+func WithModelModalities(ctx context.Context, modalities []enum.Modality) context.Context {
+	if len(modalities) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, modelModalitiesCtxKey{}, modalities)
+}
+
+// ModelModalities returns the turn model's declared input modalities, nil
+// when the turn declared none.
+func ModelModalities(ctx context.Context) []enum.Modality {
+	mods, _ := ctx.Value(modelModalitiesCtxKey{}).([]enum.Modality)
+	return mods
+}
+
+// ModelAccepts reports whether the turn's model accepts mod, and whether the
+// turn declared its modalities at all. An undeclared list is "unknown": the
+// caller behaves as it did before the capability existed, and the encoder
+// degrades the attachment afterwards.
+func ModelAccepts(ctx context.Context, mod enum.Modality) (accepted, known bool) {
+	mods := ModelModalities(ctx)
+	if len(mods) == 0 {
+		return true, false
+	}
+	return slices.Contains(mods, mod), true
 }

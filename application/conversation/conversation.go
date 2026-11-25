@@ -61,8 +61,11 @@ type ConversationApp struct {
 	uploads    drepo.Uploads
 	picks      drepo.Picks
 	recordings drepo.Recordings
-	shells     dservice.Shells
-	views      drepo.ThreadViews
+	// mediaDescriptions remembers read_media's readings per room; a deleted
+	// room must not leave the text it lifted from its files behind.
+	mediaDescriptions dservice.MediaDescriptions
+	shells            dservice.Shells
+	views             drepo.ThreadViews
 	// skills and mcpNames feed reference search.
 	skills   drepo.Skills
 	mcpNames func(context.Context) []string

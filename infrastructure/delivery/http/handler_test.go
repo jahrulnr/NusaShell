@@ -306,6 +306,51 @@ func TestConversationDetailActiveTurn(t *testing.T) {
 	}
 }
 
+// A tab that opens a room without ever hearing a conversation.queued frame
+// still learns the depth: the read carries the worker's count. A room with
+// nothing waiting stays silent, and a composition with no queue at all leaves
+// the field off the wire.
+func TestConversationRowsCarryTheRoomsWait(t *testing.T) {
+	fc := &fakeConversations{infos: []drepo.ConversationInfo{mkInfo("c_1"), mkInfo("c_2")}}
+	h := newTestHandler(t, Deps{Conversations: fc, Queue: scriptedQueue{"c_1": 2}})
+
+	doc := decodeBody(t, do(t, h, "GET", "/api/conversations/c_1", "", ""))
+	if doc["waiting"] != float64(2) {
+		t.Fatalf("detail waiting = %v, want the worker's 2", doc["waiting"])
+	}
+	if _, ok := decodeBody(t, do(t, h, "GET", "/api/conversations/c_2", "", ""))["waiting"]; ok {
+		t.Fatal("a room with an empty queue must omit waiting")
+	}
+	// The list is the sidebar read — and the reconnect path, where a tab
+	// never saw the frame that would have told it.
+	for _, item := range decodeBody(t, do(t, h, "GET", "/api/conversations?limit=10", "", ""))["data"].([]any) {
+		m := item.(map[string]any)
+		switch m["id"] {
+		case "c_1":
+			if m["waiting"] != float64(2) {
+				t.Fatalf("list item for the waiting room = %v", m)
+			}
+		case "c_2":
+			if _, ok := m["waiting"]; ok {
+				t.Fatalf("idle room's list item must omit waiting: %v", m)
+			}
+		}
+	}
+	h = newTestHandler(t, Deps{Conversations: fc})
+	if _, ok := decodeBody(t, do(t, h, "GET", "/api/conversations/c_1", "", ""))["waiting"]; ok {
+		t.Fatal("detail without a queue must omit waiting")
+	}
+	for _, item := range decodeBody(t, do(t, h, "GET", "/api/conversations?limit=10", "", ""))["data"].([]any) {
+		if _, ok := item.(map[string]any)["waiting"]; ok {
+			t.Fatal("list without a queue must omit waiting")
+		}
+	}
+}
+
+type scriptedQueue map[string]int
+
+func (q scriptedQueue) QueueDepth(convID string) int { return q[convID] }
+
 func TestConversationDetail404(t *testing.T) {
 	h := newTestHandler(t, Deps{Conversations: &fakeConversations{}})
 	rec := do(t, h, "GET", "/api/conversations/c_missing", "", "")

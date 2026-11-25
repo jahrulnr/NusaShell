@@ -766,3 +766,91 @@ func TestExecNormalExitNeverSaysInterrupted(t *testing.T) {
 		t.Fatalf("normal exit = %q, want no interruption wording", res.Text)
 	}
 }
+
+// A finished but slow run tells the model which tool would have been better:
+// the harness cannot know a command's duration in advance, so the result says
+// it once it knows — above the status line, which stays last because that is
+// the line clients read to decide how the call ended.
+func TestExecLongRunSuggestsExecSession(t *testing.T) {
+	tool := newTool(t)
+	ctx := testContext()
+
+	result, err := tool.Execute(ctx, mustCall(t, "quick", `{"command":"echo quick"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Text, "exec_session") {
+		t.Fatalf("a fast run must not suggest exec_session: %q", result.Text)
+	}
+
+	previous := longRunHintAfter
+	longRunHintAfter = 0
+	defer func() { longRunHintAfter = previous }()
+
+	// A clean long run: hint above, status line closing the result.
+	result, err = tool.Execute(ctx, mustCall(t, "slow", `{"command":"echo slow"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(result.Text, "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "(exit 0, ") {
+		t.Fatalf("last line = %q, want the status line", last)
+	}
+	if !strings.Contains(result.Text, "ran 0s; use exec_session and poll for runs like this\n(exit 0, ") {
+		t.Fatalf("hint must sit above the status line: %q", result.Text)
+	}
+
+	// A failed long run is the case the clients read: the exit code must stay
+	// on the last line, or a failure renders as a success.
+	result, err = tool.Execute(ctx, mustCall(t, "failed", `{"command":"echo boom; exit 3"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines = strings.Split(result.Text, "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, "(exit 3, ") {
+		t.Fatalf("last line = %q, want (exit 3, …)", last)
+	}
+	if len(lines) < 2 || !strings.Contains(lines[len(lines)-2], "ran 0s; use exec_session and poll for runs like this") {
+		t.Fatalf("hint missing above the failed status: %q", result.Text)
+	}
+
+	// Output that does not end its own line: the separator is added once, so
+	// the hint never starts on a blank line.
+	result, err = tool.Execute(ctx, mustCall(t, "no-newline", `{"command":"printf boom"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result.Text, "boom\nran 0s; use exec_session and poll for runs like this\n(exit 0, ") {
+		t.Fatalf("no-newline output = %q, want one newline before the hint", result.Text)
+	}
+	if strings.Contains(result.Text, "boom\n\n") {
+		t.Fatalf("no-newline output left a blank line: %q", result.Text)
+	}
+
+	// The hint is part of the record, not a display extra: a spilled result's
+	// file carries it too, above the status line that closes the file.
+	result, err = tool.Execute(ctx, mustCall(t, "slow-spill", `{"command":"seq 1 2000"}`, 400), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, path, ok := strings.Cut(result.Text, "full output: ")
+	if !ok {
+		t.Fatalf("spill marker missing: %q", result.Text)
+	}
+	path, _, _ = strings.Cut(path, " ...]")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spilled := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(spilled) < 2 {
+		t.Fatalf("spill file = %q, want the output plus the closing lines", raw)
+	}
+	if last := spilled[len(spilled)-1]; !strings.HasPrefix(last, "(exit 0, ") {
+		t.Fatalf("spill file last line = %q, want the status line", last)
+	}
+	if prev := spilled[len(spilled)-2]; !strings.Contains(prev, "ran 0s; use exec_session and poll for runs like this") {
+		t.Fatalf("spill file hint missing above the status: %q", prev)
+	}
+}

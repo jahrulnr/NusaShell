@@ -36,9 +36,10 @@ upgrade — it does not define frames.
   zero. `waiting` is the worker's queue depth read when the frame is
   emitted, never a counter kept beside it, and the frame belongs to no
   turn: it carries no `seq` and never appears in a `turn.watch` replay,
-  so a reattaching tab learns the current depth rather than replaying old
-  counts. Neither notice makes a tab observe the turn's stream; it sees
-  persisted state through HTTP reads.
+  so it is a nudge, not the record: a tab that missed it reads the
+  current depth from the room projection (`waiting` on detail and list
+  items) rather than replaying old counts. Neither notice makes a tab
+  observe the turn's stream; it sees persisted state through HTTP reads.
 - **Reloading a room.** `GET /api/conversations/{id}` and each item of
   `GET /api/conversations` include
   `activeTurnId` and `activeTurnKind` (`send` or `edit`) while this

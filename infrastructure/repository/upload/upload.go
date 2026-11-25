@@ -128,6 +128,23 @@ func (s *Store) attachment(dir string, m meta) (valueobject.Attachment, error) {
 	return a, nil
 }
 
+// Delete removes one upload and everything stored under its id. A valid id that
+// no longer exists is already the requested state and answers nil, so cleanup
+// stays idempotent; an id that is not an upload id is a 404.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if valueobject.ValidID(id) != nil || !strings.HasPrefix(id, "u_") {
+		return apperror.NewNotFoundError("upload "+id, nil)
+	}
+	err := os.RemoveAll(filepath.Join(s.root, id))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Purge removes every stored upload and leaves an empty root.
 func (s *Store) Purge(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {

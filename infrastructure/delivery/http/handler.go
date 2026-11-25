@@ -119,6 +119,10 @@ type Deps struct {
 	// LiveTurns is the hub's in-progress transport turn, projected onto
 	// conversation detail. Nil omits the field.
 	LiveTurns conversation.LiveTurn
+	// Queue is the worker queue depth, projected onto conversation detail
+	// and list rows — the state behind the `conversation.queued` nudge.
+	// Nil omits the field.
+	Queue conversation.QueueDepth
 	// Authorities are configured host:port pairs accepted in Host and
 	// Origin headers. The listener address remains a separate loopback bind.
 	Authorities []string
@@ -151,6 +155,7 @@ func NewHandler(d Deps) *gin.Engine {
 		Writes:          d.ConversationWrites,
 		Jobs:            d.Jobs,
 		LiveTurns:       d.LiveTurns,
+		Queue:           d.Queue,
 		Approvals:       d.Approvals,
 		Elicitations:    d.Elicitations,
 		Workspace:       d.Workspace,

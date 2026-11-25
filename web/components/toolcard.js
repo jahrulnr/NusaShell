@@ -3,7 +3,7 @@
 // output (tail first), each clipped with a fade and expandable in place.
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import hljs from '/vendor/highlight/highlight.min.mjs';
-import { toolSummary, closeStatus, toolEnding, formatDuration, toolClock } from '../lib/turn.js';
+import { toolSummary, toolRoom, closeStatus, toolEnding, formatDuration, toolClock } from '../lib/turn.js';
 import { useFollow } from '../lib/follow.js';
 import { Icon } from './icons.js';
 import { cx, Spinner } from './ui.js';
@@ -11,6 +11,9 @@ import { ToolMedia } from './media.js';
 
 const CLIP_LINES = 12;
 const SHELL_TOOLS = new Set(['exec', 'exec_session', 'shell', 'bash']);
+// A search can name many rooms; three keep the row one line at any width, and
+// the rest are counted rather than cut mid-name.
+const ROOM_NAMES_SHOWN = 3;
 
 const opened = new Map();
 function useOpen(id) {
@@ -79,8 +82,14 @@ function Clip({ id, text, mode, lang, live }) {
 
 export function ToolRow({ room, item, cwd }) {
   const [open, setOpen] = useOpen(item.id);
-  const { verb, detail } = toolSummary(item.name, item.input);
   const running = item.status === 'requested' || item.status === 'streaming';
+  // A room tool names the room from its own result; everything else is the
+  // summary of its arguments (lib/turn.js). The result is read without the
+  // runner's status line when the output carries one — a row's own room prop is
+  // `room`, and this is what the call named.
+  const answered = closeStatus(item.output);
+  const subject = toolRoom(item.name, item.input, answered ? answered.body : item.output || '');
+  const { verb, detail } = subject || toolSummary(item.name, item.input);
   const shell = SHELL_TOOLS.has(item.name);
   const args = parseArgs(item.input);
   // How this call ended, in one value (lib/turn.js): the row's word and mark,
@@ -134,7 +143,17 @@ export function ToolRow({ room, item, cwd }) {
     <button type="button" ref=${row} onClick=${() => setOpen(!open)} aria-expanded=${open} aria-controls=${cardId}
       class="group w-full flex items-center gap-2 py-1 text-left text-[13px] text-muted hover:text-fg min-w-0">
       ${ending.mark !== 'none' && html`<span class=${cx('orb', ending.mark)} aria-hidden="true"></span>`}
-      <span class="min-w-0 truncate"><span class=${running ? 'shimmer' : ''}>${verb}</span> <span class="text-muted">${detail}</span></span>
+      <span class="min-w-0 flex items-baseline gap-1 overflow-hidden">
+        <span class=${cx('shrink-0', running && 'shimmer')}>${verb}</span>
+        ${!subject && html`<span class="min-w-0 truncate text-muted">${detail}</span>`}
+        ${subject?.detail && html`<span class="min-w-0 truncate text-muted">${subject.detail}</span>`}
+        ${subject && subject.names.slice(0, ROOM_NAMES_SHOWN).map((n) => html`<span class="min-w-0 flex items-baseline gap-1">
+          ${n.label && html`<span class="shrink-0 whitespace-nowrap text-accent">@${n.label}</span>`}
+          ${n.title && html`<span class="min-w-0 truncate">“${n.title}”</span>`}
+          ${n.short && html`<span class="shrink-0 font-mono text-muted">${n.short}</span>`}
+        </span>`)}
+        ${subject && subject.names.length > ROOM_NAMES_SHOWN && html`<span class="shrink-0 text-faint">+${subject.names.length - ROOM_NAMES_SHOWN} more</span>`}
+      </span>
       <span class="tool-tail ml-auto shrink-0 flex items-center gap-1.5">
         ${ending.word && html`<span class=${cx('text-[12.5px] font-medium', tone)}> ${ending.word}</span>`}
         ${clock && html`<span class="text-muted tabular-nums">${running && item.at

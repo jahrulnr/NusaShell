@@ -170,7 +170,7 @@ func encodeMessage(m entity.Message, model entity.Model, fileRoot wire.MediaRoot
 		for _, a := range m.Attachments() {
 			if !model.AcceptsInput(a.Modality()) {
 				parts = append(parts, map[string]any{"type": "text",
-					"text": "(" + a.Modality().String() + " attachment omitted: model does not accept it)"})
+					"text": wire.Omitted(a, fileRoot.Readers)})
 				continue
 			}
 			p, err := encodeAttachment(a, fileRoot)

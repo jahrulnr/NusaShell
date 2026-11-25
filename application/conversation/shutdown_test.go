@@ -8,8 +8,10 @@ import (
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	"github.com/jahrulnr/nusashell/infrastructure/worker"
 )
@@ -195,7 +197,7 @@ func TestQueuedSendsRunAsTurnsInArrivalOrder(t *testing.T) {
 	}
 
 	for i, text := range []string{"one", "two", "three"} {
-		position, err := app.Enqueue(t.Context(), "queue-room", "gw1", "m1", text, appjob.SendOptions{})
+		position, err := app.Enqueue(t.Context(), "queue-room", "gw1", "m1", text, nil, appjob.SendOptions{})
 		if err != nil {
 			t.Fatalf("enqueue %q: %v", text, err)
 		}
@@ -253,5 +255,76 @@ func TestQueuedSendsRunAsTurnsInArrivalOrder(t *testing.T) {
 	}
 	if len(replies) != 3 {
 		t.Fatalf("replies = %d, want one per message", len(replies))
+	}
+}
+
+// An accepted message keeps its attachment through the wait: the queue carries
+// the reference, and the sender's turn ending changes nothing about it.
+func TestQueuedSendKeepsItsAttachmentAfterTheSenderTurnEnds(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	running := newWedgeJob()
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			close(running.release)
+		}
+	}
+	t.Cleanup(release)
+	app.post("attach-room", running)
+	select {
+	case <-running.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the blocking job never started")
+	}
+
+	att, err := valueobject.NewAttachment("file:///tmp/notes.txt", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	att.SetName("notes.txt")
+	att.SetSHA256(strings.Repeat("a", 64))
+
+	sender, cancel := context.WithCancel(t.Context())
+	position, err := app.Enqueue(sender, "attach-room", "gw1", "m1", "later", []valueobject.Attachment{att}, appjob.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if position != 1 {
+		t.Fatalf("position = %d, want 1", position)
+	}
+	// The sender's turn ends while the message still waits.
+	cancel()
+	release()
+
+	var loaded *aggregate.Conversation
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		// The room does not exist until the queued send runs: a missing room is
+		// the expected state while the worker is busy, not a failure.
+		loaded, err = app.deps.Convs.Load(t.Context(), "attach-room")
+		if err != nil && apperror.As(err).StatusCode() != 404 {
+			t.Fatal(err)
+		}
+		if err == nil && loaded.Last() != nil && loaded.Last().Role() == enum.RoleAssistant {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the queued message never ran")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	var queued *entity.Message
+	for i, m := range loaded.Messages() {
+		if m.Role() == enum.RoleUser && m.Content() == "later" {
+			queued = &loaded.Messages()[i]
+		}
+	}
+	if queued == nil {
+		t.Fatalf("the queued message is missing: %+v", loaded.Messages())
+	}
+	atts := queued.Attachments()
+	if len(atts) != 1 || atts[0].URI() != "file:///tmp/notes.txt" || atts[0].SHA256() != att.SHA256() {
+		t.Fatalf("attachments = %+v, want the accepted reference", atts)
 	}
 }

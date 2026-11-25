@@ -10,6 +10,7 @@ import (
 	"time"
 
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
@@ -27,6 +28,14 @@ const maxAnnotationsPerMessage = 20
 // WithUploads sets where owner uploads and live-page picks are kept.
 func WithUploads(u drepo.Uploads, p drepo.Picks) Option {
 	return func(app *ConversationApp) { app.uploads, app.picks = u, p }
+}
+
+// UseMediaDescriptions sets where read_media's descriptions are remembered, so a
+// deleted room takes its descriptions with it.
+func (app *ConversationApp) UseMediaDescriptions(m dservice.MediaDescriptions) {
+	app.mu.Lock()
+	app.mediaDescriptions = m
+	app.mu.Unlock()
 }
 
 // UseRecordings sets where browser recordings a message can carry are

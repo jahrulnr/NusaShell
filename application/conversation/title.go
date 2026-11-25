@@ -92,11 +92,9 @@ func (app *ConversationApp) AutoTitle(ctx context.Context, convID string) error 
 		return nil
 	}
 	from := conv.Title()
-	if err := app.Annotate(ctx, convID, Annotation{Title: &title, IfTitle: &from}); err != nil {
-		return err
-	}
-	app.notifyChanged(convID)
-	return nil
+	// Annotate announces the changed room itself — the notice belongs to the
+	// mutation, not to each caller of it.
+	return app.Annotate(ctx, convID, Annotation{Title: &title, IfTitle: &from})
 }
 
 // cleanTitle keeps the first line of a model's answer, without the

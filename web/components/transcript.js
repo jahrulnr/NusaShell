@@ -3,8 +3,8 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
-import { queuedFor, watchQueued } from '../lib/queued.js';
+import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, userLayout, splitRelay, splitReplyQuote, turnEnds } from '../lib/turn.js';
+import { queuedFor, queuedNote, watchQueued } from '../lib/queued.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
 import { ElicitationCard } from './elicitation.js';
@@ -95,9 +95,11 @@ function RelayHead({ relay }) {
     </span>
     ${relay.id && html`<${Icon} name="link" size=${14} class="text-faint group-hover/relay:text-accent transition-colors" />`}`;
   const cls = 'group/relay flex items-center gap-2.5 px-3 py-2 bg-accent/[0.06] border-b border-accent/20';
+  // data-relay-head marks the block's own head: what the message carried is
+  // drawn under it, and the layout check reads the DOM order from here.
   return relay.id
-    ? html`<a href=${'#/c/' + encodeURIComponent(relay.id)} title="Open the thread that sent this" class=${cx(cls, 'hover:bg-accent/10 transition-colors')}>${inner}</a>`
-    : html`<div class=${cls}>${inner}</div>`;
+    ? html`<a data-relay-head href=${'#/c/' + encodeURIComponent(relay.id)} title="Open the thread that sent this" class=${cx(cls, 'hover:bg-accent/10 transition-colors')}>${inner}</a>`
+    : html`<div data-relay-head class=${cls}>${inner}</div>`;
 }
 
 function CopyButton({ text, label = 'Copy' }) {
@@ -138,13 +140,18 @@ function Annotations({ list }) {
   </div>`;
 }
 
-function UserMessage({ room, msg, text, refs, files, annotations, recording, pending, steer }) {
+function UserMessage({ room, msg, text, refs, files, annotations, recording, pending, steer, relayed }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
-  // A steered input is not a prompt the owner can rewrite: it was folded into
-  // the turn that already consumed it, and the bubble drawn from the journal
-  // never offers an edit either.
-  const canEdit = msg && !steer && !isBusy(room);
+  // Where this message's uploads belong, and whether it is the owner's to
+  // rewrite: the server marks a prompt from another thread (userType 'relay'),
+  // and lib/turn.js says what that means for the layout.
+  const layout = userLayout(relayed);
+  const own = layout.extras === 'own';
+  // A steered input is not a prompt the owner can rewrite either: it was
+  // folded into the turn that already consumed it, and the bubble drawn from
+  // the journal never offers an edit.
+  const canEdit = msg && !steer && own && !isBusy(room);
   const agentRoom = !!(room.info?.agentId || selection(room).agentId);
   if (editing) {
     const save = () => { if (editMessage(room, msg.id, draft)) setEditing(false); };
@@ -170,22 +177,28 @@ function UserMessage({ room, msg, text, refs, files, annotations, recording, pen
   // as the message, its selections moved to match. A steer is owner input
   // too — the same text the composer sends mid-turn, relayed heads and all
   // — so it renders through this same bubble, marked as steered.
-  const relay = splitRelay(text);
+  // The head is in the text; whether to lead with it is the layout's call.
+  const relay = layout.relayed ? splitRelay(text) : null;
   const reply = relay ? null : splitReplyQuote(text);
   const cut = (relay || reply)?.head || 0;
   const shown = text.slice(cut);
   const stored = referencesFromStored(text, refs || msg?.references);
   const shownRefs = cut ? stored.filter((r) => r.start >= cut).map((r) => ({ ...r, start: r.start - cut, end: r.end - cut })) : stored;
   const rec = recording || msg?.recording;
-  return html`<div class="group flex flex-col items-end gap-1">
-    ${steer && html`<span class="text-[11px] text-faint">steered</span>`}
-    <${Attachments} room=${room} list=${files ? files.filter((f) => !f.pickId) : msg?.attachments} />
+  // What the message carried, and the note that it was recorded: the owner's
+  // own prompt shows them above its bubble; a prompt from another thread shows
+  // them inside that block, under its head, where they read as its own.
+  const extras = html`<${Attachments} room=${room} list=${files ? files.filter((f) => !f.pickId) : msg?.attachments} start=${!own} />
     <${Annotations} list=${annotations || (files ? files.filter((f) => f.pickId) : msg?.annotations)} />
     ${rec && html`<span class="inline-flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-lg border border-line bg-panel text-[11px] text-muted" title=${'Browser recording ' + rec.id}>
       <${Icon} name="video" size=${12} /> Browser recording · ${rec.status || 'unknown'}
-    </span>`}
+    </span>`}`;
+  return html`<div class="group flex flex-col items-end gap-1">
+    ${steer && html`<span class="text-[11px] text-faint">steered</span>`}
+    ${own && extras}
     ${text && relay && html`<div class=${cx('max-w-[85%] min-w-0 sm:min-w-72 rounded-2xl bg-raised border border-accent/25 overflow-hidden break-words', pending && 'opacity-70')}>
       <${RelayHead} relay=${relay} />
+      ${!own && html`<div class="px-3.5 pb-1 flex flex-col items-start gap-1">${extras}</div>`}
       ${shown && html`<div class="px-3.5 py-2.5"><${Markdown} text=${shown} room=${room} /></div>`}
     </div>`}
     ${text && !relay && html`<div class=${cx('max-w-[85%] rounded-2xl bg-raised border border-line px-3.5 py-2 break-words', steer && 'border-dashed', pending && 'opacity-70')}>
@@ -345,21 +358,24 @@ function FailedCard({ room }) {
   </div>`;
 }
 
-// QueuedLine is the room's cross-thread queue, said once and quietly: how many
-// messages from other threads wait behind the running turn. It subscribes to
-// the count itself (lib/queued.js) and holds it in its own state, so a new
-// number re-renders this line and nothing else — and it is not announced: a
-// count that moves while the owner reads must not interrupt a screen reader.
+// QueuedLine is the room's queue, said once and quietly: how many jobs wait in
+// it. The number is the worker's queue depth for this room, so an ordinary web
+// send or an edit counts too — it is not a count of messages from other
+// threads, and the line does not claim to know where they came from. It
+// subscribes to the count itself (lib/queued.js) and holds it in its own
+// state, so a new number re-renders this line and nothing else — and it is not
+// announced: a count that moves while the owner reads must not interrupt a
+// screen reader.
 export function QueuedLine({ room }) {
   const [waiting, setWaiting] = useState(() => queuedFor(room?.id));
   useEffect(() => {
     setWaiting(queuedFor(room?.id));
     return watchQueued((id, count) => { if (id === room?.id) setWaiting(count); });
   }, [room?.id]);
-  if (!waiting) return null;
+  if (waiting === 0) return null;
   return html`<div class="flex items-center gap-1.5 px-1 py-1 text-[12px] text-muted">
     <${Icon} name="queue" size=${13} class="text-muted" />
-    <span>${waiting} ${waiting === 1 ? 'message' : 'messages'} waiting from other threads</span>
+    <span>${queuedNote(waiting)}</span>
   </div>`;
 }
 
@@ -440,7 +456,7 @@ export function Transcript({ room, scroller }) {
       // The record of a steer carries the inputId of the command that wrote
       // it, so the row that wins over the journal replay is drawn as what it
       // is — steered, dashed, no edit — with its annotations and uploads.
-      case 'user': return html`<${UserMessage} key=${it.id} room=${r} msg=${it.msg} text=${it.msg.content} steer=${!!it.steerInput} />`;
+      case 'user': return html`<${UserMessage} key=${it.id} room=${r} msg=${it.msg} text=${it.msg.content} steer=${!!it.steerInput} relayed=${!!it.relayed} />`;
       // A steered input is owner text sent mid-turn — what the composer
       // wrote, including the head a relay from another thread adds — so it
       // renders as the same bubble a sent message does, marked steered.

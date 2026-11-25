@@ -386,6 +386,9 @@ func (s *server) handle(msg message) {
 func (s *server) configOptions() []any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A boolean option exists so the client's non-select path is exercised:
+	// its value is a bool on the wire, not a choice string.
+	strict, _ := s.values["strict"].(bool)
 	options := []any{
 		map[string]any{
 			"id": "model", "name": "Model", "category": "model", "type": "select",
@@ -415,6 +418,7 @@ func (s *server) configOptions() []any {
 	if s.legacy {
 		return options
 	}
+	options = append(options, map[string]any{"id": "strict", "name": "Strict mode", "category": "behavior", "type": "boolean", "currentValue": strict})
 	mode := map[string]any{
 		"id": "mode", "name": "Session Mode", "category": "mode", "type": "select",
 		"currentValue": s.values["mode"], "options": []any{

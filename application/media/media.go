@@ -55,6 +55,21 @@ func New(providers drepo.Provider, roles func() (Roles, error), adapters Adapter
 
 var _ dservice.MediaModels = (*App)(nil)
 
+// Identity names the model the transcription role points at, "provider/model"
+// — the identity a caller keys its transcript cache by, so switching models is
+// a miss rather than a stale transcript from the previous reader. Empty when
+// the role is off; the settings read's error when it cannot be read.
+func (a *App) Identity(_ context.Context) (string, error) {
+	roles, err := a.roles()
+	if err != nil {
+		return "", err
+	}
+	if roles.Transcription.ProviderID == "" || roles.Transcription.ModelID == "" {
+		return "", nil
+	}
+	return roles.Transcription.ProviderID + "/" + roles.Transcription.ModelID, nil
+}
+
 func (a *App) GenerateImage(ctx context.Context, req dservice.ImageRequest) ([]dservice.Media, error) {
 	if a.adapters.Image == nil {
 		return nil, apperror.New(501, "image generation is not available in this build", nil)

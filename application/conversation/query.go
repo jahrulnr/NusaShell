@@ -2,6 +2,9 @@ package appconversation
 
 import (
 	"context"
+	"fmt"
+	"slices"
+
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
@@ -111,7 +114,9 @@ type Annotation struct {
 type RuntimeBinding = appjob.RuntimeBinding
 
 // Annotate applies an Annotation. The write is queued on the room's worker
-// so it cannot race a turn's metadata saves.
+// so it cannot race a turn's metadata saves. A room that actually changed is
+// announced — the same notice a title or a fork sends — so every open tab
+// re-reads it instead of keeping the record it loaded.
 func (app *ConversationApp) Annotate(ctx context.Context, convID string, a Annotation) error {
 	res := make(chan error, 1)
 	j := &appjob.Annotate{Ctx: ctx, Title: a.Title, IfTitle: a.IfTitle, ProjectID: a.ProjectID, FromProjectID: a.FromProjectID, Pinned: a.Pinned, MemoryOff: a.MemoryOff,
@@ -120,50 +125,94 @@ func (app *ConversationApp) Annotate(ctx context.Context, convID string, a Annot
 	app.post(convID, j)
 	select {
 	case err := <-res:
-		return err
+		if err != nil {
+			return err
+		}
+		app.notifyChanged(convID)
+		return nil
 	case <-ctx.Done():
 		return apperror.New(408, "update request canceled", ctx.Err())
 	}
 }
 
 // AgentOptions lists the session options of the room's agent, with the
-// owner's picks as their current values.
+// owner's picks as their current values — a stored pick the option no longer
+// offers is not one it can call current.
 func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, error) {
 	deps := app.depsSnapshot()
 	info, err := deps.Convs.Info(ctx, convID)
 	if err != nil {
 		return nil, err
 	}
-	if info.AgentID == "" || deps.AgentRuntime == nil || deps.Agents == nil {
+	opts, err := app.optionReport(ctx, deps, info)
+	if err != nil {
+		return nil, err
+	}
+	if opts == nil {
 		return []dservice.AgentOption{}, nil
 	}
-	agent, err := deps.Agents.Load(ctx, info.AgentID)
-	if err != nil {
-		return nil, err
-	}
-	opts, err := deps.AgentRuntime.Options(ctx, agent, convID)
-	if err != nil {
-		return nil, err
-	}
 	for i, o := range opts {
-		if v, ok := info.AgentOptions[o.ID]; ok {
+		// A stored value this option does not offer is not a current one: the
+		// session would refuse it, and the picker must not draw it as applied.
+		if v, ok := info.AgentOptions[o.ID]; ok && o.Offers(v) {
 			opts[i].Current = v
 		}
 	}
 	return opts, nil
 }
 
-// SetAgentOption records the owner's pick and applies it to the room's
-// live agent session at once; otherwise the next turn applies it.
+// optionReport reads the room's option catalog — the report the picker draws:
+// the live session's when one runs, the agent's own defaults otherwise. It
+// answers nil, nil when the room runs no agent, and 503 when a room that does
+// cannot be asked: a caller must not treat "cannot tell" as "anything goes".
+func (app *ConversationApp) optionReport(ctx context.Context, deps appjob.Deps, info drepo.ConversationInfo) ([]dservice.AgentOption, error) {
+	if info.AgentID == "" {
+		return nil, nil
+	}
+	if deps.AgentRuntime == nil || deps.Agents == nil {
+		return nil, apperror.New(503, "agent options are unavailable", nil)
+	}
+	agent, err := deps.Agents.Load(ctx, info.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	return deps.AgentRuntime.Options(ctx, agent, info.ID)
+}
+
+// SetAgentOption validates the owner's pick against the agent's catalog,
+// applies it to the room's live session, and records it only once the agent
+// takes it. Two paths can refuse it and both must: a value the agent rejects
+// would make every later turn re-apply it and fail, and a room with no live
+// session — every room after a restart — has nothing to apply the pick to, so
+// the catalog is the only thing standing between the store and a value the
+// agent never took.
 func (app *ConversationApp) SetAgentOption(ctx context.Context, convID, id, value string) error {
-	if err := app.Annotate(ctx, convID, Annotation{AgentOption: &[2]string{id, value}}); err != nil {
-		return err
-	}
 	deps := app.depsSnapshot()
-	if deps.AgentRuntime == nil || value == "" {
-		return nil
+	if deps.AgentRuntime != nil && value != "" {
+		if err := deps.AgentRuntime.SetOption(ctx, convID, id, value); err != nil {
+			return err
+		}
 	}
-	return deps.AgentRuntime.SetOption(ctx, convID, id, value)
+	if value != "" {
+		info, err := deps.Convs.Info(ctx, convID)
+		if err != nil {
+			return err
+		}
+		opts, err := app.optionReport(ctx, deps, info)
+		if err != nil {
+			return err
+		}
+		if opts != nil {
+			i := slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == id })
+			if i < 0 {
+				return apperror.New(400, fmt.Sprintf("the agent offers no option %q", id), nil)
+			}
+			if !opts[i].Offers(value) {
+				return apperror.New(400, fmt.Sprintf("option %q does not offer %q", id, value), nil)
+			}
+		}
+	}
+	return app.Annotate(ctx, convID, Annotation{AgentOption: &[2]string{id, value}})
 }
 
 // AgentCommands lists the slash commands the room's agent session offers.

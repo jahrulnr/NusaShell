@@ -211,7 +211,7 @@ func rewriteCut(lines [][]byte, msgID, content string) (cut [][]byte, found bool
 		if err := json.Unmarshal(l, &lr); err != nil {
 			return nil, false, fmt.Errorf("corrupt line: %w", err)
 		}
-		if lr.Type != lineMessage || lr.Data.ID != msgID {
+		if lr.Type != lineMessage || lr.Data == nil || lr.Data.ID != msgID {
 			continue
 		}
 		if !entity.EditableMessage(enum.Role(lr.Data.Role), enum.LLMUserType(lr.Data.UserType)) {

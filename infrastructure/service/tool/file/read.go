@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"unicode/utf8"
 
@@ -24,13 +23,15 @@ import (
 type FileReadTool struct {
 	dir    string
 	store  drepo.Workspace
+	route  mediaRoute
 	schema valueobject.ToolSchema
 }
 
 // NewFileReadTool binds the tool's default root: a relative path resolves
 // inside it, an absolute path anchors where it lives. A turn-scoped
-// workspace dir overrides it per call.
-func NewFileReadTool(store drepo.Workspace, root string) (service.Tool, error) {
+// workspace dir overrides it per call. media is what a payload that turns out
+// not to be text needs — read_file routes it exactly as read_media would.
+func NewFileReadTool(store drepo.Workspace, root string, media MediaDeps) (service.Tool, error) {
 	abs, err := checkDir(store, root)
 	if err != nil {
 		return nil, err
@@ -45,7 +46,7 @@ func NewFileReadTool(store drepo.Workspace, root string) (service.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &FileReadTool{dir: abs, store: store, schema: schema}, nil
+	return &FileReadTool{dir: abs, store: store, route: mediaRoute{workspace: store, root: abs, media: media}, schema: schema}, nil
 }
 
 func (tool *FileReadTool) Schema() valueobject.ToolSchema {
@@ -86,20 +87,29 @@ func (tool *FileReadTool) Execute(ctx context.Context, call entity.ToolCall, _ s
 			retErr = closeErr
 		}
 	}()
+	// Sniff the same window read_media uses before loading the rest: a
+	// payload that is not text belongs to the media route whatever its size
+	// (its caps differ per modality), and read_file owes the caller the same
+	// answer read_media would give instead of an error naming another tool.
+	prefix := make([]byte, 512)
+	n, err := io.ReadFull(f, prefix)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return service.ToolResult{}, err
+	}
+	prefix = prefix[:n]
+	if top, _, _ := strings.Cut(service.SniffMediaType(prefix, input.Path), "/"); top != "text" {
+		return tool.route.attachOrRead(ctx, call, input.Path)
+	}
 	if info.Size() > readFileMax {
 		return service.ToolResult{}, fmt.Errorf("%q is too large to page through (%d bytes > %d MiB) — read parts of it with exec (sed -n, head, tail)", input.Path, info.Size(), readFileMax>>20)
 	}
-	data, err := io.ReadAll(io.LimitReader(f, readFileMax+1))
+	rest, err := io.ReadAll(io.LimitReader(f, readFileMax+1-int64(len(prefix))))
 	if err != nil {
 		return service.ToolResult{}, err
 	}
+	data := append(append([]byte{}, prefix...), rest...)
 	if len(data) > readFileMax {
 		return service.ToolResult{}, fmt.Errorf("%q is too large to page through (> %d MiB)", input.Path, readFileMax>>20)
-	}
-	// The schema promises UTF-8 text. Sniff the same window read_media
-	// uses and send non-text payloads there — a PNG is not a document.
-	if top, _, _ := strings.Cut(http.DetectContentType(data), "/"); top != "text" {
-		return service.ToolResult{}, fmt.Errorf("%q is not text — use read_media", input.Path)
 	}
 	// Text-sniffed but invalid UTF-8 (Latin-1, UTF-16 without BOM, …)
 	// reaches the model as replacement characters — the provider JSON

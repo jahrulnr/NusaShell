@@ -400,3 +400,55 @@ func TestCanceledStreamKeepsItsPartialReply(t *testing.T) {
 		t.Fatalf("assistant messages = %d, want exactly the one partial reply", assistants)
 	}
 }
+
+// A prompt another thread relayed is user content this room cannot rewrite: the
+// message keeps its attachment and is not editable here, where the owner never
+// typed it.
+func TestRelayedAttachmentIsNotEditableInTheTarget(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	att, err := valueobject.NewAttachment("file:///tmp/shot.png", "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	att.SetName("shot.png")
+	att.SetSHA256(strings.Repeat("b", 64))
+
+	j := &Send{Deps: d, Ctx: t.Context(), Receipt: NewPersistenceReceipt(),
+		ProviderID: "gw1", ModelID: "m1", Message: "look at this",
+		Attachments: []valueobject.Attachment{att},
+		Opts:        SendOptions{Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}},
+	}
+	j.Result = make(chan error, 1)
+	j.Bind("room", nil)
+	if err := j.Execute(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-j.Result; err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var relayed *entity.Message
+	for i, m := range loaded.Messages() {
+		if m.Role() == enum.RoleUser && strings.Contains(m.Content(), "look at this") {
+			relayed = &loaded.Messages()[i]
+		}
+	}
+	if relayed == nil {
+		t.Fatalf("the relayed message is missing: %+v", loaded.Messages())
+	}
+	if relayed.Editable() {
+		t.Fatal("a relayed prompt is editable in the target room")
+	}
+	if got := relayed.UserType(); got != enum.LLMUserTypeRelay {
+		t.Fatalf("user type = %q, want relay", got)
+	}
+	atts := relayed.Attachments()
+	if len(atts) != 1 || atts[0].URI() != "file:///tmp/shot.png" || atts[0].SHA256() != att.SHA256() {
+		t.Fatalf("attachments = %+v, want the relayed file with its pin", atts)
+	}
+}

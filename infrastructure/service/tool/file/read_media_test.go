@@ -129,8 +129,12 @@ func TestReadMediaToolRejects(t *testing.T) {
 		}
 	}
 
-	if _, err := runReadMedia(t, tool, `{"path":"note.txt"}`); err == nil || !strings.Contains(err.Error(), "read_file") {
-		t.Fatalf("text file: want redirect to read_file, got %v", err)
+	res, err := runReadMedia(t, tool, `{"path":"note.txt"}`)
+	if err != nil {
+		t.Fatalf("text file: read_media must render it like read_file, got %v", err)
+	}
+	if !strings.Contains(res.Text, "plain text, not media") || len(res.Attachments) != 0 {
+		t.Fatalf("text file: %+v, want the text and no attachment", res)
 	}
 	if _, err := runReadMedia(t, tool, `{"path":"big.png"}`); err == nil || !strings.Contains(err.Error(), "10 MiB") {
 		t.Fatalf("oversize: want 10 MiB cap error, got %v", err)
@@ -139,7 +143,7 @@ func TestReadMediaToolRejects(t *testing.T) {
 
 func mustMediaTool(t *testing.T, root string) service.Tool {
 	t.Helper()
-	tool, err := NewReadMediaTool(repoworkspace.NewLocal(), root)
+	tool, err := NewReadMediaTool(repoworkspace.NewLocal(), root, MediaDeps{})
 	if err != nil {
 		t.Fatal(err)
 	}

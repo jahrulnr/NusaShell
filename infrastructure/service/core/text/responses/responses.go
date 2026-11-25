@@ -34,6 +34,7 @@ type Service struct {
 	title     string
 	fileRoot  string
 	fileStore drepo.Workspace
+	readers   wire.Readers
 	idle      time.Duration
 }
 
@@ -57,6 +58,7 @@ func New(opts coretext.Options) *Service {
 		title:     opts.Title,
 		fileRoot:  opts.FileRoot,
 		fileStore: opts.FileStore,
+		readers:   opts.MediaReaders,
 		idle:      time.Duration(svcCfg.IdleTimeout),
 	}
 }
@@ -66,7 +68,7 @@ func New(opts coretext.Options) *Service {
 // selected by prov; events reach onEvent uniformly either way.
 func (s *Service) Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) (retErr error) {
 	stream := prov.StreamMode()
-	body, err := encodeRequest(conv, model, stream, wire.MediaRoot{Dir: coretext.FileRoot(conv, s.fileRoot), Store: s.fileStore})
+	body, err := encodeRequest(conv, model, stream, wire.MediaRoot{Dir: coretext.FileRoot(conv, s.fileRoot), Store: s.fileStore, Readers: s.readers})
 	if err != nil {
 		return err
 	}

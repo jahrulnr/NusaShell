@@ -71,3 +71,31 @@ func TestFileMessageKinds(t *testing.T) {
 		t.Fatal("joinText")
 	}
 }
+
+// A file whose sender left the mimetype empty is typed by its bytes and its
+// own name: an .m4a sent that way is audio, not an unreadable "file" — the
+// same class as B-023, at the WhatsApp door.
+func TestDeclaredMediaType(t *testing.T) {
+	m4a := []byte("\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00")
+	mp4 := []byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom")
+	ogg := []byte("OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00")
+	cases := []struct {
+		name     string
+		declared string
+		file     string
+		data     []byte
+		want     string
+	}{
+		{"empty mimetype, m4a name", "", "voice.m4a", m4a, "audio/mp4"},
+		{"opaque mimetype, m4a name", "application/octet-stream", "voice.m4a", m4a, "audio/mp4"},
+		{"declared wins", "audio/ogg; codecs=opus", "voice.m4a", m4a, "audio/ogg"},
+		{"empty mimetype, mp4 name", "", "clip.mp4", mp4, "video/mp4"},
+		{"empty mimetype, no name", "", "", ogg, "audio/ogg"},
+		{"empty mimetype, unknown bytes", "", "", []byte{0x00, 0x01, 0x02}, "application/octet-stream"},
+	}
+	for _, tc := range cases {
+		if got := declaredMediaType(tc.declared, tc.file, tc.data); got != tc.want {
+			t.Errorf("%s: declaredMediaType = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

@@ -3,9 +3,9 @@
 import { calls, mockApi, sleep, sockets } from './env.mjs';
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { state, subscribe } from '../lib/store.js';
+import { emitCount, state } from '../lib/store.js';
 import * as chat from '../lib/chat.js';
-import { queuedFor } from '../lib/queued.js';
+import { queuedFor, queuedNote } from '../lib/queued.js';
 import { historyItems, liveHistory, liveSegments } from '../lib/turn.js';
 
 let ws;
@@ -28,6 +28,19 @@ function firstSend(text, sel = { providerId: 'p', modelId: 'm' }) {
   home.sel = sel;
   assert.equal(chat.submit(home, text), true);
   return sentTurns().at(-1);
+}
+
+// reconnect drops the socket and opens the next one once it exists. The wait is
+// on the socket, not on a clock: the backoff jitters, so a fixed sleep would
+// sometimes open nothing and leave a timer to fire in the next test.
+async function reconnect(code) {
+  const was = ws;
+  ws.onclose(code == null ? undefined : { code });
+  for (let i = 0; i < 60 && sockets.at(-1) === was; i++) await sleep(50);
+  ws = sockets.at(-1);
+  assert.notEqual(ws, was, 'a reconnect opens a new socket');
+  ws.open();
+  await sleep(30);
 }
 
 const opened = (cmd, conversationId, turnId = 't1') => ws.serve({ type: 'turn.opened', requestId: cmd.requestId, conversationId, turnId, seq: 0 });
@@ -1444,25 +1457,170 @@ test('a queued notice updates the room without re-rendering the transcript', asy
   chat.navigate('#/c/c_1');
   await sleep(40);
   const r = state.rooms.c_1;
-  let flushes = 0;
-  const off = subscribe(() => { flushes += 1; });
   const messages = r.messages;
 
-  ws.serve({ type: 'conversation.queued', conversationId: 'c_1', payload: { waiting: 3 } });
-  await sleep(20);
-  assert.equal(queuedFor('c_1'), 3, 'the line reads the count');
-  assert.equal(flushes, 0, 'nothing in the store re-rendered');
+  // A frame is handled in one synchronous step, so the store's own count on
+  // both sides of it says whether the notice asked for a render. Counting
+  // flushes across a wait instead would also catch a toast from an earlier
+  // test dismissing on its timer — a real flush, with nothing to do with this
+  // frame.
+  // A count is not news for the transcript and asks the store for nothing; the
+  // drain is the one notice that reads the room, and it reads it once.
+  const notice = (waiting) => {
+    const asked = emitCount();
+    ws.serve({ type: 'conversation.queued', conversationId: 'c_1', payload: { waiting } });
+    assert.equal(queuedFor('c_1'), waiting, 'the line reads the count');
+    return emitCount() - asked;
+  };
+  assert.equal(notice(3), 0, 'a count asks the store for nothing');
   assert.equal(r.messages, messages, 'the transcript list is the same object');
-
-  ws.serve({ type: 'conversation.queued', conversationId: 'c_1', payload: { waiting: 1 } });
+  assert.equal(notice(1), 0, 'the last notice wins, and still asks for nothing');
+  assert.equal(notice(0), 1, 'the drain reads the room once: the finished turn lands');
   await sleep(20);
-  assert.equal(queuedFor('c_1'), 1, 'the last notice wins');
+  assert.notEqual(r.messages, messages, 'the read replaces the list; the notice alone never does');
+  assert.deepEqual(r.messages, messages, 'and it holds what the room answered');
+});
 
-  ws.serve({ type: 'conversation.queued', conversationId: 'c_1', payload: { waiting: 0 } });
+// The count is state, not only a notice: a tab that opens a queued room reads
+// it with the room, so the line is there on the first paint — no frame needed.
+test('the first open of a queued room shows its count without a frame', async () => {
+  serveThread('c_w1', { info: { waiting: 3 }, messages: [{ id: 'm1', role: 'user', content: 'queued work' }] });
+  chat.navigate('#/c/c_w1');
+  await sleep(40);
+  assert.equal(queuedFor('c_w1'), 3, 'the room record carried the depth');
+  assert.equal(queuedNote(queuedFor('c_w1')), '3 waiting to run');
+});
+
+test('a room whose record omits waiting reads zero, and shows no line', async () => {
+  serveThread('c_w3', { info: {}, messages: [{ id: 'm1', role: 'user', content: 'quiet' }] });
+  chat.navigate('#/c/c_w3');
+  await sleep(40);
+  assert.equal(queuedFor('c_w3'), 0);
+  // a count from a frame is not kept when the room's own record says otherwise
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_w3', payload: { waiting: 5 } });
+  assert.equal(queuedFor('c_w3'), 5);
+  await chat.loadInfo(state.rooms.c_w3, { force: true });
+  assert.equal(queuedFor('c_w3'), 0, 'the newer read wins, and an absent leaf is zero');
+});
+
+// A reconnect loses the frame that carried the depth; the room's record (and
+// the list) still know it, so the first read after the reconnect brings the
+// number back — no drain frame required.
+test('a reconnect’s unknown depth comes back on the next read of the room', async () => {
+  serveThread('c_w2', { info: { waiting: 2 }, messages: [{ id: 'm1', role: 'user', content: 'queued work' }] });
+  chat.navigate('#/c/c_w2');
+  await sleep(40);
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_w2', payload: { waiting: 2 } });
+  await reconnect();
+  assert.equal(queuedFor('c_w2'), null, 'the frame that carried the number is gone');
+  await chat.loadInfo(state.rooms.c_w2, { force: true });
+  assert.equal(queuedFor('c_w2'), 2, 'the room record still knows, so the line counts again');
+});
+
+// The list is the other read that carries it — the one a reconnect refreshes.
+test('the thread list seeds the count for rooms it names', async () => {
+  mockApi({
+    'GET /api/conversations': { data: [{ id: 'c_w4', title: 'Queued', waiting: 2 }, { id: 'c_w5', title: 'Quiet' }], page: { total: 2 } },
+  });
+  await chat.loadConversations();
+  assert.equal(queuedFor('c_w4'), 2);
+  assert.equal(queuedFor('c_w5'), 0, 'a row with no waiting leaf is a room with nothing waiting');
+});
+
+// A queue drains, and the turn that was waiting in it is already in history:
+// the drain frame reads the room once, so the answer appears without a reload.
+// `waiting: 0` is sent when the worker is idle — after the job's turn ended —
+// so the read lands on a finished turn, not on the prompt that started it.
+test('a drain reads the room once, and a second zero reads nothing', async () => {
+  serveThread('c_q1', { messages: [{ id: 'm1', role: 'user', content: 'queued work' }] });
+  chat.navigate('#/c/c_q1');
+  await sleep(40);
+  calls.length = 0;
+
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q1', payload: { waiting: 1 } });
+  await sleep(10);
+  assert.equal(queuedFor('c_q1'), 1);
+  assert.equal(queuedNote(1), '1 waiting to run', 'the line reads what waits, not who sent it');
+  assert.equal(calls.length, 0, 'a count alone asks the room for nothing');
+
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q1', payload: { waiting: 0 } });
   await sleep(20);
-  assert.equal(queuedFor('c_1'), 0, 'drained: the line goes away');
-  assert.equal(flushes, 0);
-  off();
+  assert.equal(queuedFor('c_q1'), 0, 'drained: the line goes away');
+  assert.equal(calls.filter((c) => c.url.includes('/c_q1/messages')).length, 1, 'one read for the finished turn');
+
+  // The same zero again is not a transition: nothing new happened.
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q1', payload: { waiting: 0 } });
+  await sleep(20);
+  assert.equal(calls.filter((c) => c.url.includes('/c_q1/messages')).length, 1, 'no second read');
+});
+
+test('a room that was never queued shows nothing and reads nothing for a zero', async () => {
+  serveThread('c_q3', { messages: [{ id: 'm1', role: 'user', content: 'quiet' }] });
+  chat.navigate('#/c/c_q3');
+  await sleep(40);
+  calls.length = 0;
+
+  assert.equal(queuedFor('c_q3'), 0);
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q3', payload: { waiting: 0 } });
+  await sleep(20);
+  assert.equal(queuedFor('c_q3'), 0);
+  assert.equal(calls.filter((c) => c.url.includes('/c_q3/messages')).length, 0, 'a zero without a queue is not news');
+});
+
+// A job can die with its worker, and a server can stop before sending the
+// drain: the next activity frame is the only word the room gets, so it reads
+// the history then — even though the TTL would call that history fresh.
+// Nothing polls; this is a reaction to a frame that arrived.
+test('an activity frame reads a room whose drain never came', async () => {
+  serveThread('c_q4', { messages: [{ id: 'm1', role: 'user', content: 'queued work' }] });
+  chat.navigate('#/c/c_q4');
+  await sleep(40);
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q4', payload: { waiting: 2 } });
+  await sleep(10);
+  calls.length = 0;
+
+  ws.serve({ type: 'conversation.activity', conversationId: 'c_q4', turnId: 't_other', payload: { state: 'message' } });
+  await sleep(20);
+  assert.equal(calls.filter((c) => c.url.includes('/c_q4/messages')).length, 1, 'the room is read once');
+});
+
+// Frames sent while the socket was down are never replayed: a reconnect reads
+// the room the queue notice was about, because its drain may have been sent
+// into the gap. The count went with those frames, so the line keeps the wait
+// and drops the number it can no longer vouch for.
+test('a reconnect keeps a wait it cannot count, and reads the room', async () => {
+  serveThread('c_q5', { messages: [{ id: 'm1', role: 'user', content: 'queued work' }] });
+  chat.navigate('#/c/c_q5');
+  await sleep(40);
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q5', payload: { waiting: 2 } });
+  await sleep(10);
+  assert.equal(queuedFor('c_q5'), 2);
+  calls.length = 0;
+
+  await reconnect();
+  assert.equal(queuedFor('c_q5'), null, 'the depth is unknown, not the last number it heard');
+  assert.equal(queuedNote(queuedFor('c_q5')), 'waiting to run', 'a wait it cannot count still says so, with no number');
+  assert.equal(calls.filter((c) => c.url.includes('/c_q5/messages')).length, 1, 'one catch-up read');
+
+  // the next notice is the newest word: it brings the number back
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q5', payload: { waiting: 1 } });
+  assert.equal(queuedFor('c_q5'), 1);
+});
+
+// The queue lives in the server's memory, and a server that closes the socket
+// with 1000/1012 is telling every tab it is going away — the wait it was
+// holding cannot outlive it, so the line goes with the process.
+test('a server that said it is leaving takes the waiting line with it', async () => {
+  serveThread('c_q6', { messages: [{ id: 'm1', role: 'user', content: 'queued work' }] });
+  chat.navigate('#/c/c_q6');
+  await sleep(40);
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_q6', payload: { waiting: 2 } });
+  await sleep(10);
+  calls.length = 0;
+
+  await reconnect(1012);
+  assert.equal(queuedFor('c_q6'), 0, 'nothing waits behind a queue the server took with it');
+  assert.equal(calls.filter((c) => c.url.includes('/c_q6/messages')).length, 1, 'and the room is still read once');
 });
 
 test('a stop tool answer names the same count, and the newer number wins', async () => {

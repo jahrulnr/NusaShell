@@ -270,10 +270,21 @@ func loadEnvFile(path string) {
 // sequences into the operator's terminal.
 func printErr(w io.Writer, err error) {
 	if appErr, ok := errors.AsType[apperror.IAppError](err); ok {
-		fmt.Fprintln(w, "nusashell:", cliterm.Sanitize(appErr.Caused()))
+		fmt.Fprintln(w, "nusashell:", cliterm.Sanitize(explainError(appErr)))
 		return
 	}
 	fmt.Fprintln(w, "nusashell:", cliterm.Sanitize(err.Error()))
+}
+
+// explainError renders the status, the public message, and the cause — except
+// when the message already carries the cause's words. A detail that moved into
+// the message for the wire (an expected type, a leaf's name) must not be
+// printed twice here; the check is string containment, nothing else.
+func explainError(appErr apperror.IAppError) string {
+	if cause := errors.Unwrap(appErr); cause != nil && strings.Contains(appErr.Error(), cause.Error()) {
+		return fmt.Sprintf("error %d: %s", appErr.StatusCode(), appErr.Error())
+	}
+	return appErr.Caused()
 }
 
 func isTTY(r io.Reader) bool {

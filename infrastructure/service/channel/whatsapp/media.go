@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -41,12 +40,19 @@ func (c *Channel) inboundFiles(ctx context.Context, msg *waE2E.Message, id types
 			text = joinText(text, "["+kind+" could not be downloaded]")
 			return
 		}
-		mediaType = strings.TrimSpace(strings.Split(mediaType, ";")[0])
-		if mediaType == "" {
-			mediaType = http.DetectContentType(data)
-		}
 		fileName = filepath.Base(strings.TrimSpace(fileName))
-		if fileName == "" || fileName == "." || fileName == "/" {
+		if fileName == "." || fileName == "/" {
+			fileName = ""
+		}
+		// The sender's mimetype first; the bytes and the file's own name when
+		// it said nothing (or said opaque data) — an .m4a document sent that
+		// way must not reach the room as an unreadable "file".
+		hint := fileName
+		if hint == "" {
+			hint = stem + fallbackExt
+		}
+		mediaType = declaredMediaType(mediaType, hint, data)
+		if fileName == "" {
 			fileName = stem + "-" + id + extensionFor(mediaType, fallbackExt)
 		}
 		files = append(files, dservice.ChannelFile{Name: fileName, MediaType: mediaType, Data: data})
@@ -75,6 +81,20 @@ func (c *Channel) inboundFiles(ctx context.Context, msg *waE2E.Message, id types
 		take("Sticker", "sticker", ".webp", "", x.GetMimetype(), x, x.GetFileLength())
 	}
 	return files, text
+}
+
+// declaredMediaType is the type a file carries: what the sender said (or the
+// caller set), else what the bytes say, with the file's own name settling the
+// containers the bytes cannot tell apart. An opaque "application/octet-stream"
+// counts as "not said": an .m4a sent that way would otherwise be stored as an
+// unreadable file and refused by read_file — the same class as B-023, at the
+// channel door.
+func declaredMediaType(declared, name string, data []byte) string {
+	mime := strings.TrimSpace(strings.Split(declared, ";")[0])
+	if mime == "" || strings.EqualFold(mime, "application/octet-stream") {
+		return dservice.SniffMediaType(data, name)
+	}
+	return mime
 }
 
 func (c *Channel) download(ctx context.Context, m whatsmeow.DownloadableMessage, size uint64) ([]byte, error) {
@@ -173,10 +193,7 @@ func (c *Channel) sendFile(ctx context.Context, jid types.JID, f dservice.Channe
 	if client == nil || !client.IsLoggedIn() {
 		return "", errors.New("WhatsApp is not connected")
 	}
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(f.MediaType, ";")[0]))
-	if mediaType == "" {
-		mediaType = http.DetectContentType(f.Data)
-	}
+	mediaType := strings.ToLower(declaredMediaType(f.MediaType, f.Name, f.Data))
 	kind := whatsmeow.MediaDocument
 	switch {
 	case strings.HasPrefix(mediaType, "image/"):

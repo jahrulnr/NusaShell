@@ -390,8 +390,8 @@ func TestMessagePatchesBindToOwningMessageInOrder(t *testing.T) {
 	second, _ := entity.NewMessage(enum.RoleAssistant, "second")
 	second.AddToolCall(call)
 	records := []lineRecord{
-		{Type: lineMessage, Data: encodeMessage(first)},
-		{Type: lineMessage, Data: encodeMessage(second)},
+		{Type: lineMessage, Data: messageEnvelope(first)},
+		{Type: lineMessage, Data: messageEnvelope(second)},
 		{Type: lineToolOutput, CallID: "dead-call", Output: "ignored"},
 		{Type: lineToolOutput, CallID: "shared-call", Output: "early"},
 		{Type: lineToolOutput, CallID: "shared-call", Output: "late"},
@@ -1252,7 +1252,7 @@ func messageLine(t *testing.T, content string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(lineRecord{Type: lineMessage, Data: encodeMessage(m)})
+	raw, err := json.Marshal(lineRecord{Type: lineMessage, Data: messageEnvelope(m)})
 	if err != nil {
 		t.Fatal(err)
 	}

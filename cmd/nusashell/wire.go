@@ -31,6 +31,7 @@ import (
 	repoconversation "github.com/jahrulnr/nusashell/infrastructure/repository/conversation"
 	repofiletree "github.com/jahrulnr/nusashell/infrastructure/repository/filetree"
 	repolog "github.com/jahrulnr/nusashell/infrastructure/repository/log"
+	"github.com/jahrulnr/nusashell/infrastructure/repository/mediadescription"
 	repomemory "github.com/jahrulnr/nusashell/infrastructure/repository/memory"
 	repopick "github.com/jahrulnr/nusashell/infrastructure/repository/pick"
 	repoproject "github.com/jahrulnr/nusashell/infrastructure/repository/project"
@@ -66,6 +67,7 @@ import (
 	toolexec "github.com/jahrulnr/nusashell/infrastructure/service/tool/terminal"
 	toolweb "github.com/jahrulnr/nusashell/infrastructure/service/tool/web"
 	toolworkspace "github.com/jahrulnr/nusashell/infrastructure/service/tool/workspace"
+	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
 	"github.com/jahrulnr/nusashell/migration"
 	"github.com/jahrulnr/searchwire"
 )
@@ -167,19 +169,11 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	if err != nil {
 		return nil, err
 	}
-	readFile, err := toolfile.NewFileReadTool(workspaceStore, workspaceRoot)
-	if err != nil {
-		return nil, err
-	}
 	writeFile, err := toolfile.NewFileWriteTool(workspaceStore, workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
 	patchFile, err := toolfile.NewFilePatchTool(workspaceStore, workspaceRoot)
-	if err != nil {
-		return nil, err
-	}
-	readMedia, err := toolfile.NewReadMediaTool(workspaceStore, workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +235,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	if err != nil {
 		return nil, err
 	}
-	for _, tool := range []dservice.Tool{readFile, searchFiles, writeFile, patchFile, readMedia, execTool, execSession, writeStdin, workspaceRecord, projectContext, skills, readSkill, customTools, updatePlan} {
+	for _, tool := range []dservice.Tool{searchFiles, writeFile, patchFile, execTool, execSession, writeStdin, workspaceRecord, projectContext, skills, readSkill, customTools, updatePlan} {
 		tools[tool.Schema().Name()] = tool
 	}
 	// Web search/fetch run locally through searchwire so the bound model
@@ -314,6 +308,9 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 
 	// One adapter instance per wire style — each is stateless and reads the
 	// provider per Send, so the same instance serves every provider of a style.
+	// The map is declared empty here and filled below, after the tool catalog
+	// decides whether the omitted-attachment placeholder may name a reader;
+	// the vision resolver closes over it and reads it per call.
 	textOpts := coretext.Options{
 		Title:         cfg.App.Name,
 		Referer:       cfg.App.Source,
@@ -323,12 +320,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		FileRoot:      workspaceRoot,
 		FileStore:     workspaceStore,
 	}
-	services := map[enum.Style]dservice.TextModelService{
-		enum.StyleCompletion:      textcompletion.New(textOpts),
-		enum.StyleResponses:       textresponses.New(textOpts),
-		enum.StyleMessages:        textmessages.New(textOpts),
-		enum.StyleGenerateContent: textgeneratecontent.New(textOpts),
-	}
+	services := make(map[enum.Style]dservice.TextModelService, 4)
 	// Media tools run on the models assigned to the media roles in
 	// Settings → Models, read from the file on every call so a change
 	// applies without a restart.
@@ -369,6 +361,75 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	for _, tool := range mediaTools {
 		tools[tool.Schema().Name()] = tool
 	}
+	// The file readers route by the turn model's capabilities: attach what it
+	// can read, describe (or transcribe) what it cannot. The vision bridge
+	// and the description store are read per call, so Settings changes apply
+	// without a restart; the resolver loads what models.vision names and
+	// picks the text adapter for that model's wire style — the same
+	// (provider, model) → service resolution a turn uses.
+	vision := dservice.VisionFuncs{
+		Settings: func(context.Context) (dservice.VisionReading, error) {
+			live := cfg
+			if err := live.Load(repoconfig.NewLocal(), configPath); err != nil {
+				return dservice.VisionReading{}, err
+			}
+			return dservice.VisionReading{
+				ProviderID: live.Models.Vision.Provider,
+				ModelID:    live.Models.Vision.Model,
+				Consent:    live.Media.ReadingConsent,
+			}, nil
+		},
+		Resolve: func(ctx context.Context, providerID, modelID string) (dservice.VisionTarget, error) {
+			prov, err := providers.Load(ctx, providerID)
+			if err != nil {
+				return dservice.VisionTarget{}, err
+			}
+			model, ok := prov.Model(modelID)
+			if !ok {
+				return dservice.VisionTarget{}, fmt.Errorf(
+					"the vision model %s is no longer in provider %s's catalog — choose another for models.vision", modelID, providerID)
+			}
+			style := model.WireStyle(prov.Style())
+			svc, ok := services[style]
+			if !ok {
+				return dservice.VisionTarget{}, fmt.Errorf("no adapter for the vision model's wire style %s", style)
+			}
+			return dservice.VisionTarget{Provider: prov, Model: model, Service: svc}, nil
+		},
+	}
+	// Descriptions live behind a repository, so a deleted room's text leaves
+	// with the room: the tool writes it and the broker purges it.
+	descriptions := mediadescription.New(filepath.Join(dir, "media-descriptions"))
+	media := toolfile.MediaDeps{Descriptions: descriptions, Vision: vision, Transcriber: mediaModels}
+	readMedia, err := toolfile.NewReadMediaTool(workspaceStore, workspaceRoot, media)
+	if err != nil {
+		_ = logger.Close()
+		_ = db.Close()
+		return nil, err
+	}
+	readFile, err := toolfile.NewFileReadTool(workspaceStore, workspaceRoot, media)
+	if err != nil {
+		_ = logger.Close()
+		_ = db.Close()
+		return nil, err
+	}
+	tools[readMedia.Schema().Name()] = readMedia
+	tools[readFile.Schema().Name()] = readFile
+	// The placeholder a model without the modality sees names the reader
+	// that can actually help with that modality — and only when this build
+	// registered it.
+	var readers wire.Readers
+	if _, ok := tools[toolfile.ReadMediaToolName]; ok {
+		readers.Image = toolfile.ReadMediaToolName
+	}
+	if _, ok := tools[toolmedia.TranscribeToolName]; ok {
+		readers.Audio = toolmedia.TranscribeToolName
+	}
+	textOpts.MediaReaders = readers
+	services[enum.StyleCompletion] = textcompletion.New(textOpts)
+	services[enum.StyleResponses] = textresponses.New(textOpts)
+	services[enum.StyleMessages] = textmessages.New(textOpts)
+	services[enum.StyleGenerateContent] = textgeneratecontent.New(textOpts)
 	// Memory is read live too: turning it off in Settings stops the index
 	// and the tools at the next step. Memory search embeds with the
 	// embedding role when one is assigned, and falls back to full text.
@@ -415,6 +476,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		appconversation.WithAgents(agentRepo, agentRuntime),
 		appconversation.WithProjects(projectRepo),
 		appconversation.WithUploads(uploads, picks))
+	conversations.UseMediaDescriptions(descriptions)
 	return &engine{
 		conversations: conversations,
 		projects:      appproject.New(projectRepo, workspaceStore, conversations),

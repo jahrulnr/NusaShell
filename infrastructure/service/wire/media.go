@@ -9,10 +9,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
@@ -41,6 +45,78 @@ func MaxAttachmentBytes(modality enum.Modality) int64 {
 type MediaRoot struct {
 	Dir   string
 	Store drepo.Workspace
+	// Readers names the tools that can read an attachment the target model
+	// cannot take, by modality. The placeholder a dropped file leaves behind
+	// points at the one that can actually help — read_media for images,
+	// transcribe for audio, nothing for video.
+	Readers Readers
+}
+
+// Readers names the tools that can read an attachment the target model cannot
+// take. A modality with no reader is named by no tool: pointing a video at a
+// tool that cannot hand it over would be worse than silence.
+type Readers struct {
+	Image string
+	Audio string
+}
+
+// For returns the tool that can read mod, "" when nothing can help.
+func (r Readers) For(mod enum.Modality) string {
+	switch mod {
+	case enum.ModalityImage:
+		return r.Image
+	case enum.ModalityAudio:
+		return r.Audio
+	}
+	return ""
+}
+
+// Omitted is the placeholder that stands in for an attachment the target
+// model cannot read: it names the file and why it was dropped, and — when a
+// reader can help with that modality — the tool that can. A dropped file is
+// never silent: the model either asks the right tool or, with no reader, still
+// learns which file it is missing.
+func Omitted(a valueobject.Attachment, readers Readers) string {
+	modality := a.Modality().String()
+	var b strings.Builder
+	b.WriteString("(" + modality)
+	if name := safeName(a.Name()); name != "" {
+		b.WriteString(" " + strconv.Quote(name))
+	}
+	b.WriteString(" omitted: model does not accept " + pluralModality(a.Modality()))
+	if reader := readers.For(a.Modality()); reader != "" {
+		b.WriteString("; " + reader + " can read it")
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// pluralModality names the modality as a denominal object: "images" and
+// "files" read as classes, "audio" and "video" as mass nouns.
+func pluralModality(mod enum.Modality) string {
+	switch mod {
+	case enum.ModalityImage:
+		return "images"
+	case enum.ModalityFile:
+		return "files"
+	}
+	return mod.String()
+}
+
+// safeName reduces a stored attachment name to one printable path base —
+// the name lands in a prompt, so newlines and quotes must not survive.
+func safeName(name string) string {
+	name = path.Base(strings.ReplaceAll(name, `\`, "/"))
+	if name == "." || name == "/" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range name {
+		if r >= 0x20 && r != 0x7f && r != '"' && r != '\'' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // ResolveURI materializes an attachment reference into a sendable URL. Local
@@ -166,6 +242,11 @@ func readLocal(a valueobject.Attachment, fileRoot MediaRoot) (raw []byte, err er
 	return raw, nil
 }
 
+// ErrPinChanged marks an attachment whose bytes no longer match the digest its
+// producer pinned: the caller decides what a changed file means, but every path
+// must refuse to serve it.
+var ErrPinChanged = errors.New("attachment content changed")
+
 // verifyPin enforces the optional content pin: resolved bytes must hash
 // to the digest the producer recorded at check time.
 func verifyPin(a valueobject.Attachment, raw []byte) error {
@@ -175,9 +256,40 @@ func verifyPin(a valueobject.Attachment, raw []byte) error {
 	sum := sha256.Sum256(raw)
 	if got := hex.EncodeToString(sum[:]); got != a.SHA256() {
 		return apperror.New(400, "attachment content changed",
-			fmt.Errorf("sha256 mismatch: got %s, want %s", got, a.SHA256()))
+			fmt.Errorf("%w: got %s, want %s", ErrPinChanged, got, a.SHA256()))
 	}
 	return nil
+}
+
+// VerifyPinnedFile re-checks a local attachment's content pin without
+// materializing what it will send. The inline path verifies while it reads; a
+// reference handed to an agent is read by the agent itself, so the pin has to
+// be checked before the reference crosses — one rule, both paths, or a changed
+// file is served as a different picture through the other door.
+//
+// An unpinned reference and a remote URI have nothing to verify here: a remote
+// reference is the provider's to fetch, and an unpinned file never claimed a
+// hash.
+func VerifyPinnedFile(a valueobject.Attachment) error {
+	uri := a.URI()
+	if !strings.HasPrefix(uri, "file://") || a.SHA256() == "" {
+		return nil
+	}
+	path := strings.TrimPrefix(uri, "file://")
+	f, err := os.Open(path)
+	if err != nil {
+		return apperror.New(400, "attachment unreadable", err)
+	}
+	defer f.Close()
+	limit := MaxAttachmentBytes(a.Modality())
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return apperror.New(400, "attachment unreadable", err)
+	}
+	if int64(len(raw)) > limit {
+		return apperror.New(400, "attachment exceeds media limit", nil)
+	}
+	return verifyPin(a, raw)
 }
 
 // decodeDataURI extracts the base64 payload of a data: URI.

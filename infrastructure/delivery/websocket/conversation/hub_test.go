@@ -180,6 +180,14 @@ func newHub(t *testing.T, sender Sender) *Hub {
 
 // dial upgrades a raw socket onto the hub — the upgrade edge itself is
 // covered by the root handler tests; here the hub is under test.
+//
+// It returns only once the hub holds the socket. Gorilla's Dial returns
+// the moment the 101 lands, and Attach — the goroutine behind the
+// upgrade — registers the socket a few allocations later, so a test that
+// dials and immediately broadcasts would race an empty socket set and
+// wait out its read deadline for a frame nobody was sent. A real tab
+// cannot hit this: its first command travels over the socket, so the
+// read loop only sees it after Attach registered the conn.
 func dial(t *testing.T, h *Hub) *websocket.Conn {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,12 +199,35 @@ func dial(t *testing.T, h *Hub) *websocket.Conn {
 		h.Attach(ws)
 	}))
 	t.Cleanup(srv.Close)
+	before := socketSet(h)
 	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A socket the flood killed may be dropped while this one attaches, so
+	// the count can fall as easily as rise: wait for a socket that was not
+	// there before, not for a bigger set.
+	waitUntil(t, func() bool {
+		for c := range socketSet(h) {
+			if _, held := before[c]; !held {
+				return true
+			}
+		}
+		return false
+	})
 	t.Cleanup(func() { ws.Close() })
 	return ws
+}
+
+// socketSet is the test-side view of Attach's registration.
+func socketSet(h *Hub) map[*conn]struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[*conn]struct{}, len(h.sockets))
+	for c := range h.sockets {
+		out[c] = struct{}{}
+	}
+	return out
 }
 
 // readFrame reads the next turn-stream or command frame, stepping over

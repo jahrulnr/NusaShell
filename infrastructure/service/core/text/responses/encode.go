@@ -292,7 +292,7 @@ func marshalItem(it ItemBody) ([]json.RawMessage, error) {
 // whole request.
 func attachmentPart(a valueobject.Attachment, model entity.Model, fileRoot wire.MediaRoot) any {
 	if !model.AcceptsInput(a.Modality()) {
-		return PartBody{Type: "input_text", Text: "(" + a.Modality().String() + " attachment omitted: model does not accept it)"}
+		return PartBody{Type: "input_text", Text: wire.Omitted(a, fileRoot.Readers)}
 	}
 	p, err := encodeAttachment(a, fileRoot)
 	if err != nil {

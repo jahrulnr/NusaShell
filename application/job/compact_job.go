@@ -235,11 +235,17 @@ func (j *Annotate) Execute(execCtx context.Context) (err error) {
 				return err
 			}
 		}
-		if j.Effort != nil {
-			conv.SetEffort(*j.Effort)
-		}
-		if j.Upstream != nil {
-			conv.SetUpstream(strings.TrimSpace(*j.Upstream))
+		// Effort and upstream are picks of a provider call, and they are
+		// applied after any rebind above — so a PATCH that switches the room
+		// to an agent drops them instead of storing a value the agent never
+		// applies. A provider room stores them as before.
+		if conv.Runtime() != enum.RuntimeAgent {
+			if j.Effort != nil {
+				conv.SetEffort(*j.Effort)
+			}
+			if j.Upstream != nil {
+				conv.SetUpstream(strings.TrimSpace(*j.Upstream))
+			}
 		}
 		return d.Convs.Save(ctx, conv)
 	}()

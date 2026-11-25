@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import './env.mjs';
-import { setQueued, queuedFor, watchQueued } from '../lib/queued.js';
+import { ownNote, queuedFor, queuedNote, setQueued, watchQueued } from '../lib/queued.js';
 
 test('the last notice wins, and zero clears the room', () => {
   assert.equal(queuedFor('q_1'), 0);
@@ -37,4 +37,23 @@ test('a watcher hears every change until it stops watching', () => {
   off();
   setQueued('q_5', 7);
   assert.deepEqual(heard, [['q_5', 2], ['q_5', 0]]);
+});
+
+// The room's line and the composer's tray can be on screen together, holding
+// two different numbers: the worker's depth for the room and this tab's own
+// queued messages. Each says what it counts, so the smaller number never reads
+// as a contradiction of the larger one.
+test('the room count and the owner\'s queue never read as one number', () => {
+  const room = queuedNote(3);
+  assert.equal(room, '3 waiting to run');
+  assert.ok(!/yours|queued/i.test(room), 'the room line does not claim whose jobs they are');
+
+  const own = ownNote(1);
+  assert.equal(own, '1 of yours queued — it sends when this turn ends');
+  assert.ok(!/waiting/i.test(own), 'the tray does not use the room line\'s word');
+  assert.match(ownNote(2, { command: true }), /^2 of yours queued — it sends when the command finishes$/);
+  assert.match(ownNote(1, { held: true }), /^1 of yours queued — on hold$/);
+
+  // the words that tell the two apart: one names who, the other names what
+  assert.ok(room.includes('waiting') && own.includes('yours'));
 });

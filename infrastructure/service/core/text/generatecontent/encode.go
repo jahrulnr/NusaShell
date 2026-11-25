@@ -392,7 +392,7 @@ func sanitizeNode(node any) any {
 // This wire carries every modality inline, so nothing is dropped.
 func attachmentPart(a valueobject.Attachment, model entity.Model, fileRoot wire.MediaRoot) any {
 	if !model.AcceptsInput(a.Modality()) {
-		return PartBody{Text: "(" + a.Modality().String() + " attachment omitted: model does not accept it)"}
+		return PartBody{Text: wire.Omitted(a, fileRoot.Readers)}
 	}
 	p, err := encodeAttachment(a, fileRoot)
 	if err != nil {

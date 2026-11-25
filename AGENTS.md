@@ -74,3 +74,14 @@ breaking refactor and update its consumers over adding a patch that merely
 hides the symptom. If the design is sound and the issue is genuinely missing
 handling (for example, an unhandled error), add the necessary targeted handling
 without forcing a broader refactor.
+
+## Git
+
+Do not commit, amend, push, tag, or cut a release. Leave the change in the
+working tree and report it instead. The owner commits when the batch is clean;
+a release follows only once every finding in that batch is closed or deferred
+with a written reason.
+
+The tree is shared: never run `git checkout`, `git restore`, `git stash`, or
+`git reset` — another room's uncommitted work lives in the same tree, and
+those commands delete it.

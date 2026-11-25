@@ -61,8 +61,10 @@ func (r *ConversationRepository) Compact(ctx context.Context, convID string, sum
 		}
 		if lr.Type == lineMessage {
 			idx := len(msgLines)
-			for _, call := range lr.Data.ToolCalls {
-				callOwner[call.ID] = idx
+			if lr.Data != nil {
+				for _, call := range lr.Data.ToolCalls {
+					callOwner[call.ID] = idx
+				}
 			}
 			msgLines = append(msgLines, l)
 			items = append(items, streamItem{raw: l, msgIndex: idx, message: true})
@@ -122,7 +124,7 @@ func (r *ConversationRepository) Compact(ctx context.Context, convID string, sum
 	// Rewrite active: summary + surviving messages + all patch lines.
 	// The reader matches patches to retained calls across every segment.
 	buf.Reset()
-	sum, err := json.Marshal(lineRecord{Type: lineMessage, Data: encodeMessage(summary)})
+	sum, err := json.Marshal(lineRecord{Type: lineMessage, Data: messageEnvelope(summary)})
 	if err != nil {
 		return err
 	}
@@ -173,6 +175,9 @@ func rewriteRetainedLines(lines [][]byte, retained []entity.Message) ([][]byte, 
 		}
 		if lr.Type != lineMessage {
 			return nil, fmt.Errorf("retained line %d is %q, not a message", i, lr.Type)
+		}
+		if lr.Data == nil {
+			return nil, fmt.Errorf("retained line %d has no message envelope", i)
 		}
 		if lr.Data.ID != retained[i].ID() {
 			return nil, fmt.Errorf("retained tail mismatch at %d: stored %q, supplied %q",

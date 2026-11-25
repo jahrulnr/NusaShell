@@ -118,8 +118,13 @@ type toolSchemaRecord struct {
 // jsonl line envelope: messages and tool-output patches share one stream
 // per file so appends stay O(1) and ordering is literal.
 type lineRecord struct {
-	Type          string             `json:"type"` // "message" | "tool_output" | "delivery"
-	Data          messageRecord      `json:"data"`
+	Type string `json:"type"` // "message" | "tool_output" | "delivery"
+	// Data is the message a line carries — only a message line has one.
+	// Patches (a tool output, a delivery receipt) point at a stored message
+	// by id, so they carry no envelope; writing a zero one would put an
+	// empty message into every patch line (B-010). Old files that carry the
+	// empty envelope still parse: the readers never look at Data for a patch.
+	Data          *messageRecord     `json:"data,omitempty"`
 	CallID        string             `json:"callId,omitempty"`
 	MessageID     string             `json:"messageId,omitempty"` // a delivery patch's message
 	Receipt       string             `json:"receipt,omitempty"`
@@ -202,6 +207,13 @@ type attachmentRecord struct {
 	MediaType string `json:"mediaType"`
 	Name      string `json:"name,omitempty"`
 	SHA256    string `json:"sha256,omitempty"`
+}
+
+// messageEnvelope is the envelope a message line carries — the one line type
+// that repeats the message; a patch line names its target by id instead.
+func messageEnvelope(m entity.Message) *messageRecord {
+	rec := encodeMessage(m)
+	return &rec
 }
 
 func encodeMessage(m entity.Message) messageRecord {

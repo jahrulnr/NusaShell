@@ -45,6 +45,14 @@ func (app *ConversationApp) Delete(ctx context.Context, convID string) error {
 		if views, err := app.threadViews(); err == nil {
 			_ = views.Delete(context.WithoutCancel(ctx), convID)
 		}
+		// The descriptions the room's files produced are that room's text:
+		// they leave with it rather than waiting for a delete-all.
+		app.mu.Lock()
+		descriptions := app.mediaDescriptions
+		app.mu.Unlock()
+		if descriptions != nil {
+			_ = descriptions.Purge(convID)
+		}
 		return nil
 	case <-ctx.Done():
 		return apperror.New(408, "delete request canceled", ctx.Err())
@@ -87,6 +95,14 @@ func (app *ConversationApp) DeleteAll(ctx context.Context) (int, error) {
 	// per-room paths do.
 	if app.uploads != nil {
 		if err := app.uploads.Purge(ctx); err != nil {
+			return deleted, err
+		}
+	}
+	app.mu.Lock()
+	descriptions := app.mediaDescriptions
+	app.mu.Unlock()
+	if descriptions != nil {
+		if err := descriptions.PurgeAll(); err != nil {
 			return deleted, err
 		}
 	}

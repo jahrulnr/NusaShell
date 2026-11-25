@@ -67,8 +67,8 @@ func (s *server) runCommand(c *gin.Context) {
 }
 
 // project finishes a room projection with the read-side facts a client paints
-// its header with: whether a manual fold would do anything, and the live turn
-// this process's hub holds for the room.
+// its header with: whether a manual fold would do anything, the live turn
+// this process's hub holds for the room, and how many jobs wait behind it.
 func (s *server) project(ctx context.Context, info drepo.ConversationInfo) (conversationDTO, error) {
 	available, err := s.reads.CanCompact(ctx, info.ID)
 	if err != nil {
@@ -81,6 +81,9 @@ func (s *server) project(ctx context.Context, info drepo.ConversationInfo) (conv
 			out.ActiveTurnID = turnID
 			out.ActiveTurnKind = kind
 		}
+	}
+	if s.queue != nil {
+		out.Waiting = s.queue.QueueDepth(info.ID)
 	}
 	return out, nil
 }

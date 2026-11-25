@@ -8,6 +8,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	"github.com/jahrulnr/nusashell/infrastructure/service/wire"
 )
 
 type Options struct {
@@ -21,6 +22,11 @@ type Options struct {
 	// HeaderTimeout bounds the wait for a response's first byte on the
 	// built-in transport; ignored when Client is supplied. Default 30s.
 	HeaderTimeout time.Duration
+	// MediaReaders names the tools that can read an attachment the target
+	// model cannot take, by modality (read_media for images, transcribe for
+	// audio). The placeholder left in a dropped file's place points at the
+	// one that can actually help.
+	MediaReaders wire.Readers
 }
 
 // FileRoot picks the attachment-resolution root for one send: the

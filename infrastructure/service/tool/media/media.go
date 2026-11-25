@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,6 +27,11 @@ import (
 
 // maxReferences bounds the images one call may hand a model.
 const maxReferences = 8
+
+// TranscribeToolName is the catalog name of the transcription tool; the
+// encoder's omitted-attachment placeholder points at it for audio a model
+// cannot take, so the pointer and the tool cannot drift apart.
+const TranscribeToolName = "transcribe"
 
 // VideoWait bounds one generate_video call: a render that is still
 // running then is reported as unfinished rather than holding the turn.
@@ -92,7 +96,7 @@ func Tools(d Deps) ([]dservice.Tool, error) {
 "instructions":{"type":"string","description":"How to say it: tone, pace, accent — for models that take guidance"},
 "speed":{"type":"number","minimum":0.25,"maximum":4,"description":"1 is normal"}},
 "required":["text"]}`, speak},
-		{"transcribe",
+		{TranscribeToolName,
 			"Turn speech in an audio or video file into text with the speech-to-text model set in Settings → Models.",
 			`{"type":"object","properties":{
 "path":{"type":"string","description":"Audio or video path (workspace-relative or absolute)"},
@@ -322,7 +326,7 @@ func (d Deps) read(ctx context.Context, path string, kinds ...enum.Modality) (m 
 	if int64(len(raw)) > limit {
 		return dservice.Media{}, fmt.Errorf("%q is larger than the %d MiB limit", path, limit>>20)
 	}
-	mediaType := sniff(raw, path)
+	mediaType := dservice.SniffMediaType(raw, path)
 	att, err := valueobject.NewAttachment("data:", mediaType)
 	if err != nil {
 		return dservice.Media{}, err
@@ -337,41 +341,6 @@ func (d Deps) read(ctx context.Context, path string, kinds ...enum.Modality) (m 
 		names[i] = string(k)
 	}
 	return dservice.Media{}, fmt.Errorf("%q is %s, not %s", path, mediaType, strings.Join(names, " or "))
-}
-
-// sniff names a payload by its bytes. The sniffer calls Ogg an
-// application container and an audio-only MPEG-4 a video, and misses
-// some audio containers (aac, flac without a tag) entirely; a matching
-// extension settles those.
-func sniff(raw []byte, path string) string {
-	t, _, _ := strings.Cut(http.DetectContentType(raw), ";")
-	ext := strings.ToLower(filepath.Ext(path))
-	switch {
-	case t == "application/ogg":
-		if ext == ".ogv" {
-			return "video/ogg"
-		}
-		return "audio/ogg"
-	case t == "video/mp4" && ext == ".m4a":
-		return "audio/mp4"
-	case t != "application/octet-stream":
-		return t
-	}
-	switch ext {
-	case ".m4a":
-		return "audio/mp4"
-	case ".aac":
-		return "audio/aac"
-	case ".flac":
-		return "audio/flac"
-	case ".opus", ".oga":
-		return "audio/ogg"
-	case ".mp3":
-		return "audio/mpeg"
-	case ".mov":
-		return "video/quicktime"
-	}
-	return t
 }
 
 // keep stores each payload as a file of the thread and attaches it; one

@@ -16,6 +16,13 @@ type Uploads interface {
 	// Read returns the stored bytes and media type; a 404 apperror for an
 	// id that was never saved.
 	Read(ctx context.Context, id string) (data []byte, mediaType string, err error)
+	// Delete removes one stored upload — a copy a refused send made and never
+	// handed over. It is idempotent: an id that no longer exists is already the
+	// requested state and answers nil, which is what a cleanup path needs (a
+	// retried refusal must not fail on its own earlier cleanup). An id that is
+	// not an upload id at all is a 404 — that caller asked for the wrong thing.
+	// Purging instead would take every room's files with it.
+	Delete(ctx context.Context, id string) error
 	// Purge removes every stored upload — called only once the rooms that
 	// referenced them are gone.
 	Purge(ctx context.Context) error

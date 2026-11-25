@@ -61,7 +61,7 @@ function Header({ room: r, browser, pane, setPane }) {
         <${Icon} name="folder" size=${14} /><span class="truncate max-w-56">${ws.split('/').pop()}</span>
       </span>`}
     </div>
-    ${r.command && html`<span class="flex items-center gap-1.5 text-xs text-muted"><${Spinner} size=${12} /> ${commandBusyLabel(r.command)}</span>`}
+    ${r.command && html`<span class="flex items-center gap-1.5 text-xs text-muted"><${Spinner} size=${12} /> ${commandBusyLabel(r.command.name)}</span>`}
     ${!editing && html`<${BrowserButton} browser=${browser} />
     <${PaneButtons} pane=${pane} setPane=${setPane} />
     <${LinksButton} room=${r} />`}

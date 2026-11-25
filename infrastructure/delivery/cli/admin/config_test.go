@@ -365,3 +365,44 @@ func TestDotEnvNeverOverridesExportedEnv(t *testing.T) {
 		t.Fatalf("exported env overwritten: %q", got)
 	}
 }
+
+// A wrong-typed leaf says which leaf and which type — once. The sentence moved
+// into the public message for the wire's sake, so the printer must not repeat
+// it as the cause.
+func TestConfigSetExplainsAWrongTypeOnce(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONFIG_PATH", configPath)
+	var out, errs bytes.Buffer
+	if code := Config([]string{"set", "media.reading_consent", "xyz"}, &out, &errs); code != 1 {
+		t.Fatalf("config set exit %d: %s", code, errs.String())
+	}
+	msg := errs.String()
+	if !strings.Contains(msg, `"media.reading_consent"`) || !strings.Contains(msg, "boolean") {
+		t.Fatalf("stderr = %q, want the leaf and its expected type", msg)
+	}
+	if got := strings.Count(msg, `"media.reading_consent" expects a boolean`); got != 1 {
+		t.Fatalf("the sentence appears %d times, want once: %q", got, msg)
+	}
+	if strings.Contains(msg, "caused by") {
+		t.Fatalf("stderr = %q, want the cause folded into the message", msg)
+	}
+}
+
+// A refusal that carries no cause still prints the message as before.
+func TestConfigSetKeepsAMessageOnlyRefusal(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONFIG_PATH", configPath)
+	var out, errs bytes.Buffer
+	if code := Config([]string{"set", "conversation.not_a_key", "1"}, &out, &errs); code != 1 {
+		t.Fatalf("config set exit %d: %s", code, errs.String())
+	}
+	if msg := errs.String(); !strings.Contains(msg, "not_a_key") || strings.Count(msg, "not_a_key") != 1 {
+		t.Fatalf("stderr = %q, want the leaf named once", msg)
+	}
+}

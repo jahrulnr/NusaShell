@@ -177,9 +177,18 @@ func (m Message) Editable() bool {
 }
 
 // EditableMessage is the same rule on the storage tuple — wire records
-// (repository rewrite) hold role/userType before hydration.
+// (repository rewrite) hold role/userType before hydration. A system payload
+// and another thread's relayed prompt are not the owner's words in this room,
+// so neither is rewritable here.
 func EditableMessage(role enum.Role, userType enum.LLMUserType) bool {
-	return role == enum.RoleUser && userType != enum.LLMUserTypeSystem
+	if role != enum.RoleUser {
+		return false
+	}
+	switch userType {
+	case enum.LLMUserTypeSystem, enum.LLMUserTypeRelay:
+		return false
+	}
+	return true
 }
 
 // SetContent replaces the message text — the edit primitive. Only the

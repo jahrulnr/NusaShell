@@ -122,7 +122,9 @@ test('Enter on /compact runs the command and never sends a turn', async () => {
     'POST /api/conversations/c_1/commands': () => ({ command: 'compact', conversation: { id: 'c_1', title: 'Thread', providerId: 'p', modelId: 'm' } }),
   });
   r.draft = '/compact';
-  assert.equal(chat.submit(r, '/compact'), false, 'a command is not a send; the caller keeps the draft');
+  assert.equal(chat.submit(r, '/compact'), false, 'a command is not a send');
+  assert.equal(r.command?.phase, 'running', 'it becomes a receipt, not a turn');
+  assert.equal(r.command?.text, '/compact');
 
   await sleep(30);
   const posts = commandPosts();
@@ -130,8 +132,8 @@ test('Enter on /compact runs the command and never sends a turn', async () => {
   assert.equal(posts[0].url, '/api/conversations/c_1/commands');
   assert.deepEqual(posts[0].body, { name: 'compact', args: '', confirm: false });
   assert.equal(sentTurns().length, 0, 'no turn may carry a recognized command');
-  assert.equal(r.draft, '', 'the 200 spent the draft');
-  assert.equal(r.command, '');
+  assert.equal(r.draft, '', 'the command is spent from the draft by submit');
+  assert.equal(r.command, null, 'and the receipt clears when it settles');
   assert.equal(state.toasts.at(-1).message, 'History compacted.');
 });
 
@@ -173,14 +175,14 @@ test('clear asks first, retries with the confirm word, and keeps the draft when 
   assert.equal(state.confirm?.title, 'Clear this thread?');
   assert.equal(state.confirm?.confirm, 'Clear');
   assert.equal(state.confirm?.danger, true);
-  assert.equal(r.draft, '/clear', 'the draft waits on the answer');
+  assert.equal(r.draft, '', 'the command left the box when it was sent');
 
   state.confirm.resolve(false);
   state.confirm = null;
   await sleep(20);
   assert.equal(posts, 1, 'cancelling sends nothing');
-  assert.equal(r.draft, '/clear');
-  assert.equal(r.command, '');
+  assert.equal(r.draft, '/clear', 'and the word comes back to the box');
+  assert.equal(r.command, null);
 
   chat.submit(r, '/clear');
   await sleep(20);
@@ -223,7 +225,8 @@ test('a command the room reports as unavailable is refused locally, saying why',
   await sleep(20);
   assert.equal(commandPosts().length, 0, 'the server never has to refuse what its catalog already did');
   assert.deepEqual([state.toasts.at(-1).kind, state.toasts.at(-1).message], ['info', 'Nothing to compact yet']);
-  assert.equal(r.draft, '/compact');
+  assert.equal(r.draft, '/compact', 'a refusal nobody sent keeps the word');
+  assert.equal(r.command, null);
 });
 
 test('a busy room refuses the command and keeps the draft', async () => {
@@ -234,8 +237,8 @@ test('a busy room refuses the command and keeps the draft', async () => {
   chat.submit(r, '/compact');
   await sleep(30);
   assert.deepEqual([state.toasts.at(-1).kind, state.toasts.at(-1).message], ['error', 'Wait for the turn to finish']);
-  assert.equal(r.draft, '/compact');
-  assert.equal(r.command, '');
+  assert.equal(r.draft, '/compact', 'the box was free, so the word goes back to it');
+  assert.equal(r.command, null);
   assert.equal(sentTurns().length, 0);
 });
 
@@ -244,11 +247,12 @@ test('a server without the command endpoint answers, and the draft survives it',
   r.draft = '/compact';
   chat.submit(r, '/compact');
   await sleep(30);
-  // No route: the call is a 404 problem+json, which is a failure like any other.
+  // No route: the call is a 404 problem+json — the server answered, so the
+  // command certainly did not run, and the box gets its word back.
   assert.equal(state.toasts.at(-1).kind, 'error');
-  assert.match(state.toasts.at(-1).message, /\/compact failed: /);
+  assert.match(state.toasts.at(-1).message, /not found/i);
   assert.equal(r.draft, '/compact');
-  assert.equal(r.command, '');
+  assert.equal(r.command, null);
   assert.equal(sentTurns().length, 0);
 });
 
@@ -262,4 +266,135 @@ test('a command in the composer needs a thread first', async () => {
   assert.deepEqual([state.toasts.at(-1).kind, state.toasts.at(-1).message], ['info', 'Send a message first.']);
   assert.equal(home.draft, '/compact');
   assert.equal(sentTurns().length, 0);
+});
+
+// ---------- /compact while it runs: the composer is free, the receipt is not ----------
+
+const running = (name = 'compact') => ({ name, text: `/${name}`, args: '', phase: 'running', error: '', retry: true, startedAt: Date.now() });
+
+test('a message typed while a command runs waits in the queue', async () => {
+  const r = await openThread('c_1');
+  r.command = running();
+  assert.equal(chat.submit(r, 'hello'), true);
+  assert.equal(r.queue.length, 1, 'queued, not sent into a refusal');
+  assert.equal(sentTurns().length, 0, 'no turn.send while the command holds the room');
+
+  // the same room, idle: it goes out as a turn again
+  r.command = null;
+  assert.equal(chat.submit(r, 'again'), true);
+  assert.equal(sentTurns().length, 1);
+});
+
+test('the draft leaves the box once, when the command is sent', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const r = await openThread('c_1', {
+    'POST /api/conversations/c_1/commands': async () => { await gate; return { command: 'compact' }; },
+  });
+  r.draft = '/compact';
+  r.files = [{ key: 'k1', status: 'ready', id: 'u_1', name: 'a.png' }];
+  r.refs = [{ start: 0, end: 8, label: '/compact', kind: 'command' }];
+  assert.equal(chat.submit(r, '/compact'), false);
+  assert.equal(r.draft, '', 'spent by submit, on the tick it was sent');
+  assert.deepEqual(r.refs, []);
+  assert.equal(r.files.length, 1, 'attachments belong to the next message');
+  assert.equal(r.command?.phase, 'running');
+  assert.equal(r.command?.text, '/compact');
+
+  release();
+  await sleep(50);
+  assert.equal(r.draft, '', 'and not emptied a second time when the reply lands');
+  assert.equal(r.command, null);
+});
+
+test('a refusal while the owner is typing leaves the receipt, not the draft', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const r = await openThread('c_1', {
+    'POST /api/conversations/c_1/commands': async () => {
+      await gate;
+      return [400, { code: 'nothing_to_compact', detail: 'Nothing to compact yet' }];
+    },
+  });
+  chat.submit(r, '/compact');
+  r.draft = 'hello';
+  release();
+  await sleep(50);
+  assert.equal(r.draft, 'hello', 'what the owner wrote is never touched');
+  assert.equal(r.command?.phase, 'failed');
+  assert.equal(r.command?.error, 'Nothing to compact yet');
+  assert.equal(r.command?.retry, true, 'a named refusal can be retried');
+  assert.equal(state.toasts.length, 0, 'the receipt says it; no toast on top');
+});
+
+test('an unanswered command puts its word back, and offers no retry', async () => {
+  const r = await openThread('c_1', {
+    'POST /api/conversations/c_1/commands': () => { throw new Error('offline'); },
+  });
+  chat.submit(r, '/compact');
+  await sleep(50);
+  assert.equal(r.draft, '/compact', 'the box was free, so the word comes back');
+  assert.equal(r.command, null, 'no receipt is left behind');
+  assert.equal(state.toasts.at(-1)?.message, 'Could not confirm /compact — check the thread.');
+  assert.doesNotMatch(JSON.stringify(state.toasts.at(-1)), /retry/i);
+});
+
+test('an unanswered command while the box is busy keeps the receipt without retry', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const r = await openThread('c_1', {
+    'POST /api/conversations/c_1/commands': async () => { await gate; throw new Error('offline'); },
+  });
+  chat.submit(r, '/clear');
+  r.draft = 'hello';
+  release();
+  await sleep(50);
+  assert.equal(r.draft, 'hello');
+  assert.equal(r.command?.phase, 'failed');
+  assert.equal(r.command?.retry, false, 'an unknown outcome is never resent blindly');
+  assert.equal(state.toasts.length, 0);
+});
+
+test('the queue moves when the command settles, not before', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const r = await openThread('c_1', {
+    'POST /api/conversations/c_1/commands': async () => { await gate; return { command: 'compact' }; },
+  });
+  chat.submit(r, '/compact');
+  r.queue = [{ id: 'q1', text: 'queued hello', references: [], files: [], recording: null }];
+  assert.equal(chat.resumeQueue(r), undefined);
+  assert.equal(sentTurns().length, 0, 'nothing sends while the command runs');
+  release();
+  await sleep(60);
+  assert.equal(sentTurns().length, 1, 'and it sends when the command is done');
+  assert.equal(sentTurns()[0].payload.content, 'queued hello');
+  assert.equal(r.queue.length, 0);
+});
+
+// A fork moves the route; the old room keeps whatever was queued for it. That
+// queue must not run in a thread nobody is watching, and must not be orphaned
+// either: coming back is what sends it.
+test('a queue a fork left behind sends when the owner comes back', async () => {
+  serveRoom(['c_1', 'c_2'], {
+    'POST /api/conversations/c_1/commands': () => ({ command: 'fork', conversation: { id: 'c_2', title: 'Thread (fork)', providerId: 'p', modelId: 'm' } }),
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(30);
+  const r = state.rooms.c_1;
+  r.queue = [{ id: 'q1', text: 'left behind', references: [], files: [], recording: null }];
+
+  r.draft = '/fork';
+  chat.submit(r, '/fork');
+  await sleep(400);
+  assert.equal(location.hash, '#/c/c_2');
+  assert.equal(sentTurns().length, 0, 'nothing runs in the room nobody is looking at');
+  assert.equal(r.queue.length, 1, 'the queue waits for its room');
+
+  // the tray says so when the owner is back — and the message goes
+  chat.navigate('#/c/c_1');
+  await sleep(80);
+  assert.equal(sentTurns().length, 1, 'coming back releases it');
+  assert.equal(sentTurns()[0].payload.content, 'left behind');
+  assert.equal(r.queue.length, 0);
 });

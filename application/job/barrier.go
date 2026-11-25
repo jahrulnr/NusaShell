@@ -89,8 +89,9 @@ type BarrierPhaseResult struct {
 // the sequence, because the only hard stop left is the supervisor's SIGKILL
 // and the budget is built to finish before it.
 type Barrier struct {
-	steps BarrierSteps
-	plan  []BarrierPhase
+	// The steps live in plan: each phase holds the one function it runs, so
+	// there is no second copy of them to fall out of step with it.
+	plan []BarrierPhase
 
 	once sync.Once
 	done chan struct{}
@@ -101,7 +102,7 @@ type Barrier struct {
 // NewBarrier binds the steps and fixes the plan. The order, and each phase's
 // budget, live here — not at a call site.
 func NewBarrier(steps BarrierSteps) *Barrier {
-	b := &Barrier{steps: steps, done: make(chan struct{}), log: slog.Default()}
+	b := &Barrier{done: make(chan struct{}), log: slog.Default()}
 	b.plan = []BarrierPhase{
 		{Name: "admission", Budget: barrierAdmissionBudget, run: steps.CloseAdmission},
 		{Name: "turns", Budget: barrierTurnsBudget, run: steps.StopTurns},

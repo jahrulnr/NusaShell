@@ -5,8 +5,9 @@
 // control.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, emit, toast } from '../lib/store.js';
-import { submit, cancel, isBusy, recallSteer, removeQueued, restoreQueued, resumeQueue, attachFiles, removeFile, navigate, quotedDraft, removeQuote } from '../lib/chat.js';
+import { submit, cancel, isBusy, roomBusy, retryCommand, dismissCommand, recallSteer, removeQueued, restoreQueued, resumeQueue, attachFiles, removeFile, navigate, quotedDraft, removeQuote } from '../lib/chat.js';
 import { api, errorText } from '../lib/api.js';
+import { ownNote } from '../lib/queued.js';
 import { Icon } from './icons.js';
 import { cx, Popover, Kbd, Spinner, Marker } from './ui.js';
 import { ModelPicker, WorkspacePicker, ContextMeter } from './pickers.js';
@@ -16,6 +17,45 @@ import { referenceTrigger, reconcileReferences, liveReferences, referenceLabel }
 import { useCommands, parseCommand, isNativeCommand, commandBusyLabel, firstEnabled, stepRow } from '../lib/commands.js';
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+// CommandReceipt is the command as it runs: what was sent, what it is doing,
+// and — after two seconds — how long it has been doing it. The clock is
+// decoration for a reader: aria-hidden, so a screen reader hears the state
+// once instead of a number every second.
+function CommandReceipt({ command }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [command.startedAt]);
+  const secs = Math.floor((Date.now() - command.startedAt) / 1000);
+  return html`<div class="flex items-center gap-1.5 px-3 pt-2 min-w-0 text-[12px] text-muted" role="status">
+    <${Spinner} size=${12} />
+    <span class="font-mono shrink-0">${command.text}</span>
+    <span class="truncate">${commandBusyLabel(command.name)}…</span>
+    ${secs >= 2 && html`<span class="ml-auto shrink-0 tabular-nums text-[11.5px] text-muted" aria-hidden="true">${secs}s</span>`}
+  </div>`;
+}
+
+// CommandFailure is a command the server refused while the owner was already
+// writing the next message: the receipt stays, with the reason, and the text
+// stays where it is. Retry only when resending cannot run the action twice.
+function CommandFailure({ room, field }) {
+  const c = room.command;
+  return html`<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 pt-2 text-[12px]" role="alert">
+    <${Icon} name="alert" size=${13} class="text-bad shrink-0" />
+    <span class="font-mono shrink-0 text-muted">${c.text}</span>
+    <span class="min-w-0 break-words text-muted">${c.error || 'The command failed.'}</span>
+    <span class="ml-auto flex items-center gap-1.5 shrink-0">
+      ${c.retry && html`<button type="button" onClick=${() => retryCommand(room)}
+        class="h-6 px-2 rounded-md border border-line text-[12px] text-fg hover:bg-hover">Retry</button>`}
+      <button type="button" onClick=${() => { dismissCommand(room); field?.current?.focus(); }}
+        class="h-6 px-2 rounded-md text-[12px] text-muted hover:text-fg hover:bg-hover">Dismiss</button>
+    </span>
+  </div>`;
+}
+
+
 const MOD = isMac ? '⌘' : 'Ctrl';
 
 const fmtSize = (n) => (n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B');
@@ -63,7 +103,7 @@ function Tray({ room }) {
       ${s.state === 'unknown' && html`<button type="button" onClick=${() => { r.steers = r.steers.filter((x) => x !== s); emit(); }} class="text-xs text-muted hover:text-fg px-1.5 h-6 rounded hover:bg-hover">Dismiss</button>`}
     </div>`)}
     ${r.queue.length > 0 && html`<div class="flex items-center justify-between text-xs text-faint">
-      <span>${r.queue.length} queued — ${r.held ? 'on hold' : 'sends when the current turn ends'}</span>
+      <span>${ownNote(r.queue.length, { held: r.held, command: !!r.command })}</span>
       ${r.held && !isBusy(r) && html`<button type="button" onClick=${() => resumeQueue(r)} class="text-accent hover:underline">Send next</button>`}
     </div>`}
     ${r.queue.map((q) => html`<div key=${q.id} class="flex items-center gap-2 min-w-0">
@@ -164,7 +204,8 @@ export function Composer({ room, hero = false }) {
   const live = r.live && !r.live.terminal;
   const canSteer = live && r.live.kind === 'send';
   const steerTurnId = canSteer ? r.live.turnId : '';
-  const busy = isBusy(r);
+  // What the composer answers to: a turn, or a command it started.
+  const busy = roomBusy(r);
   const hasText = !!r.draft.trim();
   const fileInput = useRef();
   const [dragging, setDragging] = useState(false);
@@ -174,13 +215,14 @@ export function Composer({ room, hero = false }) {
   const [options, setOptions] = useState(false);
   const uploading = r.files.some((f) => f.status === 'uploading');
   const readyFiles = r.files.filter((f) => f.status === 'ready');
-  // A native command runs on the server, so the composer waits while it does;
-  // the draft itself is the input, so a command needs no attachments.
+  // A native command runs on the server, but the box stays usable: a message
+  // typed now waits in the queue (lib/chat.js roomBusy), so the send control
+  // follows the text, not the command.
   const typed = parseCommand(r.draft);
   // A quote rides above the draft, so a draft carrying one is a message, not
   // a command line; only the draft's own first line can be a command.
   const native = !r.quotes.length && typed && isNativeCommand(r, typed.name) ? typed.name : '';
-  const canSend = !r.command && (hasText || readyFiles.length > 0 || r.quotes.length > 0 || r.recording) && !uploading;
+  const canSend = (hasText || readyFiles.length > 0 || r.quotes.length > 0 || r.recording) && !uploading;
   // "@" and "/" open the reference picker at the caret; Tab or Enter
   // picks, Escape closes it until the caret leaves that word.
   const cmds = useCommands(r);
@@ -330,8 +372,8 @@ export function Composer({ room, hero = false }) {
   };
 
   const placeholder = canSteer ? 'Steer the running turn…' : busy ? 'Queue a follow-up…' : hero ? 'What should we work on?' : 'Reply…';
-  const primaryLabel = r.command ? `Running /${r.command}…` : native ? `Run /${native}` : canSteer ? 'Steer now' : busy ? 'Add to queue' : 'Send';
-  const primaryTitle = r.command ? primaryLabel : primaryLabel + ' (Enter)';
+  const primaryLabel = native ? `Run /${native}` : canSteer ? 'Steer now' : busy ? 'Add to queue' : 'Send';
+  const primaryTitle = primaryLabel + ' (Enter)';
 
   return html`<div class=${cx('w-full', hero ? '' : 'pb-[max(12px,env(safe-area-inset-bottom))]')}>
     <${Tray} room=${r} />
@@ -375,9 +417,9 @@ export function Composer({ room, hero = false }) {
             class="size-4 inline-flex items-center justify-center rounded text-faint hover:text-fg"><${Icon} name="x" size=${11} /></button>
         </span>`)}
       </div>`}
-      ${r.command && html`<div class="flex items-center gap-1.5 px-3 pt-2 text-xs text-muted" role="status">
-        <${Spinner} size=${12} /> ${commandBusyLabel(r.command)}…
-      </div>`}
+      ${r.command && (r.command.phase === 'failed'
+        ? html`<${CommandFailure} room=${r} field=${ta} />`
+        : html`<${CommandReceipt} command=${r.command} />`)}
       <textarea ref=${ta} rows=${hero ? 3 : 1} value=${r.draft} placeholder=${placeholder} aria-label="Message"
         role="combobox" aria-autocomplete="list" aria-expanded=${!!(open && (matches.length || choices.message))}
         aria-controls="reference-menu" aria-activedescendant=${open && matches.length ? 'ref-opt-' + Math.min(active, matches.length - 1) : undefined}

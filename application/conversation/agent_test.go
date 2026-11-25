@@ -57,6 +57,8 @@ type scriptedAgent struct {
 	// beforePrompt delays the moment the scripted agent takes the prompt,
 	// holding the send open while session setup has already run.
 	beforePrompt func(context.Context) error
+	// refuseValue is the one option value the agent turns down.
+	refuseValue string
 }
 
 func (a *scriptedAgent) Prompt(ctx context.Context, p dservice.AgentPrompt, onEvent event.TurnEventHandler, approve dservice.Approver) error {
@@ -206,11 +208,26 @@ func (a *scriptedAgent) retiredSessions(t *testing.T, want int) []string {
 func (a *scriptedAgent) Warm(context.Context, *aggregate.Agent) error { return nil }
 func (a *scriptedAgent) ReapIdle(time.Duration)                       {}
 func (a *scriptedAgent) Options(context.Context, *aggregate.Agent, string) ([]dservice.AgentOption, error) {
-	return nil, nil
+	// The catalog a real agent reports. The picker and the store now validate
+	// against it, so the scripted agent has to offer what a test picks.
+	return []dservice.AgentOption{
+		{ID: "mode", Name: "Mode", Category: "mode", Type: "select", Current: "ask",
+			Choices: []dservice.OptionChoice{{Value: "ask", Name: "Ask"}, {Value: "build", Name: "Build"}}},
+		{ID: "strict", Name: "Strict", Category: "behavior", Type: "boolean", Current: "false"},
+	}, nil
 }
-func (a *scriptedAgent) SetOption(context.Context, string, string, string) error { return nil }
-func (a *scriptedAgent) Commands(string) []dservice.AgentCommand                 { return nil }
-func (a *scriptedAgent) Status(string) dservice.AgentStatus                      { return dservice.AgentStatus{} }
+func (a *scriptedAgent) SetOption(_ context.Context, _, _, value string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// A live agent refuses a value it does not have — a mode it never
+	// declared, say — and the refusal must not be swallowed.
+	if a.refuseValue != "" && value == a.refuseValue {
+		return apperror.New(502, "agent refused the mode change", nil)
+	}
+	return nil
+}
+func (a *scriptedAgent) Commands(string) []dservice.AgentCommand { return nil }
+func (a *scriptedAgent) Status(string) dservice.AgentStatus      { return dservice.AgentStatus{} }
 func (a *scriptedAgent) Steer(_ context.Context, _ string, input valueobject.UserInput, delivered func()) bool {
 	if !a.steerable {
 		return false
@@ -582,6 +599,193 @@ func TestAgentDefaultsApplyUnderTheRoomsPicks(t *testing.T) {
 	}
 	if second := prompts[1].Options; second["mode"] != "build" || second["effort"] != "high" {
 		t.Fatalf("second turn options = %v", second)
+	}
+}
+
+// A session option the agent refuses is not recorded. Storing it would trap the
+// owner: every later turn re-applies a value the agent rejects, so the turn
+// fails before any newer choice could matter.
+func TestRefusedAgentOptionIsNotStored(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	rt.mu.Lock()
+	rt.refuseValue = "ludicrous"
+	rt.mu.Unlock()
+
+	err := app.SetAgentOption(ctx, "c_opt", "mode", "ludicrous")
+	if code := apperror.As(err).StatusCode(); code != 502 {
+		t.Fatalf("a refused option = %v (status %d), want the agent's 502", err, code)
+	}
+	conv, err := app.deps.Convs.Load(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if picks := conv.AgentOptions(); len(picks) != 0 {
+		t.Fatalf("the refused pick was stored: %v", picks)
+	}
+	// The next turn runs the value that worked, not the refused one.
+	if _, err := app.Send(ctx, "c_opt", "", "", "again", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	prompts := rt.Prompts()
+	if got := prompts[len(prompts)-1].Options["mode"]; got == "ludicrous" {
+		t.Fatalf("the next turn applied the refused value: %q", got)
+	}
+	// A value the agent takes is still stored — the reorder must not turn
+	// every pick into a no-op.
+	rt.mu.Lock()
+	rt.refuseValue = ""
+	rt.mu.Unlock()
+	if err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
+		t.Fatal(err)
+	}
+	conv, err = app.deps.Convs.Load(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := conv.AgentOptions()["mode"]; got != "build" {
+		t.Fatalf("an accepted pick = %q, want build recorded", got)
+	}
+}
+
+// A changed session option changes the room, so every open tab hears it — the
+// same notice a title or a fork sends. Without it "one state across tabs"
+// cannot hold: the other tab keeps showing the option it loaded.
+func TestAgentOptionAnnouncesTheChangedRoom(t *testing.T) {
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var changed []string
+	app.OnChanged(func(id string) { mu.Lock(); changed = append(changed, id); mu.Unlock() })
+	if err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(changed) != 1 || changed[0] != "c_opt" {
+		t.Fatalf("changed = %v, want one notice for c_opt", changed)
+	}
+}
+
+// An effort or an upstream is a pick of a provider call, and an agent room has
+// none: Annotate drops them instead of storing a value the agent never applies
+// — the same rule a turn already follows.
+func TestAnnotateDropsProviderPicksOnAnAgentRoom(t *testing.T) {
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_eff", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	effort, upstream := enum.EffortMax, "Alpha"
+	if err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); err != nil {
+		t.Fatal(err)
+	}
+	// The record, not a loaded aggregate: Load replays BindAgent, which
+	// strips provider picks from an agent room either way.
+	info, err := app.deps.Convs.Info(ctx, "c_eff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Effort != "" || info.Upstream != "" {
+		t.Fatalf("agent room stored %q, %q, want neither", info.Effort, info.Upstream)
+	}
+}
+
+// A provider room stores both, exactly as before.
+func TestAnnotateStoresProviderPicksOnAProviderRoom(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_eff", "gw1", "m1", "hi", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	effort, upstream := enum.EffortMax, "Alpha"
+	if err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := app.deps.Convs.Info(ctx, "c_eff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Effort != string(enum.EffortMax) || info.Upstream != "Alpha" {
+		t.Fatalf("provider room stored %q, %q", info.Effort, info.Upstream)
+	}
+}
+
+// A room that just restarted has no live session, so nothing applied the pick —
+// the catalog is the only thing that can refuse it. The scripted runtime's
+// SetOption applies nothing, which is what a room without a session does.
+func TestAgentOptionIsCheckedAgainstTheCatalogWithoutALiveSession(t *testing.T) {
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, pick := range [][2]string{
+		{"turbo", "fast"}, // no such option
+		{"mode", "nope"},  // the option exists, the value does not
+		{"strict", "yes"}, // a boolean takes true or false
+	} {
+		err := app.SetAgentOption(ctx, "c_opt", pick[0], pick[1])
+		if code := apperror.As(err).StatusCode(); code != 400 {
+			t.Fatalf("%v = %v (status %d), want 400", pick, err, code)
+		}
+	}
+	info, err := app.deps.Convs.Info(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(info.AgentOptions) != 0 {
+		t.Fatalf("refused picks were stored: %v", info.AgentOptions)
+	}
+	// What the catalog does offer is recorded, still with no session.
+	if err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.SetAgentOption(ctx, "c_opt", "strict", "true"); err != nil {
+		t.Fatal(err)
+	}
+	info, err = app.deps.Convs.Info(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.AgentOptions["mode"] != "build" || info.AgentOptions["strict"] != "true" {
+		t.Fatalf("stored picks = %v", info.AgentOptions)
+	}
+}
+
+// The picker never draws a current value outside its own choices, even when an
+// older bug left one in the store.
+func TestAgentOptionsNeverReportACurrentOutsideItsChoices(t *testing.T) {
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Written through the annotation job, the way a build before this fix did.
+	poison := [2]string{"mode", "nope"}
+	if err := app.Annotate(ctx, "c_opt", Annotation{AgentOption: &poison}); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := app.AgentOptions(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range opts {
+		if o.Type == "select" && !slices.ContainsFunc(o.Choices, func(c dservice.OptionChoice) bool { return c.Value == o.Current }) {
+			t.Fatalf("option %q reports current %q, which it does not offer: %+v", o.ID, o.Current, o.Choices)
+		}
+	}
+	for _, o := range opts {
+		if o.ID == "mode" && o.Current != "ask" {
+			t.Fatalf("mode current = %q, want the catalog's own ask", o.Current)
+		}
 	}
 }
 

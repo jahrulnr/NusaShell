@@ -134,7 +134,10 @@ func (r *ConversationRepository) RepairOrphan(ctx context.Context, convID string
 		if err := json.Unmarshal(line, &record); err != nil {
 			return fmt.Errorf("repair %s: decode orphan message: %w", convID, err)
 		}
-		message, err := decodeMessage(record.Data)
+		if record.Data == nil {
+			return fmt.Errorf("repair %s: orphan message line has no envelope", convID)
+		}
+		message, err := decodeMessage(*record.Data)
 		if err != nil {
 			return fmt.Errorf("repair %s: decode orphan message: %w", convID, err)
 		}

@@ -52,8 +52,25 @@ func Conversation(app *appcontrol.App) Catalog {
 				in that room's queue at the returned position; queued is an acceptance, not a promise of when it runs, and
 				a server that stops before it runs loses it), or refused. Refused for your own thread, for a thread waiting
 				on a permission answer from the owner (409), for a full queue (429, with the depth), and while the server
-				stops (503).`),
-				InputSchema: schema(map[string]any{"conversationId": thread, "text": str("The prompt")}, "conversationId", "text")},
+				stops (503). Every accepted answer carries thread — its id, label, and title — so a row can name the room
+				without another lookup. Attachments: up to 4 files, 32 MiB together. A local target receives the absolute path plus
+				its sha256 pin (it re-reads the file itself); a remote target receives a stored copy; an http(s) reference
+				passes through. A path is read in your workspace, must be a regular file, and must fit the wire cap for its
+				kind (image 10 MiB, file 20 MiB, audio 50 MiB, video 100 MiB).`),
+				InputSchema: schema(map[string]any{
+					"conversationId": thread,
+					"text":           str("The prompt"),
+					"attachments": map[string]any{
+						"type":        "array",
+						"maxItems":    4,
+						"description": "Files to carry beside the prompt: a path in your workspace, an absolute path, a file:// URI, or an http(s) reference",
+						"items": map[string]any{
+							"type":       "object",
+							"properties": map[string]any{"path": str("Path or URL")},
+							"required":   []string{"path"},
+						},
+					},
+				}, "conversationId", "text")},
 			{Name: "stop", Description: "Stop the running turn of another thread. Only when the user asked for it.",
 				InputSchema: schema(map[string]any{"conversationId": thread}, "conversationId")},
 			{Name: "spawn", Description: oneLine(`Open a new thread and start it on a prompt. It runs on agent, or on provider and

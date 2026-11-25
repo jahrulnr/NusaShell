@@ -306,6 +306,15 @@ export function toolEnding(item) {
   return { kind: 'ok', mark: 'ok', word: '', tone: '' };
 }
 
+// userLayout answers how a user message is laid out. Whether it came from
+// another thread is the server's word — userType 'relay' on the stored message
+// — not something read back out of the text: a prompt the owner happens to
+// start with "[From thread …]" is still theirs. A relayed prompt carries what
+// it brought inside its own block, and is not the owner's to rewrite.
+export function userLayout(relayed) {
+  return { relayed: !!relayed, extras: relayed ? 'relay' : 'own', editable: !relayed };
+}
+
 // A tool's stored output signals failure by convention.
 // closeStatus reads the status line exec closes its output with: how the
 // process ended, and — for an exit — how long it ran. The line is data the
@@ -486,7 +495,13 @@ export function historyItems(messages, cwd = '') {
   const out = [];
   for (const m of messages) {
     if (m.role === 'user') {
-      out.push({ id: m.id, kind: m.userType === 'system' ? 'note' : 'user', msg: m, steerInput: m[STEER_INPUT] || '' });
+      out.push({
+        id: m.id, kind: m.userType === 'system' ? 'note' : 'user', msg: m,
+        steerInput: m[STEER_INPUT] || '',
+        // A prompt another thread sent is the server's to say (userType), never
+        // something the transcript guesses from the text.
+        relayed: m.userType === 'relay',
+      });
       continue;
     }
     if (m.role !== 'assistant') continue;
@@ -629,3 +644,86 @@ export function toolSummary(name, input) {
     }
   }
 }
+
+// ROOM_VERBS names the tools whose subject is another room, and the verb the
+// row reads. A room tool names the room itself, so the generic summary (which
+// would print the raw id from the arguments) does not apply to it.
+const ROOM_VERBS = {
+  conversation_send: 'Sent',
+  conversation_stop: 'Stopped',
+  conversation_read: 'Read',
+  conversation_wait: 'Waited for',
+  conversation_search: 'Searched',
+  conversation_spawn: 'Spawned',
+  conversation_export: 'Exported',
+};
+
+// shortHandle is a room id said short — its last six characters, marked as a
+// handle — which is all a row can honestly show before the result names it.
+export const shortHandle = (id) => (id ? '@' + String(id).trim().slice(-6) : '');
+
+// roomName is how one room reads: its label, its title, or the short handle of
+// its id when it has neither. A label is already a handle, so it takes no
+// quotes; a title is not one, so it is quoted and never given an at-sign — an
+// at-sign on a title would invent a handle nobody has.
+//
+// It reads both shapes a tool answers with: a target that carries the thread
+// object (send, stop, read, wait, export, and spawn once it has one), and a
+// flat search hit (threadId, label, title). One reader for one shape on screen.
+function roomName(src) {
+  const t = src?.thread || src || {};
+  const label = String(t.label || '').trim();
+  const title = String(t.title || '').trim();
+  const id = String(t.id || t.threadId || '').trim();
+  return { label, title, short: label || title ? '' : shortHandle(id) };
+}
+
+// partialId reads the id out of arguments that are still arriving: a tool's
+// input streams as text, so its first frames are not JSON yet and the row
+// would have nothing to show for them.
+function partialId(input) {
+  const m = /"conversationId"\s*:\s*"([^"\\]*)/.exec(String(input || ''));
+  return m ? m[1].trim() : '';
+}
+
+// toolRoom answers the room (or rooms) a tool row names, or null for a tool
+// that names none. The result is the source: a thread object the server read
+// when the call was made — an id in the transcript is not a name, and a cache
+// here would go stale the first time a label changed.
+//
+// While the call still runs there is no result yet, so the row falls back to
+// what the input named (a short handle, or the label the caller already used),
+// because an empty summary would read as a tool that was never called.
+export function toolRoom(name, input, output) {
+  const verb = ROOM_VERBS[name];
+  if (!verb) return null;
+  let args = null;
+  try { args = JSON.parse(input || '{}'); } catch { /* partial while streaming */ }
+  let out = null;
+  try { out = JSON.parse(output || ''); } catch { /* no result yet */ }
+
+  if (name === 'conversation_search') {
+    // One hit per room, each already flat: every one renders through the same
+    // reader, so a list of rooms reads as a list of names.
+    const hits = Array.isArray(out?.hits) ? out.hits : [];
+    return { verb, detail: typeof args?.query === 'string' ? args.query : '', names: hits.map(roomName).filter(named) };
+  }
+  // An export answers a file and a count rather than a room, so the row shows
+  // what it wrote; a spawn answers an id until its thread object lands.
+  const detail = name === 'conversation_export' ? String(out?.path || '') : '';
+  if (out) return { verb, detail, names: [roomName(out)].filter(named) };
+
+  // The input is read as an opaque handle, never as a name. A model can write a
+  // label where an id belongs, and a call that fails never gets a result to
+  // correct it — so the transcript must not repeat the model's word as if the
+  // room were really called that. The handle is the last six characters of what
+  // it wrote, until the result says what the room is.
+  const asked = typeof args?.conversationId === 'string' ? args.conversationId.trim() : partialId(input);
+  const id = asked.replace(/^@/, '');
+  if (!id) return { verb, detail, names: [] };
+  return { verb, detail, names: [roomName({ id })] };
+}
+
+// named drops a room the answer said nothing about, so an empty handle never
+// renders as a blank gap.
+const named = (n) => !!(n.label || n.title || n.short);

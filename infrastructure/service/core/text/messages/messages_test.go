@@ -1317,3 +1317,60 @@ func TestProviderStatsStream(t *testing.T) {
 		t.Fatalf("duration_ms: %v", rec)
 	}
 }
+
+// An attachment the target model cannot read leaves a placeholder that names
+// the file and why it was dropped, and — per modality — the tool that can
+// actually help: read_media for images, transcribe for audio, nothing for
+// video. A model that cannot see must learn the file exists and which one name
+// to ask.
+func TestOmittedAttachmentPlaceholderNamesFileAndReader(t *testing.T) {
+	model, err := entity.NewModel("blind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.SetInputModalities([]enum.Modality{enum.ModalityText})
+	readers := wire.Readers{Image: "read_media", Audio: "transcribe"}
+
+	cases := []struct {
+		name      string
+		mediaType string
+		fileName  string
+		readers   wire.Readers
+		want      string
+	}{
+		{"image", "image/png", "screenshot.png", readers,
+			`(image "screenshot.png" omitted: model does not accept images; read_media can read it)`},
+		{"image without a reader", "image/png", "screenshot.png", wire.Readers{},
+			`(image "screenshot.png" omitted: model does not accept images)`},
+		{"audio", "audio/mpeg", "voice.mp3", readers,
+			`(audio "voice.mp3" omitted: model does not accept audio; transcribe can read it)`},
+		{"video", "video/mp4", "clip.mp4", readers,
+			`(video "clip.mp4" omitted: model does not accept video)`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, err := entity.NewMessage(enum.RoleUser, "inspect this")
+			if err != nil {
+				t.Fatal(err)
+			}
+			att, err := valueobject.NewAttachment("file:///tmp/"+tc.fileName, tc.mediaType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			att.SetName(tc.fileName)
+			msg.AddAttachment(att)
+			msgs, err := encodeMessage(msg, model, wire.MediaRoot{Readers: tc.readers})
+			if err != nil {
+				t.Fatal(err)
+			}
+			blocks, ok := msgs[0].Content.([]any)
+			if !ok || len(blocks) != 2 {
+				t.Fatalf("want text plus placeholder, got %#v", msgs[0].Content)
+			}
+			placeholder, ok := blocks[1].(ContentBlock)
+			if !ok || placeholder.Text != tc.want {
+				t.Fatalf("placeholder = %#v, want %q", blocks[1], tc.want)
+			}
+		})
+	}
+}

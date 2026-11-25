@@ -1,4 +1,4 @@
-.PHONY: build build-lean serve install test check fmt-check test-web tags provider-add memory-eval docs-serve docs-build
+.PHONY: build build-lean serve install test check check-full fmt-check test-web tags provider-add memory-eval docs-serve docs-build
 
 # The build version comes from the VERSION file. A checkout without one builds
 # as "dev", and "dev" turns the update check off.
@@ -80,3 +80,14 @@ provider-add: build
 	opencode --style completion \
 	--endpoint https://opencode.ai/zen/v1 \
 	--models big-pickle --key-stdin
+
+# check-full runs the same gate without Go's test cache (-count=1). Use it before a
+# commit; plain `check` is for the inner loop, where a cached pass is fine.
+check-full: fmt-check test-web
+	go build ./...
+	go vet ./...
+	go vet -tags memoryeval ./cmd/nusashell/
+	go test -count=1 ./...
+	go test -count=1 -tags '$(REPOMAP_TAGS)' ./infrastructure/service/symbol/... ./infrastructure/service/tool/symbolmap/ ./infrastructure/config/ ./cmd/nusashell/
+	GOOS=windows go build ./...
+	GOOS=darwin go build ./...

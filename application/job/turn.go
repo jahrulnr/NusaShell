@@ -46,6 +46,12 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 	// the room's binding, else the driver's default root.
 	dir := TurnWorkspace(conv, driver)
 	ctx = dservice.WithWorkspaceDir(ctx, dir)
+	// The model's declared input modalities ride the context: a file tool
+	// attaches what this model can read and reads it for the model when it
+	// cannot — the model never has to know its own capability, and a turn
+	// that declares none keeps the old attach-and-let-the-encoder-degrade
+	// behaviour.
+	ctx = dservice.WithModelModalities(ctx, model.InputModalities())
 	ctx = dservice.WithConversationID(ctx, convID)
 	// Provider-capable tools resolve their backend per turn from the bound
 	// provider — the provider id is the provider identity users name. A nil

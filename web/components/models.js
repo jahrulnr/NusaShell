@@ -4,20 +4,20 @@
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, toast, state, emit } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
-import { useSettingsDoc } from '../lib/settings.js';
+import { readingConsent, rolePatch, setReadingConsent, setRoleEffort, useSettingsDoc } from '../lib/settings.js';
 import { loadAgentModels } from '../lib/chat.js';
 import { Icon } from './icons.js';
-import { cx, ErrorBlock, Select, Spinner } from './ui.js';
+import { cx, ErrorBlock, Select, Spinner, Toggle } from './ui.js';
 
 // kinds lists the model types a role can use. A text role also takes a model
 // whose type is not declared, since an untyped model is a chat model until
 // someone says otherwise; every other role takes only the models typed for
 // it, so an embedding picker never offers a chat model.
-const ROLES = [
-  { id: 'threads', icon: 'plus', title: 'New threads', agents: true, kinds: ['text'],
+export const ROLES = [
+  { id: 'threads', icon: 'plus', title: 'New threads', agents: true, effort: true, kinds: ['text'],
     desc: 'What a new thread starts on, on every device. Picking another in the composer changes only that thread.',
     none: 'The last one picked in this browser' },
-  { id: 'chat', icon: 'message', title: 'Chat channels', agents: true, kinds: ['text'],
+  { id: 'chat', icon: 'message', title: 'Chat channels', agents: true, effort: true, kinds: ['text'],
     desc: 'Answers the threads WhatsApp and Telegram start. An agent or a model, so replies come from the one you chose.',
     none: 'Automatic · first agent, then first provider' },
   { id: 'utility', icon: 'spark', title: 'Utility', kinds: ['text'],
@@ -28,6 +28,12 @@ const ROLES = [
     none: 'Off' },
   { id: 'transcription', icon: 'mic', title: 'Speech to text', kinds: ['transcription'],
     desc: 'Turns speech into text: voice input in the composer, and when a thread transcribes an audio or video file.',
+    none: 'Off' },
+  // Vision reads an image for a thread whose own model cannot see it. Assigning
+  // it sends nothing: media.reading_consent is the switch that decides whether
+  // a file may leave the app at all.
+  { id: 'vision', icon: 'eye', title: 'Vision', kinds: ['text'], needs: 'image',
+    desc: 'Describes an image for a model that cannot see one. Picking it sends nothing on its own; the switch below decides whether a file may be sent.',
     none: 'Off' },
   { id: 'image', group: 'media', icon: 'image', title: 'Image', kinds: ['image'],
     desc: 'Makes images from text, or from text and images.', none: 'Off' },
@@ -66,6 +72,7 @@ export function Models() {
     ${doc.status === 'ready' && !lists && html`<div class="flex flex-col gap-3">
       ${ROLES.filter((r) => !r.group).map((role) => html`<${RoleCard} key=${role.id} role=${role} value=${doc.d.models?.[role.id]}
         onSaved=${saved} />`)}
+      <${ReadingConsent} d=${doc.d} onSaved=${saved} />
       <div class="mt-3 flex items-center gap-2">
         <h3 class="font-medium">${MEDIA.title}</h3>
         <span class="rounded px-1 border border-line text-[10px] leading-4 text-faint">Later</span>
@@ -75,6 +82,94 @@ export function Models() {
         onSaved=${saved} />`)}
     </div>`}
   </div>`;
+}
+
+// rolePicker answers the choices a role's select offers, with the role's
+// current value kept selectable so the page never shows a blank it would save
+// on the next render.
+//
+// A role's kinds are model types it can run on; needs names one input
+// modality on top of them — a vision model is not a kind of its own, it is a
+// text model that can look at an image. A model that exists but does not fit
+// keeps its own name here: "(not found)" is for a model the catalog no longer
+// lists, not for one this select filters out.
+const KIND = (m) => m.modelType || '';
+function roleFits(role, m) {
+  const text = role.kinds.includes('text');
+  const kind = role.kinds.includes(KIND(m)) || (text && !KIND(m));
+  if (!kind) return false;
+  return !role.needs || (m.inputModalities || []).includes(role.needs);
+}
+
+export function rolePicker(role, providers = [], agentList = [], value = null) {
+  const cur = encode(value);
+  const shown = (m) => !role.agents || m.listed !== false;
+  const groups = providers.filter((p) => !p.broken).map((p) => ({
+    label: `${p.name || p.id} · API`,
+    options: p.models.filter((m) => shown(m) && roleFits(role, m)).map((m) => ({ value: `p:${p.id}\n${m.id}`, text: m.name || m.id })),
+  })).filter((g) => g.options.length);
+  const agents = role.agents && agentList.length
+    ? [{ label: 'Agents · ACP', options: agentList.map((a) => ({ value: 'a:' + a.id, text: a.name || a.id })) }] : [];
+  const options = [{ value: '', text: role.none }, ...agents, ...groups];
+  const known = options.some((o) => o.value === cur || o.options?.some((x) => x.value === cur));
+  if (!cur || known) return options;
+
+  // What the role names, in the catalog's own words when the model is there:
+  // a model assigned through the API still reads as itself, even when this
+  // select is not the place to pick it.
+  const found = providers.find((p) => p.id === value.provider)?.models.find((m) => m.id === value.model);
+  const text = value.agent || `${found ? (providers.find((p) => p.id === value.provider)?.name || value.provider) : value.provider} · ${found ? (found.name || found.id) : value.model}`;
+  return [...options, { value: cur, text: found ? text : `${text} (not found)` }];
+}
+
+// ReadingConsent is the one switch behind read_media. Both readings sit under
+// it — an image description and an audio transcript are the same act, sending
+// a file out of the app — so asking twice would only teach the owner to click
+// through. It is off unless the server says true, and a refused write leaves
+// the switch showing the value the server still holds, with the reason under
+// it.
+function ReadingConsent({ d, onSaved }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const on = readingConsent(d);
+  const vision = d?.models?.vision;
+  const stt = d?.models?.transcription;
+  const name = (r) => (r?.provider && r?.model ? `${r.provider} / ${r.model}` : '');
+  const visionName = name(vision);
+  const sttName = name(stt);
+  const save = async (next) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onSaved(await setReadingConsent(next));
+      toast(next ? 'Files may be sent to a reading model.' : 'Files stay in the app.');
+    } catch (e) { setError(errorText(e)); }
+    setBusy(false);
+  };
+  // What is still missing before the switch can keep its promise. One consent
+  // covers both readings, so each role it depends on is named on its own.
+  const needs = [!visionName && 'vision', !sttName && 'transcription'].filter(Boolean);
+  const note = needs.length === 2
+    ? html`Needs a vision model above (and a transcription model for audio) — without one, <code class="font-mono text-[11px]">read_media</code> refuses instead of sending.`
+    : needs[0] === 'vision'
+      ? html`Needs a vision model above — without one, <code class="font-mono text-[11px]">read_media</code> refuses instead of sending.`
+      : html`Needs a transcription model above — without one, <code class="font-mono text-[11px]">read_media</code> refuses audio instead of sending.`;
+  return html`<section class="rounded-xl border border-line bg-panel px-4 py-3.5 flex flex-col gap-2.5">
+    <div class="flex items-start gap-3">
+      <span class="mt-0.5 size-8 shrink-0 rounded-lg bg-raised flex items-center justify-center text-muted"><${Icon} name="file" size=${16} /></span>
+      <div class="flex-1 min-w-0">
+        <span class="font-medium">Send files to a model that can read them</span>
+        <p class="text-muted text-[13px] mt-0.5">When a thread’s model cannot read an image or hear audio, ${' '}
+          <code class="font-mono text-[12px]">read_media</code> sends the file to ${' '}
+          ${visionName ? html`<span class="font-mono text-[12px]">${visionName}</span>` : 'the vision model above'} for a description, or to the ${' '}
+          transcription model ${sttName ? html`(<span class="font-mono text-[12px]">${sttName}</span>)` : '(none is set above)'} for a transcript.
+          Off by default. Only a file the model explicitly asks for is sent; each thread caches its answers for itself and never shares them with another thread.</p>
+      </div>
+      <${Toggle} checked=${on} disabled=${busy} onChange=${save} label="Send files to a model that can read them" />
+    </div>
+    ${on && needs.length > 0 && html`<p class="text-xs text-warn sm:pl-11">${note}</p>`}
+    ${error && html`<p role="alert" class="text-xs text-bad sm:pl-11">${error}</p>`}
+  </section>`;
 }
 
 function RoleCard({ role, value, onSaved }) {
@@ -98,35 +193,20 @@ function RoleCard({ role, value, onSaved }) {
     ...(effortUnsupported ? [{ value: effort, text: effort[0].toUpperCase() + effort.slice(1) + ' (not declared)' }] : []),
   ];
 
-  // The models of the role's kinds. Only chat keeps the composer's
-  // context-window floor (listed): a title or a vector needs no long
-  // context, and the small models that suit them fall under it.
-  const text = role.kinds.includes('text');
   // Only the thread-opening roles take an effort: an agent carries its own
   // among its session options, and the app's own jobs keep the model default.
-  const takesEffort = role.id === 'threads' || role.id === 'chat';
-  const fits = (m) => role.kinds.includes(m.modelType) || (text && !m.modelType);
-  const shown = (m) => !role.agents || m.listed !== false;
-  const usable = s.providers.items.filter((p) => !p.broken);
-  const groups = usable.map((p) => ({
-    label: `${p.name || p.id} · API`,
-    options: p.models.filter((m) => shown(m) && fits(m)).map((m) => ({ value: `p:${p.id}\n${m.id}`, text: m.name || m.id })),
-  })).filter((g) => g.options.length);
-  const agents = role.agents && s.agents.items.length
-    ? [{ label: 'Agents · ACP', options: s.agents.items.map((a) => ({ value: 'a:' + a.id, text: a.name || a.id })) }] : [];
-  let options = [{ value: '', text: role.none }, ...agents, ...groups];
-  // A role naming something since removed still shows what it names.
-  const known = options.some((o) => o.value === cur || o.options?.some((x) => x.value === cur));
-  if (cur && !known) options = [...options, { value: cur, text: `${value.agent || `${value.provider} · ${value.model}`} (not found)` }];
+  const takesEffort = !!role.effort;
+  const options = rolePicker(role, s.providers.items, s.agents.items, value);
+  // What the picker actually offers, so the hint below can say which of the
+  // two reasons it is: nothing to pick from, or nothing that fits this role.
+  const hasProviders = s.providers.items.some((p) => !p.broken);
+  const offeredModel = options.some((o) => o.options?.length);
+  const offeredAgent = options.some((o) => typeof o.value === 'string' && o.value.startsWith('a:'));
 
   // name is what the toast calls the choice: the option's text, not its id.
   const save = async (next, name) => {
     setBusy(true);
-    const vals = { [`models.${role.id}.provider`]: next.provider, [`models.${role.id}.model`]: next.model };
-    if (role.agents) vals[`models.${role.id}.agent`] = next.agent;
-    // An agent carries its own effort, and a role with no model cannot keep
-    // one; either way the stale value would be rejected by the validator.
-    if (next.agent || !next.provider || !next.model) vals[`models.${role.id}.effort`] = '';
+    const vals = rolePatch(role, next);
     try {
       const d = await api.setSettings(vals);
       state.threadDefault = d.models?.threads || null;
@@ -140,9 +220,11 @@ function RoleCard({ role, value, onSaved }) {
   // saveEffort writes the effort a thread of this role starts on; "" leaves
   // it to the model's own default, then the provider's.
   const saveEffort = async (v) => {
+    const write = setRoleEffort(role, v);
+    if (!write) return; // this role has no effort leaf, so the select is not offered
     setBusy(true);
     try {
-      const d = await api.setSettings({ [`models.${role.id}.effort`]: v || '' });
+      const d = await write;
       state.threadDefault = d.models?.threads || null;
       emit();
       onSaved(d);
@@ -186,8 +268,10 @@ function RoleCard({ role, value, onSaved }) {
     </p>`}
     ${!agentId && takesEffort && html`<p class="text-xs text-faint sm:pl-11">The effort list follows what the selected model declares. Reasoning models often do better at medium or higher.</p>`}
     ${am?.status === 'error' && html`<p class="text-xs text-bad sm:pl-11">The agent did not list its models: ${am.error}</p>`}
-    ${!groups.length && !agents.length && (text
-      ? html`<p class="text-xs text-faint sm:pl-11">Add a provider${role.agents ? ' or an agent' : ''} to choose one.</p>`
-      : html`<p class="text-xs text-faint sm:pl-11">No model is marked as ${role.kinds[0]}. A provider’s catalog marks them when it can; otherwise set a model’s type under <a href="#/settings/providers" class="underline">Providers</a>.</p>`)}
+    ${!offeredModel && !offeredAgent && (hasProviders
+      ? role.needs
+        ? html`<p class="text-xs text-faint sm:pl-11">No model in this catalog takes an ${role.needs}. A provider’s catalog says what each model can read; the ones that can will appear here.</p>`
+        : html`<p class="text-xs text-faint sm:pl-11">No model is marked as ${role.kinds[0]}. A provider’s catalog marks them when it can; otherwise set a model’s type under <a href="#/settings/providers" class="underline">Providers</a>.</p>`
+      : html`<p class="text-xs text-faint sm:pl-11">Add a provider${role.agents ? ' or an agent' : ''} to choose one.</p>`)}
   </section>`;
 }

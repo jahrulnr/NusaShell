@@ -97,6 +97,74 @@ func (stubAgentRuntime) Steer(context.Context, string, valueobject.UserInput, fu
 
 // An agent room carries its effort in the agent's own session, so the thread
 // setting never touches it — and never fails the turn either.
+// useAgent registers an agent and its runtime on the job deps, the way the
+// composition does before an agent turn can run.
+func useAgent(t *testing.T, d *Deps) {
+	t.Helper()
+	agent, err := aggregate.NewAgent("claude", "Claude", "claude", nil, enum.ApprovalPolicyAsk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents := repoagent.New(t.TempDir(), nil)
+	if err := agents.Save(t.Context(), &agent); err != nil {
+		t.Fatal(err)
+	}
+	d.Agents = agents
+	d.AgentRuntime = stubAgentRuntime{}
+}
+
+// storedRecord reads the room's record, not a loaded aggregate: Load replays
+// BindAgent, which strips provider picks from agent rooms — so a loaded
+// conversation cannot tell a value that was written from one that was dropped.
+func storedRecord(t *testing.T, d Deps) (string, string) {
+	t.Helper()
+	info, err := d.Convs.Info(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Effort, info.Upstream
+}
+
+// A provider room that becomes an agent room drops the provider's picks. The
+// agent applies neither an effort nor an upstream, so a room that kept them
+// would show a value nothing honours — for good.
+func TestBindingAnAgentDropsTheProviderSelection(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	d.ThreadsEffort = enum.EffortMax
+	if err := send(t, d, spy, SendOptions{Upstream: "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	if effort, upstream := storedSelection(t, d); effort != enum.EffortMax || upstream != "Alpha" {
+		t.Fatalf("provider room stored %q, %q", effort, upstream)
+	}
+	useAgent(t, &d)
+	if err := send(t, d, spy, SendOptions{Agent: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	// The record itself: the binding must not leave the old picks behind for
+	// a later load to clean up.
+	if effort, upstream := storedRecord(t, d); effort != "" || upstream != "" {
+		t.Fatalf("agent room kept %q, %q — the agent applies neither", effort, upstream)
+	}
+}
+
+// A pick the caller sends with the first turn of an agent room never reaches
+// the record: the fresh-room path stores what a provider turn would use, and
+// an agent room has none.
+func TestAgentRoomIgnoresAPickedEffort(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	d.ThreadsEffort = enum.EffortMax
+	useAgent(t, &d)
+	if err := send(t, d, spy, SendOptions{Effort: enum.EffortHigh, Upstream: "Alpha", Agent: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	if effort, upstream := storedRecord(t, d); effort != "" || upstream != "" {
+		t.Fatalf("agent room stored %q, %q, want neither", effort, upstream)
+	}
+}
+
 func TestAgentRoomIgnoresTheThreadEffort(t *testing.T) {
 	spy := &selectionSpy{}
 	d := hydrationDeps(t, spy)

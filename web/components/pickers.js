@@ -6,9 +6,8 @@
 // hides the runtime it leaves out.
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore } from '../lib/store.js';
-import { api, errorText } from '../lib/api.js';
-import { toast } from '../lib/store.js';
-import { selection, setSelection, loadProviders, loadAgents, loadAgentModels } from '../lib/chat.js';
+import { api } from '../lib/api.js';
+import { selection, setSelection, loadProviders, loadAgents, loadAgentModels, isBusy, loadAgentOptions, sessionOptionValue, setSessionOption } from '../lib/chat.js';
 import { Icon } from './icons.js';
 import { FolderBrowser } from './folders.js';
 import { cx, Popover, Spinner, ErrorBlock, Select, fmtTokens } from './ui.js';
@@ -17,37 +16,19 @@ import { editProject } from './projects.js';
 const ALL_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const upstreamCache = new Map();
 
-// agentOptionValue is what a control shows: the room's own pick when the
-// thread exists (the agent may have changed it mid-thread), else a choice
-// staged for the thread this message will start, else the agent's default.
-function agentOptionValue(room, o) {
-  if (room.id) return o.current || '';
-  const staged = room.sel?.agentOptions || {};
-  return staged[o.id] ?? o.current ?? '';
-}
-
-// setAgentOption applies a choice to the room, or stages it when no room
-// exists yet — a fresh thread takes staged options with its first turn, so
-// a mode picked here is the one the agent starts in.
-async function setAgentOption(room, o, value, setOpts) {
-  if (!room.id) {
-    setSelection(room, { agentOptions: { ...(room.sel?.agentOptions || {}), [o.id]: value } });
-    return;
+// agentModelLabel names an agent choice: the picked model when there is
+// one, else the model the agent itself would run — the one it marks
+// current. Until the list says which that is, the button names the agent
+// and the state instead of lending the agent's name to a model.
+export function agentModelLabel(s, agentId, modelId) {
+  const name = s.agents.items.find((x) => x.id === agentId)?.name || agentId;
+  const st = s.agentModels[agentId];
+  if (modelId) {
+    const m = st?.list.find((x) => x.id === modelId);
+    return m?.name || modelId;
   }
-  try {
-    const res = await api.setAgentOption(room.id, o.id, value);
-    setOpts({ status: 'ready', list: res.data || [] });
-  } catch (e) {
-    toast('Could not set ' + o.name + ': ' + errorText(e), 'error');
-  }
-}
-
-// agentModelLabel names an agent choice: its model when one is picked.
-function agentModelLabel(s, agentId, modelId) {
-  const a = s.agents.items.find((x) => x.id === agentId);
-  const m = s.agentModels[agentId]?.list.find((x) => x.id === modelId);
-  const name = a?.name || agentId;
-  return modelId ? `${m?.name || modelId}` : name;
+  const cur = st?.list.find((x) => x.current);
+  return cur ? cur.name || cur.id : `${name} · default`;
 }
 
 export function ModelPicker({ room }) {
@@ -74,17 +55,17 @@ export function ModelPicker({ room }) {
   // plan/accept-edits/bypass modes, Devin's, and whatever config each
   // offers — so the controls are generated from what the agent reports
   // rather than from a list we would have to keep in step.
-  const [agentOpts, setAgentOpts] = useState({ status: 'idle', list: [] });
+  // The session options are the room's list (lib/chat.js), the same one the
+  // composer's chip reads: opening this panel only asks the shared loader, so
+  // a pick made in either control shows in both.
+  const agentOpts = room.agentOptions;
+  // A turn holds the room's worker until it ends: a pick now would be queued
+  // behind it and canceled by its own timeout, so the controls say when it
+  // will apply instead of taking a change they cannot deliver.
+  const readOnly = isBusy(room);
   useEffect(() => {
     if (!open || !sel.agentId) return;
-    let live = true;
-    setAgentOpts((o) => ({ status: o.list.length ? 'ready' : 'loading', list: o.list }));
-    const req = room.id ? api.agentOptions(room.id) : api.agentOptionsFor(sel.agentId);
-    req.then(
-      (res) => { if (live) setAgentOpts({ status: 'ready', list: res.data || [] }); },
-      (e) => { if (live) setAgentOpts({ status: 'error', list: [], error: errorText(e) }); },
-    );
-    return () => { live = false; };
+    loadAgentOptions(room);
   }, [open, sel.agentId, room.id]);
 
   useEffect(() => {
@@ -108,10 +89,13 @@ export function ModelPicker({ room }) {
   })).filter((x) => x.models.length);
   for (const a of agents.items) {
     const st = s.agentModels[a.id] || { status: 'idle', list: [] };
-    // An agent with no model choice still runs: its default is the row.
-    const list = st.status === 'ready' && !st.list.length ? [{ id: '', name: 'Agent default' }] : st.list;
-    const models = list.filter((m) => hit(m.name, m.id, a.id, a.name));
-    if (!needle || models.length || st.status !== 'ready') groups.push({ kind: 'agent', id: a.id, name: a.name || a.id, status: st.status, error: st.error, models });
+    const models = st.list.filter((m) => hit(m.name, m.id, a.id, a.name));
+    // An agent whose list came back empty still runs — on a model only it
+    // can name. The row says so instead of offering a fake model.
+    const bare = st.status === 'ready' && !st.list.length;
+    if (!needle || models.length || st.status !== 'ready' || (bare && hit(a.id, a.name))) {
+      groups.push({ kind: 'agent', id: a.id, name: a.name || a.id, status: st.status, error: st.error, models, bare });
+    }
   }
   const loading = provs.status === 'loading' || agents.status === 'loading';
   const nothing = !loading && provs.status === 'ready' && !provs.items.length && agents.status === 'ready' && !agents.items.length;
@@ -153,7 +137,12 @@ export function ModelPicker({ room }) {
             <button type="button" class="text-accent shrink-0" onClick=${() => loadAgentModels(grp.id, true)}>Retry</button>
           </div>`}
           ${grp.models.map((m) => {
-            const active = grp.kind === 'agent' ? sel.agentId === grp.id && (sel.modelId || '') === m.id : !sel.agentId && grp.id === sel.providerId && m.id === sel.modelId;
+            // An agent room without a stored model runs the one the agent
+            // marks current: that row carries the check, so the pick the
+            // button names is the same one the list shows.
+            const active = grp.kind === 'agent'
+              ? sel.agentId === grp.id && (sel.modelId ? sel.modelId === m.id : !!m.current)
+              : !sel.agentId && grp.id === sel.providerId && m.id === sel.modelId;
             const pick = grp.kind === 'agent'
               ? () => setSelection(room, { agentId: grp.id, providerId: '', modelId: m.id, effort: 'default', upstream: '' })
               : () => setSelection(room, { agentId: '', providerId: grp.id, modelId: m.id, effort: 'default', upstream: '' });
@@ -164,6 +153,12 @@ export function ModelPicker({ room }) {
               ${active && html`<${Icon} name="check" size=${14} class="text-accent" />`}
             </button>`;
           })}
+          ${grp.bare && html`<button type="button"
+            onClick=${() => setSelection(room, { agentId: grp.id, providerId: '', modelId: '', effort: 'default', upstream: '' })}
+            class=${cx('w-full flex items-center gap-2 px-3 h-8 text-left hover:bg-hover', sel.agentId === grp.id && !sel.modelId && 'bg-hover')}>
+            <span class="flex-1 truncate text-muted">This agent lists no models; it runs its own choice</span>
+            ${sel.agentId === grp.id && !sel.modelId && html`<${Icon} name="check" size=${14} class="text-accent" />`}
+          </button>`}
         </div>`)}
       </div>
       ${cur && html`<div class="shrink-0 border-t border-line px-3 py-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
@@ -189,15 +184,17 @@ export function ModelPicker({ room }) {
           ${agentOpts.list.map((o) => html`<label class="flex flex-col gap-1 min-w-0 only-of-type:col-span-full" key=${o.id}>
             <span class="text-xs text-muted truncate" title=${o.description || o.name}>${o.name}</span>
             ${o.type === 'boolean'
-              ? html`<${Select} dense label=${o.name} class="w-full" value=${agentOptionValue(room, o)}
+              ? html`<${Select} dense label=${o.name} class="w-full" disabled=${readOnly} value=${sessionOptionValue(room, o)}
                   options=${[{ value: 'true', text: 'On' }, { value: 'false', text: 'Off' }]}
-                  onChange=${(v) => setAgentOption(room, o, v, setAgentOpts)} />`
-              : html`<${Select} dense label=${o.name} class="w-full" search=${(o.choices || []).length > 8} value=${agentOptionValue(room, o)}
+                  onChange=${(v) => setSessionOption(room, o.id, v)} />`
+              : html`<${Select} dense label=${o.name} class="w-full" search=${(o.choices || []).length > 8} disabled=${readOnly} value=${sessionOptionValue(room, o)}
                   options=${(o.choices || []).map((c) => ({ value: c.value, text: c.name || c.value }))}
-                  onChange=${(v) => setAgentOption(room, o, v, setAgentOpts)} />`}
+                  onChange=${(v) => setSessionOption(room, o.id, v)} />`}
           </label>`)}
         </div>`}
-        ${!room.id && agentOpts.list.length > 0 && html`<p class="text-[11px] text-faint">Applies to the thread this message starts.</p>`}
+        ${agentOpts.list.length > 0 && html`<p class="text-[11px] text-faint">${readOnly
+          ? 'Applies when this turn ends.'
+          : !room.id ? 'Applies to the thread this message starts.' : ''}</p>`}
       </div>`}
       <div class="shrink-0 sticky bottom-0 z-10 bg-raised flex border-t border-line">
         <a href=${'#/settings/providers' + (sel.providerId ? '/' + encodeURIComponent(sel.providerId) : '')} onClick=${() => setOpen(false)}

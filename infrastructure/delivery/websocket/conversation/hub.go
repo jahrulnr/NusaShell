@@ -244,8 +244,10 @@ func (h *Hub) UseQueueDepth(fn func(convID string) int) {
 }
 
 // QueueChanged announces a room's waiting count. The frame is unsequenced and
-// belongs to no turn, so it never enters a journal: a reattaching tab learns
-// the current depth from the room's state, never from a replay of old counts.
+// belongs to no turn, so it never enters a journal: it is a nudge, and a tab
+// that missed it — a fresh load, a reconnect, a socket dropped for being slow —
+// reads the same number off the room's projection instead (`waiting` on the
+// conversation detail and list), never from a replay of old counts.
 func (h *Hub) QueueChanged(convID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

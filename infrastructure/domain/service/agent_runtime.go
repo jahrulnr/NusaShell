@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -67,6 +68,21 @@ type AgentOption struct {
 	Type        string         `json:"type"` // select or boolean
 	Current     string         `json:"current"`
 	Choices     []OptionChoice `json:"choices,omitempty"`
+}
+
+// Offers reports whether value is one this option accepts: a listed choice for
+// a select, "true" or "false" for a boolean, and any non-empty value for free
+// text. It is the single answer to "may this value be recorded for this
+// option" — the picker's validation, the live session's refusal, and the turn
+// that replays a stored pick all refuse the same set.
+func (o AgentOption) Offers(value string) bool {
+	switch o.Type {
+	case "select":
+		return slices.ContainsFunc(o.Choices, func(c OptionChoice) bool { return c.Value == value })
+	case "boolean":
+		return value == "true" || value == "false"
+	}
+	return value != ""
 }
 
 // AgentCommand is a slash command an agent session offers. It runs by

@@ -233,8 +233,8 @@ Full schemas, typed errors, and examples live in
 | `GET /api/conversations/{id}/elicitations` · `POST /api/conversations/{id}/elicitations/{elicitationId}` | Open requests for input from the room's agent (`[{id, mode, message, schema, url}]`, `mode` is `form` or `url`), and answering one with body `{action, content}`: `action` is `accept`, `decline`, or `cancel`; `content` (accept only) must match the form's schema — a missing required field, an unknown field, or a wrong type, length, range, pattern, or choice is `400` and the request stays open. `204`; `404` when nothing waits under that id. |
 | `GET /api/conversations/{id}/agent-options` · `PUT /api/conversations/{id}/agent-options` | The agent's session options for the room — `{ "data": [{ id, name, description, category, type, current, choices: [{value, name, description}] }] }`, its live session's when one runs, else the agent's defaults — and setting one with body `{id, value}` (answers the updated list). The room keeps its picks and applies them before each turn. |
 | `GET /api/commands?conversationId=` | The composer's slash-command catalog — `{ "data": [{ name, description, hint, source, enabled, reason }] }`: the native commands (compact, clear, fork) first, then the room's agent commands, one row per name with `source` saying which owns it (native wins a collision). `enabled`/`reason` are the server's verdict for this room; an agent command is always on. Without `conversationId` it answers the native set with every row off and `reason: "Send a message first"`. |
-| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Items include `activeTurnId` / `activeTurnKind` while a transport turn is in progress. `limit` default 30, max 100. |
-| `GET /api/conversations/{id}` | One projection. Detail adds `canCompact`, and `activeTurnId` / `activeTurnKind` while a transport turn is in progress. |
+| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Items include `activeTurnId` / `activeTurnKind` while a transport turn is in progress, and `waiting` while jobs queue behind it. `limit` default 30, max 100. |
+| `GET /api/conversations/{id}` | One projection. Detail adds `canCompact`, `activeTurnId` / `activeTurnKind` while a transport turn is in progress, and `waiting` for the jobs queued behind it. |
 | `GET /api/conversations/{id}/messages?start&limit` | Ranged history; `start >= 0` absolute, negative counts back from the end. `limit` max 100. |
 | `PATCH /api/conversations/{id}` | Any of `title`, `projectId` (`""` takes the room out of its project; an unknown id is `400`), `pinned`, `label` (the room's `@handle`: 1–24 of `a-z0-9` with inner hyphens, a leading `@` dropped; `""` clears; invalid `400`, taken by another room `409`), and `routing` (`{replyToOrigin, mirrorFinal, notifyApprovals}`; `null` returns to the defaults); absent fields keep their value. Queued on the room's worker, so it lands after a running turn. Answers the updated projection, which carries `label` and `routing` when set. |
 | `GET /api/conversations/{id}/export` | The whole thread as one JSON download (`Content-Disposition: attachment; filename=nusashell-<id>.json`): `{ exportedAt, conversation, messages }`, in the shapes the projection and messages routes serve. |
@@ -477,7 +477,13 @@ The same response — and each item of the list projection — includes
 `activeTurnId` and `activeTurnKind` (`send` or `edit`) when this
 process's turn hub has a non-terminal turn for the room, so a client
 can attach with `turn.watch`. Both fields are omitted when the room is
-idle. They are not persisted conversation state.
+idle. They are not persisted conversation state. Both also carry
+`waiting`: how many jobs queue behind that turn, read from the same
+worker queue the `conversation.queued` notice counts. The notice is a
+nudge a tab can miss — a fresh load, a reconnect, a socket dropped for
+being slow — so the read carries the number itself, and a client seeds
+its queue line from it. `waiting` is omitted when nothing waits and is
+not persisted either.
 
 ## WebSocket surface
 

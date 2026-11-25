@@ -31,6 +31,10 @@ type ModelsConfig struct {
 	Video ModelRole `json:"video"`
 	// Speech reads text aloud.
 	Speech ModelRole `json:"speech"`
+	// Vision describes an image for a model that cannot see it — read_media's
+	// description branch. Assigning it is not consent to send files:
+	// media.reading_consent is the separate switch.
+	Vision ModelRole `json:"vision"`
 }
 
 // ModelRole is one assignment: an agent (Threads and Chat only), or a provider and
@@ -68,6 +72,7 @@ func (c *ModelsConfig) Normalize() {
 	c.Image.normalize()
 	c.Video.normalize()
 	c.Speech.normalize()
+	c.Vision.normalize()
 }
 
 func (c ModelsConfig) validate() error {
@@ -95,7 +100,7 @@ func (c ModelsConfig) validate() error {
 	// directly. None of them takes a reasoning effort.
 	for name, r := range map[string]ModelRole{
 		"utility": c.Utility, "embedding": c.Embedding, "transcription": c.Transcription,
-		"image": c.Image, "video": c.Video, "speech": c.Speech,
+		"image": c.Image, "video": c.Video, "speech": c.Speech, "vision": c.Vision,
 	} {
 		if r.Agent != "" {
 			return fmt.Errorf("models.%s takes a provider and model, not an agent", name)

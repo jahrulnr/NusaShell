@@ -51,6 +51,11 @@ type conversationDTO struct {
 	// persisted conversation state.
 	ActiveTurnID   string `json:"activeTurnId,omitempty"`
 	ActiveTurnKind string `json:"activeTurnKind,omitempty"`
+	// Waiting is how many jobs queue behind that turn, read from the
+	// worker queue itself. Detail and list items set it, so a tab that
+	// never saw a `conversation.queued` frame still opens on the real
+	// count; writes leave it empty, like the turn above. Not persisted.
+	Waiting int `json:"waiting,omitempty"`
 }
 
 func toConversation(i drepo.ConversationInfo) conversationDTO {

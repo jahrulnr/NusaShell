@@ -148,14 +148,31 @@ export function Select({ value, options, onChange, search = false, class: cls = 
     if (!ss.current) return;
     if (disabled) ss.current.disable(); else ss.current.enable();
   }, [disabled]);
+  // Slim-select marks a user's pick at once; a change the server refused
+  // changes nothing upstream, so the display can diverge from `value`
+  // without `value` ever moving. The resync runs after every render —
+  // divergence, not change, is what asks for it.
   useEffect(() => {
-    if (!ss.current) return;
-    el.current._value = value;
-    // An entry with options is a labelled group of them.
-    const opt = (o) => ({ value: o.value, text: o.text, selected: o.value === value });
-    ss.current.setData(options.map((o) => (o.options ? { label: o.label, options: o.options.map(opt) } : opt(o))));
-  }, [value, JSON.stringify(options)]);
+    if (ss.current && el.current) selectResync(el.current, ss.current, value, options);
+  });
   return html`<div class=${cx('min-w-40', dense && 'ss-dense', cls)}><select ref=${el} aria-label=${label}></select></div>`;
+}
+
+// selectResync pushes the props into slim-select when its display differs
+// from them: on mount, on a real change, and after a refused pick left its
+// selection ahead of `value`. `el._value` holds what slim-select last showed
+// (set here, or by the picker's afterChange) and `el._data` what was last
+// pushed; both matching means nothing moved and the call is free. Returns
+// whether it pushed.
+export function selectResync(el, ss, value, options) {
+  const data = JSON.stringify(options);
+  if (el._value === value && el._data === data) return false;
+  el._data = data;
+  el._value = value;
+  // An entry with options is a labelled group of them.
+  const opt = (o) => ({ value: o.value, text: o.text, selected: o.value === value });
+  ss.setData(options.map((o) => (o.options ? { label: o.label, options: o.options.map(opt) } : opt(o))));
+  return true;
 }
 
 // ConfirmHost shows the question askConfirm is asking; the app renders it

@@ -112,9 +112,12 @@ func (a *SettingApp) SetMany(values map[string]string) ([]byte, error) {
 		}
 		if jsonType(value) != jsonType(schemaLeaf) {
 			example, _ := json.Marshal(schemaLeaf) // schema values came from JSON
-			return nil, apperror.New(400, "invalid value",
-				fmt.Errorf("config key %q expects a %s value like %s",
-					key, jsonType(schemaLeaf), string(example)))
+			// The sentence belongs in the public message: the wire sends only
+			// that, and "invalid value" alone leaves an API caller guessing
+			// which leaf and which type. The cause repeats it for the log.
+			detail := fmt.Sprintf("config key %q expects a %s value like %s",
+				key, jsonType(schemaLeaf), string(example))
+			return nil, apperror.New(400, "invalid value: "+detail, errors.New(detail))
 		}
 		decoded[key] = value
 	}

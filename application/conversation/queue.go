@@ -4,6 +4,7 @@ import (
 	"context"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
 // QueueDepth is how many jobs wait on the room's worker — a queued
@@ -33,17 +34,18 @@ func (app *ConversationApp) OnQueueChanged(fn func(convID string)) {
 // (the queue depth after the post) and never a promise about when the turn
 // runs — a server that stops first loses the message, and its sender was told
 // only that it was accepted.
-func (app *ConversationApp) Enqueue(ctx context.Context, convID, providerID, modelID, text string, opts appjob.SendOptions) (int, error) {
+func (app *ConversationApp) Enqueue(ctx context.Context, convID, providerID, modelID, text string, attachments []valueobject.Attachment, opts appjob.SendOptions) (int, error) {
 	// The accepted message outlives the caller's turn: a sender that ends its
 	// own turn must not cancel the message it just handed over.
 	j := &appjob.Send{
-		Deps:       app.depsSnapshot(),
-		Ctx:        context.WithoutCancel(ctx),
-		Receipt:    appjob.NewPersistenceReceipt(),
-		ProviderID: providerID,
-		ModelID:    modelID,
-		Message:    text,
-		Opts:       opts,
+		Deps:        app.depsSnapshot(),
+		Ctx:         context.WithoutCancel(ctx),
+		Receipt:     appjob.NewPersistenceReceipt(),
+		ProviderID:  providerID,
+		ModelID:     modelID,
+		Message:     text,
+		Attachments: attachments,
+		Opts:        opts,
 	}
 	j.Result = make(chan error, 1)
 	if err := app.post(convID, j); err != nil {

@@ -57,6 +57,15 @@ type LiveTurn interface {
 	ActiveTurn(conversationID string) (turnID, kind string, ok bool)
 }
 
+// QueueDepth reports how many jobs wait behind a room's running turn —
+// the worker queue `conversation.queued` announces. The projection owns no
+// queue, and the frame is a nudge that a tab can miss: a read carries the
+// number so an opened room starts from the truth. A nil lookup omits it.
+// *appconversation.ConversationApp satisfies it.
+type QueueDepth interface {
+	QueueDepth(convID string) int
+}
+
 // Deps wires the use cases; Reads and Writes are optional — nil leaves
 // the corresponding routes unregistered.
 type Deps struct {
@@ -65,6 +74,9 @@ type Deps struct {
 	// LiveTurns reports a non-terminal transport turn for detail and
 	// list reads. Nil leaves the field off the projection.
 	LiveTurns LiveTurn
+	// Queue reports how many jobs wait behind a room's running turn for
+	// detail and list reads. Nil leaves the field off the projection.
+	Queue QueueDepth
 	// Approvals answers agent permission requests; nil leaves its routes
 	// unregistered.
 	Approvals Approver
@@ -103,7 +115,7 @@ func Register(api *gin.RouterGroup, d Deps) {
 	if jobs == nil {
 		jobs = context.Background()
 	}
-	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, clearActivity: d.ActivityClearer, commands: d.Commands}
+	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, queue: d.Queue, clearActivity: d.ActivityClearer, commands: d.Commands}
 	if d.Approvals != nil {
 		a := &approvals{svc: d.Approvals}
 		api.GET("/conversations/:id/approvals", a.list)
@@ -158,6 +170,7 @@ type server struct {
 	writes        Writer
 	commands      CommandSurface
 	live          LiveTurn
+	queue         QueueDepth
 	jobs          context.Context
 	clearActivity interface{ Clear() }
 }

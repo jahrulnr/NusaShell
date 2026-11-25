@@ -35,6 +35,17 @@ const (
 	waitDelay = 5 * time.Second
 )
 
+// longRunHintAfter is how long a command may take before the result says that
+// exec_session is the tool for runs like it. A variable so a test can prove
+// the branch without sleeping twenty seconds.
+var longRunHintAfter = 20 * time.Second
+
+// longRunHint is the line a finished but slow run carries: the tool cannot know
+// a command's duration before it runs, so it reports once it knows.
+func longRunHint(elapsed time.Duration) string {
+	return fmt.Sprintf("ran %.0fs; use exec_session and poll for runs like this", elapsed.Seconds())
+}
+
 // ExecTool runs a shell command and returns its merged output. It is
 // inherently unsandboxed — there is no root to confine it to — so the
 // schema's ToolPermissionAgent is the gate the application turn
@@ -179,6 +190,17 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 		lastByte = head[len(head)-1]
 	}
 	line := fmt.Sprintf("(%s, %.1fs)", status, elapsed.Seconds())
+	// A long run is a fact, not a guess: neither the model nor the harness can
+	// know a command's duration before it runs, so the tool does not route on
+	// it — it reports once it knows. The hint names the tool that would have
+	// been the better call, and never appears for a run this tool itself
+	// stopped (that line already explains the stop). It sits ABOVE the status
+	// line: the status line closes the result, and the clients read the last
+	// line to decide how the call ended.
+	longRun := ""
+	if elapsed >= longRunHintAfter && !(exit.Code == 0 && !clean) {
+		longRun = longRunHint(elapsed) + "\n"
+	}
 	// A process this tool stopped on purpose says who stopped it and how long
 	// it ran first: a bare "(signal: killed)" cannot tell the owner's Stop
 	// from an agent's own cancel or a server restart, and a timeout that reads
@@ -197,9 +219,9 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 			}
 		}
 	}
-	suffix := line
+	suffix := longRun + line
 	if total > 0 && lastByte != '\n' {
-		suffix = "\n" + line
+		suffix = "\n" + suffix
 	}
 	if sink.writer != nil {
 		sink.writeSpill([]byte(suffix))

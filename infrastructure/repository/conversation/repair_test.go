@@ -63,7 +63,7 @@ func TestRepairOrphanRejectsPartialMessageOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghost, _ := entity.NewMessage(enum.RoleUser, "ghost")
-	ghostLine, err := json.Marshal(lineRecord{Type: lineMessage, Data: encodeMessage(ghost)})
+	ghostLine, err := json.Marshal(lineRecord{Type: lineMessage, Data: messageEnvelope(ghost)})
 	if err != nil {
 		t.Fatal(err)
 	}
