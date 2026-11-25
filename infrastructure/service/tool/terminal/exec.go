@@ -238,11 +238,11 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 		// Never crossed the budget mid-run but overshot after the exit
 		// suffix (or on a final chunk boundary) — spill the whole string
 		// now; it is still fully in memory.
-		ref := "full output: " + spillPath
+		ref := entity.SpillRef(spillPath, 0)
 		toWrite := full
 		if len(toWrite) > maxExecSpillBytes {
 			toWrite = toWrite[:maxExecSpillBytes]
-			ref = fmt.Sprintf("spilled output (truncated at %d MiB): %s", maxExecSpillBytes>>20, spillPath)
+			ref = entity.SpillRef(spillPath, maxExecSpillBytes>>20)
 		}
 		f, err := spill.Open()
 		if err == nil {
@@ -264,13 +264,13 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 	// Spilled mid-run: the file holds the stream up to the spill cap, and
 	// the excerpt is assembled from the frozen head and the rolling tail.
 	tail += suffix
-	ref := "full output: " + spillPath
+	ref := entity.SpillRef(spillPath, 0)
 	switch {
 	case spillErr != nil:
 		ref = fmt.Sprintf("spill to %s failed: %v", spillPath, spillErr)
 	case spillWritten < total+len(suffix):
 		// The cap dropped stream bytes — "full" would be a lie.
-		ref = fmt.Sprintf("spilled output (truncated at %d MiB): %s", maxExecSpillBytes>>20, spillPath)
+		ref = entity.SpillRef(spillPath, maxExecSpillBytes>>20)
 	}
 	return service.ToolResult{Text: call.OutputWithMiddleTruncateWindow(head, tail, total+len(suffix), ref)}, nil
 }

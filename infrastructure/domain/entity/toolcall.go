@@ -126,6 +126,20 @@ func (t ToolCall) OutputWithMiddleTruncateWindow(head, tail string, total int, r
 	return head + fmt.Sprintf(markerFmt, max(0, total-len(head)-len(tail)), markerSuffix) + tail
 }
 
+// SpillRef is the marker suffix naming where a truncated result's output
+// lives — one wording for every tool, ending with the read-back hint so the
+// model knows how to recover it. cappedMiB > 0 marks the spill file itself
+// as capped: claiming "full" would be a lie, but the partial file is still
+// the recovery path. A failed spill has nothing to read, so callers keep a
+// plain error ref there.
+func SpillRef(path string, cappedMiB int) string {
+	const hint = " (read it with read_file or grep it with exec)"
+	if cappedMiB > 0 {
+		return fmt.Sprintf("spilled output (truncated at %d MiB): %s%s", cappedMiB, path, hint)
+	}
+	return "full output: " + path + hint
+}
+
 func outputHead(s string, budget int) string {
 	if budget <= 0 {
 		return ""

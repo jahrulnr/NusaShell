@@ -307,7 +307,7 @@ func (t *Tool) result(ctx context.Context, call entity.ToolCall, out json.RawMes
 	}
 	if len(buf) > call.OutputBudget() {
 		if ref := t.spillBytes(ctx, call, buf); ref != "" {
-			return service.ToolResult{Text: call.OutputWithMiddleTruncateWindow(string(buf), string(buf), len(buf), "full output: "+ref)}, nil
+			return service.ToolResult{Text: call.OutputWithMiddleTruncateWindow(string(buf), string(buf), len(buf), entity.SpillRef(ref, 0))}, nil
 		}
 	}
 	return service.ToolResult{Text: string(buf)}, nil

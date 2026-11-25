@@ -322,7 +322,7 @@ func TestExecOversizedSpillsAndTruncates(t *testing.T) {
 	if !ok {
 		t.Fatalf("spill marker missing: %q", out)
 	}
-	spill, _, _ = strings.Cut(spill, " ...]")
+	spill, _, _ = strings.Cut(spill, " (")
 	if !strings.HasPrefix(out, "1\n2\n3") || !strings.Contains(out, "2000\n(exit 0, ") || !strings.HasSuffix(out, "s)") {
 		t.Fatalf("missing head or tail: %q (tail %q)", out[:80], out[max(0, len(out)-80):])
 	}
@@ -358,7 +358,7 @@ func TestExecSpillBelongsToConversationAndSurvivesAge(t *testing.T) {
 	if !ok {
 		t.Fatalf("spill marker missing: %q", result.Text)
 	}
-	path, _, _ = strings.Cut(path, " ...]")
+	path, _, _ = strings.Cut(path, " (")
 	if filepath.Dir(path) != filepath.Join(root, "c1", "tool-output") {
 		t.Fatalf("spill outside conversation: %s", path)
 	}
@@ -444,7 +444,7 @@ func TestExecExitSuffixOverflowSpillsWholeOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing spill marker: %q", res.Text)
 	}
-	path, _, _ = strings.Cut(path, " ...]")
+	path, _, _ = strings.Cut(path, " (")
 	if filepath.Dir(path) != filepath.Join(root, "c1", "tool-output") {
 		t.Fatalf("spill path outside room: %q", path)
 	}
@@ -475,7 +475,7 @@ func TestRepeatedCallIDKeepsDistinctSpillMarkers(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing spill marker: %q", result.Text)
 		}
-		path, _, _ = strings.Cut(path, " ...]")
+		path, _, _ = strings.Cut(path, " (")
 		paths = append(paths, path)
 		t.Cleanup(func() { _ = os.Remove(path) })
 		if _, err := os.Stat(path); err != nil {
@@ -498,7 +498,7 @@ func TestSpillCapReportsTruncation(t *testing.T) {
 	if !ok {
 		t.Fatalf("spill cap marker missing: %q", result.Text)
 	}
-	path, _, _ := strings.Cut(rest, " ...]")
+	path, _, _ := strings.Cut(rest, " (")
 	t.Cleanup(func() { _ = os.Remove(path) })
 	info, err := os.Stat(path)
 	if err != nil || info.Size() != maxExecSpillBytes {
@@ -838,7 +838,7 @@ func TestExecLongRunSuggestsExecSession(t *testing.T) {
 	if !ok {
 		t.Fatalf("spill marker missing: %q", result.Text)
 	}
-	path, _, _ = strings.Cut(path, " ...]")
+	path, _, _ = strings.Cut(path, " (")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

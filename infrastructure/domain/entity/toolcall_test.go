@@ -157,6 +157,36 @@ func TestToolCallMiddleTruncateWindowKeepsLiteralReference(t *testing.T) {
 	}
 }
 
+func TestToolCallSpillRefMarkerCarriesHintInsideBudget(t *testing.T) {
+	tc := mustCall(t, "i", "n", "{}", enum.TooltypeOrigin)
+	tc.SetOutputBudget(400)
+	head := strings.Repeat("head ", 200)
+	tail := strings.Repeat("tail ", 200)
+	got := tc.OutputWithMiddleTruncateWindow(head, tail, 5000,
+		SpillRef("/conv/c1/tool-output/nusashell-exec-abc.log", 0))
+	if len(got) > tc.OutputBudget() {
+		t.Fatalf("the read-back hint pushed output past budget: %d > %d", len(got), tc.OutputBudget())
+	}
+	for _, want := range []string{"bytes omitted", "full output: /conv/c1/tool-output/nusashell-exec-abc.log",
+		"read it with read_file or grep it with exec"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("marker missing %q: %q", want, got)
+		}
+	}
+	// A ref longer than the whole budget still cannot overflow — the window
+	// falls back to a head-only excerpt.
+	tc.SetOutputBudget(80)
+	got = tc.OutputWithMiddleTruncateWindow(head, tail, 5000,
+		SpillRef("/conv/c1/tool-output/nusashell-exec-abc.log", 0))
+	if len(got) > tc.OutputBudget() {
+		t.Fatalf("oversized ref overflowed the budget: %d > %d", len(got), tc.OutputBudget())
+	}
+	if ref := SpillRef("/tmp/x.log", 32); !strings.Contains(ref, "truncated at 32 MiB") ||
+		!strings.Contains(ref, "read it with read_file") {
+		t.Fatalf("capped ref = %q", ref)
+	}
+}
+
 func TestToolCallOutputViewsRespectUTF8AndExactBudget(t *testing.T) {
 	tc := mustCall(t, "i", "n", "{}", enum.TooltypeOrigin)
 	tc.SetOutputBudget(5)

@@ -86,7 +86,8 @@ func TestOversizedDocSpillsWithRecoveryPointer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Text, "bytes omitted") || !strings.Contains(res.Text, "full output: ") {
+	if !strings.Contains(res.Text, "bytes omitted") || !strings.Contains(res.Text, "full output: ") ||
+		!strings.Contains(res.Text, "read it with read_file") {
 		t.Fatalf("missing spill pointer: %q…", res.Text[:200])
 	}
 	if len(res.Text) > call.OutputBudget()+100 {
