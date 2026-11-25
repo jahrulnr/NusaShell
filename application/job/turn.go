@@ -329,6 +329,23 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 		}
 		if canceled && len(added) == 0 {
 			if ctx.Err() != nil {
+				// The reply the owner watched stream is still history: keep it
+				// as an interrupted message before the turn reports the cancel,
+				// sealed with the cause that cut it. A restart that erased the
+				// partial would make the owner's last screen a lie.
+				if partial, ok, perr := interruptedReply(parts); perr != nil {
+					return perr
+				} else if ok {
+					if perr := stampInterrupted(ctx, &partial); perr != nil {
+						return perr
+					}
+					if _, perr := d.Convs.AppendMessage(context.WithoutCancel(ctx), convID, partial); perr != nil {
+						return perr
+					}
+					if perr := d.Convs.Save(context.WithoutCancel(ctx), conv); perr != nil {
+						return perr
+					}
+				}
 				return apperror.New(408, "turn canceled", ctx.Err())
 			}
 			return err
@@ -344,7 +361,7 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 		}
 		persistCtx := ctx
 		if canceled || ctx.Err() != nil {
-			if err := stampInterrupted(conv.Last()); err != nil {
+			if err := stampInterrupted(ctx, conv.Last()); err != nil {
 				return err
 			}
 			// The partial reply and interrupted markers are history, not
@@ -438,10 +455,26 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 			}
 			// Live chunks flow to the frontend scoped by call id —
 			// they are a preview, never history; only the Execute
-			// result lands in output.
+			// result lands in output. What the client already saw is
+			// kept as a bounded head, so the settled tail can be sent
+			// as the rest instead of a second copy — and a command that
+			// streams a hundred megabytes does not sit in this turn's
+			// memory twice.
 			emitted := false
+			streamedOver := false
+			var streamed strings.Builder
 			emit := func(chunk string) {
 				emitted = true
+				if !streamedOver {
+					if streamed.Len()+len(chunk) > streamedHeadBytes {
+						// Past the head the prefix check can no longer be
+						// made; drop what we held rather than grow.
+						streamedOver = true
+						streamed.Reset()
+					} else {
+						streamed.WriteString(chunk)
+					}
+				}
 				if onEvent != nil {
 					onEvent(event.NewToolOutputEvent(call, chunk))
 				}
@@ -456,6 +489,12 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 				res, err := tool.Execute(ctx, call, emit)
 				switch {
 				case err == nil:
+					out, outAtts = res.Text, res.Attachments
+				case ctx.Err() != nil && res.Text != "":
+					// The tool kept what ran before the stop — its own words
+					// say who stopped it. That text is the call's outcome, so
+					// it is recorded here rather than replaced by the blind
+					// marker; the turn ends canceled once it is persisted.
 					out, outAtts = res.Text, res.Attachments
 				case ctx.Err() != nil:
 					return apperror.New(408, "turn canceled", ctx.Err())
@@ -498,6 +537,14 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 			if !emitted && out != "" {
 				emit(out)
 			}
+			// A tool that streamed its own output still settles with text
+			// the stream never carried — the exit status, the line naming
+			// who stopped it, a withheld-media note. Send exactly that
+			// extension, so the live row ends with the record's text and a
+			// stopped run does not read as a clean success until reload.
+			if emitted && !streamedOver && len(out) > streamed.Len() && strings.HasPrefix(out, streamed.String()) {
+				emit(out[streamed.Len():])
+			}
 			if err := last.SetToolOutput(call.ID(), out); err != nil {
 				return apperror.New(500, "tool output lost", err)
 			}
@@ -536,6 +583,15 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 				return hitMediaLimit, apperror.New(408, "turn canceled", ctx.Err())
 			}
 			return hitMediaLimit, err
+		}
+		// A tool that reported its result while the turn was canceled has
+		// already written it above; the turn still ends canceled — with the
+		// captured output in history instead of a marker over it.
+		if ctx.Err() != nil {
+			if err := d.persistInterrupted(ctx, convID, last); err != nil {
+				return hitMediaLimit, err
+			}
+			return hitMediaLimit, apperror.New(408, "turn canceled", ctx.Err())
 		}
 	}
 	return hitMediaLimit, nil
@@ -579,23 +635,56 @@ func (d Deps) resolveProvider(ctx context.Context, convID string, conv *aggregat
 	return prov, m, svc, nil
 }
 
-// stampInterrupted records "interrupted by user" on origin calls that
-// never received a result, and marks a reply the provider never closed
-// with the interrupted finish — an empty finish would read as a
-// complete answer to a later reload. Incomplete argument streams are
-// not on the message — adapters omit them before appending.
-func stampInterrupted(msg *entity.Message) error {
+// stampInterrupted marks origin calls that never received a result, and a
+// reply the provider never closed with the interrupted finish — an empty
+// finish would read as a complete answer to a later reload. Incomplete
+// argument streams are not on the message — adapters omit them before
+// appending.
+//
+// The short marker names its cause (ADR-0004 §7): a restart that cuts a call
+// must not blame the owner. Three causes share two lengths — the owner's Stop,
+// the restart, and a caller that simply left; the canceled cause reads short
+// here and long in a tool result that had output
+// (`(canceled after N.Ns — partial output above)`). An agent-canceled call has
+// no short form yet: that mechanism is not landed, so a fourth form is not
+// invented here.
+func stampInterrupted(ctx context.Context, msg *entity.Message) error {
 	if msg == nil {
 		return nil
 	}
 	if msg.FinishReason() == "" {
 		msg.SetFinishReason(enum.FinishReasonInterrupted)
 	}
+	cause := context.Cause(ctx)
+	marker := ""
+	switch {
+	case errors.Is(cause, dservice.ErrInterruptedByUser):
+		marker = "interrupted by user"
+	case errors.Is(cause, dservice.ErrServerRestarted):
+		marker = "interrupted by a nusashell restart"
+	case errors.Is(cause, context.Canceled):
+		// The caller went away — a closed tab, a dropped socket. Nobody
+		// decided this, so the marker must not name the owner; it uses the
+		// canceled form the tool vocabulary already has.
+		marker = "(canceled — the caller went away)"
+	case errors.Is(cause, dservice.ErrInterruptedByAgent):
+		// Deliberately unnamed: no short form exists for an agent's own
+		// per-call abort until that mechanism lands and the ADR names it.
+		// The placeholder below says so rather than borrowing the owner's
+		// words for a stop the owner never made.
+	default:
+		// An unrecognized cause must never fall through to a name. This arm
+		// exists to keep a future mechanism from silently accusing the owner
+		// the day it starts canceling turns.
+	}
+	if marker == "" {
+		marker = "(interrupted — cause not named)"
+	}
 	for _, tc := range msg.ToolCalls() {
 		if tc.Type() != enum.TooltypeOrigin || tc.HasOutput() {
 			continue
 		}
-		if err := msg.SetToolOutput(tc.ID(), "interrupted by user"); err != nil {
+		if err := msg.SetToolOutput(tc.ID(), marker); err != nil {
 			return err
 		}
 		if err := msg.SetToolFailed(tc.ID(), true); err != nil {
@@ -604,6 +693,11 @@ func stampInterrupted(msg *entity.Message) error {
 	}
 	return nil
 }
+
+// streamedHeadBytes bounds what a streaming tool's live output keeps in
+// memory for the "send only the tail" check — the same reasoning as the
+// output budget, applied to the turn's own copy.
+const streamedHeadBytes = 64 << 10
 
 // interruptedReply is the reply a failed call streamed before it broke:
 // the text and reasoning the owner already saw, in arrival order. Tool-call
@@ -644,7 +738,7 @@ func (d Deps) persistInterrupted(ctx context.Context, convID string, msg *entity
 		return nil
 	}
 	pending := pendingCalls(*msg)
-	if err := stampInterrupted(msg); err != nil {
+	if err := stampInterrupted(ctx, msg); err != nil {
 		return err
 	}
 	for _, pc := range pending {

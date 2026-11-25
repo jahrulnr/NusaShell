@@ -3,8 +3,9 @@
 import { calls, mockApi, sleep, sockets } from './env.mjs';
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { state } from '../lib/store.js';
+import { state, subscribe } from '../lib/store.js';
 import * as chat from '../lib/chat.js';
+import { queuedFor } from '../lib/queued.js';
 import { historyItems, liveHistory, liveSegments } from '../lib/turn.js';
 
 let ws;
@@ -154,7 +155,10 @@ test('a later message an existing thread did not save comes back to that thread\
   await sleep(40);
   assert.equal(location.hash, '#/c/c_2');
   assert.equal(r.draft, 'again');
-  assert.equal(r.failed.message, 'rejected');
+  // the prompt never landed, so there is no turn to report: the draft is back
+  // and the reason is said once, without a failure card offering a retry
+  assert.equal(r.failed, null);
+  assert.match(state.toasts.at(-1)?.message || '', /rejected/);
 });
 
 test('a command the server rejects outright gives the text back and says why', async () => {
@@ -1383,4 +1387,96 @@ test('a failure frame with no message keeps none, so the card can say so', async
   await sleep(60);
   assert.equal(r.failed.message, '', 'no invented explanation stands in for the provider');
   assert.deepEqual([r.failed.status, r.failed.code], [502, 'upstream_error']);
+});
+
+// A turn the server never ran is not a failed turn: nothing to report, nothing
+// to retry, and the prompt goes back to the draft.
+test('a shutdown failure restores the draft and leaves no card and no retry', async () => {
+  const { r, cmd } = await openBusyThread();
+  r.messages = [...r.messages, { id: 'a1', role: 'assistant', content: 'the answer that finished' }];
+  terminal(cmd, 'turn.failed', 'c_1', { status: 503, code: 'unavailable', message: 'server shutting down', userMessagePersisted: false }, 't2');
+  await sleep(60);
+  assert.equal(r.failed, null, 'no failure card for a turn that never ran');
+  assert.equal(r.draft, 'work', 'the prompt is back in the draft');
+  assert.equal(chat.waitingPrompt(r), null);
+  assert.match(state.toasts.at(-1)?.message || '', /shutting down/);
+});
+
+test('a real failure on an unanswered prompt keeps the card and its retry', async () => {
+  const { r, cmd } = await openBusyThread();
+  terminal(cmd, 'turn.failed', 'c_1', { status: 500, code: 'internal', message: 'boom', userMessagePersisted: true }, 't2');
+  await sleep(60);
+  assert.equal(r.failed.status, 500);
+  assert.ok(chat.waitingPrompt(r), 'the prompt has no answer, so it can be sent again');
+});
+
+test('a failure after the answer finished offers nothing to retry', async () => {
+  const { r, cmd } = await openBusyThread();
+  terminal(cmd, 'turn.failed', 'c_1', { status: 500, code: 'internal', message: 'boom', userMessagePersisted: true }, 't2');
+  await sleep(60);
+  assert.equal(r.failed.status, 500, 'the failure is on file …');
+  // … but the room ends with the answer to that prompt, and the card is
+  // rendered on waitingPrompt (transcript.js), so neither it nor Retry shows.
+  r.messages = [
+    { id: 'm1', role: 'user', content: 'work' },
+    { id: 'a1', role: 'assistant', content: 'done — nothing left to ask' },
+  ];
+  assert.equal(chat.waitingPrompt(r), null, 'no Retry for work that is done');
+});
+
+test('a tool-only step is not an answer to the prompt', () => {
+  const room = {
+    messages: [
+      { id: 'm1', role: 'user', content: 'work' },
+      { id: 'a1', role: 'assistant', content: '', parts: [{ kind: 'tool_call', toolCallId: 'c1' }] },
+    ],
+  };
+  assert.equal(chat.waitingPrompt(room)?.id, 'm1', 'a step without text leaves the prompt unanswered');
+  assert.equal(chat.waitingPrompt({ messages: [{ id: 'n1', role: 'user', userType: 'system', content: 'note' }] }), null);
+  assert.equal(chat.waitingPrompt({ messages: [] }), null);
+});
+
+// The room's cross-thread queue: a notice, not a turn frame. It updates the
+// line that shows it without touching the transcript (no store flush), and a
+// stop tool's own answer feeds the same number rather than a second one.
+test('a queued notice updates the room without re-rendering the transcript', async () => {
+  serveThread('c_1');
+  chat.navigate('#/c/c_1');
+  await sleep(40);
+  const r = state.rooms.c_1;
+  let flushes = 0;
+  const off = subscribe(() => { flushes += 1; });
+  const messages = r.messages;
+
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_1', payload: { waiting: 3 } });
+  await sleep(20);
+  assert.equal(queuedFor('c_1'), 3, 'the line reads the count');
+  assert.equal(flushes, 0, 'nothing in the store re-rendered');
+  assert.equal(r.messages, messages, 'the transcript list is the same object');
+
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_1', payload: { waiting: 1 } });
+  await sleep(20);
+  assert.equal(queuedFor('c_1'), 1, 'the last notice wins');
+
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_1', payload: { waiting: 0 } });
+  await sleep(20);
+  assert.equal(queuedFor('c_1'), 0, 'drained: the line goes away');
+  assert.equal(flushes, 0);
+  off();
+});
+
+test('a stop tool answer names the same count, and the newer number wins', async () => {
+  const { r } = await openBusyThread();
+  ws.serve({ type: 'turn.tool_call', conversationId: 'c_1', turnId: 't2', seq: 10, payload: { callId: 'stop1', name: 'conversation_stop' } });
+  ws.serve({ type: 'turn.tool_input', conversationId: 'c_1', turnId: 't2', seq: 11, payload: { callId: 'stop1', text: '{"thread":"c_2"}' } });
+  ws.serve({ type: 'turn.tool_output', conversationId: 'c_1', turnId: 't2', seq: 12, payload: { callId: 'stop1', text: '{"threadId":"c_2","stopped":true,"waiting":2}' } });
+  ws.serve({ type: 'turn.tool_result', conversationId: 'c_1', turnId: 't2', seq: 13, payload: { callId: 'stop1' } });
+  await sleep(20);
+  assert.equal(queuedFor('c_2'), 2, 'the stopped room keeps its queue count');
+
+  // the room's own notice is the newer word: one number, no second line
+  ws.serve({ type: 'conversation.queued', conversationId: 'c_2', payload: { waiting: 0 } });
+  await sleep(20);
+  assert.equal(queuedFor('c_2'), 0);
+  assert.ok(r.live, 'the calling turn is untouched');
 });

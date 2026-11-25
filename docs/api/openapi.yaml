@@ -907,7 +907,8 @@ paths:
                       type: "object"
                       properties:
                         command: { type: "string", description: "Shell command to execute" }
-                        timeout_ms: { type: "integer", description: "Timeout in milliseconds — default 120000, capped at 600000" }
+                        timeout_ms: { type: "integer", description: "Timeout in milliseconds — default 120000, capped at 300000" }
+                        allow_broad_kill: { type: "boolean", description: "Allow a command that stops every matching process (pkill, killall, fuser -k, kill -9 of a pattern). Off by default; kill -9 -1 stays refused" }
                       required: ["command"]
                   - name: "read_file"
                     description: "Read a UTF-8 text file relative to the workspace root."

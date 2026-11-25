@@ -210,3 +210,56 @@ func TestExecuteRendersExtraFolders(t *testing.T) {
 		t.Fatalf("extra folder must not render a full section:\n%s", out.Text)
 	}
 }
+
+// The per-directory weight in the layout moves whenever unrelated files
+// appear or vanish, which is not a change of the map's content. DedupKey
+// normalizes those counts so the record dedups on the layout itself, and
+// keeps room for the changes that do matter: a new directory, an edited
+// AGENTS.md.
+func TestDedupKeyIgnoresFileCounts(t *testing.T) {
+	tool, ctx, dir := mkTool(t)
+	write(t, dir, "AGENTS.md", "rules")
+	write(t, dir, "cmd/app/main.go", "package main")
+	first, err := tool.Execute(ctx, entity.ToolCall{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A file below the displayed depth changes both counts, no name.
+	write(t, dir, "cmd/app/deep/more.go", "package deep")
+	second, err := tool.Execute(ctx, entity.ToolCall{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Text == second.Text {
+		t.Fatalf("fixture must move the counts:\n%s", first.Text)
+	}
+	// The job's ToolDeduper is a method set, not an import: a tool declares
+	// it by having DedupKey, and the adapter packages never import the job.
+	deduper, ok := tool.(interface{ DedupKey(string) string })
+	if !ok {
+		t.Fatal("project_context must declare a dedup key")
+	}
+	if deduper.DedupKey(first.Text) != deduper.DedupKey(second.Text) {
+		t.Fatalf("count-only renders must share a dedup key:\n%s\n---\n%s", deduper.DedupKey(first.Text), deduper.DedupKey(second.Text))
+	}
+
+	// A new directory is a real layout change.
+	write(t, dir, "cmd/extra/notes.md", "x")
+	third, err := tool.Execute(ctx, entity.ToolCall{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deduper.DedupKey(second.Text) == deduper.DedupKey(third.Text) {
+		t.Fatal("a new directory must change the dedup key")
+	}
+
+	// So is an edited AGENTS.md.
+	write(t, dir, "AGENTS.md", "rules v2")
+	fourth, err := tool.Execute(ctx, entity.ToolCall{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deduper.DedupKey(third.Text) == deduper.DedupKey(fourth.Text) {
+		t.Fatal("an edited AGENTS.md must change the dedup key")
+	}
+}

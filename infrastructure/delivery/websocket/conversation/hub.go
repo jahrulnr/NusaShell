@@ -16,6 +16,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
@@ -47,8 +48,13 @@ const (
 	// turn.steer_recall — the steer command's requestId becomes the
 	// input's inputId and rides every snapshot entry.
 	maxControlRequestIDBytes = 128
-	shutdownTurnGrace        = 10 * time.Second
-	shutdownDrainGrace       = 5 * time.Second
+	// shutdownTurnGrace is how long the hub waits for a transport turn's
+	// terminal frame before it hands the socket layer over. Persistence is
+	// the barrier's turn phase, not this wait: the drain gets its own phase
+	// with its own budget, so the grace only covers landing frames already
+	// written.
+	shutdownTurnGrace  = 2 * time.Second
+	shutdownDrainGrace = 3 * time.Second
 )
 
 // Sender is the conversation send/edit/resume use case — the same
@@ -125,7 +131,7 @@ type turn struct {
 	admitted   int64
 	requestID  string
 	turnCtx    context.Context
-	turnCancel context.CancelFunc
+	turnCancel context.CancelCauseFunc
 	// job arguments — convID already on the turn.
 	providerID, modelID, msgID, content string
 	attachments                         []valueobject.Attachment
@@ -196,6 +202,9 @@ type Hub struct {
 	shutting   bool
 	turnGrace  time.Duration // bounded wait for turn terminals at shutdown
 	drainGrace time.Duration // bounded wait for socket writers to flush
+	// queueDepth reads how many messages wait in a room, so a queued notice
+	// names the count at emit time rather than a number kept beside the queue.
+	queueDepth func(convID string) int
 	// finished run after every turn ends (see OnFinished); events see
 	// every turn event (see OnEvent).
 	finished []func(convID, kind string, external bool, err error)
@@ -225,6 +234,30 @@ func (h *Hub) UseUploads(u Uploads) { h.uploads = u }
 // UsePlanEvents sets the registry update_plan resolves the room's live
 // turn through; without it plan events drop while the call still records.
 func (h *Hub) UsePlanEvents(p PlanSink) { h.planEvents = p }
+
+// UseQueueDepth binds how many messages wait in a room — the worker's own
+// queue depth — so the queued notice can name it.
+func (h *Hub) UseQueueDepth(fn func(convID string) int) {
+	h.mu.Lock()
+	h.queueDepth = fn
+	h.mu.Unlock()
+}
+
+// QueueChanged announces a room's waiting count. The frame is unsequenced and
+// belongs to no turn, so it never enters a journal: a reattaching tab learns
+// the current depth from the room's state, never from a replay of old counts.
+func (h *Hub) QueueChanged(convID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.shutting {
+		return
+	}
+	waiting := 0
+	if h.queueDepth != nil {
+		waiting = h.queueDepth(convID)
+	}
+	h.broadcastLocked(queuedFrame(convID, waiting))
+}
 
 // SocketFull reports whether the socket bound is reached — the upgrade
 // edge checks it before upgrading so a full hub answers 503 problem+json
@@ -555,7 +588,7 @@ func (h *Hub) admitAndRun(c *conn, requestID, convID string, job turn) {
 	h.admitSeq++
 	t.admitted = h.admitSeq
 	t.subscribed = map[*conn]struct{}{c: {}}
-	t.turnCtx, t.turnCancel = context.WithCancel(h.ctx)
+	t.turnCtx, t.turnCancel = context.WithCancelCause(h.ctx)
 	t.startedAt = time.Now()
 	t.live = newLiveDoc()
 	h.turns[t.id] = t
@@ -711,7 +744,8 @@ func (h *Hub) turnCancelCommand(c *conn, cmd command) {
 		return
 	}
 	c.push(cancelAckFrame(cmd.RequestID, convID, t.id))
-	t.turnCancel()
+	// The owner's Stop: a tool this kills says "interrupted by user".
+	t.turnCancel(dservice.ErrInterruptedByUser)
 	h.mu.Unlock()
 }
 
@@ -904,7 +938,7 @@ func (h *Hub) finishLocked(t *turn) {
 	t.terminal = true
 	t.closedAt = time.Now()
 	t.subscribed = nil
-	t.turnCancel()
+	t.turnCancel(nil)
 }
 
 // ActiveTurn is the oldest non-terminal transport turn for a room, the
@@ -979,22 +1013,32 @@ func shutdownCasualty(err error) bool {
 	return status == http.StatusRequestTimeout
 }
 
-// Shutdown stops admission, cancels every live turn context so senders
-// surface quickly, and waits (bounded) for workers to land their real
-// terminal frame before sockets drain — the terminal enqueued by a
-// worker must precede the drain sentinel, so sockets close only after
-// the wait. If the grace lapses, remaining workers close without a
-// fabricated terminal — the hub exits regardless.
+// Shutdown is the whole hub teardown on the hub's own graces — the
+// convenience an early exit and a test use. The barrier calls the two halves
+// separately so persistence, the drain and the listener keep their own
+// budgets.
 func (h *Hub) Shutdown() {
+	h.StopTurns()
+	ctx, cancel := context.WithTimeout(context.Background(), h.drainGrace)
+	defer cancel()
+	h.DrainSockets(ctx)
+}
+
+// StopTurns closes admission and cancels every live turn with the restart
+// cause, then waits — bounded by the turn grace — for the terminal frames
+// their workers write. It is the barrier's turn phase and finishes before the
+// socket layer moves; if the grace lapses the turns close without a fabricated
+// terminal, because persistence already happened in the phase that mattered.
+func (h *Hub) StopTurns() {
 	h.mu.Lock()
-	if h.shutting {
-		h.mu.Unlock()
-		return
-	}
-	h.shutting = true
-	for _, t := range h.turns {
-		if !t.terminal {
-			t.turnCancel()
+	if !h.shutting {
+		h.shutting = true
+		for _, t := range h.turns {
+			if !t.terminal {
+				// A restart cuts these turns: a tool they were running
+				// reports "nusashell restarted", never the owner's words.
+				t.turnCancel(dservice.ErrServerRestarted)
+			}
 		}
 	}
 	h.mu.Unlock()
@@ -1009,12 +1053,16 @@ func (h *Hub) Shutdown() {
 	select {
 	case <-done:
 	case <-timer.C:
-		// Turns still running outlive the socket layer; the hub context
-		// cancellation below unblocks them for process exit.
+		// Turns still running outlive the socket layer; the context
+		// cancellation in the drain unblocks them for process exit.
 	}
+}
 
-	// Terminals landed (or grace lapsed) — drain sockets politely, then
-	// force-close any writer that couldn't flush in time.
+// DrainSockets lands the terminal frames already queued, closes every socket
+// and cancels the hub context — all inside the caller's budget, which the
+// barrier sets as its socket phase. A client that missed a frame reconnects
+// and resyncs, so a slow drain is cut rather than waited for.
+func (h *Hub) DrainSockets(ctx context.Context) {
 	h.mu.Lock()
 	sockets := make([]*conn, 0, len(h.sockets))
 	for c := range h.sockets {
@@ -1022,12 +1070,10 @@ func (h *Hub) Shutdown() {
 		sockets = append(sockets, c)
 	}
 	h.mu.Unlock()
-	drain := time.NewTimer(h.drainGrace)
-	defer drain.Stop()
 	for _, c := range sockets {
 		select {
 		case <-c.flushed:
-		case <-drain.C:
+		case <-ctx.Done():
 		}
 	}
 	h.cancel()

@@ -5,6 +5,7 @@ import { state, emit, toast, dismissToast, askConfirm } from './store.js';
 import { api, errorText, ApiError } from './api.js';
 import { TurnSocket, newRequestId } from './socket.js';
 import { newTurn, applyFrame, snapshotSegments } from './turn.js';
+import { setQueued } from './queued.js';
 import { referencesForSend, referencesToDraft, liveReferences } from './references.js';
 import { parseCommand, isNativeCommand, catalogRow, loadCommands } from './commands.js';
 import { loadView, startViews } from './views.js';
@@ -812,6 +813,19 @@ export function cancel(r) {
   emit();
 }
 
+// waitingPrompt answers the owner prompt the room has not answered: the
+// newest prompt with no assistant text after it. A room whose last word is an
+// answer has nothing left to retry, and a note (a synthetic user line) is not
+// a prompt. Null when there is no prompt at all.
+export function waitingPrompt(room) {
+  const msgs = (room.messages || []).filter((m) => m.role === 'user' || m.role === 'assistant');
+  const at = msgs.findLastIndex((m) => m.role === 'user' && m.userType !== 'system');
+  if (at < 0) return null;
+  const answered = msgs.slice(at + 1).some((m) => m.role === 'assistant'
+    && ((m.content || '').trim() !== '' || (m.parts || []).some((p) => p.kind === 'text' && (p.text || '').trim() !== '')));
+  return answered ? null : msgs[at];
+}
+
 export function retry(r) {
   if (isBusy(r)) return;
   const requestId = command(r, 'resume', { type: 'turn.resume', conversationId: r.id, payload: turnPayload(r, {}, true) });
@@ -957,6 +971,13 @@ function roomForFrame(f) {
 
 function onFrame(f) {
   switch (f.type) {
+    // How many messages from other threads wait in a room. Unsequenced and
+    // never replayed, so the number is the current one — last frame wins, and
+    // the line that shows it renders itself (lib/queued.js), which is why this
+    // frame deliberately does not emit.
+    case 'conversation.queued':
+      setQueued(f.conversationId, f.payload?.waiting);
+      return;
     case 'turn.opened': return onOpened(f);
     case 'error': return onError(f);
     case 'conversation.activity': return onActivity(f);
@@ -1015,6 +1036,17 @@ function onFrame(f) {
   // A fold just ended: the history is smaller than any size reported before
   // it, so the meter asks the server rather than keep showing the old one.
   if (compacting && r.live?.phase?.phase !== 'compacting') fetchContext(r, { force: true });
+  if (f.type === 'turn.tool_result') {
+    // A thread that stopped another one is told how many messages stayed
+    // queued. Same number, same place: the room's line, never a second one.
+    const call = r.live?.segments.findLast((x) => x.kind === 'tool' && x.callId === f.payload?.callId);
+    if (call?.name === 'conversation_stop') {
+      const read = (text) => { try { return JSON.parse(text || ''); } catch { return null; } };
+      const out = read(call.output);
+      const asked = read(call.input) || {};
+      if (typeof out?.waiting === 'number') setQueued(out.threadId || asked.thread || asked.threadId || asked.conversationId, out.waiting);
+    }
+  }
   if (f.type === 'turn.steer' && inputId) {
     // The frame carries the input's text and uploads, not the annotation
     // picks that went with it. The tab that submitted this steer still holds
@@ -1235,11 +1267,24 @@ async function onTerminal(r, f) {
   }
   r.minted = null;
   if (f.type === 'turn.failed') {
-    if (live?.kind === 'send' && (live.userText || live.userFiles?.length || live.userRecording) && p.userMessagePersisted === false) {
+    // Never started: the server took no user line for this turn.
+    const unstarted = p.userMessagePersisted === false;
+    // Leaving: the server is going away, so it cannot say the prompt failed —
+    // whatever ran is in history, and a card here would offer work already done.
+    const leaving = p.status === 503 && p.code === 'unavailable';
+    if (live?.kind === 'send' && (live.userText || live.userFiles?.length || live.userRecording) && unstarted) {
       restoreDraft(r, live.userText, live.userRefs, live.userFiles, live.userRecording);
     }
-    if (p.status !== 408) r.failed = { status: p.status, code: p.code, message: p.message || '' };
-    else if (!live?.canceling) toast('Turn was interrupted.', 'info');
+    if (p.status === 408) {
+      if (!live?.canceling) toast('Turn was interrupted.', 'info');
+    } else if (unstarted || leaving) {
+      // Say it once, keep the draft, and leave no failure card (and no Retry)
+      // for a turn the server never ran to completion.
+      toast(p.message || (leaving ? 'The server restarted before the turn finished.' : 'The turn never started.'), leaving ? 'warning' : 'error');
+      r.failed = null;
+    } else {
+      r.failed = { status: p.status, code: p.code, message: p.message || '' };
+    }
   }
   r.settling = true;
   // The turn wrote history — or, on a failed send that never persisted,

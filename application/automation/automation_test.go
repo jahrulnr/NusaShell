@@ -2,6 +2,7 @@ package appautomation
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoautomation "github.com/jahrulnr/nusashell/infrastructure/repository/automation"
@@ -30,6 +32,7 @@ type fakeRunner struct {
 	err     error
 	block   chan struct{} // when set, a run waits on it or on ctx
 	started chan struct{} // a blocking run signals it began
+	died    chan error    // reports the cause a canceled run saw
 }
 
 func (r *fakeRunner) Run(ctx context.Context, convID, providerID, modelID, content string, _ []valueobject.Attachment, opts appjob.SendOptions, _ event.TurnEventHandler) (string, appconversation.SendResult, error) {
@@ -46,6 +49,12 @@ func (r *fakeRunner) Run(ctx context.Context, convID, providerID, modelID, conte
 		case <-block:
 			return convID, appconversation.SendResult{}, err
 		case <-ctx.Done():
+			if r.died != nil {
+				select {
+				case r.died <- context.Cause(ctx):
+				default:
+				}
+			}
 			return convID, appconversation.SendResult{}, ctx.Err()
 		}
 	}
@@ -385,5 +394,39 @@ func TestUpdateOmittingEnabledKeepsTheState(t *testing.T) {
 	}
 	if got.Enabled {
 		t.Fatal("an edit without enabled must keep the automation paused")
+	}
+}
+
+// A run the shutdown stops is a restart, not the owner's Stop: the app's run
+// ctx carries the cause, and it cancels before the room workers terminate, so
+// a plain cancel here would be the one every cut turn reports.
+func TestStopCarriesTheRestartCauseToARunningRun(t *testing.T) {
+	app, runner, _, _, now := setup(t)
+	runner.block = make(chan struct{})
+	runner.started = make(chan struct{}, 1)
+	runner.died = make(chan error, 1)
+	app.Start(context.Background())
+	ctx := context.Background()
+	v, err := app.Create(ctx, Input{Name: "Blocked", Prompt: "Wait", AgentID: "claude", Schedule: "once",
+		RunAt: now.Add(time.Hour), Thread: "new", Enabled: new(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.RunNow(ctx, v.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the run never started")
+	}
+	app.Stop()
+	select {
+	case cause := <-runner.died:
+		if !errors.Is(cause, dservice.ErrServerRestarted) {
+			t.Fatalf("run cause after Stop = %v, want the restart", cause)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the run never observed the shutdown")
 	}
 }

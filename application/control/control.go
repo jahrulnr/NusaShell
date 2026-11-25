@@ -44,6 +44,14 @@ type Turns interface {
 	Busy(convID string) bool
 }
 
+// Queue accepts a message for a busy room and names how many wait. The worker
+// owns the FIFO, so a queued message keeps its arrival order and the room
+// still runs one turn at a time.
+type Queue interface {
+	Enqueue(ctx context.Context, convID, providerID, modelID, text string, opts appjob.SendOptions) (int, error)
+	QueueDepth(convID string) int
+}
+
 // Chats reaches the chat a running turn came from.
 type Chats interface {
 	Origin(convID string) (valueobject.ChatRef, bool)
@@ -69,6 +77,7 @@ const (
 type App struct {
 	rooms    Rooms
 	turns    Turns
+	queue    Queue
 	projects drepo.Project
 	chats    Chats
 	outputs  drepo.ToolOutput
@@ -86,7 +95,7 @@ type App struct {
 
 // New wires the use case. ctx bounds the turns it starts. chats may be
 // nil (no channels); outputs holds exports as files of the calling thread.
-func New(ctx context.Context, rooms Rooms, turns Turns, projects drepo.Project, chats Chats, outputs drepo.ToolOutput, log *slog.Logger) *App {
+func New(ctx context.Context, rooms Rooms, turns Turns, queue Queue, projects drepo.Project, chats Chats, outputs drepo.ToolOutput, log *slog.Logger) *App {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -342,14 +351,48 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 		return nil, apperror.New(409, "that thread is waiting on a permission answer from the owner", nil)
 	}
 	text = a.relayHead(ctx, self) + text
+	// A busy room is not a refusal: fold into the live turn when it can take
+	// input, otherwise let the message wait in the room's own queue.
 	if a.turns.Busy(info.ID) {
 		if a.turns.Steer(info.ID, text) {
 			return map[string]any{"threadId": info.ID, "delivery": "steer", "afterSeq": info.MessageCount - 1}, nil
 		}
-		return nil, apperror.New(409, "that thread is busy and takes no more input right now; wait and try again", nil)
+		return a.queueSend(ctx, info, text)
+	}
+	if a.queue != nil && a.queue.QueueDepth(info.ID) > 0 {
+		// Someone else is already waiting: keep arrival order instead of
+		// starting a second turn ahead of them.
+		return a.queueSend(ctx, info, text)
 	}
 	a.start(info.ID, "", "", "", text, "", "")
 	return map[string]any{"threadId": info.ID, "delivery": "turn", "afterSeq": info.MessageCount - 1}, nil
+}
+
+// queueSend hands the message to the room's worker queue and reports only what
+// happened: it waits, at this position. Queued is an acceptance, not a promise
+// — nothing here says when the turn runs, and a stop before it does loses the
+// message.
+func (a *App) queueSend(ctx context.Context, info drepo.ConversationInfo, text string) (map[string]any, error) {
+	if a.queue == nil {
+		return nil, apperror.New(503, "thread delivery is unavailable in this build", nil)
+	}
+	position, err := a.queue.Enqueue(ctx, info.ID, "", "", text, appjob.SendOptions{
+		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation},
+	})
+	if err != nil {
+		// The app's refusal carries the code; a full queue also names the
+		// depth so the sender knows what it waits behind.
+		if apperror.As(err).StatusCode() == 429 {
+			return nil, apperror.New(429, fmt.Sprintf("that thread's queue is full (%d waiting) — nothing was written; try again once its turn drains", a.queue.QueueDepth(info.ID)), err)
+		}
+		return nil, err
+	}
+	if position == 0 {
+		// The worker took it at once: a turn, not a queued message, and no
+		// afterSeq — this path never watched the room.
+		return map[string]any{"threadId": info.ID, "delivery": "turn"}, nil
+	}
+	return map[string]any{"threadId": info.ID, "delivery": "queued", "position": position}, nil
 }
 
 // StopInput names the thread to stop.
@@ -369,7 +412,14 @@ func (a *App) Stop(ctx context.Context, self string, in StopInput) (result map[s
 	if info.ID == self {
 		return nil, apperror.New(400, "a thread cannot stop itself", nil)
 	}
-	return map[string]any{"threadId": info.ID, "stopped": a.turns.Cancel(info.ID)}, nil
+	// Stop cuts the live turn only: accepted messages stay in the queue, and
+	// the count says so instead of reading as a Stop that did nothing.
+	stopped := a.turns.Cancel(info.ID)
+	waiting := 0
+	if a.queue != nil {
+		waiting = a.queue.QueueDepth(info.ID)
+	}
+	return map[string]any{"threadId": info.ID, "stopped": stopped, "waiting": waiting}, nil
 }
 
 // SpawnInput opens a thread. Agent or Provider+Model pick its runtime; with

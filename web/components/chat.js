@@ -4,7 +4,7 @@ import { room, freshRoom, rename, removeRoom, runCommand, isBusy, openRoom, navi
 import { useCommands, commandBusyLabel } from '../lib/commands.js';
 import { Icon, Logo } from './icons.js';
 import { Popover, IconButton, Dialog, Button, ErrorBlock, Spinner } from './ui.js';
-import { Transcript } from './transcript.js';
+import { Transcript, QueuedLine } from './transcript.js';
 import { useFollow } from '../lib/follow.js';
 import { SetupWizard, needsSetup } from './setup.js';
 import { Composer } from './composer.js';
@@ -140,6 +140,7 @@ export function ChatView({ id }) {
         <${Icon} name="chevronDown" size=${15} /> ${isBusy(r) ? 'Follow latest' : 'Jump to latest'}
       </button>
     </div>`}
+    <div class="mx-auto w-full max-w-3xl px-4 sm:px-6 empty:hidden"><${QueuedLine} room=${r} /></div>
     <div class="mx-auto w-full max-w-3xl px-2 sm:px-4">
       <${Composer} room=${r} />
     </div>

@@ -1664,3 +1664,75 @@ func TestWatchAttachesWhenTheClientIsCaughtUp(t *testing.T) {
 		}
 	}
 }
+
+// A queued message is visible: the room's surface names how many wait, and the
+// number is read from the queue when the frame is emitted — a drained queue
+// reports zero instead of a count kept beside it.
+func TestQueuedNoticeNamesTheWaitingCount(t *testing.T) {
+	emit := make(chan event.TurnEvent, 4)
+	release := make(chan struct{})
+	h := newHub(t, stubSender{fn: func(_ context.Context, convID, _, _, _ string, onEvent event.TurnEventHandler) (appconversation.SendResult, error) {
+		for ev := range emit {
+			onEvent(ev)
+		}
+		<-release
+		return appconversation.SendResult{ConversationID: convID, UserMessagePersisted: true}, nil
+	}})
+	depth := 0
+	h.UseQueueDepth(func(string) int { return depth })
+	ws := dial(t, h)
+
+	depth = 3
+	h.QueueChanged("c_room")
+	f := readFrame(t, ws)
+	if f.Type != "conversation.queued" || f.ConversationID != "c_room" {
+		t.Fatalf("notice = %+v, want conversation.queued for the room", f)
+	}
+	if f.Seq != nil {
+		t.Fatalf("queued notice carries seq %v — it belongs to no turn", *f.Seq)
+	}
+	var p queuedPayload
+	if err := json.Unmarshal(f.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Waiting != 3 {
+		t.Fatalf("waiting = %d, want the queue depth at emit", p.Waiting)
+	}
+
+	// The queue drained: the same frame says zero, from the queue itself.
+	depth = 0
+	h.QueueChanged("c_room")
+	f = readFrame(t, ws)
+	if err := json.Unmarshal(f.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Waiting != 0 {
+		t.Fatalf("waiting after drain = %d, want 0", p.Waiting)
+	}
+
+	// It never enters a journal: a turn's watch replay carries turn frames
+	// only, so an old count cannot come back on a reattach.
+	owner := dial(t, h)
+	sendCommand(t, owner, `{"type":"turn.send","requestId":"q1","payload":{"content":"x"}}`)
+	opened := readFrame(t, owner)
+	if opened.Type != "turn.opened" {
+		t.Fatalf("opened %+v", opened)
+	}
+	h.QueueChanged("c_room")
+	depth = 3
+	h.QueueChanged("c_room")
+	watcher := dial(t, h)
+	sendCommand(t, watcher, fmt.Sprintf(`{"type":"turn.watch","requestId":"w1","conversationId":%q,"turnId":%q,"afterSeq":-1}`,
+		opened.ConversationID, opened.TurnID))
+	// The live notice reaches every socket; the replay that follows carries
+	// only the turn's own opened frame.
+	close(emit)
+	f = readFrame(t, watcher)
+	for f.Type == "conversation.queued" {
+		f = readFrame(t, watcher)
+	}
+	if f.Type != "turn.opened" || f.Seq == nil || *f.Seq != 0 {
+		t.Fatalf("replay first frame = %+v, want the journaled opened frame", f)
+	}
+	close(release)
+}

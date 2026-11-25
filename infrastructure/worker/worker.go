@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 )
 
 // Job is a unit of scheduled work. Execute runs on the worker's own
@@ -89,7 +91,7 @@ type Worker struct {
 	mu      sync.Mutex
 	queue   []Job
 	running Job
-	runKill context.CancelFunc
+	runKill context.CancelCauseFunc
 	runGID  uint64 // goroutine executing the running job — 0 when idle
 	unwind  bool   // the running job was asked to stop — refuse new steer
 	dead    bool
@@ -212,9 +214,9 @@ func (w *Worker) Interrupt() error {
 	return nil
 }
 
-// Terminate is the hard stop: marks the worker dead, interrupts the
-// running job AND kills its context, then returns the drained queue so
-// the caller decides what unstarted jobs deserve. Idempotent — a second
+// Terminate is the hard stop: marks the worker dead, kills the running
+// job's context with the restart cause and interrupts it, then returns the
+// drained queue so the caller decides what unstarted jobs deserve. Idempotent — a second
 // call returns nil. The loop exits as soon as the running job unwinds.
 func (w *Worker) Terminate() []Job {
 	w.mu.Lock()
@@ -228,11 +230,17 @@ func (w *Worker) Terminate() []Job {
 	running := w.running
 	kill := w.runKill
 	w.mu.Unlock()
-	if running != nil {
-		running.Interrupt()
-	}
+	// Kill the context first: it is the cause the job sees, and a cause is
+	// set once — an Interrupt arriving first would label a restart as the
+	// owner's Stop for every tool it cuts. A job's own ctx inherits this
+	// cause through Cancellable.
 	if kill != nil {
-		kill()
+		kill(dservice.ErrServerRestarted)
+	}
+	if running != nil {
+		// The soft hook still fires, for a job that unwinds on it rather
+		// than on its context; by now the cause is already the restart.
+		running.Interrupt()
 	}
 	w.signal()
 	return drained
@@ -251,6 +259,15 @@ func (w *Worker) Idle() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return !w.dead && w.running == nil && len(w.queue) == 0
+}
+
+// Depth is how many jobs wait in the queue — the number a room surface shows
+// for accepted-but-not-yet-running work. Read at emit time, never counted
+// beside the queue, so a drained queue reports zero instead of a stale count.
+func (w *Worker) Depth() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.queue)
 }
 
 // Done closes when the loop exits — after the OnTerminate hook ran —
@@ -303,7 +320,7 @@ func (w *Worker) loop() {
 			w.running = j
 			w.runGID = goroutineID()
 			w.unwind = false
-			ctx, kill := context.WithCancel(context.Background())
+			ctx, kill := context.WithCancelCause(context.Background())
 			w.runKill = kill
 			w.mu.Unlock()
 
@@ -320,7 +337,7 @@ func (w *Worker) loop() {
 				return j.Execute(ctx)
 			}()
 
-			kill()
+			kill(nil)
 			w.mu.Lock()
 			w.running = nil
 			w.runKill = nil

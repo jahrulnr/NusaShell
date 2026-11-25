@@ -84,6 +84,7 @@ func (f *fakeService) Status(name string) (string, system.State, error) {
 }
 func (f *fakeService) Active(string) bool          { return f.isActive }
 func (f *fakeService) ActiveElsewhere(string) bool { return f.elsewhere }
+func (f *fakeService) MainPID(string) int          { return 0 }
 func (f *fakeService) PersistAcrossLogout() error {
 	f.calls = append(f.calls, "linger")
 	return f.lingerErr

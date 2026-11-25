@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -248,6 +249,23 @@ func (s systemd) ActiveElsewhere(name string) bool {
 	return err == nil && strings.TrimSpace(string(out)) != id
 }
 
+// MainPID asks the manager for the unit's main process. A unit that is not
+// running answers 0, and so does a systemd that cannot be reached.
+func (s systemd) MainPID(name string) int {
+	if !validName(name) {
+		return 0
+	}
+	out, code, err := systemctlUser("show", s.unitName(name), "--value", "-p", "MainPID")
+	if err != nil || code != 0 {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || pid < 0 {
+		return 0
+	}
+	return pid
+}
+
 // PersistAcrossLogout maps to loginctl enable-linger — the user's
 // services keep running and autostart without a session.
 func (s systemd) PersistAcrossLogout() error {
@@ -345,7 +363,7 @@ func (s systemd) render(spec Spec) (string, error) {
 	lines = append(lines,
 		"Restart=on-failure",
 		"RestartSec=5",
-		"TimeoutStopSec=20",
+		"TimeoutStopSec=30",
 		"KillMode=control-group",
 		"",
 		"[Install]",

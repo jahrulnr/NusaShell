@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	appbrowser "github.com/jahrulnr/nusashell/application/browser"
 	appchannel "github.com/jahrulnr/nusashell/application/channel"
 	appcontrol "github.com/jahrulnr/nusashell/application/control"
+	appjob "github.com/jahrulnr/nusashell/application/job"
 	appmcp "github.com/jahrulnr/nusashell/application/mcp"
 	appnotify "github.com/jahrulnr/nusashell/application/notify"
 	appprovider "github.com/jahrulnr/nusashell/application/provider"
@@ -128,15 +131,19 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	if err != nil {
 		return err
 	}
+	// One close each: the barrier's storage phase runs them, and the defers
+	// only cover an early return before the barrier exists.
+	closeLogger := sync.OnceValue(func() error { return eng.logger.Close() })
 	defer func() {
-		if closeErr := eng.logger.Close(); serveErr == nil {
+		if closeErr := closeLogger(); serveErr == nil {
 			serveErr = closeErr
 		}
 	}()
 	// Runs after the conversation app's shutdown below (defers unwind in
 	// reverse), so no turn writes to a closed database.
+	closeDB := sync.OnceValue(func() error { return eng.db.Close() })
 	defer func() {
-		if closeErr := eng.db.Close(); serveErr == nil {
+		if closeErr := closeDB(); serveErr == nil {
 			serveErr = closeErr
 		}
 	}()
@@ -156,7 +163,10 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// SIGHUP joins the set because closing the terminal is the most common way
+	// a foreground run dies, and without it the process gets no shutdown at
+	// all — no persisted turn, no killed children.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	// Model catalogs refresh on an hourly cadence, first pass at boot —
@@ -183,6 +193,10 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	// signal arrival. Deferred so an early Serve failure still closes it.
 	hub := wsconversation.NewHub(context.WithoutCancel(ctx), eng.conversations)
 	hub.UseUploads(eng.conversations)
+	// The queued notice names the worker's own queue depth, read when the
+	// frame is emitted.
+	hub.UseQueueDepth(eng.conversations.QueueDepth)
+	eng.conversations.OnQueueChanged(hub.QueueChanged)
 	hub.UsePlanEvents(eng.planEvents)
 	eng.conversations.UseShells(shell.Local{})
 	eng.agents.UseShells(shell.Local{})
@@ -296,7 +310,8 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	// in-process connection; agents start this binary as a relay that
 	// calls back here with the thread's token.
 	recordings := reporecording.NewStore(filepath.Join(eng.storageDir, "recordings"), slog.Default())
-	defer recordings.Shutdown()
+	stopRecordings := sync.OnceFunc(func() { recordings.Shutdown() })
+	defer stopRecordings()
 	profileDir := browserProfileDir(b.Config().Browser.Dir, eng.storageDir)
 	if strings.TrimSpace(b.Config().Browser.Dir) == "" {
 		var moved bool
@@ -317,7 +332,8 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		// warming it here makes the first browser_navigate hit a live one.
 		browserMgr.Preheat(ctx)
 	}
-	defer browserMgr.Shutdown()
+	stopBrowser := sync.OnceFunc(func() { browserMgr.Shutdown() })
+	defer stopBrowser()
 	// [[env:NAME]] in typed text resolves against the thread's agent's
 	// saved environment; a model thread has none.
 	browsers := appbrowser.New(browserMgr, func(ctx context.Context, convID string) (map[string]string, error) {
@@ -335,10 +351,11 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	eng.conversations.UseRecordings(recordings)
 	browsers.UseInstaller(browserMgr)
 	browsers.UseHistory(repobrowserhistory.New(eng.db))
-	control := appcontrol.New(context.WithoutCancel(ctx), eng.conversations, hub, eng.projectRepo, chats, eng.toolOutputs, slog.Default())
+	control := appcontrol.New(context.WithoutCancel(ctx), eng.conversations, hub, eng.conversations, eng.projectRepo, chats, eng.toolOutputs, slog.Default())
 	catalogs := []deliverymcp.Catalog{deliverymcp.Conversation(control), deliverymcp.Browser(browsers), deliverymcp.Memory(eng.memory)}
 	mcpPool := toolmcp.NewPool()
-	defer mcpPool.Close()
+	closeMCPPool := sync.OnceFunc(func() { mcpPool.Close() })
+	defer closeMCPPool()
 	serverNames := make([]string, 0, len(catalogs))
 	for _, cat := range catalogs {
 		serverNames = append(serverNames, cat.Name)
@@ -360,7 +377,8 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	// The owner's MCP servers: the model runtime connects to them in the
 	// background, agents get them with the built-in ones in each session.
 	mcpServers := appmcp.New(repomcpserver.New(eng.db, b.Secrets()), mcpRuntime{eng.mcpTools}, slog.Default())
-	defer eng.mcpTools.Close()
+	closeMCPTools := sync.OnceFunc(func() { eng.mcpTools.Close() })
+	defer closeMCPTools()
 	go mcpServers.Reload(context.WithoutCancel(ctx))
 	go mcpServers.Watch(ctx, 30*time.Second)
 	grants := deliverymcp.NewGrants()
@@ -417,7 +435,8 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	hub.OnFinished(alerts.TurnFinished)
 	hub.OnEvent(alerts.TurnEvent)
 	chats.Start(context.WithoutCancel(ctx))
-	defer chats.Stop()
+	stopChats := sync.OnceFunc(func() { chats.Stop() })
+	defer stopChats()
 	// Agents kept resident start with the server; the others stop after a
 	// while without a turn, and their rooms resume where they were.
 	eng.agents.WarmResident(ctx)
@@ -442,9 +461,64 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	automations := appautomation.New(repoautomation.New(eng.db), eng.projectRepo, hub, eng.conversations, chats, alerts,
 		system.LocalTimezone(), slog.Default())
 	automations.Start(context.WithoutCancel(ctx))
-	defer automations.Stop()
+	stopAutomations := sync.OnceFunc(func() { automations.Stop() })
+	defer stopAutomations()
 	settings := setting.New(repoconfig.NewLocal(), b.ConfigPath())
-	updates, err := newUpdates(svc, ctx)
+	// The barrier is built here — before any update can run and long before a
+	// signal — so the update job's restart hook always has it. Its socket
+	// phase needs the listener, which is the one piece that arrives later; the
+	// closure reads it when the phase runs, and by then Serve has long started.
+	var srv *http.Server
+	// restarting marks a shutdown the update job started: once the drain
+	// closes the listener, serve must not return and let main exit — the
+	// replacement is about to exec, and only it can finish the restart.
+	var restarting atomic.Bool
+	shutdown := appjob.NewBarrier(appjob.BarrierSteps{
+		// Nothing may start once shutdown does.
+		CloseAdmission: func(context.Context) error {
+			alerts.Mute()
+			stopAutomations()
+			eng.conversations.CloseAdmission()
+			return nil
+		},
+		// Workers terminate with the restart cause and their turns unwind —
+		// a tool is killed, its head and restart suffix written, the reply
+		// sealed interrupted. The hub cuts the transport turns with the same
+		// cause and lands their terminal frames.
+		StopTurns: func(phaseCtx context.Context) error {
+			err := eng.conversations.Shutdown(phaseCtx)
+			hub.StopTurns()
+			return err
+		},
+		// Everything still holding a file or a process. Child processes die
+		// here because syscall.Exec keeps the process tree and a Windows exit
+		// leaves it.
+		FlushWriters: func(phaseCtx context.Context) error {
+			stopChats()
+			stopRecordings()
+			stopBrowser()
+			closeMCPPool()
+			closeMCPTools()
+			return eng.conversations.TerminateChildren(phaseCtx)
+		},
+		// Hijacked WebSocket conns are invisible to http.Server.Shutdown, so
+		// the hub drains them first; a client that missed a frame reconnects
+		// and resyncs. An error here ends the phase, not the barrier.
+		DrainSockets: func(phaseCtx context.Context) error {
+			hub.DrainSockets(phaseCtx)
+			if srv == nil {
+				return nil
+			}
+			return srv.Shutdown(phaseCtx)
+		},
+		CloseStorage: func(context.Context) error {
+			if err := closeDB(); err != nil {
+				return err
+			}
+			return closeLogger()
+		},
+	})
+	updates, err := newUpdates(svc, ctx, restartHook(shutdown, &restarting))
 	if err != nil {
 		return err
 	}
@@ -517,7 +591,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		}
 		return fmt.Errorf("listen on %s: %w", listenAuthority, err)
 	}
-	srv := &http.Server{Handler: handler}
+	srv = &http.Server{Handler: handler}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- srv.Serve(ln) }()
 
@@ -537,30 +611,46 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	}
 	select {
 	case err := <-serveDone:
-		return err // Serve only returns early on a listener failure
+		// A listener closed by our own drain — a signal or a restart — is not
+		// a failure: the sequence owns what happens next.
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		if !restarting.Load() {
+			return nil
+		}
 	case <-ctx.Done():
 	}
 
-	// Turns cancelled by the shutdown are no news.
-	alerts.Mute()
-	// Automations stop before the hub does: a run cut now ends as
-	// interrupted — not cancelled by the hub's own teardown — and the
-	// ticker stops claiming firings the hub would refuse. The defer
-	// above only covers an early Serve failure.
-	automations.Stop()
-	// Hijacked WebSocket conns are invisible to http.Server.Shutdown —
-	// the hub drains sockets and lands terminal frames first, on its own
-	// context that outlived the signal.
-	hub.Shutdown()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("server shutdown: %w", err)
-	}
-	if err := <-serveDone; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	// The signal path runs the same sequence the update path does: one pass,
+	// save first, sockets after.
+	shutdown.Run(ctx)
+	if restarting.Load() {
+		// The update job is replacing this image now. Returning here would let
+		// main exit 0 while syscall.Exec is still on its way — the binary
+		// installed, no process running it. Park instead: the exec ends this
+		// process, or its failure exits 1 with a message.
+		//
+		// While parked this process handles no signal: a second SIGTERM (or
+		// SIGHUP) is ignored — signal.NotifyContext already used its one
+		// notification and the handler does nothing now — so only SIGKILL
+		// stops it before the exec lands. That window is the exec itself, and
+		// a supervisor's stop timeout covers it.
+		select {}
 	}
 	return nil
+}
+
+// restartHook is what the update job runs before a process-mode restart: the
+// one shutdown barrier, created at composition time and passed by value to the
+// hook, so a restart can never find it missing. A service-mode restart skips
+// it — the manager's stop sends the signal that runs the same sequence.
+func restartHook(shutdown *appjob.Barrier, restarting *atomic.Bool) func(context.Context) error {
+	return func(ctx context.Context) error {
+		restarting.Store(true)
+		shutdown.Run(ctx)
+		return nil
+	}
 }
 
 // serveFlags parses the optional one-process overrides. With no flag,

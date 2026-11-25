@@ -1,9 +1,9 @@
 // Tool call row + terminal-style card. The row is a one-line summary
 // ("Ran <command>"); expanding it shows the input (head first) and the
 // output (tail first), each clipped with a fade and expandable in place.
-import { html, useRef, useState } from '/vendor/preact/htm-preact.mjs';
+import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import hljs from '/vendor/highlight/highlight.min.mjs';
-import { toolSummary, toolFailed } from '../lib/turn.js';
+import { toolSummary, closeStatus, toolEnding, formatDuration, toolClock } from '../lib/turn.js';
 import { useFollow } from '../lib/follow.js';
 import { Icon } from './icons.js';
 import { cx, Spinner } from './ui.js';
@@ -18,16 +18,21 @@ function useOpen(id) {
   return [open, (v) => { opened.set(id, v); set(v); }];
 }
 
-function parseArgs(input) {
-  try { return JSON.parse(input || '{}'); } catch { return null; }
+// Elapsed is the only thing on a tool row that ticks. It owns the one-second
+// interval and its own state, so the clock re-renders this label alone — not
+// the row's card, not the transcript — and it is unmounted (and its interval
+// cleared) the moment the call stops running or the row goes away.
+function Elapsed({ since }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [since]);
+  return html`${formatDuration(Date.now() - since)}`;
 }
 
-// splitExit peels the runner's trailing "(exit N)" / "(signal: X)" marker
-// off the stored output so it can render as a footer instead of text.
-function splitExit(output) {
-  const m = /\n?\((exit (\d+)|signal: ([^)]+))\)\s*$/.exec(output || '');
-  if (!m) return { body: output || '', exit: null };
-  return { body: output.slice(0, m.index), exit: m[2] != null ? { code: Number(m[2]) } : { signal: m[3] } };
+function parseArgs(input) {
+  try { return JSON.parse(input || '{}'); } catch { return null; }
 }
 
 function CopyIcon({ text }) {
@@ -78,15 +83,17 @@ export function ToolRow({ room, item, cwd }) {
   const running = item.status === 'requested' || item.status === 'streaming';
   const shell = SHELL_TOOLS.has(item.name);
   const args = parseArgs(item.input);
-  const { body, exit } = splitExit(item.output);
-  // The backend's tool_result event is authoritative; the output wording
-  // remains the fallback for history written before that event existed.
-  const badExit = !!exit && (exit.code != null ? exit.code !== 0 : true);
-  // A live tool_result's success is trusted; settled is the heuristic
-  // path for history written before that event existed.
-  const failed = item.status === 'failed' || badExit ||
-    (item.status === 'settled' && !exit && toolFailed(item.output));
-  const succeeded = !failed && !running && item.status !== 'pending';
+  // How this call ended, in one value (lib/turn.js): the row's word and mark,
+  // its footer, and the group's count all read this, so they cannot disagree.
+  const ending = toolEnding(item);
+  const closed = closeStatus(item.output) || { body: item.output || '', close: null };
+  const body = closed.body;
+  // A running call counts up (Elapsed re-reads it every second); a finished
+  // one shows the duration the runner measured, once.
+  const clock = toolClock(item);
+  const row = useRef();
+  const cardId = `${item.id}:card`;
+  const tone = ending.tone === 'bad' ? 'text-bad' : ending.tone === 'warn' ? 'text-warn' : ending.tone === 'muted' ? 'text-muted' : '';
 
   let inputText = item.input || '';
   let inputLang = 'json';
@@ -99,17 +106,45 @@ export function ToolRow({ room, item, cwd }) {
     inputText = JSON.stringify(args, null, 2);
   }
 
-  return html`<div>
-    <button type="button" onClick=${() => setOpen(!open)} aria-expanded=${open}
+  // The footer says the same ending in a sentence; the exit code itself lives
+  // on the row (decided), so it is not repeated here.
+  const footer = (() => {
+    switch (ending.kind) {
+      case 'running':
+        return html`<${Spinner} size=${12} class="text-muted" /><span class="text-muted">Running</span>`;
+      case 'exit':
+      case 'failed':
+        return html`<${Icon} name="xCircle" size=${14} class="text-bad" /><span class="text-bad">Failed</span>`;
+      case 'signal':
+        return html`<${Icon} name="xCircle" size=${14} class="text-bad" /><span class="text-bad">Stopped by signal: <span class="font-mono">${ending.signal}</span></span>`;
+      case 'timeout':
+        return html`<${Icon} name="alert" size=${14} class="text-warn" /><span class="text-warn">Timed out at the <span class="font-mono">${ending.cap}</span> cap</span>`;
+      case 'stopped':
+        if (ending.by === 'agent') return html`<${Icon} name="stop" size=${13} class="text-muted" /><span class="text-muted">Stopped by the agent</span>`;
+        if (ending.by === 'server') return html`<${Icon} name="refresh" size=${13} class="text-muted" /><span class="text-muted">NusaShell restarted</span>`;
+        return html`<${Icon} name="stop" size=${13} class="text-muted" /><span class="text-muted">Stopped by you</span>`;
+      case 'canceled':
+        return html`<${Icon} name="stop" size=${13} class="text-muted" /><span class="text-muted">Canceled — the client went away</span>`;
+      default:
+        return null;
+    }
+  })();
+
+  return html`<div class="tool-row">
+    <button type="button" ref=${row} onClick=${() => setOpen(!open)} aria-expanded=${open} aria-controls=${cardId}
       class="group w-full flex items-center gap-2 py-1 text-left text-[13px] text-muted hover:text-fg min-w-0">
-      ${running && html`<span class="orb live" title="Running"></span>`}
-      ${failed && html`<span class="orb bad" title="Failed"></span>`}
-      ${succeeded && html`<span class="orb ok" title="Succeeded"></span>`}
-      ${item.status === 'pending' && html`<span class="orb idle" title="No result recorded"></span>`}
-      <span class="min-w-0 truncate"><span class=${running ? 'shimmer' : ''}>${verb}</span> <span class="text-faint group-hover:text-muted">${detail}</span></span>
-      <${Icon} name=${open ? 'chevronDown' : 'chevronRight'} size=${14} class="shrink-0 ml-auto text-faint" />
+      ${ending.mark !== 'none' && html`<span class=${cx('orb', ending.mark)} aria-hidden="true"></span>`}
+      <span class="min-w-0 truncate"><span class=${running ? 'shimmer' : ''}>${verb}</span> <span class="text-muted">${detail}</span></span>
+      <span class="tool-tail ml-auto shrink-0 flex items-center gap-1.5">
+        ${ending.word && html`<span class=${cx('text-[12.5px] font-medium', tone)}> ${ending.word}</span>`}
+        ${clock && html`<span class="text-muted tabular-nums">${running && item.at
+          ? html` · <${Elapsed} since=${item.at} />`
+          : ` · ${clock}`}</span>`}
+      </span>
+      <${Icon} name=${open ? 'chevronDown' : 'chevronRight'} size=${14} class="shrink-0 text-faint" />
     </button>
-    ${open && html`<div class="mt-1 mb-2 rounded-xl border border-line bg-raised overflow-hidden">
+    ${open && html`<div id=${cardId} class="mt-1 mb-2 rounded-xl border border-line bg-raised overflow-hidden"
+      onKeyDown=${(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); row.current?.focus(); } }}>
       <section class="px-3 pt-2 pb-3">
         <div class="text-xs text-faint mb-1.5 truncate">${inputLabel}${!shell && html` · <span class="font-mono">${item.name}</span>`}</div>
         <${Clip} id=${item.id + ':in'} text=${inputText || '(no arguments)'} mode="head" lang=${inputLang} />
@@ -124,13 +159,7 @@ export function ToolRow({ room, item, cwd }) {
         <div class="text-xs text-faint mb-1.5">${item.attachments.length === 1 ? 'Shown to the model' : `Shown to the model · ${item.attachments.length}`}</div>
         <${ToolMedia} room=${room} list=${item.attachments} />
       </section>`}
-      ${(running || exit || failed) && html`<footer class="flex items-center gap-2 px-3 py-2 border-t border-line text-xs">
-        ${running && html`<${Spinner} size=${12} class="text-muted" /><span class="text-muted">Running</span>`}
-        ${!running && exit?.code != null && html`<${Icon} name=${exit.code === 0 ? 'check' : 'xCircle'} size=${14} class=${exit.code === 0 ? 'text-ok' : 'text-bad'} />
-          <span class=${exit.code === 0 ? 'text-muted' : 'text-bad'}>Exit code ${exit.code}</span>`}
-        ${!running && exit?.signal && html`<${Icon} name="xCircle" size=${14} class="text-bad" /><span class="text-bad">Stopped (signal: ${exit.signal})</span>`}
-        ${!running && !exit && failed && html`<${Icon} name="xCircle" size=${14} class="text-bad" /><span class="text-bad">Failed</span>`}
-      </footer>`}
+      ${footer && html`<footer class="card-foot flex items-center gap-2 px-3 py-2 border-t border-line text-xs">${footer}</footer>`}
     </div>`}
   </div>`;
 }

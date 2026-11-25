@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,10 +65,12 @@ type fakeRunner struct {
 	command   string
 	workspace string
 	stdin     io.Reader
+	deadline  time.Time
 }
 
-func (r *fakeRunner) Run(_ context.Context, command, workspace string, stdin io.Reader, output io.Writer) (service.ProcessExit, error) {
+func (r *fakeRunner) Run(ctx context.Context, command, workspace string, stdin io.Reader, output io.Writer) (service.ProcessExit, error) {
 	r.command, r.workspace, r.stdin = command, workspace, stdin
+	r.deadline, _ = ctx.Deadline()
 	_, err := output.Write([]byte("remote output"))
 	return service.ProcessExit{Code: 7}, err
 }
@@ -91,7 +94,7 @@ func TestExecUsesInjectedRunner(t *testing.T) {
 	if runner.command != "echo ignored" || runner.workspace != "/remote/work" {
 		t.Fatalf("runner saw %q in %q", runner.command, runner.workspace)
 	}
-	if preview != "remote output" || result.Text != "remote output\n(exit 7)" {
+	if preview != "remote output" || !strings.HasPrefix(result.Text, "remote output\n(exit 7, ") || !strings.HasSuffix(result.Text, "s)") {
 		t.Fatalf("preview=%q result=%q", preview, result.Text)
 	}
 }
@@ -113,8 +116,8 @@ func TestExecCleanExitDoesNotReportKilled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(res.Text, "killed") {
-		t.Fatalf("a clean exit rendered as killed: %q", res.Text)
+	if strings.Contains(res.Text, "killed") || strings.Contains(res.Text, "timed out") {
+		t.Fatalf("a clean exit rendered as killed or timed out: %q", res.Text)
 	}
 }
 
@@ -216,7 +219,7 @@ func TestExecNonzeroExitIsOutput(t *testing.T) {
 		t.Fatalf("nonzero exit must not be a Go error: %v", err)
 	}
 	out := res.Text
-	if !strings.Contains(out, "partial") || !strings.Contains(out, "(exit 3)") {
+	if !strings.Contains(out, "partial") || !strings.Contains(out, "(exit 3, ") {
 		t.Fatalf("exit status not reported: %q", out)
 	}
 }
@@ -232,8 +235,75 @@ func TestExecTimeoutKillsTree(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Fatalf("kill took too long: %v", elapsed)
 	}
-	if !strings.Contains(out, "killed") {
-		t.Fatalf("kill not reported: %q", out)
+	// A kill of our own says so, with the cap that fired and what to do
+	// next — a bare signal leaves the model guessing who killed it, and this
+	// line replaces the signal status rather than stacking on it.
+	want := "(timed out after 200ms — partial output above; rerun with exec_session if it needs longer)"
+	if !strings.HasSuffix(out, want) {
+		t.Fatalf("timeout result = %q, want it to end with %q", out, want)
+	}
+	if strings.Contains(out, "signal:") {
+		t.Fatalf("a timeout must not read as a foreign kill: %q", out)
+	}
+}
+
+// Every result carries how long the command took, in the status line that
+// already closes it: the difference between a 40-millisecond and a
+// 40-second run is otherwise invisible to the model.
+func TestExecStatusLineCarriesDuration(t *testing.T) {
+	start := time.Now()
+	res, err := newTool(t).Execute(testContext(),
+		mustCall(t, "dur-1", `{"command":"echo done"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	if !strings.HasPrefix(res.Text, "done\n(exit 0, ") || !strings.HasSuffix(res.Text, "s)") {
+		t.Fatalf("status line = %q, want done then (exit 0, <duration>)", res.Text)
+	}
+	printed := strings.TrimSuffix(strings.TrimPrefix(res.Text[strings.LastIndex(res.Text, "\n(")+1:], "(exit 0, "), "s)")
+	got, perr := strconv.ParseFloat(printed, 64)
+	if perr != nil {
+		t.Fatalf("duration %q is not a number: %v", printed, perr)
+	}
+	if got > elapsed.Seconds()+0.05 {
+		t.Fatalf("printed %vss for a run the test measured at %v", got, elapsed)
+	}
+
+	// A silent command still says it ran, with the same duration.
+	res, err = newTool(t).Execute(testContext(), mustCall(t, "dur-2", `{"command":"sleep 0.3"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.Text, "(no output, exit 0, ") || !strings.HasSuffix(res.Text, "s)") {
+		t.Fatalf("silent command = %q, want (no output, exit 0, <duration>)", res.Text)
+	}
+	if strings.HasPrefix(res.Text, "\n") {
+		t.Fatalf("a status-only result must not open with a blank line: %q", res.Text)
+	}
+}
+
+// A caller that went away — a closed tab, a dropped socket — kills the
+// process with no actor to name: the neutral line says canceled, never a
+// timeout the model would answer by raising a bound nobody reached.
+func TestExecCallerGoneIsNotATimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(service.WithConversationID(context.Background(), "c1"))
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	res, err := newTool(t).Execute(ctx,
+		mustCall(t, "cancel-1", `{"command":"echo started; sleep 30"}`, 0), nil)
+	if err != nil {
+		t.Fatalf("a killed process must not be a Go error: %v", err)
+	}
+	// The caller went away; nobody decided it, so the neutral form is used
+	// and the head the command produced is still there.
+	if !strings.HasPrefix(res.Text, "started\n(canceled after ") || !strings.HasSuffix(res.Text, "— partial output above)") {
+		t.Fatalf("cancelerless cancel = %q, want the head and the neutral line", res.Text)
+	}
+	if strings.Contains(res.Text, "timed out") {
+		t.Fatalf("an owner cancel must not read as a timeout: %q", res.Text)
 	}
 }
 
@@ -253,8 +323,8 @@ func TestExecOversizedSpillsAndTruncates(t *testing.T) {
 		t.Fatalf("spill marker missing: %q", out)
 	}
 	spill, _, _ = strings.Cut(spill, " ...]")
-	if !strings.HasPrefix(out, "1\n2\n3") || !strings.HasSuffix(out, "2000\n") {
-		t.Fatalf("missing head or tail: %q...", out[:80])
+	if !strings.HasPrefix(out, "1\n2\n3") || !strings.Contains(out, "2000\n(exit 0, ") || !strings.HasSuffix(out, "s)") {
+		t.Fatalf("missing head or tail: %q (tail %q)", out[:80], out[max(0, len(out)-80):])
 	}
 	if !strings.Contains(out, "bytes omitted") || !strings.Contains(out, "full output: "+spill) {
 		t.Fatalf("marker missing count or spill path: %q", out)
@@ -265,8 +335,8 @@ func TestExecOversizedSpillsAndTruncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spill file must persist after execute: %v", err)
 	}
-	if !strings.HasPrefix(string(data), "1\n2\n3") || !strings.HasSuffix(string(data), "2000\n") {
-		t.Fatalf("spill file missing head or tail: %q...%q", data[:20], data[len(data)-20:])
+	if !strings.HasPrefix(string(data), "1\n2\n3") || !strings.Contains(string(data), "2000\n(exit 0, ") {
+		t.Fatalf("spill file missing head or tail: %q...%q", data[:20], data[len(data)-24:])
 	}
 }
 
@@ -367,7 +437,7 @@ func TestExecExitSuffixOverflowSpillsWholeOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Text) > budget || !strings.Contains(res.Text, "bytes omitted") || !strings.HasSuffix(res.Text, "(exit 7)") {
+	if len(res.Text) > budget || !strings.Contains(res.Text, "bytes omitted") || !strings.HasSuffix(res.Text, "s)") {
 		t.Fatalf("suffix-overflow excerpt = %q", res.Text)
 	}
 	_, path, ok := strings.Cut(res.Text, "full output: ")
@@ -382,8 +452,13 @@ func TestExecExitSuffixOverflowSpillsWholeOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(full) != budget+len("\n(exit 7)") || !strings.HasSuffix(string(full), "\n(exit 7)") {
-		t.Fatalf("spill does not contain the full result: %q", full)
+	// The padding is exactly the budget; the status line follows it, so the
+	// whole result is in the file and ends with the exit line.
+	if cut := strings.LastIndex(string(full), "\n(exit 7, "); cut != budget {
+		t.Fatalf("spill holds %d bytes before the status line, want %d: %q", cut, budget, full)
+	}
+	if !strings.HasSuffix(string(full), "s)") {
+		t.Fatalf("spill does not end with the status line: %q", full)
 	}
 }
 
@@ -433,16 +508,30 @@ func TestSpillCapReportsTruncation(t *testing.T) {
 
 func TestExecTimeoutMsOverflowClamps(t *testing.T) {
 	// timeout_ms near int64 max overflows the Duration multiply — the
-	// clamp must land before conversion, so a fast command still runs.
-	for _, ms := range []int64{math.MaxInt64, 600001, 9000000000000000000} {
-		res, err := newTool(t).Execute(testContext(),
+	// clamp must land before conversion, so a fast command still runs, and
+	// the deadline it runs under is the cap itself.
+	for _, ms := range []int64{math.MaxInt64, 300001, 600001, 9000000000000000000} {
+		root := t.TempDir()
+		if err := os.Mkdir(filepath.Join(root, "c1"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runner := &fakeRunner{}
+		tool, err := NewExecTool(mustOutputRepo(t, root), runner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		res, err := tool.Execute(testContext(),
 			mustCall(t, "huge-timeout",
 				fmt.Sprintf(`{"command":"echo ok","timeout_ms":%d}`, ms), 0), nil)
 		if err != nil {
 			t.Fatalf("Execute(timeout_ms=%d): %v", ms, err)
 		}
-		if !strings.Contains(res.Text, "ok") || strings.Contains(res.Text, "killed") {
+		if !strings.Contains(res.Text, "remote output") || strings.Contains(res.Text, "killed") {
 			t.Fatalf("timeout_ms=%d must clamp to the cap, not expire instantly: %q", ms, res.Text)
+		}
+		if got := runner.deadline.Sub(start); got < maxExecTimeout-5*time.Second || got > maxExecTimeout+5*time.Second {
+			t.Fatalf("timeout_ms=%d gave a %v deadline, want the %v cap", ms, got, maxExecTimeout)
 		}
 	}
 }
@@ -473,7 +562,10 @@ func TestExecEmitsChunks(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	out := res.Text
-	if len(chunks) == 0 || strings.Join(chunks, "") != out {
+	// The streamed chunks reassemble into what the process wrote; the status
+	// line is added after the stream, never emitted as a chunk.
+	if streamed := strings.Join(chunks, ""); len(chunks) == 0 || !strings.HasPrefix(out, streamed) ||
+		!strings.HasSuffix(out, "s)") || streamed == out {
 		t.Fatalf("emitted chunks %q do not reassemble into %q", chunks, out)
 	}
 }
@@ -572,5 +664,105 @@ func TestSpillSinkCountsOnlyAcceptedBytes(t *testing.T) {
 	ok.writeSpill([]byte("0123456789"))
 	if ok.spillWritten != 10 || ok.spillErr != nil {
 		t.Fatalf("written=%d err=%v, want 10/nil", ok.spillWritten, ok.spillErr)
+	}
+}
+
+// stoppedContext builds the ctx a stopped turn hands a tool: canceled with a
+// cause, which is how the tool can name who stopped it.
+func stoppedContext() (context.Context, context.CancelCauseFunc) {
+	return context.WithCancelCause(service.WithConversationID(context.Background(), "c1"))
+}
+
+// The owner's Stop must not erase the work the process already did: the
+// result keeps the head and closes with who stopped it and how long it ran.
+func TestExecInterruptedByOwnerKeepsTheHead(t *testing.T) {
+	ctx, stop := stoppedContext()
+	defer stop(nil)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		stop(service.ErrInterruptedByUser)
+	}()
+	res, err := newTool(t).Execute(ctx,
+		mustCall(t, "stop-1", `{"command":"echo first line; echo second line; sleep 30"}`, 0), nil)
+	if err != nil {
+		t.Fatalf("a stopped run must return its result, not an error: %v", err)
+	}
+	if !strings.HasPrefix(res.Text, "first line\nsecond line\n(interrupted by user after ") {
+		t.Fatalf("stopped run = %q, want the head then the interrupt line", res.Text)
+	}
+	if !strings.HasSuffix(res.Text, "s — partial output above)") {
+		t.Fatalf("interrupt line lost its duration: %q", res.Text)
+	}
+}
+
+// A stop before the process said anything leaves nothing but the line — and
+// still no error, so the turn persists it as the call's outcome.
+func TestExecInterruptedBeforeOutputIsJustTheLine(t *testing.T) {
+	ctx, stop := stoppedContext()
+	defer stop(nil)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		stop(service.ErrInterruptedByUser)
+	}()
+	res, err := newTool(t).Execute(ctx, mustCall(t, "stop-2", `{"command":"sleep 30"}`, 0), nil)
+	if err != nil {
+		t.Fatalf("a stopped run must not be a Go error: %v", err)
+	}
+	if !strings.HasPrefix(res.Text, "(interrupted by user after ") || !strings.HasSuffix(res.Text, "— partial output above)") {
+		t.Fatalf("silent stop = %q, want only the interrupt line", res.Text)
+	}
+	if strings.Contains(res.Text, "no output") || strings.Contains(res.Text, "signal") {
+		t.Fatalf("silent stop = %q, want no exit-status wording", res.Text)
+	}
+}
+
+// A restart is not the owner's decision either: the same result says the
+// server went down under it.
+func TestExecRestartNamesTheServer(t *testing.T) {
+	ctx, stop := stoppedContext()
+	defer stop(nil)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		stop(service.ErrServerRestarted)
+	}()
+	res, err := newTool(t).Execute(ctx,
+		mustCall(t, "restart-1", `{"command":"echo working; sleep 30"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.Text, "working\n(nusashell restarted after ") {
+		t.Fatalf("restart = %q, want the head then the restart line", res.Text)
+	}
+}
+
+// An agent's own cancel has its own words — the sentinel no path sets yet is
+// wired through, so the contract does not have to change when one does.
+func TestExecInterruptedByAgentHasItsOwnWords(t *testing.T) {
+	ctx, stop := stoppedContext()
+	defer stop(nil)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		stop(service.ErrInterruptedByAgent)
+	}()
+	res, err := newTool(t).Execute(ctx,
+		mustCall(t, "agent-stop", `{"command":"echo thinking; sleep 30"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.Text, "thinking\n(interrupted by agent after ") {
+		t.Fatalf("agent cancel = %q, want the head then the agent line", res.Text)
+	}
+}
+
+// A command that ends on its own never claims an interruption, whatever the
+// ctx does after it exits.
+func TestExecNormalExitNeverSaysInterrupted(t *testing.T) {
+	res, err := newTool(t).Execute(testContext(),
+		mustCall(t, "plain-1", `{"command":"echo done"}`, 0), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Text, "interrupted") || strings.Contains(res.Text, "canceled") {
+		t.Fatalf("normal exit = %q, want no interruption wording", res.Text)
 	}
 }

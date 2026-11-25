@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/config"
 )
 
@@ -97,5 +100,43 @@ func TestHealthy(t *testing.T) {
 	}
 	if healthy("127.0.0.1:1") {
 		t.Fatal("closed port reported healthy")
+	}
+}
+
+// The update job's process-mode restart runs the one shutdown barrier. The
+// hook is built from the barrier value itself, so it cannot exist without one
+// — the shape that let a restart overwrite the binary and then fail "barrier
+// is not ready" is gone.
+func TestRestartHookRunsTheShutdownBarrier(t *testing.T) {
+	var order []string
+	shutdown := appjob.NewBarrier(appjob.BarrierSteps{
+		CloseAdmission: func(context.Context) error {
+			order = append(order, "admission")
+			return nil
+		},
+		StopTurns: func(context.Context) error {
+			order = append(order, "turns")
+			return nil
+		},
+	})
+	var restarting atomic.Bool
+	hook := restartHook(shutdown, &restarting)
+	if err := hook(t.Context()); err != nil {
+		t.Fatalf("restart hook = %v, want the barrier to run", err)
+	}
+	if len(order) != 2 || order[0] != "admission" || order[1] != "turns" {
+		t.Fatalf("hook order = %v, want the barrier's own plan", order)
+	}
+	// A second call is the same pass: a retried restart does not rerun it.
+	if err := hook(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(order) != 2 {
+		t.Fatalf("hook reran the barrier: %v", order)
+	}
+	// The hook marks the restart so serve parks instead of exiting under the
+	// replacement's exec.
+	if !restarting.Load() {
+		t.Fatal("the restart hook did not mark the process as restarting")
 	}
 }

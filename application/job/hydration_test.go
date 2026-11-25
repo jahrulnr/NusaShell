@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,6 +22,8 @@ import (
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoconversation "github.com/jahrulnr/nusashell/infrastructure/repository/conversation"
 	repoprovider "github.com/jahrulnr/nusashell/infrastructure/repository/provider"
+	repoworkspace "github.com/jahrulnr/nusashell/infrastructure/repository/workspace"
+	toolproject "github.com/jahrulnr/nusashell/infrastructure/service/tool/project"
 	toolsummary "github.com/jahrulnr/nusashell/infrastructure/service/tool/summary"
 )
 
@@ -1200,5 +1204,76 @@ func TestBundleToolContextsPinCarriesExtraFolders(t *testing.T) {
 	}
 	if got := len(conv.Messages()); got != 2 {
 		t.Fatalf("canceled pass wrote a message — history = %d, want 2", got)
+	}
+}
+
+// projectRecords are the live project_context injection records — the
+// layout orientation the harness writes, never an agent call.
+func projectRecords(conv *aggregate.Conversation) []entity.ToolCall {
+	var calls []entity.ToolCall
+	for _, msg := range conv.Messages() {
+		for _, call := range msg.ToolCalls() {
+			if call.Type() == enum.TooltypeInjection && call.Name() == toolproject.ToolName {
+				calls = append(calls, call)
+			}
+		}
+	}
+	return calls
+}
+
+// A record whose only difference is a directory's file count must dedup
+// against the live one: the layout is orientation, and files come and go
+// under it on every unrelated edit. A changed layout or AGENTS.md still
+// re-records — this is value dedup, not a "same name, skip" shortcut.
+func TestProjectContextNotReinjectedWhenOnlyCountsChange(t *testing.T) {
+	d := Deps{Convs: repoconversation.NewConversationRepository(t.TempDir())}
+	conv := seedRoom(t, d.Convs, "project-counts", "go")
+	root := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("cmd/app/main.go", "package main")
+	write("cmd/app/util.go", "package util")
+	tool, err := toolproject.NewProjectContextTool(repoworkspace.NewLocal(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := EnvironmentBundle{Tools: map[string]dservice.Tool{toolproject.ToolName: tool}}
+	ctx := dservice.WithWorkspaceDir(t.Context(), root)
+
+	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver, root); err != nil {
+		t.Fatal(err)
+	}
+	records := projectRecords(conv)
+	if len(records) != 1 {
+		t.Fatalf("first pass records = %d, want 1", len(records))
+	}
+	if out := records[0].Output(); !strings.Contains(out, "cmd/ — 2 files") || !strings.Contains(out, "app/ — 2 files") {
+		t.Fatalf("fixture did not render the counts:\n%s", out)
+	}
+
+	// A file below the displayed depth moves both counts and no name.
+	write("cmd/app/deep/more.go", "package deep")
+	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver, root); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(projectRecords(conv)); got != 1 {
+		t.Fatalf("a count-only change re-recorded the layout — records = %d, want 1", got)
+	}
+
+	// A real change still refreshes the record.
+	write("AGENTS.md", "rules v2")
+	if err := d.appendToolContexts(ctx, conv.ID(), conv, driver, root); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(projectRecords(conv)); got != 2 {
+		t.Fatalf("an edited AGENTS.md did not re-record — records = %d, want 2", got)
 	}
 }

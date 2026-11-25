@@ -17,6 +17,8 @@ import { Memory } from './memory.js';
 import { WebSearch } from './websearch.js';
 import { McpServers, BrowserSetup, BrowserLogins } from './mcp.js';
 import { Models } from './models.js';
+import { Markdown } from './transcript.js';
+import { settleInstall } from '../lib/install.js';
 
 // SECTIONS are the settings pages, grouped as the settings sidebar shows
 // them. The sidebar replaces the thread list while Settings is open.
@@ -686,39 +688,45 @@ function About() {
   const u = s.update;
   const [busy, setBusy] = useState('');
   const [prog, setProg] = useState(null);
+  // The install ended without the server coming back as a new version: the
+  // page says so and offers the one thing it can still do.
+  const [stuck, setStuck] = useState(false);
 
   const check = async () => {
     setBusy('check');
     try { state.update = await api.checkUpdate(); emit(); } catch (e) { toast(errorText(e), 'error'); }
     setBusy('');
   };
-  const poll = async () => {
-    for (;;) {
-      let p;
-      try { p = await api.installProgress(); } catch { p = null; }
-      if (p) setProg(p);
-      if (p && p.state !== 'running') return p;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  };
+  // settle follows the install past the point where the server replaces
+  // itself: the install state dies with the old process, so the version the
+  // new one answers with is what the page reloads on (lib/install.js).
   const install = async () => {
     const ok = await askConfirm({
       title: 'Install update?',
-      body: `NusaShell will download ${u?.latest ? 'v' + u.latest : 'the latest release'}, verify it, replace the binary and restart. This page reconnects and refreshes automatically.`,
+      body: `NusaShell will download ${u?.latest ? 'v' + u.latest : 'the latest release'}, verify it, replace the binary and restart. This page reloads itself once the new version answers; if it does not come back, it offers you a reload instead.`,
       confirm: 'Update',
     });
     if (!ok) return;
     setBusy('install');
+    setStuck(false);
     try {
       setProg(await api.installUpdate());
-      const p = await poll();
-      if (p.state === 'succeeded') {
-        // The server restarts; wait for it to answer again, then reload.
-        for (let i = 0; i < 120; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
-          try { const v = await api.update(); if (v.current !== u.current) { location.reload(); return; } } catch { /* restarting */ }
-        }
-        toast('Update installed. Reload the page once the server is back.');
+      const out = await settleInstall({
+        progress: api.installProgress,
+        version: api.update,
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        reload: () => location.reload(),
+        onProgress: (p) => setProg(p),
+        from: u?.current || '',
+      });
+      if (out.outcome === 'failed') {
+        setProg({ ...(out.progress || {}), state: 'failed', error: out.error || 'Install failed.' });
+        toast('Update failed: ' + (out.error || 'the installer reported an error'), 'error');
+      } else if (out.outcome === 'timeout') {
+        setStuck(true);
+        toast(out.version
+          ? `The server answers ${out.version} — the update did not take effect. Reload to retry.`
+          : 'The server has not answered yet. Reload once it is back.', 'error');
       }
     } catch (e) { toast(errorText(e), 'error'); }
     setBusy('');
@@ -749,7 +757,16 @@ function About() {
             <div class="h-1.5 rounded-full bg-line overflow-hidden"><div class="h-full bg-accent transition-all" style=${{ width: (pct ?? (prog.state === 'succeeded' ? 100 : 5)) + '%' }}></div></div>
             <div class="text-xs text-muted">${prog.state === 'failed' ? html`<span class="text-bad">${prog.error || 'Install failed.'}</span>` : prog.state === 'succeeded' ? 'Installed — restarting the server…' : `${prog.phase || 'Working'}${pct != null ? ` · ${pct}%` : ''}`}</div>
           </div>`}
-          ${u.notes && html`<details class="text-[13px]"><summary class="cursor-pointer text-muted">What's new</summary><pre class="rawtext mt-2">${u.notes}</pre></details>`}
+          ${stuck && html`<div class="flex items-center justify-between gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-[13px]">
+            <span class="text-muted">The server did not report a new version. Reload to check where the update stands.</span>
+            <${Button} onClick=${() => location.reload()}><${Icon} name="refresh" size=${14} /> Reload</${Button}>
+          </div>`}
+          ${u.notes && html`<details class="text-[13px]" open>
+            <summary class="cursor-pointer text-muted">What's new</summary>
+            <div class="mt-2 max-h-72 overflow-y-auto overflow-x-hidden min-w-0">
+              <${Markdown} text=${u.notes} />
+            </div>
+          </details>`}
         </div>`}
       </${Card}>
     </section>

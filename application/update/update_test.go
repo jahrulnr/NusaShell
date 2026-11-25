@@ -632,3 +632,123 @@ func TestWatchDoesNothingWhenCheckingIsOff(t *testing.T) {
 		t.Fatalf("a dev build asked the source %d times", n)
 	}
 }
+
+// orderingRestarter records the restart against the same timeline the
+// shutdown hook writes to.
+type orderingRestarter struct {
+	mode  string
+	order *[]string
+	err   error
+}
+
+func (r orderingRestarter) Mode() string { return r.mode }
+
+func (r orderingRestarter) Restart(mode string) error {
+	*r.order = append(*r.order, "restart:"+mode)
+	return r.err
+}
+
+// A process-mode restart replaces the running image: the shutdown must have
+// run before it, or the replacement starts over work the old process killed
+// on its way out.
+func TestProcessModeShutsDownBeforeTheRestart(t *testing.T) {
+	payload := []byte("new")
+	src := release(t, "0.1.0", payload, goodSums(payload))
+	var order []string
+	rst := orderingRestarter{mode: "process", order: &order}
+	app := newApp(t, src, "0.0.0", &fakeBinary{}, &fakeRestarter{})
+	app.deps.Restarter = rst
+	app.deps.BeforeRestart = func(context.Context) error {
+		order = append(order, "barrier")
+		return nil
+	}
+	app.Status(context.Background())
+	app.Install()
+	if final := waitDone(t, app); final.State != StateSucceeded {
+		t.Fatalf("final = %+v", final)
+	}
+	if len(order) != 2 || order[0] != "barrier" || order[1] != "restart:process" {
+		t.Fatalf("order = %v, want the barrier before the replacement", order)
+	}
+}
+
+// A service-mode restart is the manager's stop: it signals this process, which
+// runs the same barrier on the signal path. Shutting down here would race it.
+func TestServiceModeLeavesTheShutdownToTheSignalPath(t *testing.T) {
+	payload := []byte("new")
+	src := release(t, "0.1.0", payload, goodSums(payload))
+	var order []string
+	rst := orderingRestarter{mode: "service", order: &order}
+	app := newApp(t, src, "0.0.0", &fakeBinary{}, &fakeRestarter{})
+	app.deps.Restarter = rst
+	app.deps.BeforeRestart = func(context.Context) error {
+		order = append(order, "barrier")
+		return nil
+	}
+	app.Status(context.Background())
+	app.Install()
+	if final := waitDone(t, app); final.State != StateSucceeded {
+		t.Fatalf("final = %+v", final)
+	}
+	if len(order) != 1 || order[0] != "restart:service" {
+		t.Fatalf("order = %v, want only the manager restart", order)
+	}
+}
+
+// A shutdown that cannot finish stops the restart: replacing the image would
+// leave the record to a process that already gave up on it.
+func TestFailedShutdownStopsTheProcessRestart(t *testing.T) {
+	payload := []byte("new")
+	src := release(t, "0.1.0", payload, goodSums(payload))
+	var order []string
+	rst := orderingRestarter{mode: "process", order: &order}
+	app := newApp(t, src, "0.0.0", &fakeBinary{}, &fakeRestarter{})
+	app.deps.Restarter = rst
+	app.deps.BeforeRestart = func(context.Context) error {
+		order = append(order, "barrier")
+		return errors.New("sockets would not close")
+	}
+	app.Status(context.Background())
+	app.Install()
+	final := waitDone(t, app)
+	if final.State != StateFailed || final.Phase != PhaseRestart {
+		t.Fatalf("final = %+v, want a failed restart", final)
+	}
+	if len(order) != 1 || order[0] != "barrier" {
+		t.Fatalf("order = %v, want the barrier only", order)
+	}
+}
+
+// A process that is not the installed binary must not install: it would
+// overwrite the real installation and restart its service. The refusal names
+// both paths, and nothing is downloaded or restarted.
+func TestInstallRefusesFromABinaryThatIsNotTheInstall(t *testing.T) {
+	payload := []byte("new")
+	src := release(t, "0.1.0", payload, goodSums(payload))
+	bin := &fakeBinary{}
+	rst := &fakeRestarter{mode: "process"}
+	app := newApp(t, src, "0.0.0", bin, rst)
+	app.deps.InstallBlocked = "this server runs from /tmp/qa/nusashell, not from the installed binary /home/u/.local/bin/nusashell"
+	app.Status(context.Background())
+
+	if info := app.Status(context.Background()); info.Installable {
+		t.Fatalf("installable = true, want false when this process is not the install: %+v", info)
+	}
+	prog, err := app.Install()
+	if err == nil {
+		t.Fatal("install from a non-installed binary must be refused")
+	}
+	if !errors.Is(err, ErrDisabled) || !strings.Contains(err.Error(), "/tmp/qa/nusashell") || !strings.Contains(err.Error(), "/home/u/.local/bin/nusashell") {
+		t.Fatalf("refusal = %v, want ErrDisabled naming both paths", err)
+	}
+	if prog.State == StateRunning {
+		t.Fatalf("progress = %+v, want no install started", prog)
+	}
+	bin.mu.Lock()
+	staged := len(bin.stagings)
+	installed := bin.installed
+	bin.mu.Unlock()
+	if staged != 0 || installed != nil || len(rst.restarted()) != 0 {
+		t.Fatalf("a refused install staged %d, installed %v, restarted %v", staged, installed, rst.restarted())
+	}
+}

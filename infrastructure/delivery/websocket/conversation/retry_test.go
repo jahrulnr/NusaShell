@@ -3,13 +3,16 @@ package wsconversation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	appconversation "github.com/jahrulnr/nusashell/application/conversation"
+	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 )
 
 // A tab that reattaches during a turn gets the live document instead of the
@@ -73,4 +76,32 @@ func TestRetryWaitTruncatesLiveSnapshot(t *testing.T) {
 			t.Fatalf("terminal frame = %+v", f)
 		}
 	}
+}
+
+// An external turn — an automation, a chat channel — reports its caller's
+// cause: a shutdown stops it as a restart, not as a client that drifted off.
+func TestExternalTurnPropagatesTheCallerCause(t *testing.T) {
+	cause := make(chan error, 1)
+	h := newHub(t, stubSender{fn: func(ctx context.Context, convID, _, _, _ string, _ event.TurnEventHandler) (appconversation.SendResult, error) {
+		<-ctx.Done()
+		cause <- context.Cause(ctx)
+		return appconversation.SendResult{ConversationID: convID, UserMessagePersisted: true}, ctx.Err()
+	}})
+	ctx, stop := context.WithCancelCause(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = h.Run(ctx, "room", "gw1", "m1", "x", nil, appjob.SendOptions{}, nil)
+		close(done)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	stop(dservice.ErrServerRestarted)
+	select {
+	case got := <-cause:
+		if !errors.Is(got, dservice.ErrServerRestarted) {
+			t.Fatalf("turn cause = %v, want the restart the caller carried", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sender never saw its context die")
+	}
+	<-done
 }

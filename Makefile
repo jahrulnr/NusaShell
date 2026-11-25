@@ -1,4 +1,4 @@
-.PHONY: build serve install test check fmt-check test-web provider-add memory-eval docs-serve docs-build
+.PHONY: build build-lean serve install test check fmt-check test-web tags provider-add memory-eval docs-serve docs-build
 
 # The build version comes from the VERSION file. A checkout without one builds
 # as "dev", and "dev" turns the update check off.
@@ -6,8 +6,16 @@ VERSION ?= $(or $(shell tr -d '[:space:]' < VERSION 2>/dev/null),dev)
 
 # repomap + the grammar_subset tags carry the tree-sitter symbol index
 # into the default binary (~+13 MB). build-lean drops them for hosts that
-# would rather not pay for the symbol_map record.
+# would rather not pay for the symbol_map record — a release does not: the
+# published binary is the full one, so `make tags` is what the workflow
+# reads instead of keeping a second copy of this list.
 REPOMAP_TAGS := repomap grammar_subset grammar_subset_go grammar_subset_javascript grammar_subset_typescript grammar_subset_tsx grammar_subset_python grammar_subset_rust grammar_subset_java grammar_subset_kotlin grammar_subset_c_sharp grammar_subset_ruby grammar_subset_php grammar_subset_c grammar_subset_cpp grammar_subset_swift
+
+# tags prints the build tag set for callers that build the binary
+# themselves — the release workflow, above all, so the symbol engine cannot
+# silently drop out of what users download.
+tags:
+	@echo $(REPOMAP_TAGS)
 
 build:
 	mkdir -p ./bin

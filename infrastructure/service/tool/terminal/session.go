@@ -54,9 +54,13 @@ var scrubEnv = map[string]string{
 type terminalSession struct {
 	id  int
 	tty bool
-	cmd *exec.Cmd
-	env []string
-	dir string
+	// command is what the session was opened with — write_stdin reads it to
+	// tell a shell (typed lines are commands) from a REPL or editor (they are
+	// input).
+	command string
+	cmd     *exec.Cmd
+	env     []string
+	dir     string
 
 	// master serves the pty backend for both reads and writes; pipes
 	// sessions hold no stdin handle at all — their child reads EOF.
@@ -112,6 +116,7 @@ func spawnSession(convID string, id int, req dservice.TerminalOpenRequest, env [
 	sess := &terminalSession{
 		id:          id,
 		tty:         req.TTY,
+		command:     req.Command,
 		done:        make(chan struct{}),
 		readerEOF:   make(chan struct{}),
 		notify:      make(chan struct{}, 1),
@@ -307,7 +312,9 @@ func (s *terminalSession) drain() (string, int) {
 	return out, flowed
 }
 
-func (s *terminalSession) ID() int   { return s.id }
+func (s *terminalSession) ID() int         { return s.id }
+func (s *terminalSession) Command() string { return s.command }
+
 func (s *terminalSession) TTY() bool { return s.tty }
 func (s *terminalSession) touch()    { s.lastUsed.Store(time.Now().UnixNano()) }
 

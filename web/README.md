@@ -165,7 +165,11 @@ not-found view (`MissingView`).
   (`components/toolcard.js`): shell commands show as highlighted bash
   "Command in <workspace>", other tools as pretty JSON; long input shows its
   head and long output its tail behind a fade, each expandable in place.
-  The runner's trailing `(exit N)` / `(signal: X)` becomes the card footer.
+  The result's trailing status line — `(exit N, 4.4s)`, `(no output, exit 0, …)`,
+  `(signal: killed, …)`, `(timed out …)`, `(interrupted by user|agent …)`,
+  `(nusashell restarted …)`, `(canceled …)` — becomes the card footer and the
+  row's own word (`exit 1`, `killed`, `timed out`, `stopped`), with the wall
+  time on the row.
 - **History paging.** A thread opens on its newest 60 messages; older pages
   load automatically as the reader nears the top (skeleton placeholder,
   inline retry on failure) while the line being read stays in place.

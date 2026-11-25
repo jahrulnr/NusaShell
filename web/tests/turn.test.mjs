@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, closeStatus, toolEnding, formatDuration, toolClock, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
 
 const turn = () => newTurn({ turnId: 't1', requestId: 'r1', conversationId: 'c1', kind: 'send' });
 const frame = (type, payload, seq) => ({ type, payload, seq });
@@ -120,7 +120,8 @@ test('toolFailed reads the failure conventions of stored output', () => {
   assert.equal(toolFailed('failed'), true);
   assert.equal(toolFailed('ran\n(exit 2)'), true);
   assert.equal(toolFailed('ran\n(signal: killed)'), true);
-  assert.equal(toolFailed('interrupted by user'), true);
+  // an interrupted run is our own doing, not the command's failure
+  assert.equal(toolFailed('partial\n(interrupted by user after 12.3s — partial output above)'), false);
   assert.equal(toolFailed('ok (exit 0)'), false);
   assert.equal(toolFailed(''), false);
 });
@@ -496,4 +497,166 @@ test('a recalled steer leaves the live transcript, and its history row stays', (
   assert.deepEqual(t.segments.map((s) => s.inputId || s.kind), ['req-1', 'req-2']);
   applyFrame(t, frame('turn.steer_recalled', { inputId: 'req-1' }, 3));
   assert.deepEqual(t.segments.map((s) => s.inputId || s.kind), ['req-2']);
+});
+
+// A row the tab replayed or resynced never saw the call start: its own clock
+// would say "0s" for a 40-second call. The runner's status line carries the
+// duration it measured, so a finished row reads that instead.
+test('a finished row takes its duration from the runner, not from the tab clock', () => {
+  const now = Date.now();
+  const replayed = {
+    kind: 'tool', status: 'success',
+    at: now,                                  // the frame arrived just now …
+    took: 0,                                  // … so the tab's own measure is nothing
+    output: 'make: *** [test] Error 1\n(exit 1, 43.2s)',
+  };
+  assert.equal(toolClock(replayed, now), '43s', 'the runner measured it, the tab did not');
+  assert.equal(toolClock({ ...replayed, output: 'done\n(exit 0, 4.4s)' }, now), '4s');
+  assert.equal(toolClock({ ...replayed, output: '(no output, exit 0, 0.3s)' }, now), '0s');
+  assert.equal(toolClock({ ...replayed, output: 'x\n(signal: killed, 3.2s)' }, now), '3s');
+  assert.equal(toolClock({ ...replayed, output: 'x\n(interrupted by user after 12.3s — partial output above)' }, now), '12s');
+
+  // a running row has no status line yet: the ticker from its start is all there is
+  const running = { kind: 'tool', status: 'requested', at: now - 33_000, output: '' };
+  assert.equal(toolClock(running, now), '33s');
+  assert.equal(toolClock(running, now + 2000), '35s');
+  // a call the tab watched end, with no status line of its own, keeps its measure
+  assert.equal(toolClock({ kind: 'tool', status: 'success', at: now - 9000, took: 9000, output: 'ok' }, now), '9s');
+});
+
+// A running tool row shows how long it has been running, and a finished one
+// shows what it took: the difference is whether the label still moves.
+test('a running tool row counts up, and stops when the call does', () => {
+  const t = turn();
+  applyFrame(t, frame('turn.tool_call', { callId: 'a', name: 'exec' }, 0));
+  const row = t.segments[0];
+  assert.ok(row.at > 0, 'the call remembers when this tab saw it start');
+
+  // the row's label grows with the clock while it runs
+  assert.equal(toolClock(row, row.at + 33_000), '33s');
+  assert.equal(toolClock(row, row.at + 34_000), '34s');
+  assert.equal(toolClock(row, row.at + 61_000), '1m 01s');
+
+  // the result stores one duration; from then on the label is that, whatever
+  // the clock says — nothing left to tick
+  applyFrame(t, frame('turn.tool_result', { callId: 'a', output: 'ok' }, 1));
+  assert.equal(row.status, 'success');
+  assert.ok(row.took >= 0);
+  const fixed = toolClock(row, row.at + 5_000);
+  assert.equal(toolClock(row, row.at + 9_000), fixed, 'a finished row does not move');
+  assert.equal(toolClock({ ...row, at: 0, took: 43_000 }, 1_000_000), '43s');
+
+  // nothing to say about a row whose start was never seen (history)
+  assert.equal(toolClock({ kind: 'tool', status: 'success' }), '');
+  assert.equal(toolClock(null), '');
+});
+
+test('a call the turn closes without a result still gets a final duration', () => {
+  const t = turn();
+  applyFrame(t, frame('turn.tool_call', { callId: 'a', name: 'exec' }, 0));
+  applyFrame(t, frame('turn.tool_output', { callId: 'a', text: 'partial' }, 1));
+  applyFrame(t, frame('turn.failed', { status: 502, message: 'upstream' }, 2));
+  const row = t.segments[0];
+  assert.equal(row.status, 'failed');
+  assert.ok(row.took >= 0, 'the clock closed with the turn');
+  assert.equal(toolClock({ ...row, took: 12_400 }, 0), '12s', 'and it stays put afterwards');
+});
+
+test('durations read as a person would say them', () => {
+  assert.deepEqual(
+    [0, 999, 1000, 33_000, 59_900, 60_000, 61_000, 3_661_000].map(formatDuration),
+    ['0s', '1s', '1s', '33s', '1m 00s', '1m 00s', '1m 01s', '1h 01m'],
+  );
+});
+
+// exec closes its output with a status line that names how the process ended;
+// the row reads that line and shows the output without it.
+test('every status line exec writes is read, and none of it leaks into the output', () => {
+  const cases = [
+    ['(exit 0, 4.4s)', { kind: 'exit', code: 0, ms: 4400 }],
+    ['(exit 1, 43.2s)', { kind: 'exit', code: 1, ms: 43200 }],
+    ['(no output, exit 0, 0.3s)', { kind: 'exit', code: 0, ms: 300 }],
+    ['(signal: killed, 3.2s)', { kind: 'signal', signal: 'killed', ms: 3200 }],
+    ['(timed out after 120s — partial output above; rerun with exec_session for a long run, or raise timeout_ms)', { kind: 'timeout', after: '120s', ms: 120000 }],
+    ['(interrupted by user after 12.3s — partial output above)', { kind: 'interrupted', by: 'user', ms: 12300 }],
+    ['(interrupted by agent after 4.1s — partial output above)', { kind: 'interrupted', by: 'agent', ms: 4100 }],
+    ['(nusashell restarted after 8.0s — partial output above)', { kind: 'interrupted', by: 'server', ms: 8000 }],
+    ['(canceled after 12.3s — partial output above)', { kind: 'canceled', ms: 12300 }],
+  ];
+  for (const [line, close] of cases) {
+    const out = closeStatus('done\n' + line);
+    assert.deepEqual(out.close, close, line);
+    assert.equal(out.body, 'done', line);
+  }
+  // a status-only result has no body at all
+  assert.deepEqual(closeStatus('(no output, exit 0, 0.3s)'), { body: '', close: { kind: 'exit', code: 0, ms: 300 } });
+  // the duration is optional: it says how long, never what happened
+  assert.deepEqual(closeStatus('x\n(exit 2)').close, { kind: 'exit', code: 2, ms: undefined });
+  assert.deepEqual(closeStatus('done\n(exit 0)').close, { kind: 'exit', code: 0, ms: undefined });
+  // a stored output may end with the newline that followed the status line
+  assert.deepEqual(closeStatus('done\n(exit 1, 8.4s)\n').close, { kind: 'exit', code: 1, ms: 8400 });
+  // text that merely ends in parentheses is not a status line
+  assert.equal(closeStatus('done\n(see the log)'), null);
+  assert.equal(closeStatus('done'), null);
+  assert.equal(closeStatus(''), null);
+});
+
+test('a command that exited nonzero counts as failed; one we stopped does not', () => {
+  assert.equal(toolFailed('done\n(exit 0, 4.4s)'), false);
+  assert.equal(toolFailed('done\n(exit 1, 43.2s)'), true);
+  assert.equal(toolFailed('done\n(exit 127, 0.1s)'), true);
+  assert.equal(toolFailed('(no output, exit 0, 0.3s)'), false);
+  assert.equal(toolFailed('done\n(signal: killed, 3.2s)'), true, 'a signal that killed it is a failure');
+  // our own hand: a cap, a Stop, a restart is not the command failing
+  assert.equal(toolFailed('partial\n(timed out after 120s — partial output above; rerun with exec_session for a long run, or raise timeout_ms)'), false);
+  assert.equal(toolFailed('partial\n(interrupted by user after 12.3s — partial output above)'), false);
+  assert.equal(toolFailed('partial\n(interrupted by agent after 4.1s — partial output above)'), false);
+  assert.equal(toolFailed('partial\n(nusashell restarted after 8.0s — partial output above)'), false);
+  assert.equal(toolFailed('partial\n(canceled after 12.3s — partial output above)'), false);
+  // other tools keep their own wording
+  assert.equal(toolFailed('error: no such file'), true);
+  assert.equal(toolFailed('all good'), false);
+});
+
+// One value says how a call ended, and the row, its footer, and the group's
+// count all read it. These are the ten shapes the runner can leave behind.
+test('toolEnding names every ending once', () => {
+  const cases = [
+    [{ status: 'streaming', at: 0 }, 'running', 'live', '', ''],
+    [{ status: 'settled', output: 'done\n(exit 0, 2.1s)' }, 'ok', 'ok', '', ''],
+    [{ status: 'settled', output: 'FAIL\n(exit 1, 8.4s)' }, 'exit', 'bad', 'exit 1', 'bad'],
+    [{ status: 'settled', output: 'x\n(signal: killed, 3.2s)' }, 'signal', 'bad', 'killed', 'bad'],
+    [{ status: 'settled', output: 'x\n(timed out after 120s — partial output above)' }, 'timeout', 'warn', 'timed out', 'warn'],
+    [{ status: 'settled', output: 'x\n(interrupted by user after 12.3s — partial)' }, 'stopped', 'ring', 'stopped', 'muted'],
+    [{ status: 'settled', output: 'x\n(interrupted by agent after 4.1s — partial)' }, 'stopped', 'ring', 'stopped by agent', 'muted'],
+    [{ status: 'settled', output: 'x\n(nusashell restarted after 8.0s — partial)' }, 'stopped', 'ring', 'restarted', 'muted'],
+    [{ status: 'settled', output: 'x\n(canceled after 12.3s — partial)' }, 'canceled', 'ring', 'canceled', 'muted'],
+    [{ status: 'pending' }, 'pending', 'none', 'no result', 'muted'],
+  ];
+  for (const [item, kind, mark, word, tone] of cases) {
+    const got = toolEnding(item);
+    assert.deepEqual([got.kind, got.mark, got.word, got.tone], [kind, mark, word, tone], JSON.stringify(item));
+  }
+  // the backend can call a clean exit a failure — it is authoritative
+  assert.equal(toolEnding({ status: 'failed', output: 'done\n(exit 0, 1.0s)' }).kind, 'failed');
+  // no status line: the wording of a stored result decides
+  assert.equal(toolEnding({ status: 'settled', output: 'error: no such file' }).kind, 'failed');
+  assert.equal(toolEnding({ status: 'success', output: 'ok' }).kind, 'ok');
+  // the footer detail each ending carries
+  assert.equal(toolEnding({ status: 'settled', output: '(exit 1, 1s)' }).code, 1);
+  assert.equal(toolEnding({ status: 'settled', output: '(timed out after 120s — x)' }).cap, '120s');
+  assert.equal(toolEnding({ status: 'settled', output: '(interrupted by agent after 1s — x)' }).by, 'agent');
+});
+
+test('a group counts failures and timeouts, never stops', () => {
+  const kinds = (items) => items.map((i) => toolEnding(i).kind);
+  const one = { status: 'settled', output: 'x\n(exit 1, 1s)' };
+  const timeout = { status: 'settled', output: 'x\n(timed out after 120s — y)' };
+  const stop = { status: 'settled', output: 'x\n(interrupted by user after 1s — y)' };
+  const cancel = { status: 'settled', output: 'x\n(canceled after 1s — y)' };
+  const clean = { status: 'settled', output: 'x\n(exit 0, 1s)' };
+  assert.deepEqual(kinds([clean, clean, clean, clean]), ['ok', 'ok', 'ok', 'ok']);
+  assert.deepEqual(kinds([clean, one, clean, clean]), ['ok', 'exit', 'ok', 'ok']);
+  assert.deepEqual(kinds([clean, timeout, clean, clean]), ['ok', 'timeout', 'ok', 'ok']);
+  assert.deepEqual(kinds([clean, stop, cancel, clean]), ['ok', 'stopped', 'canceled', 'ok']);
 });

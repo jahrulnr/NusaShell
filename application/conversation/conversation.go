@@ -18,6 +18,7 @@ package appconversation
 
 import (
 	"slices"
+	"time"
 
 	"context"
 	"errors"
@@ -69,6 +70,10 @@ type ConversationApp struct {
 	// changed hears of a room changing outside a turn (a reply's
 	// delivery to a chat, a generated title), so open views reload it.
 	changed []func(convID string)
+	// onQueueChanged hears that a room's queue depth moved (an accepted
+	// message landed, or the queue drained), so the room surface can name
+	// how many wait. Nil announces nothing.
+	onQueueChanged func(convID string)
 	// liveTurns tells whether a transport turn is in progress in a room; the
 	// hub owns that fact. Nil reads every room as idle.
 	liveTurns func(convID string) bool
@@ -78,7 +83,10 @@ type ConversationApp struct {
 
 	shuttingDown bool
 	shutdownDone chan struct{}
-	workerWG     sync.WaitGroup
+	// stopGrace bounds how long Shutdown waits for the rooms' workers to
+	// unwind before naming the ones it leaves behind.
+	stopGrace time.Duration
+	workerWG  sync.WaitGroup
 }
 
 func New(
@@ -112,7 +120,8 @@ func New(
 			Terminals:     terminals,
 			SummaryTool:   summaryTool,
 		},
-		workers: map[string]*worker.Worker{},
+		workers:   map[string]*worker.Worker{},
+		stopGrace: 10 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(app)
@@ -242,7 +251,10 @@ func (app *ConversationApp) depsSnapshot() appjob.Deps {
 // ordinary jobs append FIFO. Posting stays under app.mu through Submit so
 // Shutdown has a clear boundary between accepted and rejected work. A
 // submit racing a worker's teardown gets ErrClosed — respawn and retry.
-func (app *ConversationApp) post(convID string, j queuedJob) {
+// post enqueues a job on the room's worker and answers the refusal, if any:
+// nil means the worker accepted it. A job accepted here may still fail later —
+// post only reports admission, never the turn's outcome.
+func (app *ConversationApp) post(convID string, j queuedJob) error {
 	for {
 		app.mu.Lock()
 		// Live config rides each post — a settings change reaches the
@@ -280,14 +292,20 @@ func (app *ConversationApp) post(convID string, j queuedJob) {
 		}
 		if app.shuttingDown {
 			app.mu.Unlock()
-			j.Reply(apperror.New(503, "conversation application is shutting down", nil))
-			return
+			refusal := apperror.New(503, "conversation application is shutting down", nil)
+			j.Reply(refusal)
+			return refusal
 		}
 		w := app.workers[convID]
 		if w == nil || w.Dead() {
 			w = worker.New(worker.Options{
 				QueueCap: cfg.MailboxCap,
-				OnIdle:   func(idle *worker.Worker) { app.evict(convID, idle) },
+				OnIdle: func(idle *worker.Worker) {
+					// The queue drained: the room's surface goes back to
+					// zero waiting, read from the queue itself.
+					app.notifyQueue(convID)
+					app.evict(convID, idle)
+				},
 				OnTerminate: func(term *worker.Worker, drained []worker.Job) {
 					// A self-terminated worker (a delete job retired it):
 					// queued jobs die with the room — 410 Gone — and the
@@ -321,8 +339,9 @@ func (app *ConversationApp) post(convID string, j queuedJob) {
 		// intent to its own goroutine.
 		if w.OnWorkerGoroutine() {
 			app.mu.Unlock()
-			j.Reply(apperror.New(409, "cannot post to a conversation from inside its own turn", fmt.Errorf("reentrant same-room post on %s", convID)))
-			return
+			refusal := apperror.New(409, "cannot post to a conversation from inside its own turn", fmt.Errorf("reentrant same-room post on %s", convID))
+			j.Reply(refusal)
+			return refusal
 		}
 
 		j.Bind(convID, w)
@@ -338,9 +357,11 @@ func (app *ConversationApp) post(convID string, j queuedJob) {
 		case errors.Is(err, worker.ErrClosed):
 			continue
 		case errors.Is(err, worker.ErrFull):
-			j.Reply(apperror.New(429, "conversation queue full", fmt.Errorf("mailbox capacity %d", cfg.MailboxCap)))
+			refusal := apperror.New(429, "conversation queue full", fmt.Errorf("mailbox capacity %d", cfg.MailboxCap))
+			j.Reply(refusal)
+			return refusal
 		}
-		return
+		return nil
 	}
 }
 

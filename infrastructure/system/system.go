@@ -101,6 +101,11 @@ type Service interface {
 	Status(name string) (report string, state State, err error)
 	Active(name string) bool
 	ActiveElsewhere(name string) bool
+	// MainPID is the manager's main process for the unit, 0 when it is not
+	// running or the manager cannot tell. It answers "is this process the
+	// service", which Active cannot: a child the service spawned is active
+	// too, and restarting the unit from it would restart its own parent.
+	MainPID(name string) int
 
 	// PersistAcrossLogout keeps the service alive and autostarted
 	// without a login session — systemd linger, a boot-triggered task.
@@ -134,6 +139,7 @@ func (u unavailable) Status(string) (string, State, error) {
 	return "", StateUnknown, u.Available()
 }
 func (u unavailable) Active(string) bool          { return false }
+func (u unavailable) MainPID(string) int          { return 0 }
 func (u unavailable) ActiveElsewhere(string) bool { return false }
 func (u unavailable) PersistAcrossLogout() error {
 	return fmt.Errorf("%w: %s", ErrUnsupported, u.name)

@@ -130,13 +130,15 @@ func (j *Base) finish(err *error) {
 	j.Reply(*err)
 }
 
-// Interrupt cancels the Execute ctx — the default stop for room jobs.
-// The flag is sticky and stored before the cancel is loaded, pairing with
+// Interrupt cancels the Execute ctx — the default stop for room jobs. The
+// flag is sticky and stored before the cancel is loaded, pairing with
 // Cancellable's store-then-check so a racing Interrupt can't slip through.
+// The cause names the owner: a tool whose process this killed says
+// "interrupted by user" instead of reporting an unexplained SIGKILL.
 func (j *Base) Interrupt() {
 	j.interrupted.Store(true)
-	if c, ok := j.cancel.Load().(context.CancelFunc); ok {
-		c()
+	if c, ok := j.cancel.Load().(context.CancelCauseFunc); ok {
+		c(dservice.ErrInterruptedByUser)
 	}
 }
 
@@ -152,11 +154,17 @@ func (j *Base) Cancellable(execCtx, callerCtx context.Context) context.Context {
 	if callerCtx == nil {
 		callerCtx = context.Background()
 	}
-	ctx, cancel := context.WithCancel(execCtx)
+	ctx, cancel := context.WithCancelCause(execCtx)
 	j.cancel.Store(cancel)
-	context.AfterFunc(callerCtx, cancel)
-	if callerCtx.Err() != nil || j.interrupted.Load() {
-		cancel()
+	// The caller's own cause travels with its cancellation: a hub stopping on
+	// a restart says "nusashell restarted", an owner's Stop says "user", and a
+	// tab that just closed says nothing — the neutral canceled, never a name
+	// nobody earned.
+	context.AfterFunc(callerCtx, func() { cancel(context.Cause(callerCtx)) })
+	if callerCtx.Err() != nil {
+		cancel(context.Cause(callerCtx))
+	} else if j.interrupted.Load() {
+		cancel(dservice.ErrInterruptedByUser)
 	}
 	return ctx
 }

@@ -687,11 +687,18 @@ SIGKILL on cancel — `exec_linux.go`) and `cmd /C` on Windows (`exec_windows.go
 which can orphan grandchildren since Windows has no portable group kill). It
 is inherently unsandboxed — there is no root to confine it to — so the schema
 permission and the application turn are the entire gate. Timeout defaults to
-120s, caller-settable up to 600s; `cmd.WaitDelay` (5s) caps how long `Wait`
+120s, caller-settable up to 300s; `cmd.WaitDelay` (5s) caps how long `Wait`
 blocks on pipes inherited by stray grandchildren. The optional `stdin` input
 pipes one-shot bytes to the process's stdin (scripted answers, `sudo -S`);
 interactive work is delegated to `exec_session`/`write_stdin` below — `exec`
-itself deliberately stays one-shot. The child environment is
+itself deliberately stays one-shot. A broad kill is refused: `pkill`,
+`killall`, `fuser -k`, and `kill -9` without an explicit pid (including
+`$(pgrep …)` when the command does no lookup itself) answer with the safe path
+— `pgrep -af <pattern>` then `kill <pid>` — and `kill -9 -1` stays refused even
+for the deliberate machine-wide stop that `allow_broad_kill: true` unlocks. The
+guard sees through wrappers (`sudo`, `env`, `nice`, `ionice`, `busybox`,
+`timeout`, `xargs`, path prefixes) and through `sh -c`, `eval`, and command
+substitutions; it is a guard-rail, not a sandbox. The child environment is
 inherited from the daemon — the service unit pins the installer's login
 `PATH` plus the stable user bin dirs, so agent commands resolve the same
 toolchain the user's shell does.
@@ -710,9 +717,15 @@ tail excerpt joined by a `[... N bytes omitted — full output: <path> ...]`
 marker — `spilled output (truncated at 32 MiB): <path>` when the file hit the
 cap, `spill to <path> failed: <err>` when the write itself failed — cut on
 rune boundaries by `ToolCall.OutputWithMiddleTruncateWindow`; the adapter
-supplies bounded stream samples and the spill reference. The exit status (`(exit 3)`, `(killed: …)`,
-signal deaths) is appended as a suffix so it lands inside the tail and at the
-end of the spill file. A spill-write failure degrades to head+tail with the
+supplies bounded stream samples and the spill reference. One status line
+closes the result — `(exit 3, 4.4s)`, `(no output, exit 0, 0.2s)`,
+`(signal: killed, 3.2s)` — always with the wall time, so a 40-second run and a
+40-millisecond one read differently. A run this tool stopped says who stopped
+it instead: `(timed out after 120s — partial output above; rerun with
+exec_session if it needs longer)`, `(interrupted by user after 12.3s — partial
+output above)`, `(interrupted by agent after …)`, `(nusashell restarted after
+…)`, or `(canceled after …)` when the caller went away. The line is appended so
+it lands inside the tail and at the end of the spill file. A spill-write failure degrades to head+tail with the
 error in the marker. The spill file remains available until the user deletes
 its conversation; repository deletion removes the whole conversation directory,
 including tool output. No age- or process-based sweep removes live history's
@@ -764,7 +777,7 @@ lands, so an id reaped or reused while the call queued fails with
 "not found" instead of landing on the wrong process (codex's
 interaction_lock + ptr-eq guard). The same serialization means a `\x03`
 queued behind an in-flight call waits it out — a long empty poll can hold
-the semaphore up to the 300 s cap before the interrupt lands. Inside the
+the semaphore up to the 60 s cap before the interrupt lands. Inside the
 interaction, `chars` writes
 to the tty master — pipes sessions reject it with "stdin is closed for
 this session; rerun exec_session with tty=true" — while an empty `chars`
@@ -779,7 +792,9 @@ model always knows whether another poll is meaningful and the scale of
 what was collected. Yield bounds differ by call shape: open waits default
 10 s (clamp 250 ms–30 s), writes default 250 ms (clamp 250 ms–30 s, with a
 100 ms settle after a tty write so the reaction lands in the same window),
-empty polls default 5 s (clamp 5 s–300 s).
+empty polls default 5 s (clamp 5 s–60 s). A poll that drained nothing says so
+— `no new output for 60s` — and a poll the turn canceled keeps its bytes and
+closes with the same stop line `exec` uses.
 
 ### `summary` — the compaction contract
 

@@ -1,5 +1,7 @@
 package system
 
+import "os"
+
 // Restarter brings the running WebUI onto a freshly installed executable. A
 // process the host service manager owns is restarted through the manager. A
 // foreground run has no manager, so it replaces itself in place with the
@@ -18,10 +20,14 @@ func NewRestarter(svc Service, name, path string, argv []string) Restarter {
 	return Restarter{svc: svc, name: name, path: path, argv: argv, reexec: Reexec}
 }
 
-// Mode names the path a restart takes: "service" when the manager owns this
-// process, "process" for a foreground run.
+// Mode names the path a restart takes: "service" when this process IS the
+// unit's main process, "process" for anything else. An active unit is not the
+// same fact — a child the service started (an agent running `nusashell serve`
+// from a temp dir) inherits its invocation id and is active too. Asking the
+// manager for MainPID is what tells them apart; getting it wrong restarts the
+// real service and replaces its installed binary from a test instance.
 func (r Restarter) Mode() string {
-	if r.svc.Active(r.name) && !r.svc.ActiveElsewhere(r.name) {
+	if r.svc.MainPID(r.name) == os.Getpid() {
 		return "service"
 	}
 	return "process"

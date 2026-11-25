@@ -342,7 +342,7 @@ func (h *Hub) markOverflowedLocked(t *turn) {
 		return
 	}
 	t.overflowed = true
-	t.turnCancel()
+	t.turnCancel(nil) // a frame bound, not an actor: the turn surfaces its own 413
 }
 
 // classifyError maps a send failure through the shared delivery

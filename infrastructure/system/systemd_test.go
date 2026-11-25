@@ -78,7 +78,7 @@ WorkingDirectory=` + home + `/data
 Environment=CONFIG_PATH=` + home + `/cfg/config.json
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=20
+TimeoutStopSec=30
 KillMode=control-group
 
 [Install]

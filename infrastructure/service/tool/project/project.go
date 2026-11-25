@@ -3,9 +3,11 @@
 // pre-call hydration so the model never guesses repo conventions or
 // layout. The schema rides the catalog with ToolPermissionSystem — the
 // environment runs it before each provider call and persists the render
-// as a deduped injection record, so the output is deliberately
-// deterministic: no mtimes, byte sizes, or full listings, which would
-// churn a new record on every unrelated change.
+// as a value-deduped injection record. The record's content is its names
+// and the AGENTS.md excerpt; a directory's file count is orientation and
+// moves on every unrelated edit, so DedupKey normalizes the counts: a
+// render differing only in them dedups away, while a new directory or an
+// edited AGENTS.md still records.
 package toolproject
 
 import (
@@ -16,6 +18,7 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -74,6 +77,18 @@ func NewProjectContextTool(store drepo.Workspace, root string) (dservice.Tool, e
 
 func (tool *ProjectContextTool) Schema() valueobject.ToolSchema {
 	return tool.schema
+}
+
+// fileCount matches one directory line's weight — the only part of a render
+// that moves when unrelated files come and go beneath it.
+var fileCount = regexp.MustCompile(`(?m)^(\s*- [^\n]*/) — \d+ files?$`)
+
+// DedupKey normalizes each directory's file count so value dedup compares
+// the layout instead of its weight: a file added below the displayed depth
+// would otherwise re-record the whole map. Names, depth, and the AGENTS.md
+// excerpt stay in the key, so a real change still refreshes the record.
+func (tool *ProjectContextTool) DedupKey(output string) string {
+	return fileCount.ReplaceAllString(output, "$1 — … files")
 }
 
 // Execute renders one section per bound directory: the real dirs come

@@ -45,7 +45,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go test -race ./application/conversation ./infrastructure/worker ./infrastructure/repository/conversation
+      - run: go test -race ./application/job ./application/conversation ./application/control ./infrastructure/worker ./infrastructure/repository/conversation ./infrastructure/service/tool/terminal
 
   tag:
     name: Tag VERSION
@@ -132,7 +132,11 @@ jobs:
           mkdir -p dist
           out="dist/nusashell-${GOOS}-${GOARCH}"
           [ "$GOOS" = windows ] && out="$out.exe"
-          CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o "$out" ./cmd/nusashell
+          # The published binary carries the symbol engine. `make tags` reads the
+          # one tag list in the Makefile, so a release cannot quietly ship the
+          # regex-only build (build-lean stays a local choice).
+          tags="$(make -s tags)"
+          CGO_ENABLED=0 go build -trimpath -tags "$tags" -ldflags "-X main.version=${VERSION}" -o "$out" ./cmd/nusashell
       - uses: actions/upload-artifact@v7
         with:
           name: nusashell-${{ matrix.os }}-${{ matrix.arch }}

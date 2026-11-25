@@ -19,6 +19,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
@@ -69,8 +70,8 @@ type App struct {
 	now      func() time.Time
 
 	mu      sync.Mutex
-	cancel  context.CancelFunc
-	ctx     context.Context
+	cancel  context.CancelCauseFunc
+	runCtx  context.Context
 	stopped bool
 	wg      sync.WaitGroup
 }
@@ -82,7 +83,7 @@ func New(repo drepo.Automation, projects drepo.Project, runner Runner, rooms Roo
 		log = slog.Default()
 	}
 	return &App{repo: repo, projects: projects, runner: runner, rooms: rooms, chats: chats, alerts: alerts, zone: zone,
-		log: log.With("component", "automations"), now: time.Now, ctx: context.Background()}
+		log: log.With("component", "automations"), now: time.Now, runCtx: context.Background()}
 }
 
 // Zone is the server's time zone.
@@ -408,9 +409,13 @@ func (a *App) TestNotify(ctx context.Context, id string) error {
 // Start marks runs left over from a previous process as interrupted and
 // starts the scheduler.
 func (a *App) Start(ctx context.Context) {
-	ctx, cancel := context.WithCancel(ctx)
+	// The run ctx carries the restart cause: Stop is the shutdown path, and a
+	// turn it cuts must report "nusashell restarted", never the owner's Stop.
+	// Its caller cancels before the room workers are terminated, so a plain
+	// cancel here would be the first — and wrong — cause the turn sees.
+	ctx, cancel := context.WithCancelCause(ctx)
 	a.mu.Lock()
-	a.ctx, a.cancel = ctx, cancel
+	a.runCtx, a.cancel = ctx, cancel
 	a.mu.Unlock()
 	if err := a.repo.InterruptRuns(ctx, a.now()); err != nil {
 		a.log.Warn("could not close interrupted runs", "error", err)
@@ -438,7 +443,7 @@ func (a *App) Stop() {
 	cancel := a.cancel
 	a.mu.Unlock()
 	if cancel != nil {
-		cancel()
+		cancel(dservice.ErrServerRestarted)
 	}
 	a.wg.Wait()
 }
@@ -481,7 +486,7 @@ func (a *App) start(au aggregate.Automation, run *entity.AutomationRun) {
 		a.mu.Unlock()
 		return // shutting down: no new run — the leftover row is interrupted at next start
 	}
-	ctx := a.ctx
+	ctx := a.runCtx
 	a.mu.Unlock()
 	a.wg.Go(func() { a.launch(ctx, au, run) })
 }

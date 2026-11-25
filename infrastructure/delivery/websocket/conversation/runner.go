@@ -10,6 +10,7 @@ import (
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
@@ -67,10 +68,13 @@ func (h *Hub) Run(ctx context.Context, convID, providerID, modelID, content stri
 	}
 	h.admitSeq++
 	t.admitted = h.admitSeq
-	t.turnCtx, t.turnCancel = context.WithCancel(h.ctx)
+	t.turnCtx, t.turnCancel = context.WithCancelCause(h.ctx)
 	t.startedAt = time.Now()
 	t.live = newLiveDoc()
-	stop := context.AfterFunc(ctx, t.turnCancel)
+	// The caller's cause travels with its cancellation: an automation stopping
+	// on a restart says "nusashell restarted", a tab that just closed says
+	// nothing — the neutral canceled, never a name nobody earned.
+	stop := context.AfterFunc(ctx, func() { t.turnCancel(context.Cause(ctx)) })
 	defer stop()
 	h.turns[t.id] = t
 	h.wg.Add(1)
@@ -120,7 +124,8 @@ func (h *Hub) Cancel(convID string) bool {
 	stopped := false
 	for _, t := range h.turns {
 		if !t.terminal && t.conversationID == convID {
-			t.turnCancel()
+			// The room's /cancel comes from the owner.
+			t.turnCancel(dservice.ErrInterruptedByUser)
 			stopped = true
 		}
 	}

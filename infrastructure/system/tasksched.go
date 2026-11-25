@@ -387,6 +387,11 @@ func (s tasksched) Status(name string) (string, State, error) {
 	return report, schedCSVState(status), nil
 }
 
+// MainPID has no Task Scheduler equivalent: a task is an action, not a
+// process the manager names. The answer is 0, so a Windows update restarts
+// through the swap helper rather than the service path.
+func (s tasksched) MainPID(string) int { return 0 }
+
 func (s tasksched) Active(name string) bool {
 	if !validName(name) {
 		return false

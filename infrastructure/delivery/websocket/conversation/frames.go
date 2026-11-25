@@ -219,6 +219,23 @@ func resyncFrame(requestID, convID, turnID string, payload resyncPayload) server
 	}
 }
 
+// queuedPayload is the conversation.queued body: how many messages wait in the
+// room. It is a room-level notice, not a turn frame — no seq, no journal — so
+// the count a tab sees is the current one.
+type queuedPayload struct {
+	Waiting int `json:"waiting"`
+}
+
+// queuedFrame announces a room's waiting count; conversationId rides the
+// envelope so one broadcast serves every room's tab.
+func queuedFrame(convID string, waiting int) serverFrame {
+	return serverFrame{
+		Type:           "conversation.queued",
+		ConversationID: convID,
+		Payload:        queuedPayload{Waiting: waiting},
+	}
+}
+
 // activityPayload is the conversation.activity body — the room-level
 // notice that a transport turn opened or reached its terminal. state
 // mirrors the edge ("opened", or the terminal verdict "completed"/

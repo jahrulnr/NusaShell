@@ -26,13 +26,19 @@ upgrade — it does not define frames.
 - **One user, many tabs:** the server accepts multiple concurrent
   sockets (the browser may hold several tabs). Turn events are delivered
   to the socket that owns the turn plus any socket that has attached via
-  `turn.watch` — turn streams are never broadcast room-wide. The one
-  room-wide notice is `conversation.activity`: an unsequenced,
-  unjournaled frame sent to every socket when a room gains or loses a
-  live turn, so a second tab discovers the activity (a new room, an
-  attachable turn, a settled room) without re-opening it. It still does
-  not passively observe the turn's stream; it sees persisted state
-  through HTTP reads.
+  `turn.watch` — turn streams are never broadcast room-wide. Room-wide
+  notices are unsequenced and unjournaled, sent to every socket:
+  `conversation.activity` when a room gains or loses a live turn, so a
+  second tab discovers the activity (a new room, an attachable turn, a
+  settled room) without re-opening it; and `conversation.queued`
+  (`{conversationId, waiting}`) whenever a room's queue depth changes —
+  a message accepted from another thread, or the queue draining back to
+  zero. `waiting` is the worker's queue depth read when the frame is
+  emitted, never a counter kept beside it, and the frame belongs to no
+  turn: it carries no `seq` and never appears in a `turn.watch` replay,
+  so a reattaching tab learns the current depth rather than replaying old
+  counts. Neither notice makes a tab observe the turn's stream; it sees
+  persisted state through HTTP reads.
 - **Reloading a room.** `GET /api/conversations/{id}` and each item of
   `GET /api/conversations` include
   `activeTurnId` and `activeTurnKind` (`send` or `edit`) while this
@@ -581,6 +587,30 @@ resync) change no room state and send nothing.
   field — its send/edit flow already refreshes, so only foreign
   notices drive discovery work. Opaque to every other tab. The frame
   itself carries no top-level `requestId` — it answers no command.
+
+### Room queue
+
+`conversation.queued` — a room-level notice **broadcast to every connected
+socket** when a room's queue depth changes: a message accepted from another
+thread, or the queue draining back to zero. Like `conversation.activity` it
+carries no `seq`, is never journaled, and a `turn.watch` replay never
+reproduces it.
+
+```json
+{
+  "type": "conversation.queued",
+  "conversationId": "c_k4j9xm2p8q1vz7w0t6nb5r3yhd",
+  "payload": { "waiting": 3 }
+}
+```
+
+- `waiting` — how many messages wait on the room's worker, read from the
+  queue when the frame is emitted. It rises as messages are accepted and
+  returns to `0` when the queue drains; it is never a counter kept beside the
+  queue, so a stale count cannot outlive the queue it describes.
+- A queued message is an **acceptance, not a promise**: nothing here says when
+  its turn runs, and a server that stops first loses it. The sender's tool
+  reply says the same.
 
 ### Stream frames
 

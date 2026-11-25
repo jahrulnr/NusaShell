@@ -20,8 +20,15 @@ import (
 
 const (
 	defaultExecTimeout = 120 * time.Second
-	maxExecTimeout     = 10 * time.Minute
-	maxExecSpillBytes  = 32 << 20 // cap spill file growth
+	// maxExecTimeout is the hard ceiling on one command. Measured from the
+	// exec tool-output store on 25 Nov 2025 (4,905 calls): p50 5.4s, p90
+	// 53.4s, p99 120s, max 300s — only two runs ever passed 240s, and the old
+	// 600s bound never saved a legitimate run: the single call that reached it
+	// was a hung harness. Halving it halves the worst case a turn can sit in;
+	// the 530 calls that asked for more than 180s (520 of them finished
+	// normally) show the big numbers were a safety net, not a need.
+	maxExecTimeout    = 300 * time.Second
+	maxExecSpillBytes = 32 << 20 // cap spill file growth
 	// waitDelay caps how long Wait may block on output pipes a stray
 	// grandchild inherited — without it a detached process stalls the
 	// tool forever even after its shell is dead.
@@ -48,7 +55,7 @@ func NewExecTool(outputs drepo.ToolOutput, runner service.CommandRunner) (servic
 	schema, err := valueobject.NewToolSchema(
 		"exec",
 		"Run a shell command and return its combined stdout and stderr.",
-		json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"stdin":{"type":"string","description":"Optional input piped to the command's stdin — for programs that read scripted answers (e.g. sudo -S). One-shot, not an interactive session"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds — default 120000, capped at 600000"}},"required":["command"]}`),
+		json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"stdin":{"type":"string","description":"Optional input piped to the command's stdin — for programs that read scripted answers (e.g. sudo -S). One-shot, not an interactive session"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds — default 120000, capped at 300000"},"allow_broad_kill":{"type":"boolean","description":"Allow a command that stops every matching process (pkill, killall, fuser -k, kill -9 of a pattern). Off by default: it can kill other threads' work, an agent's process, or this server. kill -9 -1 stays refused either way"}},"required":["command"]}`),
 		true,
 		enum.ToolPermissionAgent,
 	)
@@ -74,12 +81,20 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 		Command   string `json:"command"`
 		Stdin     string `json:"stdin"`
 		TimeoutMS int    `json:"timeout_ms"`
+		// AllowBroadKill is the deliberate machine-wide stop: the model has to
+		// say so, and the refusal that teaches `pgrep -af` comes first.
+		AllowBroadKill bool `json:"allow_broad_kill"`
 	}
 	if err := json.Unmarshal([]byte(call.Input()), &input); err != nil {
 		return service.ToolResult{}, fmt.Errorf("invalid exec input: %w", err)
 	}
 	if strings.TrimSpace(input.Command) == "" {
 		return service.ToolResult{}, errors.New("command is required")
+	}
+	// A pattern-kill reaches processes this call does not own; the refusal
+	// names the safe path so the model can act on it.
+	if err := killRefusal(input.Command, input.AllowBroadKill); err != nil {
+		return service.ToolResult{}, err
 	}
 
 	timeout := defaultExecTimeout
@@ -109,25 +124,20 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 	if input.Stdin != "" {
 		stdin = strings.NewReader(input.Stdin)
 	}
+	// Measured across the whole run — process start through Wait, the
+	// pipes' WaitDelay included — since that is the wait the reader feels.
+	start := time.Now()
 	exit, err := tool.runner.Run(ctx, input.Command, service.WorkspaceDir(ctx), stdin, sink)
+	elapsed := time.Since(start)
 	if err != nil {
-		return service.ToolResult{}, fmt.Errorf("exec: %w", err)
-	}
-
-	// Exit status is data the model must see — a nonzero exit is not a
-	// Go error. It belongs at the end of the stream, so it lands inside
-	// the tail of the excerpt and at the end of the spill file.
-	// The suffix describes the process, not the caller's ctx. A clean
-	// exit that races a canceled deadline is still a clean exit; a kill
-	// arrives as Signal or Err from the runner.
-	suffix := ""
-	switch {
-	case exit.Code > 0:
-		suffix = fmt.Sprintf("\n(exit %d)", exit.Code)
-	case exit.Signal != "":
-		suffix = fmt.Sprintf("\n(%s)", exit.Signal)
-	case exit.Err != nil:
-		suffix = fmt.Sprintf("\n(%v)", exit.Err)
+		if ctx.Err() == nil {
+			return service.ToolResult{}, fmt.Errorf("exec: %w", err)
+		}
+		// The run died because it was stopped, not because the runner broke:
+		// what it captured is still the answer, and the suffix names who
+		// stopped it. A tool result the turn can persist beats an error that
+		// throws the captured head away.
+		exit = service.ProcessExit{Err: err}
 	}
 
 	sink.mu.Lock()
@@ -136,6 +146,61 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 	total := sink.total
 	spilled := sink.spilled
 	spillErr := sink.spillErr
+	// Exit status is data the model must see — a nonzero exit is not a
+	// Go error. It belongs at the end of the stream, so it lands inside
+	// the tail of the excerpt and at the end of the spill file, and it
+	// always carries how long the command took: a 40-second run and a
+	// 40-millisecond one otherwise read alike.
+	// The status describes the process, not the caller's ctx. A clean
+	// exit that races a canceled deadline is still a clean exit; a kill
+	// arrives as Signal or Err from the runner.
+	clean := exit.Code == 0 && exit.Signal == "" && exit.Err == nil
+	status := "exit 0"
+	switch {
+	case exit.Code > 0:
+		status = fmt.Sprintf("exit %d", exit.Code)
+	case exit.Signal != "":
+		status = exit.Signal
+	case exit.Err != nil:
+		status = fmt.Sprintf("%v", exit.Err)
+	}
+	if clean && total == 0 {
+		// Say the command ran: a status-only result reads like nothing
+		// happened.
+		status = "no output, exit 0"
+	}
+	// The status line closes the captured output; the separator is added
+	// only when the command did not end its own line, so a normal result
+	// reads "done\n(exit 0, 0.1s)" rather than leaving a blank line.
+	lastByte := byte(0)
+	if spilled && len(tail) > 0 {
+		lastByte = tail[len(tail)-1]
+	} else if len(head) > 0 {
+		lastByte = head[len(head)-1]
+	}
+	line := fmt.Sprintf("(%s, %.1fs)", status, elapsed.Seconds())
+	// A process this tool stopped on purpose says who stopped it and how long
+	// it ran first: a bare "(signal: killed)" cannot tell the owner's Stop
+	// from an agent's own cancel or a server restart, and a timeout that reads
+	// like a foreign SIGKILL sends the model hunting for the wrong cause.
+	// A kill from outside — no cause on the ctx — keeps the plain signal line.
+	if exit.Code == 0 && !clean {
+		cause := context.Cause(ctx)
+		switch {
+		case errors.Is(cause, context.DeadlineExceeded) && elapsed >= timeout:
+			// The cap that fired must be ours: a caller's shorter deadline
+			// ends the run earlier, and naming our 120s there would be a lie.
+			line = fmt.Sprintf("(timed out after %s — partial output above; rerun with exec_session if it needs longer)", waitText(timeout))
+		default:
+			if stopped := stopLine(cause, elapsed); stopped != "" {
+				line = stopped
+			}
+		}
+	}
+	suffix := line
+	if total > 0 && lastByte != '\n' {
+		suffix = "\n" + line
+	}
 	if sink.writer != nil {
 		sink.writeSpill([]byte(suffix))
 		_ = sink.writer.Close()
@@ -145,10 +210,6 @@ func (tool *ExecTool) Execute(ctx context.Context, call entity.ToolCall, emit se
 
 	if !spilled {
 		full := head + suffix
-		if full == "" {
-			// Say the command ran: an empty result reads like nothing happened.
-			full = "(no output, exit 0)"
-		}
 		if len(full) <= budget {
 			return service.ToolResult{Text: full}, nil
 		}

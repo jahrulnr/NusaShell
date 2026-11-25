@@ -47,9 +47,12 @@ func Conversation(app *appcontrol.App) Catalog {
 				(default: its current last message). A timeout is a normal answer (timedOut true); call again to keep waiting.`),
 				InputSchema: schema(map[string]any{"conversationId": thread, "afterSeq": num("Wait for messages after this seq"),
 					"timeoutSeconds": num("1 to 30, default 15")}, "conversationId")},
-			{Name: "send", Description: oneLine(`Send a prompt to another thread. It starts a turn on that thread's own model or
-				agent, or joins its running turn. It does not wait for the reply: use wait with the returned afterSeq.
-				Refused for your own thread and for a thread waiting on a permission answer.`),
+			{Name: "send", Description: oneLine(`Send a prompt to another thread. Four outcomes: steer (it joined the live
+				turn — wait with afterSeq), turn (it started one — wait with afterSeq), queued (the room is busy, so it waits
+				in that room's queue at the returned position; queued is an acceptance, not a promise of when it runs, and
+				a server that stops before it runs loses it), or refused. Refused for your own thread, for a thread waiting
+				on a permission answer from the owner (409), for a full queue (429, with the depth), and while the server
+				stops (503).`),
 				InputSchema: schema(map[string]any{"conversationId": thread, "text": str("The prompt")}, "conversationId", "text")},
 			{Name: "stop", Description: "Stop the running turn of another thread. Only when the user asked for it.",
 				InputSchema: schema(map[string]any{"conversationId": thread}, "conversationId")},

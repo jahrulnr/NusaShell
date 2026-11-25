@@ -22,10 +22,11 @@ import (
 )
 
 type fakeRooms struct {
-	mu    sync.Mutex
-	infos []drepo.ConversationInfo
-	msgs  map[string][]entity.Message
-	named map[string]string
+	mu        sync.Mutex
+	infos     []drepo.ConversationInfo
+	msgs      map[string][]entity.Message
+	named     map[string]string
+	approvals map[string][]valueobject.ApprovalRequest
 }
 
 func (f *fakeRooms) List(context.Context) ([]drepo.ConversationInfo, error) {
@@ -56,7 +57,14 @@ func (f *fakeRooms) History(_ context.Context, id string, start, end int) ([]ent
 	return append([]entity.Message(nil), f.msgs[id][start:end]...), nil
 }
 
-func (f *fakeRooms) PendingApprovals(string) []valueobject.ApprovalRequest { return nil }
+func (f *fakeRooms) PendingApprovals(convID string) []valueobject.ApprovalRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.approvals == nil {
+		return nil
+	}
+	return f.approvals[convID]
+}
 
 func (f *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) error {
 	f.mu.Lock()
@@ -84,6 +92,9 @@ type fakeTurns struct {
 	steer []string
 	rooms *fakeRooms
 	gate  chan struct{}
+	// steerRefuses models a live turn that takes no more input: full steer
+	// capacity, or a turn kind that cannot fold a message.
+	steerRefuses bool
 }
 
 func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string, _ []valueobject.Attachment, opts appjob.SendOptions, _ event.TurnEventHandler) (string, appconversation.SendResult, error) {
@@ -101,8 +112,11 @@ func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string,
 	f.rooms.add(convID, enum.RoleUser, text)
 	f.rooms.add(convID, enum.RoleAssistant, "done: "+text)
 	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text, opts.Origin}
-	if f.gate != nil {
-		<-f.gate
+	f.mu.Lock()
+	gate := f.gate
+	f.mu.Unlock()
+	if gate != nil {
+		<-gate
 	}
 	return convID, appconversation.SendResult{}, nil
 }
@@ -110,6 +124,9 @@ func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string,
 func (f *fakeTurns) Steer(convID, text string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.steerRefuses {
+		return false
+	}
 	f.steer = append(f.steer, convID+": "+text)
 	return true
 }
@@ -120,6 +137,46 @@ func (f *fakeTurns) Busy(convID string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.busy[convID]
+}
+
+// fakeQueue stands in for the room worker's FIFO: it accepts while the room is
+// busy and counts what waits, so the four outcomes can be driven without a
+// real worker.
+type fakeQueue struct {
+	turns    *fakeTurns
+	mu       sync.Mutex
+	enqueued []string
+	full     bool
+	stopping bool
+	// accepted keeps the depth the way the worker's queue does: it grows on
+	// each accepted message and resets when a test drains it.
+	depth int
+}
+
+func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, _ appjob.SendOptions) (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.stopping {
+		return 0, apperror.New(503, "conversation application is shutting down", nil)
+	}
+	if q.full {
+		return 0, apperror.New(429, "conversation queue full", nil)
+	}
+	q.enqueued = append(q.enqueued, convID+": "+text)
+	q.depth++
+	return q.depth, nil
+}
+
+func (q *fakeQueue) QueueDepth(string) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.depth
+}
+
+func (q *fakeQueue) drain() {
+	q.mu.Lock()
+	q.depth = 0
+	q.mu.Unlock()
 }
 
 type fakeProjects struct{ drepo.Project }
@@ -145,7 +202,7 @@ func setup(t *testing.T) (*App, *fakeRooms, *fakeTurns) {
 	rooms.add("c_other", enum.RoleUser, "build it")
 	rooms.add("c_other", enum.RoleAssistant, "built")
 	turns := &fakeTurns{runs: make(chan run, 4), busy: map[string]bool{}, rooms: rooms}
-	return New(context.Background(), rooms, turns, fakeProjects{}, nil, nil, nil), rooms, turns
+	return New(context.Background(), rooms, turns, &fakeQueue{turns: turns}, fakeProjects{}, nil, nil, nil), rooms, turns
 }
 
 type fakeChats struct {
@@ -175,7 +232,7 @@ func TestSearchExportReport(t *testing.T) {
 	}
 	chat, _ := valueobject.NewChatRef("telegram", "42", "")
 	chats := &fakeChats{origin: map[string]valueobject.ChatRef{"c_self": chat}}
-	app := New(context.Background(), rooms, turns, fakeProjects{}, chats, outputs, nil)
+	app := New(context.Background(), rooms, turns, &fakeQueue{turns: turns}, fakeProjects{}, chats, outputs, nil)
 	ctx := context.Background()
 
 	out, err := app.Search(ctx, "c_self", SearchInput{Query: "BUILT"})
@@ -279,7 +336,10 @@ func TestSendStopAndSpawn(t *testing.T) {
 	// Spawn runs on the caller's runtime unless told otherwise, in a
 	// project — and the name is already on the thread while its first
 	// turn still runs, not after the turn ends.
-	turns.gate = make(chan struct{})
+	gate := make(chan struct{})
+	turns.mu.Lock()
+	turns.gate = gate
+	turns.mu.Unlock()
 	out, err = app.Spawn(ctx, "c_self", SpawnInput{Prompt: "research", Title: "Research", Project: "Site"})
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +354,9 @@ func TestSendStopAndSpawn(t *testing.T) {
 		t.Fatalf("spawned thread's title during its turn = %+v, %v", info, err)
 	}
 	close(turns.gate)
+	turns.mu.Lock()
 	turns.gate = nil
+	turns.mu.Unlock()
 }
 
 func TestRelayHeadNeverEchoesAPromptTitle(t *testing.T) {
@@ -355,5 +417,125 @@ func TestWait(t *testing.T) {
 	out, _ = app.Wait(ctx, "c_self", WaitInput{Thread: "c_other", AfterSeq: &after, Timeout: 1})
 	if out["timedOut"] != true || time.Since(start) < 900*time.Millisecond {
 		t.Fatalf("wait timeout = %v after %s", out, time.Since(start))
+	}
+}
+
+// A busy room is not a refusal. When the live turn can fold the text it does;
+// when it cannot, the message waits in the room's queue and the caller is told
+// its position — never "wait and try again".
+func TestSendSteersOrQueuesOnABusyThread(t *testing.T) {
+	app, _, turns := setup(t)
+	ctx := context.Background()
+	turns.busy["c_other"] = true
+
+	// A send turn with steer capacity: the message joins it.
+	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "also this"})
+	if err != nil || out["delivery"] != "steer" || out["afterSeq"] == nil {
+		t.Fatalf("steer = %v, %v", out, err)
+	}
+	if len(turns.steer) != 1 {
+		t.Fatalf("steer = %v, want the text folded in", turns.steer)
+	}
+
+	// A turn that takes no input (a resume, or full steer capacity): queued.
+	turns.steerRefuses = true
+	q := &fakeQueue{turns: turns}
+	app.queue = q
+	out, err = app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "and this"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["delivery"] != "queued" || out["position"] != 1 {
+		t.Fatalf("queued = %v, want position 1", out)
+	}
+	if _, ok := out["afterSeq"]; ok {
+		t.Fatalf("queued carries afterSeq %v — an acceptance is not a promise", out["afterSeq"])
+	}
+	if len(q.enqueued) != 1 || !strings.Contains(q.enqueued[0], "and this") || !strings.HasPrefix(q.enqueued[0], "c_other: [From thread @otter") {
+		t.Fatalf("enqueued = %v, want the relay head and the text", q.enqueued)
+	}
+
+	// A second message queues behind the first: arrival order, not a race.
+	out, err = app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "third"})
+	if err != nil || out["delivery"] != "queued" || out["position"] != 2 {
+		t.Fatalf("second queued = %v, %v, want position 2", out, err)
+	}
+}
+
+// A thread waiting on the owner's permission answer is refused, not queued:
+// a queue would wait behind a human.
+func TestSendRefusesAWaitingApproval(t *testing.T) {
+	app, rooms, _ := setup(t)
+	rooms.mu.Lock()
+	rooms.approvals = map[string][]valueobject.ApprovalRequest{"c_other": {{}}}
+	rooms.mu.Unlock()
+	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
+	if code := apperror.As(err).StatusCode(); code != 409 {
+		t.Fatalf("waiting approval = %v (status %d), want 409", err, code)
+	}
+	if !strings.Contains(err.Error(), "permission answer") {
+		t.Fatalf("refusal = %v, want it to name the reason", err)
+	}
+}
+
+// A full queue is refused with the depth, and nothing is written.
+func TestSendRefusesAFullQueue(t *testing.T) {
+	app, _, turns := setup(t)
+	turns.busy["c_other"] = true
+	turns.steerRefuses = true
+	q := &fakeQueue{turns: turns, full: true, depth: 7}
+	app.queue = q
+	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
+	if code := apperror.As(err).StatusCode(); code != 429 {
+		t.Fatalf("full queue = %v (status %d), want 429", err, code)
+	}
+	if !strings.Contains(err.Error(), "7 waiting") {
+		t.Fatalf("refusal = %v, want the depth named", err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("a refused message was written: %v", q.enqueued)
+	}
+}
+
+// A stopping server refuses instead of accepting a message it cannot keep.
+func TestSendRefusesWhileStopping(t *testing.T) {
+	app, _, turns := setup(t)
+	turns.busy["c_other"] = true
+	turns.steerRefuses = true
+	app.queue = &fakeQueue{turns: turns, stopping: true}
+	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
+	if code := apperror.As(err).StatusCode(); code != 503 {
+		t.Fatalf("stopping = %v (status %d), want 503", err, code)
+	}
+}
+
+// Stop cuts the live turn only: accepted messages keep waiting, and the count
+// says so — a Stop that silently dropped them would be the bigger surprise.
+func TestStopKeepsTheQueueAndReportsIt(t *testing.T) {
+	app, _, turns := setup(t)
+	turns.busy["c_other"] = true
+	q := &fakeQueue{turns: turns, depth: 3}
+	app.queue = q
+	out, err := app.Stop(context.Background(), "c_self", StopInput{Thread: "c_other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["stopped"] != true || out["waiting"] != 3 {
+		t.Fatalf("stop = %v, want stopped with 3 waiting", out)
+	}
+	if q.QueueDepth("c_other") != 3 {
+		t.Fatal("Stop dropped the queue")
+	}
+}
+
+// An idle room with someone already waiting queues behind them instead of
+// starting a second turn ahead of the queue.
+func TestSendQueuesBehindWaitingMessages(t *testing.T) {
+	app, _, _ := setup(t)
+	q := &fakeQueue{depth: 1}
+	app.queue = q
+	out, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
+	if err != nil || out["delivery"] != "queued" || out["position"] != 2 {
+		t.Fatalf("idle with a queue = %v, %v", out, err)
 	}
 }

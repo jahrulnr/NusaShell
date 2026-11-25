@@ -3,12 +3,13 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, liveHistory, liveSegments, joinText, group, toolFailed, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, splitReplyQuote, splitRelay, turnEnds } from '../lib/turn.js';
+import { queuedFor, watchQueued } from '../lib/queued.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
 import { ElicitationCard } from './elicitation.js';
 import { referencesFromStored } from '../lib/references.js';
-import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate } from '../lib/chat.js';
+import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate, waitingPrompt } from '../lib/chat.js';
 import { emit, state } from '../lib/store.js';
 import { openPreview } from './preview.js';
 import { fileURL } from '../lib/api.js';
@@ -220,7 +221,12 @@ function Activity({ room, item, live, cwd }) {
   const [open, setOpen] = useOpen(item.id);
   const tools = item.items.filter((x) => x.kind === 'tool');
   if (!tools.length) return item.items.map((x) => html`<${Thoughts} key=${x.id} room=${room} item=${x} live=${live} />`);
-  const failed = tools.filter((t) => t.status === 'failed' || (t.status === 'settled' && toolFailed(t.output))).length;
+  // The same value the rows read decides the count: a failure is an exit, a
+  // signal, or a failed call; a timeout is its own number. A stop and a cancel
+  // are deliberate and are not counted against the group.
+  const endings = tools.map(toolEnding);
+  const failed = endings.filter((e) => e.kind === 'exit' || e.kind === 'signal' || e.kind === 'failed').length;
+  const timedOut = endings.filter((e) => e.kind === 'timeout').length;
   const label = live ? `Working · ${tools.length} ${tools.length === 1 ? 'step' : 'steps'}` : `Used ${tools.length} ${tools.length === 1 ? 'tool' : 'tools'}`;
   const tail = !open && live ? item.items.slice(-1) : [];
   // What the tools showed the model stays in view while the run is folded.
@@ -230,7 +236,9 @@ function Activity({ room, item, live, cwd }) {
       class="flex items-center gap-1.5 py-1 text-[13px] text-muted hover:text-fg">
       <${Icon} name=${open ? 'chevronDown' : 'chevronRight'} size=${14} />
       <span class=${live ? 'shimmer' : ''}>${label}</span>
-      ${failed > 0 && html`<span class="text-bad text-xs">· ${failed} failed</span>`}
+      ${failed > 0
+        ? html`<span class="text-bad text-xs"> · ${failed} failed</span>`
+        : timedOut > 0 && html`<span class="text-warn text-xs"> · ${timedOut} timed out</span>`}
     </button>
     ${media.length > 0 && html`<div class="ml-[21px] mb-1"><${ToolMedia} room=${room} list=${media} size="strip" /></div>`}
     ${(open || tail.length > 0) && html`<div class="ml-[7px] pl-4 border-l border-line flex flex-col">
@@ -316,7 +324,8 @@ function Status({ room }) {
 
 function FailedCard({ room }) {
   const f = room.failed;
-  const lastUser = [...room.messages].reverse().find((m) => m.role === 'user');
+  // What a retry would send again: the prompt still waiting for an answer.
+  const prompt = waitingPrompt(room);
   // What the provider said is the explanation; the status and machine code
   // are the facts underneath it, never a substitute for it.
   return html`<div role="alert" class="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-[13px]">
@@ -331,8 +340,26 @@ function FailedCard({ room }) {
     </div>
     <div class="flex justify-end gap-2 mt-2">
       <${Button} kind="ghost" onClick=${() => { room.failed = null; emit(); }}>Dismiss</${Button}>
-      ${lastUser && html`<${Button} onClick=${() => retry(room)}><${Icon} name="refresh" size=${14} /> Retry</${Button}>`}
+      ${prompt && html`<${Button} onClick=${() => retry(room)}><${Icon} name="refresh" size=${14} /> Retry</${Button}>`}
     </div>
+  </div>`;
+}
+
+// QueuedLine is the room's cross-thread queue, said once and quietly: how many
+// messages from other threads wait behind the running turn. It subscribes to
+// the count itself (lib/queued.js) and holds it in its own state, so a new
+// number re-renders this line and nothing else — and it is not announced: a
+// count that moves while the owner reads must not interrupt a screen reader.
+export function QueuedLine({ room }) {
+  const [waiting, setWaiting] = useState(() => queuedFor(room?.id));
+  useEffect(() => {
+    setWaiting(queuedFor(room?.id));
+    return watchQueued((id, count) => { if (id === room?.id) setWaiting(count); });
+  }, [room?.id]);
+  if (!waiting) return null;
+  return html`<div class="flex items-center gap-1.5 px-1 py-1 text-[12px] text-muted">
+    <${Icon} name="queue" size=${13} class="text-muted" />
+    <span>${waiting} ${waiting === 1 ? 'message' : 'messages'} waiting from other threads</span>
   </div>`;
 }
 
@@ -455,6 +482,6 @@ export function Transcript({ room, scroller }) {
     ${!!(r.live?.userText || r.live?.userFiles?.length || r.live?.userRecording) && html`<${UserMessage} room=${r} text=${r.live.userText} refs=${r.live.userRefs} files=${r.live.userFiles} recording=${r.live.userRecording} pending=${!r.live.terminal} />`}
     ${liveGroups.map((it, i) => withCopy(liveEnds)(it, i, !r.live.terminal && i === liveGroups.length - 1))}
     ${(r.live && !r.live.terminal) || r.pendingOpen || r.settling ? html`<${Status} room=${r} />` : null}
-    ${r.failed && !isBusy(r) && html`<${FailedCard} room=${r} />`}
+    ${r.failed && !isBusy(r) && (waitingPrompt(r) || !r.messages.length) && html`<${FailedCard} room=${r} />`}
   </div>`;
 }

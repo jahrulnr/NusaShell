@@ -38,6 +38,9 @@ function settleTools(t, why, definitive = false) {
       s.status = toolFailed(s.output) ? 'failed' : 'success';
     }
     s.settled = why;
+    // The clock stops with the row: a call the turn closed without a result
+    // still ran for a while, and that is what its label says from now on.
+    if (s.at && !s.took) s.took = Date.now() - s.at;
   }
 }
 
@@ -94,7 +97,9 @@ export function applyFrame(t, f) {
       break;
     }
     case 'turn.tool_call':
-      t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'tool', callId: p.callId, name: p.name, input: '', output: '', status: 'requested' });
+      // at is when this tab saw the call start: the row's clock reads from it,
+      // and the frame carries no clock of its own.
+      t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'tool', callId: p.callId, name: p.name, input: '', output: '', status: 'requested', at: Date.now() });
       if (t.phase?.phase === 'reasoning') t.phase = null;
       break;
     case 'turn.tool_input': {
@@ -117,6 +122,7 @@ export function applyFrame(t, f) {
       if (s) {
         s.status = p.failed ? 'failed' : 'success';
         s.settled = 'Tool finished';
+        if (s.at && !s.took) s.took = Date.now() - s.at;
         // The media the call showed the model, listed as history lists it.
         if (p.attachments?.length) s.attachments = p.attachments;
       }
@@ -179,6 +185,8 @@ export function applyFrame(t, f) {
           if (s.kind === 'tool' && s.status !== 'success' && s.status !== 'failed') {
             s.status = 'failed';
             s.settled = 'Turn failed';
+            // Its clock stops here too: the row keeps the time it ran.
+            if (s.at && !s.took) s.took = Date.now() - s.at;
           }
         }
       } else {
@@ -255,11 +263,123 @@ export function splitRelay(text) {
   return { label, title, id: m[2] || '', head: m[0].length, body: text.slice(m[0].length) };
 }
 
+// toolEnding answers how a tool call ended — one value read by the row, its
+// card footer, and the group's count, so those three cannot disagree. Pure:
+// it reads the item and nothing else.
+//
+// { kind, mark, word, tone } plus the detail a footer needs: code for an exit,
+// signal for a kill, cap for a timeout, by for who stopped it. `mark` names the
+// dot (or ring) the row draws; `word` is the status as the row says it, empty
+// when there is nothing to add; `tone` is its colour family.
+export function toolEnding(item) {
+  if (!item) return { kind: 'ok', mark: 'ok', word: '', tone: '' };
+  if (item.status === 'requested' || item.status === 'streaming') return { kind: 'running', mark: 'live', word: '', tone: '' };
+  const close = closeStatus(item.output)?.close;
+  if (close) {
+    switch (close.kind) {
+      case 'exit':
+        if (close.code === 0) {
+          // A clean exit the backend still calls failed: the backend is
+          // authoritative about its own call.
+          return item.status === 'failed'
+            ? { kind: 'failed', mark: 'bad', word: 'failed', tone: 'bad' }
+            : { kind: 'ok', mark: 'ok', word: '', tone: '' };
+        }
+        return { kind: 'exit', mark: 'bad', word: `exit ${close.code}`, tone: 'bad', code: close.code };
+      case 'signal':
+        return { kind: 'signal', mark: 'bad', word: close.signal, tone: 'bad', signal: close.signal };
+      case 'timeout':
+        return { kind: 'timeout', mark: 'warn', word: 'timed out', tone: 'warn', cap: close.after };
+      case 'interrupted': {
+        const word = close.by === 'agent' ? 'stopped by agent' : close.by === 'server' ? 'restarted' : 'stopped';
+        return { kind: 'stopped', mark: 'ring', word, tone: 'muted', by: close.by };
+      }
+      case 'canceled':
+        return { kind: 'canceled', mark: 'ring', word: 'canceled', tone: 'muted' };
+    }
+  }
+  // No status line: the backend's flag, or the wording of a stored result.
+  if (item.status === 'failed' || (item.status === 'settled' && toolFailed(item.output))) {
+    return { kind: 'failed', mark: 'bad', word: 'failed', tone: 'bad' };
+  }
+  if (item.status === 'pending') return { kind: 'pending', mark: 'none', word: 'no result', tone: 'muted' };
+  return { kind: 'ok', mark: 'ok', word: '', tone: '' };
+}
+
 // A tool's stored output signals failure by convention.
+// closeStatus reads the status line exec closes its output with: how the
+// process ended, and — for an exit — how long it ran. The line is data the
+// model needs, so it stays in the stored output; the row reads it to say what
+// happened, and the transcript shows the output without it.
+//
+// The vocabulary is the runner's (infrastructure/service/tool/terminal):
+//   (exit 0, 4.4s)  (exit 1, 43.2s)  (no output, exit 0, 0.3s)
+//   (signal: killed, 3.2s)
+//   (timed out after 120s — partial output above; …)
+//   (interrupted by user after 12.3s — partial output above)
+//   (interrupted by agent after 4.1s — …)  (nusashell restarted after 8.0s — …)
+//   (canceled after 12.3s — …)
+// The duration is optional and never decides anything: it says how long, not
+// what happened.
+export function closeStatus(output) {
+  const text = String(output || '').trimEnd();
+  const cut = text.lastIndexOf('\n');
+  const last = (cut >= 0 ? text.slice(cut + 1) : text).trim();
+  const m = /^\((.*)\)$/.exec(last);
+  if (!m) return null;
+  const close = classifyClose(m[1].trim());
+  if (!close) return null;
+  return { body: cut >= 0 ? text.slice(0, cut) : '', close };
+}
+
+function classifyClose(inner) {
+  let m;
+  // How long the run took is the runner's own number, on the same line: it is
+  // the only duration a replayed or resynced row can still know, since the tab
+  // never saw the call start.
+  if ((m = /^(?:no output, )?exit (\d+)(?:, ([\d.]+)s)?$/.exec(inner))) {
+    return { kind: 'exit', code: Number(m[1]), ms: m[2] != null ? Math.round(Number(m[2]) * 1000) : undefined };
+  }
+  // A runner that could not start the process reports the wait error itself.
+  if ((m = /^exit status (\d+)(?:, ([\d.]+)s)?$/.exec(inner))) {
+    return { kind: 'exit', code: Number(m[1]), ms: m[2] != null ? Math.round(Number(m[2]) * 1000) : undefined };
+  }
+  if ((m = /^signal: ([^,]+?)(?:, ([\d.]+)s)?$/.exec(inner))) {
+    return { kind: 'signal', signal: m[1].trim(), ms: m[2] != null ? Math.round(Number(m[2]) * 1000) : undefined };
+  }
+  // The cap that fired is how long the run lasted, to within the poll.
+  if ((m = /^timed out after (\S+)/.exec(inner))) return { kind: 'timeout', after: m[1], ms: parseWait(m[1]) };
+  if ((m = /^interrupted by (user|agent) after ([\d.]+)s/.exec(inner))) return { kind: 'interrupted', by: m[1], ms: Math.round(Number(m[2]) * 1000) };
+  if ((m = /^nusashell restarted after ([\d.]+)s/.exec(inner))) return { kind: 'interrupted', by: 'server', ms: Math.round(Number(m[1]) * 1000) };
+  if ((m = /^canceled after ([\d.]+)s/.exec(inner))) return { kind: 'canceled', ms: Math.round(Number(m[1]) * 1000) };
+  return null;
+}
+
+// parseWait reads the duration the runner writes for a timeout — "120s", or a
+// Go duration like "2m0s" when the wait is not whole seconds.
+function parseWait(text) {
+  let ms = 0;
+  const re = /([\d.]+)(ms|h|m|s)/g;
+  let m;
+  while ((m = re.exec(String(text || '')))) {
+    const n = Number(m[1]);
+    if (!Number.isFinite(n)) continue;
+    ms += m[2] === 'ms' ? n : m[2] === 's' ? n * 1000 : m[2] === 'm' ? n * 60_000 : n * 3_600_000;
+  }
+  return ms || undefined;
+}
+
+// toolFailed answers whether a tool call failed, not whether it stopped: a
+// nonzero exit and a signal that killed it are failures, while a timeout, an
+// interruption, and a cancel are this side ending the run on purpose.
 export function toolFailed(output) {
   const o = String(output || '');
-  return /^error:/i.test(o) || /^failed$/i.test(o.trim()) || /interrupted by user/i.test(o)
-    || /\(exit [1-9]\d*\)\s*$/.test(o) || /\(signal: [^)]+\)\s*$/.test(o);
+  const close = closeStatus(o)?.close;
+  if (close) {
+    if (close.kind === 'exit') return close.code !== 0;
+    return close.kind === 'signal';
+  }
+  return /^error:/i.test(o) || /^failed$/i.test(o.trim());
 }
 
 // liveHistory trims a transcript list to what the live turn still leaves to
@@ -457,6 +577,33 @@ export function turnEnds(items) {
   });
   close();
   return ends;
+}
+
+// formatDuration is the coarse, stable label a tool row shows: whole seconds
+// while it runs, so the text changes once a second and never jitters.
+export function formatDuration(ms) {
+  const s = Math.max(0, Math.round((ms || 0) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
+// toolClock answers what a tool row says about time, or '' when it knows
+// nothing: a call this tab saw start counts up from `at` while it runs (the
+// row's own ticker re-reads this every second), and a call that has a stored
+// duration shows it once, fixed. A row from history has neither.
+export function toolClock(item, now = Date.now()) {
+  if (!item) return '';
+  const running = item.status === 'requested' || item.status === 'streaming';
+  // While it runs the tab's own clock from the call's start is all there is.
+  if (running) return item.at ? formatDuration(now - item.at) : '';
+  // Finished: the runner's duration on the status line wins. It is the same
+  // number whether this tab watched the call or replayed it, which the tab's
+  // clock is not — a replayed 40-second call starts when the replay arrives.
+  const took = closeStatus(item.output)?.close?.ms;
+  if (took != null) return formatDuration(took);
+  return item.took ? formatDuration(item.took) : '';
 }
 
 // toolSummary renders a one-line label for a tool call from its arguments.

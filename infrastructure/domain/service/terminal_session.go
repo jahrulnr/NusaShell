@@ -48,6 +48,9 @@ type TerminalSessions interface {
 type TerminalSession interface {
 	ID() int
 	TTY() bool
+	// Command is what the session was opened with: a shell runs the text
+	// typed into it, a REPL or editor reads it as input.
+	Command() string
 	Write(p []byte) error
 	Interrupt() error
 	Collect(ctx context.Context, maxWait time.Duration, sink func(chunk string)) TerminalPoll

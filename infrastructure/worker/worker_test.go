@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 )
 
 // seqJob appends its id to order — FIFO verification.
@@ -169,6 +171,43 @@ func TestJobSelfTerminate(t *testing.T) {
 	}
 	if len(drained) != 2 {
 		t.Fatalf("OnTerminate drained %d, want 2", len(drained))
+	}
+	waitClosed(t, w.Done(), "worker exit")
+}
+
+// causeJob reports the cause its execution ctx was canceled with.
+type causeJob struct {
+	started chan struct{}
+	cause   chan error
+}
+
+func (j *causeJob) Execute(ctx context.Context) error {
+	close(j.started)
+	<-ctx.Done()
+	j.cause <- context.Cause(ctx)
+	return ctx.Err()
+}
+
+func (j *causeJob) Interrupt() {}
+
+// A worker terminated on the way down is not the owner's Stop: the job's ctx
+// carries the restart sentinel, so the tool that dies with it can say the
+// server restarted instead of reporting a foreign SIGKILL.
+func TestTerminateNamesTheRestartAsCause(t *testing.T) {
+	w := New(Options{})
+	job := &causeJob{started: make(chan struct{}), cause: make(chan error, 1)}
+	if err := w.Submit(job); err != nil {
+		t.Fatal(err)
+	}
+	waitClosed(t, job.started, "cause job")
+	w.Terminate()
+	select {
+	case cause := <-job.cause:
+		if !errors.Is(cause, dservice.ErrServerRestarted) {
+			t.Fatalf("cause = %v, want the restart sentinel", cause)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("job never observed the cancellation cause")
 	}
 	waitClosed(t, w.Done(), "worker exit")
 }

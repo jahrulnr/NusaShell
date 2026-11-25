@@ -116,6 +116,17 @@ type Deps struct {
 	Restarter      Restarter
 	BinaryAsset    string
 	ChecksumsAsset string
+	// InstallBlocked, when set, is why this process may not replace the
+	// installation: it is not the installed binary. Installing from a
+	// checkout, a test instance, or a temp copy would overwrite the real
+	// install and restart its service from under the owner.
+	InstallBlocked string
+	// BeforeRestart runs the shutdown barrier before a process-mode restart
+	// replaces this image: the replacement must not start over work the old
+	// process killed on its way out. Service mode takes the signal path
+	// instead — the manager's stop runs the same barrier — so the hook is
+	// not called there.
+	BeforeRestart func(ctx context.Context) error
 	// Lifetime bounds background work; cancelling it stops an install.
 	Lifetime context.Context
 }
@@ -246,13 +257,19 @@ func (a *App) info() Info {
 }
 
 func (a *App) installable() bool {
-	return a.enabled && a.deps.BinaryAsset != ""
+	return a.enabled && a.deps.BinaryAsset != "" && a.deps.InstallBlocked == ""
 }
 
 // Install starts the update to the latest known release and returns at once.
 // The download, checksum check, install, and restart run in the background;
 // Progress reports them. Only one install runs at a time.
 func (a *App) Install() (Progress, error) {
+	if a.deps.InstallBlocked != "" {
+		// Say which binary would be replaced and why this process may not do
+		// it — a bare "updates are disabled" hides the reason the owner
+		// needs to run the right binary.
+		return a.Progress(), fmt.Errorf("%w: %s", ErrDisabled, a.deps.InstallBlocked)
+	}
 	if !a.installable() {
 		return a.Progress(), ErrDisabled
 	}
@@ -349,6 +366,15 @@ func (a *App) run(rel valueobject.Release) {
 	case <-ctx.Done():
 		a.fail(PhaseRestart, fmt.Errorf("installed %s; the restart was cancelled", version))
 		return
+	}
+	// Shut down before replacing the process, not after: a process-mode
+	// restart execs this image, and anything still running would die with the
+	// old one, unsaved.
+	if mode != "service" && a.deps.BeforeRestart != nil {
+		if err := a.deps.BeforeRestart(ctx); err != nil {
+			a.fail(PhaseRestart, fmt.Errorf("installed %s, but the shutdown before the restart failed: %w", version, err))
+			return
+		}
 	}
 	if err := a.deps.Restarter.Restart(mode); err != nil {
 		a.fail(PhaseRestart, fmt.Errorf("installed %s, but restarting failed: %w", version, err))
