@@ -58,12 +58,16 @@ func modelOption(raw json.RawMessage) (id, current string, models []dservice.Age
 	return "", "", nil
 }
 
-// mergeConfigOptions folds a set_config_option response into the session's
+// absorbConfigResponse folds a set_config_option response into the session's
 // catalog. A response is not the offered list — it names what the write changed,
 // and an agent may answer with only that entry. An option the response omits
 // keeps what the session knew; an entry that carries none of its defining fields
 // (name, type, choices, current value) says nothing and keeps the stored one too.
-func mergeConfigOptions(stored, update json.RawMessage) json.RawMessage {
+//
+// The asymmetry is deliberate: a config_option_update notification carries the
+// authoritative offered list and replaces (see the handler in runtime.go), while
+// a response absorbs.
+func absorbConfigResponse(stored, update json.RawMessage) json.RawMessage {
 	var base, next []map[string]json.RawMessage
 	if json.Unmarshal(update, &next) != nil {
 		return stored

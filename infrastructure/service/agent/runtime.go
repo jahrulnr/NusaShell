@@ -758,7 +758,10 @@ func (r *Runtime) selectModel(ctx context.Context, s *session, model string) err
 		s.mu.Lock()
 		s.modelSet = true
 		if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
-			s.configs = state.ConfigOptions
+			// A response names what the write changed; merging keeps the options it
+			// does not mention (a notification still replaces: it is the authoritative
+			// offered list).
+			s.configs = absorbConfigResponse(s.configs, state.ConfigOptions)
 			s.configSeq = state.WireSeq
 		}
 		s.mu.Unlock()
@@ -775,7 +778,10 @@ func (r *Runtime) selectModel(ctx context.Context, s *session, model string) err
 	s.mu.Lock()
 	s.modelSet = true
 	if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
-		s.configs = state.ConfigOptions
+		// A response names what the write changed; merging keeps the options it
+		// does not mention (a notification still replaces: it is the authoritative
+		// offered list).
+		s.configs = absorbConfigResponse(s.configs, state.ConfigOptions)
 		s.configSeq = state.WireSeq
 	}
 	s.mu.Unlock()
@@ -1785,7 +1791,7 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 		// A response names what the write changed; merging keeps the options it
 		// does not mention instead of narrowing the session's catalog to one
 		// entry (the bug that dropped a materialized effort from the list).
-		s.configs = mergeConfigOptions(s.configs, state.ConfigOptions)
+		s.configs = absorbConfigResponse(s.configs, state.ConfigOptions)
 		s.configSeq = state.WireSeq
 	}
 	s.mu.Unlock()

@@ -17,7 +17,7 @@ func TestMergeConfigOptionsKeepsWhatTheResponseOmits(t *testing.T) {
 	// The agent answered with the entry it changed and nothing else.
 	update := json.RawMessage(`[{"id":"mode","type":"select","currentValue":"accept-edits","options":[{"value":"ask"},{"value":"accept-edits"}]}]`)
 
-	merged := mergeConfigOptions(stored, update)
+	merged := absorbConfigResponse(stored, update)
 	for _, id := range []string{"model", "mode", "effort"} {
 		if !json.Valid(merged) || !containsOption(t, merged, id) {
 			t.Fatalf("option %q vanished from the catalog: %s", id, merged)
@@ -37,12 +37,42 @@ func TestMergeConfigOptionsKeepsWhatTheResponseOmits(t *testing.T) {
 func TestMergeConfigOptionsIgnoresABareId(t *testing.T) {
 	stored := json.RawMessage(`[{"id":"speed","type":"select","currentValue":"normal","options":[{"value":"normal"},{"value":"fast"}]}]`)
 	update := json.RawMessage(`[{"id":"speed","currentValue":null}]`)
-	merged := mergeConfigOptions(stored, update)
+	merged := absorbConfigResponse(stored, update)
 	if got := currentOf(t, merged, "speed"); got != "normal" {
 		t.Fatalf("speed = %q after a bare echo, want its stored value", got)
 	}
 	if !containsOption(t, merged, "speed") || !hasChoices(t, merged, "speed") {
 		t.Fatalf("a bare echo erased the option's choices: %s", merged)
+	}
+}
+
+// A model switch answers with the model entry alone when the agent works that
+// way; the options it does not mention stay offered.
+func TestModelSwitchKeepsTheCatalogAPartialResponseOmits(t *testing.T) {
+	t.Setenv("FAKE_ACP_PARTIAL_CONFIG", "1")
+	rt, in := setup(t, "hello")
+	ctx := t.Context()
+	liveMode(t, ctx, rt, in) // open the session
+	before, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Model = "fake-smart"
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, o := range after {
+		seen[o.ID] = true
+	}
+	for _, o := range before {
+		if !seen[o.ID] {
+			t.Fatalf("option %q vanished after a model switch: before=%+v after=%+v", o.ID, before, after)
+		}
 	}
 }
 

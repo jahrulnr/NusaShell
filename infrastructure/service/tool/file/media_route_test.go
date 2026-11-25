@@ -3,9 +3,12 @@ package toolfile
 import (
 	"context"
 	"errors"
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -360,6 +363,50 @@ func TestVisionModelMustAcceptImages(t *testing.T) {
 	}
 }
 
+// countingWorkspace counts how many times a tool opens a room root — one read
+// resolves the path once, so a payload is judged and served through the same
+// handle.
+type countingWorkspace struct {
+	drepo.Workspace
+	mu    sync.Mutex
+	opens int
+}
+
+func (c *countingWorkspace) Open(ctx context.Context, dir string) (drepo.WorkspaceSession, error) {
+	c.mu.Lock()
+	c.opens++
+	c.mu.Unlock()
+	return c.Workspace.Open(ctx, dir)
+}
+
+func (c *countingWorkspace) opened() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.opens
+}
+
+// A non-text payload is resolved once: the tool that sniffs it hands the same
+// open file to the media route instead of opening the path a second time.
+func TestReadFileResolvesThePathOnce(t *testing.T) {
+	h := newMediaHarness(t)
+	h.write(t, "shot.png", pngFixture)
+	store := &countingWorkspace{Workspace: repoworkspace.NewLocal()}
+	tool, err := NewFileReadTool(store, h.root, h.media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := runMedia(t, tool, h.ctx("c1", enum.ModalityText, enum.ModalityImage), `{"path":"shot.png"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Attachments) != 1 {
+		t.Fatalf("result = %+v, want the image", res)
+	}
+	if got := store.opened(); got != 1 {
+		t.Fatalf("the payload was resolved %d times, want one read", got)
+	}
+}
+
 // read_file and read_media sniff the same window, so a payload that turns out
 // not to be text is not a mistake: read_file routes it exactly as read_media
 // would instead of answering with a redirect the model has to act on.
@@ -373,6 +420,44 @@ func TestReadFileAttachesNonText(t *testing.T) {
 	}
 	if len(res.Attachments) != 1 || res.Attachments[0].Modality() != enum.ModalityImage {
 		t.Fatalf("attachments = %+v, want the image", res.Attachments)
+	}
+}
+
+// The routed payload comes from the handle the tool already opened: the file is
+// gone from disk by the time the route runs, and the bytes still cross. A second
+// open would resolve a path that no longer holds what was judged.
+func TestRoutedPayloadComesFromTheOpenHandle(t *testing.T) {
+	h := newMediaHarness(t)
+	h.write(t, "shot.png", pngFixture)
+	path := filepath.Join(h.root, "shot.png")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := make([]byte, 512)
+	n, err := io.ReadFull(f, prefix)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	tc, err := entity.NewToolCall("call_1", "read_file", `{"path":"shot.png"}`, enum.TooltypeOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := h.readFileTool(t).(*FileReadTool)
+	res, err := tool.route.attachOrReadOpen(h.ctx("c1", enum.ModalityText, enum.ModalityImage), tc, path, "file://"+path, f, info, prefix[:n])
+	if err != nil {
+		t.Fatalf("a payload read from the open handle was refused: %v", err)
+	}
+	if len(res.Attachments) != 1 || res.Attachments[0].Modality() != enum.ModalityImage {
+		t.Fatalf("result = %+v, want the image from the handle", res)
 	}
 }
 

@@ -275,6 +275,28 @@ async function openBusyThread(extra = {}, info = {}) {
   return { r, cmd };
 }
 
+test('a model picked on an idle room shows the new binding — no pending, no marker', async () => {
+  // The same pick with no turn running is applied, not parked: the answer
+  // is 200 with the record already bound to it. Nothing waits, so nothing
+  // may carry a "next turn" marker.
+  const info = { providerId: 'p', modelId: 'm' };
+  serveThread('c_1', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info }, {
+    'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', title: 'Thread', ...call.body }),
+    'GET /api/context': { estimate: 50_000, total: 1_000_000 },
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(40);
+  const r = state.rooms.c_1;
+  calls.length = 0;
+  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  await sleep(40);
+  assert.equal(patches().length, 1);
+  assert.equal(r.info.pending, undefined, 'an idle answer carries no pending');
+  assert.equal(r.info.providerId, 'p2', 'the record already binds the pick');
+  assert.equal(r.sel.providerId, undefined, 'no local override — the record says it');
+  assert.deepEqual([chat.selection(r).providerId, chat.selection(r).modelId], ['p2', 'm2']);
+});
+
 test('a model picked while a turn runs binds the room at once', async () => {
   const { r } = await openBusyThread();
   calls.length = 0;

@@ -73,6 +73,9 @@ test('one write changes the list both controls read, and both name the same mode
   assert.equal(chat.sessionOptionValue(r, mode), 'bypass');
   assert.equal(chat.sessionModeName(r), 'Bypass Permissions');
   assert.equal(r.agentOptions.list.length, 2, 'the write answers with the whole list');
+  // an idle room applies the pick, not parks it: no pending, no marker
+  await chat.loadInfo(r, { force: true });
+  assert.equal(r.info.pending, undefined);
 });
 
 test('a refused write keeps the value the server stored, and says why once', async () => {

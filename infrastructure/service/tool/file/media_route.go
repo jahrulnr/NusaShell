@@ -119,7 +119,15 @@ func (r mediaRoute) attachOrRead(ctx context.Context, call entity.ToolCall, path
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return dservice.ToolResult{}, err
 	}
-	prefix = prefix[:n]
+	return r.attachOrReadOpen(ctx, call, path, uri, f, info, prefix[:n])
+}
+
+// attachOrReadOpen routes a payload from a handle the caller already opened and
+// sniffed. One read serves the decision and the payload alike, so a path is
+// resolved once and the bytes the tool judged are the bytes it hands over — a
+// second open could read a different file. The caller owns f; nothing here
+// closes it.
+func (r mediaRoute) attachOrReadOpen(ctx context.Context, call entity.ToolCall, path, uri string, f io.Reader, info fs.FileInfo, prefix []byte) (dservice.ToolResult, error) {
 	mediaType := dservice.SniffMediaType(prefix, path)
 	att, err := valueobject.NewAttachment(uri, mediaType)
 	if err != nil {

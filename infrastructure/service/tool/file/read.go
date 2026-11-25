@@ -98,7 +98,10 @@ func (tool *FileReadTool) Execute(ctx context.Context, call entity.ToolCall, _ s
 	}
 	prefix = prefix[:n]
 	if top, _, _ := strings.Cut(service.SniffMediaType(prefix, input.Path), "/"); top != "text" {
-		return tool.route.attachOrRead(ctx, call, input.Path)
+		// The payload is routed from the handle already open and sniffed here:
+		// one read decides and hands over, so a path is never resolved twice and
+		// the bytes judged are the bytes served.
+		return tool.route.attachOrReadOpen(ctx, call, input.Path, root.AttachmentURI(rel), f, info, prefix)
 	}
 	if info.Size() > readFileMax {
 		return service.ToolResult{}, fmt.Errorf("%q is too large to page through (%d bytes > %d MiB) — read parts of it with exec (sed -n, head, tail)", input.Path, info.Size(), readFileMax>>20)
