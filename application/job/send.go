@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -154,6 +155,10 @@ func (j *Send) Steer(text string) { j.mailbox().push(text) }
 func (j *Send) RecallSteer() (string, bool) { return j.mailbox().popLast() }
 
 // Execute runs the whole turn end-to-end on the worker's goroutine.
+// IsTurn marks this job as a turn: a runtime pick must not be applied under it,
+// because a turn fixes its runtime when it starts.
+func (*Send) IsTurn() bool { return true }
+
 func (j *Send) Execute(execCtx context.Context) (err error) {
 	defer j.finish(&err)
 	ctx := j.Cancellable(execCtx, j.Ctx)
@@ -175,6 +180,21 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 				return apperror.New(400, "invalid conversation id", err)
 			}
 			fresh = true
+		}
+		// A pick taken while this room was busy waits for exactly this moment:
+		// it applies before anything reads the room's runtime, so the turn that
+		// runs next — from any thread — is the one it changes. A brand-new room
+		// has nothing parked.
+		appliedPending := false
+		if !fresh {
+			sel, ok, err := d.Convs.PendingSelection(ctx, convID)
+			if err != nil {
+				return err
+			}
+			if ok {
+				ApplyPendingSelection(ctx, d, conv, sel, j.OnEvent)
+				appliedPending = true
+			}
 		}
 
 		// A room that moves to another agent, or back to a provider, leaves
@@ -378,6 +398,14 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		}
 		if err := d.Convs.Save(ctx, conv); err != nil {
 			return err
+		}
+		if appliedPending {
+			// The pick rode this turn's own save. A clear that fails must not
+			// fail the turn: the next one would simply apply it again, which is
+			// idempotent because the pick already holds.
+			if err := d.Convs.ClearPendingSelection(context.WithoutCancel(ctx), convID); err != nil {
+				slog.Warn("pending selection not cleared", "conversation", convID, "error", err)
+			}
 		}
 		if !agentRoom {
 			d.retireAgentSession(convID, prevAgent, prevSession, conv)

@@ -267,7 +267,6 @@ func TestQueuedSendKeepsItsAttachment(t *testing.T) {
 	rooms.approvals = nil
 	rooms.mu.Unlock()
 	turns.busy["c_other"] = true
-	turns.steerRefuses = true
 	ctx := service.WithWorkspaceDir(context.Background(), dir)
 
 	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "later", Attachments: []string{"notes.txt"}})
@@ -283,11 +282,8 @@ func TestQueuedSendKeepsItsAttachment(t *testing.T) {
 	if got := q.kept[0][0]; got.URI() != "file://"+path || got.SHA256() != digestOf(t, path) {
 		t.Fatalf("queued attachment = %+v, want the pinned path", got)
 	}
-	// A steer cannot carry an attachment: the message waits instead of folding
-	// its text into a turn that would drop the file.
-	if len(turns.steer) != 0 {
-		t.Fatalf("a message with an attachment steered: %v", turns.steer)
-	}
+	// A relayed prompt never folds into the running turn, attachment or not:
+	// it waits for its own turn, where the file and the provenance both land.
 }
 
 // A refused send leaves nothing behind: the copies it stored are taken back, so
@@ -305,7 +301,6 @@ func TestRefusedSendTakesItsUploadCopiesBack(t *testing.T) {
 	app, rooms, turns := setupWith(t, q, uploads)
 	rooms.env = enum.EnvironmentDocker
 	turns.busy["c_other"] = true
-	turns.steerRefuses = true
 	dir := t.TempDir()
 	fileWith(t, dir, "shot.png", 64)
 	ctx := service.WithWorkspaceDir(context.Background(), dir)
@@ -442,7 +437,6 @@ func TestNewWiresTheQueueAndTheUploadStore(t *testing.T) {
 		app, rooms, turns := setupWith(t, q, uploads)
 		rooms.env = enum.EnvironmentDocker
 		turns.busy["c_other"] = true
-		turns.steerRefuses = true
 		dir := t.TempDir()
 		fileWith(t, dir, "shot.png", 32)
 		ctx := service.WithWorkspaceDir(t.Context(), dir)
@@ -474,7 +468,6 @@ func TestNewWiresTheQueueAndTheUploadStore(t *testing.T) {
 		app, rooms, turns := setupWith(t, q, uploads)
 		rooms.env = enum.EnvironmentDocker
 		turns.busy["c_other"] = true
-		turns.steerRefuses = true
 		dir := t.TempDir()
 		fileWith(t, dir, "shot.png", 32)
 		ctx := service.WithWorkspaceDir(t.Context(), dir)
@@ -512,8 +505,8 @@ func TestSendAndStopCarryTheThread(t *testing.T) {
 	// A busy room's two other outcomes carry it too.
 	turns.busy["c_other"] = true
 	out, err = app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "also"})
-	if err != nil || out["delivery"] != "steer" {
-		t.Fatalf("steer = %v, %v", out, err)
+	if err != nil || out["delivery"] != "queued" {
+		t.Fatalf("queued = %v, %v", out, err)
 	}
 	assertThreadField(t, out, "c_other", "crow", "Builder", false)
 

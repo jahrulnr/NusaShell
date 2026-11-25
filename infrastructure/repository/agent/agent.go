@@ -254,6 +254,9 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	if err := os.Remove(r.file(id)); err != nil {
 		return err
 	}
+	if err := os.Remove(r.catalogFile(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	for name, v := range rec.Env {
 		r.dropOwnedSecret(ctx, id, name, v)
 	}
@@ -261,3 +264,4 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 }
 
 var _ drepo.Agent = (*Repository)(nil)
+var _ drepo.AgentCatalogStore = (*Repository)(nil)

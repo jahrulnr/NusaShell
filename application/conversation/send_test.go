@@ -179,6 +179,55 @@ func TestSendRoundtrip(t *testing.T) {
 // An empty submission — no text and no attachments — is rejected by the
 // use case itself with 400, before any room is minted or worker posted.
 // Transports share this one decision instead of each gating their own.
+// A prompt accepted for a busy room queues as a turn and is stored with its
+// relay provenance. The steer path it used to take writes no record at all,
+// which is how a raw relay head ended up rendered as the owner's own words.
+func TestQueuedRelayKeepsItsProvenance(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	ctx := t.Context()
+	block := newWedgeJob()
+	app.post("c_relay", block)
+	select {
+	case <-block.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the blocking job never started")
+	}
+
+	head := "[From thread @otter Planner (c_self)]\n[Your answer here does not reach that thread. If it needs a reply, send one to c_self with the conversation MCP tool send.]\n\n"
+	if _, err := app.Enqueue(ctx, "c_relay", "gw1", "m1", head+"ship it", nil,
+		appjob.SendOptions{Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}}); err != nil {
+		t.Fatal(err)
+	}
+	close(block.release)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		conv, err := app.deps.Convs.Load(ctx, "c_relay")
+		if err == nil {
+			msgs := conv.Messages()
+			for _, m := range msgs {
+				if m.Role() != enum.RoleUser {
+					continue
+				}
+				if m.UserType() != enum.LLMUserTypeRelay {
+					t.Fatalf("queued relay stored as %q, want relay — the head would render as the owner's words", m.UserType())
+				}
+				if m.Editable() {
+					t.Fatal("a relayed prompt is editable in the target room")
+				}
+				if !strings.HasPrefix(m.Content(), head) || strings.TrimPrefix(m.Content(), head) != "ship it" {
+					t.Fatalf("stored relay = %q, want the head then the body alone", m.Content())
+				}
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the queued turn never ran")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestSendRejectsEmpty(t *testing.T) {
 	app, _ := fixture(t, okHandler)
 	for _, msg := range []string{"", "   "} {

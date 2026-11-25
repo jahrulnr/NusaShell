@@ -26,10 +26,11 @@ type fakeConvWrites struct {
 	deleted []string
 	purged  bool  // DeleteAll ran
 	ctxErr  error // ctx state observed inside the job call
+	parked  bool  // the annotation parked a pick for the next turn
 	err     error
 }
 
-func (f *fakeConvWrites) Annotate(_ context.Context, id string, a appconversation.Annotation) error {
+func (f *fakeConvWrites) Annotate(_ context.Context, id string, a appconversation.Annotation) (bool, error) {
 	f.last = a
 	title := a.Title
 	if f.renamed == nil {
@@ -38,7 +39,7 @@ func (f *fakeConvWrites) Annotate(_ context.Context, id string, a appconversatio
 	if title != nil {
 		f.renamed[id] = *title
 	}
-	return f.err
+	return f.parked, f.err
 }
 
 func (f *fakeConvWrites) Delete(ctx context.Context, id string) error {
@@ -177,6 +178,50 @@ func TestRenameConversation(t *testing.T) {
 // The picker's reasoning effort and upstream pin are the room's to keep: a
 // PATCH carries them without a title or a model, "default" and "" return them
 // to the model's own, and an effort that is no word of the vocabulary is a 400.
+// A pick taken while the room works is answered 202 with the object that says
+// what waits: the status never claims the pick is applied, and the room reads
+// the same object back after a reload.
+func TestPatchAnswers202WithThePendingPick(t *testing.T) {
+	fcw := &fakeConvWrites{parked: true}
+	fc := &fakeConversations{
+		infos: []drepo.ConversationInfo{mkInfo("c_1")},
+		pending: map[string]drepo.PendingSelection{"c_1": {
+			AgentID: "dewey", AgentModel: "swe-2-1", AcceptedAt: time.Now().UTC(),
+			Options: map[string]string{"mode": "accept-edits"},
+		}},
+	}
+	h := newTestHandler(t, Deps{Conversations: fc, ConversationWrites: fcw})
+	rec := doBody(t, h, "PATCH", "/api/conversations/c_1", "application/json", `{"agentId":"dewey","modelId":"swe-2-1"}`)
+	if rec.Code != 202 {
+		t.Fatalf("want 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	doc := decodeBody(t, rec)
+	pending, ok := doc["pending"].(map[string]any)
+	if !ok {
+		t.Fatalf("a 202 must carry the pending object: %s", rec.Body.String())
+	}
+	if pending["agentId"] != "dewey" || pending["modelId"] != "swe-2-1" {
+		t.Fatalf("pending = %v", pending)
+	}
+	if pending["acceptedAt"] == nil {
+		t.Fatal("a pending object names when it was taken")
+	}
+	opts, _ := pending["options"].([]any)
+	if len(opts) != 1 || opts[0].(map[string]any)["id"] != "mode" || opts[0].(map[string]any)["value"] != "accept-edits" {
+		t.Fatalf("pending options = %v", pending["options"])
+	}
+	// The room projection carries the same object, so the line survives a reload.
+	rec = do(t, h, "GET", "/api/conversations/c_1", "", "")
+	if got, ok := decodeBody(t, rec)["pending"].(map[string]any); !ok || got["agentId"] != "dewey" {
+		t.Fatalf("detail pending = %v (%s)", got, rec.Body.String())
+	}
+	rec = do(t, h, "GET", "/api/conversations?limit=10", "", "")
+	item := decodeBody(t, rec)["data"].([]any)[0].(map[string]any)
+	if got, ok := item["pending"].(map[string]any); !ok || got["modelId"] != "swe-2-1" {
+		t.Fatalf("list item pending = %v", item)
+	}
+}
+
 func TestPatchConversationEffortAndUpstream(t *testing.T) {
 	fc := &fakeConversations{infos: []drepo.ConversationInfo{mkInfo("c_1")}}
 	fcw := &fakeConvWrites{}

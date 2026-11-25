@@ -1,0 +1,143 @@
+package job
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"slices"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	repo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+)
+
+// PendingOptionPicks checks a room's session-option picks against the catalog its
+// agent reports now, answering the ones it still offers and a reason for each one
+// it does not. One rule serves both moments: a pick is checked when it arrives
+// (where a refusal is the answer) and again when the turn it waited for starts
+// (where the turn must run anyway). A catalog that cannot be read is an error,
+// never "anything goes".
+func PendingOptionPicks(ctx context.Context, d Deps, conv *aggregate.Conversation, picks map[string]string) (kept map[string]string, dropped map[string]string, err error) {
+	kept = map[string]string{}
+	dropped = map[string]string{}
+	if len(picks) == 0 {
+		return kept, dropped, nil
+	}
+	if conv.AgentID() == "" {
+		for id := range picks {
+			dropped[id] = "the room runs no agent"
+		}
+		return kept, dropped, nil
+	}
+	if d.Agents == nil || d.AgentRuntime == nil {
+		return nil, nil, apperror.New(503, "agent options are unavailable", nil)
+	}
+	agent, err := d.Agents.Load(ctx, conv.AgentID())
+	if err != nil {
+		if apperror.As(err).StatusCode() == apperror.StatusNotFound {
+			for id := range picks {
+				dropped[id] = "the agent is gone"
+			}
+			return kept, dropped, nil
+		}
+		return nil, nil, err
+	}
+	opts, err := d.AgentRuntime.Options(ctx, agent, conv.ID())
+	if err != nil {
+		return nil, nil, apperror.New(503, "agent options are unavailable", err)
+	}
+	// An option the agent will offer later is still a pick it knows: the stored
+	// catalog is the memory that keeps a deferred pick alive until it
+	// materializes, exactly as it does at accept time.
+	var stored []dservice.AgentOption
+	if d.AgentCatalog != nil {
+		if cat, err := d.AgentCatalog.Catalog(ctx, conv.AgentID()); err == nil {
+			stored = cat.Options
+		}
+	}
+	ids := make([]string, 0, len(picks))
+	for id := range picks {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		value := picks[id]
+		i := slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == id })
+		j := slices.IndexFunc(stored, func(o dservice.AgentOption) bool { return o.ID == id })
+		switch {
+		case i >= 0 && value != "" && !opts[i].Offers(value):
+			dropped[id] = fmt.Sprintf("option %q does not offer %q", id, value)
+		case i < 0 && j < 0:
+			dropped[id] = fmt.Sprintf("the agent offers no option %q", id)
+		case i < 0 && value != "" && !stored[j].Offers(value):
+			dropped[id] = fmt.Sprintf("option %q does not offer %q", id, value)
+		default:
+			kept[id] = value
+		}
+	}
+	return kept, dropped, nil
+}
+
+// ApplyPendingSelection folds a room's parked pick into the conversation a turn
+// just loaded: the runtime binding first (a turn runs on it), then effort and
+// upstream, then the session-option picks. Every part is checked again here —
+// the agent may have been upgraded, deleted, or narrowed between the pick and
+// this turn — and a part that no longer holds is dropped with a notice instead
+// of failing the turn. A room whose pick is stale must still answer its owner.
+func ApplyPendingSelection(ctx context.Context, d Deps, conv *aggregate.Conversation, sel repo.PendingSelection, onEvent event.TurnEventHandler) {
+	notice := func(text string) {
+		slog.Warn("pending selection dropped", "conversation", conv.ID(), "why", text)
+		if onEvent != nil {
+			onEvent(event.NewNoticeEvent(enum.NoticeInfo, "Pick not applied", text))
+		}
+	}
+	if sel.AgentID != "" || sel.ProviderID != "" || sel.ModelID != "" {
+		b := RuntimeBinding{AgentID: sel.AgentID, AgentModel: sel.AgentModel, ProviderID: sel.ProviderID, ModelID: sel.ModelID}
+		if err := BindRuntime(ctx, d, conv, b); err != nil {
+			notice("the runtime you picked is no longer available: " + userReason(err))
+		}
+	}
+	if sel.Effort != nil {
+		conv.SetEffort(*sel.Effort)
+	}
+	if sel.Upstream != nil {
+		conv.SetUpstream(*sel.Upstream)
+	}
+	if len(sel.Options) > 0 {
+		kept, dropped, err := PendingOptionPicks(ctx, d, conv, sel.Options)
+		if err != nil {
+			notice(userReason(err))
+			return
+		}
+		ids := make([]string, 0, len(kept))
+		for id := range kept {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		for _, id := range ids {
+			if err := conv.SetAgentOption(id, kept[id]); err != nil {
+				notice(fmt.Sprintf("option %q: %v", id, err))
+			}
+		}
+		droppedIDs := make([]string, 0, len(dropped))
+		for id := range dropped {
+			droppedIDs = append(droppedIDs, id)
+		}
+		slices.Sort(droppedIDs)
+		for _, id := range droppedIDs {
+			notice(dropped[id])
+		}
+	}
+}
+
+// userReason is the public half of an app error — what a notice may say without
+// leaking a cause.
+func userReason(err error) string {
+	if e := apperror.As(err); e != nil && e.Error() != "" {
+		return e.Error()
+	}
+	return err.Error()
+}

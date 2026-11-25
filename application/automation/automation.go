@@ -33,7 +33,7 @@ type Runner interface {
 // Rooms is what runs read and change on threads.
 type Rooms interface {
 	Info(ctx context.Context, id string) (drepo.ConversationInfo, error)
-	Annotate(ctx context.Context, convID string, a appconversation.Annotation) error
+	Annotate(ctx context.Context, convID string, a appconversation.Annotation) (bool, error)
 }
 
 // Chats sends to chat channels. *appchannel.App satisfies it.
@@ -562,7 +562,7 @@ func (a *App) launch(ctx context.Context, au aggregate.Automation, run *entity.A
 	}
 	if fresh {
 		title := "Automation · " + au.Name()
-		_ = a.rooms.Annotate(context.Background(), convID, appconversation.Annotation{Title: &title})
+		_, _ = a.rooms.Annotate(context.Background(), convID, appconversation.Annotation{Title: &title})
 	}
 	switch {
 	case err == nil:

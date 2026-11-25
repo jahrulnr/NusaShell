@@ -65,6 +65,9 @@ type Options struct {
 	// Uploads keeps the pictures and sounds an agent sends inline in its
 	// reply; nil drops them.
 	Uploads drepo.Uploads
+	// Catalog persists each agent's last seen offered surface; nil leaves
+	// the picker with only the live session and the probe cache.
+	Catalog drepo.AgentCatalogStore
 }
 
 // Runtime is the ACP-backed AgentRuntime.
@@ -124,6 +127,9 @@ type proc struct {
 	mu       sync.Mutex
 	sessions map[string]*session // by ACP session id
 	dead     bool
+	// caps is the agent's initialize-time capabilities, marshaled once —
+	// part of the catalog record, unchanged across sessions.
+	caps json.RawMessage
 	// busy counts the operations in flight on the process, and lastUse is
 	// when one last began or ended; together they say when it is idle.
 	busy    int
@@ -164,6 +170,11 @@ type session struct {
 	// cannot roll the session back.
 	configSeq uint64
 	modesSeq  uint64
+	// catalogModels and catalogCurrent are the session's model block kept
+	// for catalog writes: verbatim ids from models.availableModels when the
+	// agent reports it, else the config-options' own list.
+	catalogModels  []dservice.AgentModel
+	catalogCurrent string
 	// modelSet records whether a model pick was set on this session since
 	// it opened — as opposed to the value it arrived with. It gates the
 	// one-time list refresh below: a session resumed onto a model it never
@@ -232,6 +243,11 @@ func (r *Runtime) ensureProc(ctx context.Context, a *aggregate.Agent) (*proc, er
 	p := &proc{agentID: a.ID(), fingerprint: fp, autoStart: a.AutoStart(), lastUse: time.Now(),
 		sessions: map[string]*session{}, early: map[string][]earlyUpdate{}}
 	caps := acp.ClientCapabilities{}
+	// The only advertised flag: boolean config options (codex fast-mode gates
+	// on it). Everything else stays off — fs/terminal are dead surface on
+	// codex, elicitation waits for its own contract. Dropping this line
+	// reverts the handshake to no capabilities at all.
+	caps.Session.ConfigOptions = &acp.SessionConfigOptionsCapabilities{Boolean: &struct{}{}}
 	client, err := acp.Start(ctx, acp.ClientConfig{
 		Command:      a.Command(),
 		Args:         a.Args(),
@@ -248,6 +264,9 @@ func (r *Runtime) ensureProc(ctx context.Context, a *aggregate.Agent) (*proc, er
 		return nil, apperror.New(502, "agent failed to start", err)
 	}
 	p.client = client
+	if raw, err := json.Marshal(client.Capabilities().AgentCapabilities); err == nil {
+		p.caps = raw
+	}
 	r.mu.Lock()
 	st := r.statusLocked(a.ID())
 	st.lastErr, st.authNeeded = "", false
@@ -452,8 +471,9 @@ func (r *Runtime) ensureSession(ctx context.Context, p *proc, conv *aggregate.Co
 	if state.Modes != nil {
 		modesSeq = state.WireSeq
 	}
+	catalogModels, catalogCurrent := sessionCatalogModels(&state)
 	s = &session{convID: conv.ID(), acpID: state.SessionID, proc: p, folders: folders, tools: tools, configs: state.ConfigOptions, modes: state.Modes,
-		configSeq: configSeq, modesSeq: modesSeq,
+		configSeq: configSeq, modesSeq: modesSeq, catalogModels: catalogModels, catalogCurrent: catalogCurrent,
 		instructions: instructions, preamble: preamble{recap: !restored, instructions: !takesSystemPrompt && (!restored || replaced)}}
 	p.mu.Lock()
 	// Notifications and requests are routed by session id, so an agent that
@@ -474,6 +494,7 @@ func (r *Runtime) ensureSession(ctx context.Context, p *proc, conv *aggregate.Co
 	for _, e := range early {
 		h.OnNotification("session/update", s.acpID, e.raw, e.seq)
 	}
+	r.writeCatalog(s)
 	return s, opened{fresh: !restored, recovered: stored != "" && !restored}, nil
 }
 
@@ -668,6 +689,43 @@ func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent e
 	return nil
 }
 
+// sessionCatalogModels reads the session's model block for the catalog:
+// verbatim availableModels/currentModelId when the agent reports the field,
+// else the model option's own list — the only model surface some agents
+// (the fake) expose.
+func sessionCatalogModels(state *acp.SessionState) ([]dservice.AgentModel, string) {
+	if state.Models != nil {
+		models := make([]dservice.AgentModel, 0, len(state.Models.AvailableModels))
+		for _, m := range state.Models.AvailableModels {
+			models = append(models, dservice.AgentModel{ID: m.ModelID, Name: m.Name, Current: m.ModelID == state.Models.CurrentModelID})
+		}
+		return models, state.Models.CurrentModelID
+	}
+	_, current, models := modelOption(state.ConfigOptions)
+	return models, current
+}
+
+// writeCatalog records the offered surface this session last reported —
+// what B-033 loses on every restart. A store failure is logged, never
+// fatal: the session keeps its in-memory list either way.
+func (r *Runtime) writeCatalog(s *session) {
+	if r.opts.Catalog == nil {
+		return
+	}
+	s.mu.Lock()
+	cat := drepo.AgentCatalog{
+		Options:      sessionOptions(s.configs, s.modes),
+		Models:       slices.Clone(s.catalogModels),
+		CurrentModel: s.catalogCurrent,
+		Caps:         s.proc.caps,
+		ProbedAt:     time.Now(),
+	}
+	s.mu.Unlock()
+	if err := r.opts.Catalog.SaveCatalog(context.Background(), s.proc.agentID, cat); err != nil {
+		r.log.Warn("the agent catalog could not be saved", "agent", s.proc.agentID, "error", err)
+	}
+}
+
 // selectModel switches the session to model when the agent offers it and
 // the session runs another one.
 func (r *Runtime) selectModel(ctx context.Context, s *session, model string) error {
@@ -704,6 +762,7 @@ func (r *Runtime) selectModel(ctx context.Context, s *session, model string) err
 			s.configSeq = state.WireSeq
 		}
 		s.mu.Unlock()
+		r.writeCatalog(s)
 		return nil
 	}
 	if !slices.ContainsFunc(models, func(m dservice.AgentModel) bool { return m.ID == model }) {
@@ -720,6 +779,7 @@ func (r *Runtime) selectModel(ctx context.Context, s *session, model string) err
 		s.configSeq = state.WireSeq
 	}
 	s.mu.Unlock()
+	r.writeCatalog(s)
 	return nil
 }
 
@@ -756,6 +816,14 @@ func (r *Runtime) Models(ctx context.Context, a *aggregate.Agent) ([]dservice.Ag
 	r.mu.Lock()
 	r.models[a.ID()] = modelCache{fingerprint: fp, models: models, options: sessionOptions(state.ConfigOptions, state.Modes)}
 	r.mu.Unlock()
+	if r.opts.Catalog != nil {
+		catModels, catCurrent := sessionCatalogModels(&state)
+		cat := drepo.AgentCatalog{Options: sessionOptions(state.ConfigOptions, state.Modes), Models: catModels,
+			CurrentModel: catCurrent, Caps: p.caps, ProbedAt: time.Now()}
+		if err := r.opts.Catalog.SaveCatalog(ctx, a.ID(), cat); err != nil {
+			r.log.Warn("the agent catalog could not be saved", "agent", a.ID(), "error", err)
+		}
+	}
 	return slices.Clone(models), nil
 }
 
@@ -874,7 +942,7 @@ func (r *Runtime) attachmentBlocks(ctx context.Context, attachments []valueobjec
 		// before the link crosses: a file that changed since it was sent is
 		// refused with a note, never served as a different picture through the
 		// door the inline path does not use.
-		if err := wire.VerifyPinnedFile(a); err != nil {
+		if err := wire.VerifyPinnedFile(a, root); err != nil {
 			reason := "unreadable now"
 			if errors.Is(err, wire.ErrPinChanged) {
 				reason = "content changed since it was sent"
@@ -1346,11 +1414,16 @@ func (h *handler) OnNotification(method, sessionID string, raw json.RawMessage, 
 			s.mu.Lock()
 			// Newer wire position than every applied write only: an update
 			// dispatched before a response may still run after it.
+			updated := false
 			if seq > s.configSeq {
 				s.configs = u.ConfigOptions
 				s.configSeq = seq
+				updated = true
 			}
 			s.mu.Unlock()
+			if updated {
+				h.runtime.writeCatalog(s)
+			}
 		}
 		return
 	case "available_commands_update":
@@ -1558,6 +1631,19 @@ func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationI
 		defer s.mu.Unlock()
 		return sessionOptions(s.configs, s.modes), nil
 	}
+	// Stored before the probe: the catalog holds the list a real session
+	// last reported — a throwaway probe session can offer less (codex's
+	// default model never surfaces its effort option).
+	// Stored before the probe: the catalog holds the list a real session
+	// last reported — a throwaway probe session can offer less (codex's
+	// default model never surfaces its effort option).
+	if r.opts.Catalog != nil {
+		if cat, err := r.opts.Catalog.Catalog(ctx, a.ID()); err != nil {
+			r.log.Warn("the agent catalog could not be read", "agent", a.ID(), "error", err)
+		} else if len(cat.Options) > 0 {
+			return slices.Clone(cat.Options), nil
+		}
+	}
 	if _, err := r.Models(ctx, a); err != nil {
 		return nil, err
 	}
@@ -1680,6 +1766,7 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 			s.modesSeq = seq
 		}
 		s.mu.Unlock()
+		r.writeCatalog(s)
 		return optionApplied, nil
 	}
 	var v any = value
@@ -1695,10 +1782,14 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 		s.modelSet = true
 	}
 	if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
-		s.configs = state.ConfigOptions
+		// A response names what the write changed; merging keeps the options it
+		// does not mention instead of narrowing the session's catalog to one
+		// entry (the bug that dropped a materialized effort from the list).
+		s.configs = mergeConfigOptions(s.configs, state.ConfigOptions)
 		s.configSeq = state.WireSeq
 	}
 	s.mu.Unlock()
+	r.writeCatalog(s)
 	return optionApplied, nil
 }
 

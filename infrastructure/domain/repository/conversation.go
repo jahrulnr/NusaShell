@@ -52,6 +52,29 @@ type ConversationInfo struct {
 	SealedSegments int
 }
 
+// PendingSelection is a room's runtime pick and session-option picks waiting for
+// the room's next turn: a selection is never applied mid-turn (a turn's runtime
+// is fixed when it starts), so the pick waits in its own file beside the record
+// and the next turn applies it before anything else runs. A turn's own Save
+// rewrites the whole record, which is why this cannot be a field there.
+//
+// One selection per room, last pick wins per field: a new runtime replaces the
+// other runtime's fields (an agent pick clears the provider pair and the
+// reverse), effort and upstream replace their own value, and options merge by
+// id — a later pick for the same option wins.
+type PendingSelection struct {
+	AgentID    string            `json:"agentId,omitempty"`
+	AgentModel string            `json:"agentModel,omitempty"`
+	ProviderID string            `json:"providerId,omitempty"`
+	ModelID    string            `json:"modelId,omitempty"`
+	Effort     *enum.Effort      `json:"effort,omitempty"`
+	Upstream   *string           `json:"upstream,omitempty"`
+	Options    map[string]string `json:"options,omitempty"`
+	// AcceptedAt is when the owner's latest pick was taken — the answer a 202
+	// carries, and what a surface shows a returning owner.
+	AcceptedAt time.Time `json:"acceptedAt,omitempty"`
+}
+
 // Conversation is the conversation store port. Ordering contract: Save
 // creates/upserts the record and must precede AppendMessage. Errors carry
 // the apperror contract — a missing convID surfaces as 404, distinct from
@@ -111,6 +134,19 @@ type Conversation interface {
 	// era; later segments and the old active tail are deleted. 404 when the
 	// id is nowhere in history, 400 when it belongs to a non-user message.
 	RewriteFrom(ctx context.Context, convID, msgID, content string) error
+
+	// SavePendingSelection parks the room's runtime and session-option picks
+	// for its next turn, merging with whatever already waits there: the last
+	// pick wins per field, and a new runtime replaces the other one's fields.
+	// It must not be applied to the record now — the turn already running owns
+	// that save, and the pick would be lost or halfway applied.
+	SavePendingSelection(ctx context.Context, convID string, sel PendingSelection) error
+
+	// PendingSelection reads what waits, reporting false when nothing does.
+	PendingSelection(ctx context.Context, convID string) (PendingSelection, bool, error)
+
+	// ClearPendingSelection drops it — called once a turn applied it and saved.
+	ClearPendingSelection(ctx context.Context, convID string) error
 
 	// Info returns the lightweight projection for one conversation.
 	Info(ctx context.Context, convID string) (ConversationInfo, error)

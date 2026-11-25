@@ -518,18 +518,29 @@ export function selection(r) {
   const p = state.prefs.lastModel || {};
   // A room carries its own model, effort, and upstream pin: they are stored
   // with it, so they are what the picker shows after a reload or a restart.
+  // A pick parked on the record (pending) applies to the next turn — it is
+  // stored, so it is the selection the picker shows, ahead of the binding
+  // the running turn still uses.
+  const pend = r.info?.pending;
   const bound = r.info?.agentId ? { agentId: r.info.agentId, modelId: r.info.modelId }
     : r.info?.providerId ? { providerId: r.info.providerId, modelId: r.info.modelId, effort: r.info.effort, upstream: r.info.upstream } : null;
+  const parked = pend && (pend.agentId ? { agentId: pend.agentId, modelId: pend.modelId }
+    : pend.providerId ? { providerId: pend.providerId, modelId: pend.modelId } : null);
+  const stored = (parked || bound) && {
+    ...(parked || bound),
+    effort: pend?.effort ?? (parked || bound).effort,
+    upstream: pend?.upstream ?? (parked || bound).upstream,
+  };
   const t = !r.id && state.threadDefault;
   const fallback = t?.agent ? { agentId: t.agent, modelId: t.model }
     : t?.provider && t?.model ? { providerId: t.provider, modelId: t.model, effort: t.effort || 'default' } : null;
-  const base = r.sel.providerId || r.sel.agentId ? r.sel : bound || fallback || p;
+  const base = r.sel.providerId || r.sel.agentId ? r.sel : stored || fallback || p;
   return {
     agentId: base.agentId || '',
     providerId: base.agentId ? '' : base.providerId || '',
     modelId: base.modelId || '',
-    effort: r.sel.effort ?? (bound ? bound.effort || 'default' : fallback ? (fallback.effort || 'default') : p.effort) ?? 'default',
-    upstream: r.sel.upstream ?? (bound ? bound.upstream || '' : fallback ? '' : p.upstream) ?? '',
+    effort: r.sel.effort ?? (stored ? stored.effort || 'default' : fallback ? (fallback.effort || 'default') : p.effort) ?? 'default',
+    upstream: r.sel.upstream ?? (stored ? stored.upstream || '' : fallback ? '' : p.upstream) ?? '',
     workspace: r.sel.workspace ?? r.info?.workspace ?? '',
   };
 }
@@ -550,19 +561,16 @@ export function setSelection(r, patch) {
     const s = selection(r);
     state.prefs = { ...state.prefs, lastModel: { agentId: s.agentId, providerId: s.providerId, modelId: s.modelId, effort: s.effort, upstream: s.upstream } };
     try { localStorage.setItem('nusashell.prefs', JSON.stringify(state.prefs)); } catch { /* ignore */ }
-    // A turn that is running is not changed by this, and the room's own
-    // worker is busy with it: a request to bind the room would wait out the
-    // whole turn and time out. The choice rides the next message, which binds
-    // the room when it runs; with none queued, the end of the turn binds it.
-    if (isBusy(r)) {
-      r.bindOnIdle = true;
-    } else {
-      fetchContext(r, { force: true });
-      // The room keeps what the picker shows (its model, effort, and
-      // upstream pin), so a turn started anywhere runs it and a reload shows
-      // it. A change to the effort alone leaves the model binding alone.
-      persistSelection(r, s, patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined);
-    }
+    // A turn that is running is not changed by this, and the meter still
+    // describes the model that is actually running — it refreshes when the
+    // turn settles. The bind itself is sent now: the room stores the pick
+    // and applies it to the next turn, so a pick left in this tab's memory
+    // cannot die with the tab.
+    if (!isBusy(r)) fetchContext(r, { force: true });
+    // The room keeps what the picker shows (its model, effort, and
+    // upstream pin), so a turn started anywhere runs it and a reload shows
+    // it. A change to the effort alone leaves the model binding alone.
+    persistSelection(r, s, patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined);
   }
   emit();
 }
@@ -638,11 +646,13 @@ export async function loadAgentOptions(r, { force = false } = {}) {
 }
 
 // sessionOptionValue is what both controls read: the room's stored pick, or —
-// for a thread that does not exist yet — the one staged for it.
+// for a thread that does not exist yet — the one staged for it. A pick parked
+// on the record (pending.options) applies to the next turn — it is stored, so
+// it is the value the controls show, ahead of the session's running one.
 export function sessionOptionValue(r, o) {
-  if (r.id) return o.current ?? '';
   const staged = agentOptionMap(r.sel.agentOptions);
-  return staged[o.id] ?? o.current ?? '';
+  const pend = agentOptionMap(r.info?.pending?.options);
+  return staged[o.id] ?? pend[o.id] ?? o.current ?? '';
 }
 
 // sessionModeName is the word the composer chip shows: the name of the value
@@ -663,10 +673,6 @@ export async function setSessionOption(r, optionId, value) {
   const o = r.agentOptions;
   const option = o.list.find((x) => x.id === optionId);
   if (!option) return 'missing';
-  // A turn holds this room's worker: a write queued behind it would be
-  // canceled by this request's own timeout before it ran, losing the change
-  // without a trace. Refusing here is the same answer, said now.
-  if (isBusy(r)) return 'busy';
   if (!r.id) {
     setSelection(r, { agentOptions: { ...agentOptionMap(r.sel.agentOptions), [optionId]: value } });
     return 'staged';
@@ -674,6 +680,9 @@ export async function setSessionOption(r, optionId, value) {
   try {
     const res = await api.setAgentOption(r.id, optionId, value);
     Object.assign(o, { status: 'ready', list: res.data || [], error: null, at: Date.now(), key: agentOptionsKey(r) });
+    // A pick taken while the room was busy waits in the record's pending:
+    // pull it so the controls name the stored value, not the running one.
+    loadInfo(r, { force: true }).catch(() => { /* the next read shows it */ });
     emit();
     return 'saved';
   } catch (e) {
@@ -703,8 +712,8 @@ let writes = 0;
 // what a stream of refreshes does all day. A different key is a change, and
 // the record is applied.
 const RECORD_FIELDS = ['title', 'projectId', 'pinned', 'memoryOff', 'label', 'providerId', 'modelId',
-  'agentId', 'effort', 'upstream', 'workspace', 'messageCount', 'activeTurnId', 'activeTurnKind'];
-const recordKey = (x) => (x ? RECORD_FIELDS.map((k) => x[k] ?? '').join('\u0000') : '');
+  'agentId', 'effort', 'upstream', 'workspace', 'messageCount', 'activeTurnId', 'activeTurnKind', 'pending'];
+const recordKey = (x) => (x ? RECORD_FIELDS.map((k) => (typeof x[k] === 'object' && x[k] !== null ? JSON.stringify(x[k]) : x[k]) ?? '').join('\u0000') : '');
 const sameRecords = (a, b) => !!a && !!b && recordKey(a) === recordKey(b);
 
 // applyRoomInfo stores a room's fresh record — the open room's info and every
@@ -747,7 +756,14 @@ async function persistSelection(r, s, runtime = true) {
     // The room carries the choice now, so the local override is spent:
     // dropping it lets the picker render the room's real binding, and a
     // change made from a chat shows up here instead of being masked.
-    r.sel = { agentId: undefined, providerId: undefined, modelId: undefined, effort: undefined, upstream: undefined };
+    // "Carries" is the record naming the pick now, or its pending naming it
+    // for the next turn — either way the DTO shows it, so the override goes.
+    // Neither naming it means the pick was stored somewhere the record does
+    // not say: keep showing it rather than snap back to the old binding.
+    const names = (x) => s.agentId
+      ? x?.agentId === s.agentId && (s.modelId ? x?.modelId === s.modelId : true)
+      : x?.providerId === s.providerId && x?.modelId === s.modelId;
+    if (names(r.info) || names(r.info?.pending)) r.sel = { agentId: undefined, providerId: undefined, modelId: undefined, effort: undefined, upstream: undefined };
   } catch (err) {
     // The picker had already shown the choice; put it back to the room's
     // binding rather than leave a selection the server never took.
@@ -918,8 +934,6 @@ function sendNow(r, message) {
     payload: turnPayload(r, extra),
   }, text);
   if (!requestId) return false;
-  // The message carries the picker's choice and binds the room when it runs.
-  r.bindOnIdle = false;
   r.pendingOpen = { requestId, text, references: message.references || [], files: message.files || [], recording: message.recording || null, kind: 'send', queued: message.id ? message : null };
   r.failed = null;
   emit();
@@ -1518,14 +1532,7 @@ async function onTerminal(r, f) {
   emit();
   // Drain only after a clean finish with readable history; otherwise keep Send next available.
   r.held = r.queue.length > 0 && (f.type === 'turn.failed' || r.hist.status !== 'ready');
-  if (!r.held && r.queue.length) {
-    resumeQueue(r);
-  } else if (r.bindOnIdle) {
-    // A model picked while the turn ran binds the room now that its worker
-    // is free, and nothing is about to occupy it.
-    r.bindOnIdle = false;
-    persistSelection(r, selection(r));
-  }
+  if (!r.held && r.queue.length) resumeQueue(r);
 }
 
 export function resumeQueue(r) {

@@ -257,9 +257,9 @@ const patches = () => calls.filter((c) => c.method === 'PATCH');
 const contextReads = () => calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/context'));
 
 // openBusyThread opens c_1 and starts a turn on it, leaving the turn running.
-async function openBusyThread(extra = {}) {
+async function openBusyThread(extra = {}, info = {}) {
   state.prefs = { ...state.prefs, lastModel: pick };
-  serveThread('c_1', { messages: [{ id: 'm1', role: 'user', content: 'first' }] }, {
+  serveThread('c_1', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info }, {
     'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', title: 'Thread', ...call.body }),
     'GET /api/context': { estimate: 50_000, total: 1_000_000 },
     ...extra,
@@ -275,26 +275,87 @@ async function openBusyThread(extra = {}) {
   return { r, cmd };
 }
 
-test('a model picked while a turn runs does not ask the busy room to bind it', async () => {
-  const { r, cmd } = await openBusyThread();
+test('a model picked while a turn runs binds the room at once', async () => {
+  const { r } = await openBusyThread();
   calls.length = 0;
   chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
   await sleep(40);
-  // The room's worker is busy with the turn: a bind would wait it out and
-  // time out, and the context meter would measure a model that is not running.
-  assert.equal(patches().length, 0);
+  // The pick is sent now — the room stores it and applies it to the next
+  // turn. The meter still describes the model that is running, so it waits.
+  assert.equal(patches().length, 1);
+  assert.deepEqual(patches()[0].body, { providerId: 'p2', modelId: 'm2', effort: 'default', upstream: '' });
   assert.equal(contextReads().length, 0);
   assert.equal(state.toasts.filter((t) => t.kind === 'error').length, 0);
   assert.deepEqual([chat.selection(r).providerId, chat.selection(r).modelId], ['p2', 'm2']);
-
-  // When the turn ends and nothing follows, the choice binds the room.
-  terminal(cmd, 'turn.completed', 'c_1', { userMessagePersisted: true }, 't2');
-  await sleep(60);
-  assert.equal(patches().length, 1);
-  assert.deepEqual(patches()[0].body, { providerId: 'p2', modelId: 'm2', effort: 'default', upstream: '' });
 });
 
-test('a message queued behind the turn carries the choice instead of a separate bind', async () => {
+test('a pick stored while busy shows from the record\'s pending', async () => {
+  // The room accepted the bind as pending: its answer still binds the old
+  // model (it runs now) and carries the pick under `pending` (next turn).
+  // The picker shows the pending value — stored, so it survives a reload —
+  // and the running binding stays readable on the record.
+  const parked = { providerId: 'p2', modelId: 'm2', acceptedAt: '2026-11-25T23:15:04Z' };
+  const info = { providerId: 'p', modelId: 'm' };
+  const { r } = await openBusyThread({
+    'PATCH /api/conversations/c_1': () => {
+      info.pending = parked; // the record now carries the pick for the next turn
+      return { id: 'c_1', title: 'Thread', ...info };
+    },
+  }, info);
+  calls.length = 0;
+  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  await sleep(40);
+  assert.equal(patches().length, 1);
+  assert.equal(r.info.providerId, 'p', 'the record still names what runs now');
+  assert.equal(r.info.pending.providerId, 'p2');
+  assert.deepEqual([chat.selection(r).providerId, chat.selection(r).modelId], ['p2', 'm2'], 'the pending pick is what shows');
+  // The override is spent: a reload reads the same pending value back.
+  assert.equal(r.sel.providerId, undefined);
+  await chat.loadInfo(r, { force: true });
+  assert.deepEqual([chat.selection(r).providerId, chat.selection(r).modelId], ['p2', 'm2'], 'a reload still shows the pending pick');
+});
+
+test('pending drained by the next turn drops the marker back to the running value', async () => {
+  // When the record no longer carries pending — the pick ran — the display
+  // follows the binding the record names, without a reload.
+  const parked = { providerId: 'p2', modelId: 'm2', acceptedAt: '2026-11-25T23:15:04Z' };
+  const info = { providerId: 'p', modelId: 'm' };
+  const { r } = await openBusyThread({
+    'PATCH /api/conversations/c_1': () => {
+      info.pending = parked;
+      return { id: 'c_1', title: 'Thread', ...info };
+    },
+  }, info);
+  calls.length = 0;
+  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  await sleep(40);
+  assert.equal(r.info.pending.providerId, 'p2');
+  // The record drains: the pick is the binding now, and a room change makes
+  // the open room read again.
+  delete info.pending;
+  info.providerId = 'p2';
+  info.modelId = 'm2';
+  ws.serve({ type: 'conversation.updated', conversationId: 'c_1', payload: { state: 'option' } });
+  await sleep(60);
+  assert.equal(r.info.pending, undefined, 'the drained record carries no pending');
+  assert.equal(r.info.providerId, 'p2');
+  assert.deepEqual([chat.selection(r).providerId, chat.selection(r).modelId], ['p2', 'm2'], 'now the running value');
+});
+
+test('a bind refused while busy puts the room value back', async () => {
+  const { r } = await openBusyThread({
+    'PATCH /api/conversations/c_1': () => [409, { code: 'conflict', detail: 'that model is not offered' }],
+  }, { providerId: 'p', modelId: 'm' });
+  calls.length = 0;
+  state.toasts = [];
+  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  await sleep(40);
+  assert.equal(patches().length, 1);
+  assert.match(state.toasts.at(-1)?.message || '', /Could not save this thread's model/);
+  assert.deepEqual([chat.selection(r).providerId, chat.selection(r).modelId], ['p', 'm'], 'the picker shows the room\'s binding again');
+});
+
+test('a message queued behind the turn still carries the choice, beside the bind', async () => {
   const { r, cmd } = await openBusyThread();
   calls.length = 0;
   chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
@@ -304,7 +365,7 @@ test('a message queued behind the turn carries the choice instead of a separate 
   const next = sentTurns().at(-1);
   assert.equal(next.payload.content, 'next');
   assert.deepEqual([next.payload.providerId, next.payload.modelId], ['p2', 'm2']);
-  assert.equal(patches().length, 0, 'the next turn binds the room when it runs; a bind posted beside it would queue behind it');
+  assert.equal(patches().length, 1, 'the pick binds at once; the queued turn carries it too');
 });
 
 test('the context meter follows the stream, keeps its size between turns, and asks again after a fold', async () => {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/jahrulnr/nusashell/infrastructure/service/agent/acp"
 
@@ -55,6 +56,61 @@ func modelOption(raw json.RawMessage) (id, current string, models []dservice.Age
 		return o.ID, current, models
 	}
 	return "", "", nil
+}
+
+// mergeConfigOptions folds a set_config_option response into the session's
+// catalog. A response is not the offered list — it names what the write changed,
+// and an agent may answer with only that entry. An option the response omits
+// keeps what the session knew; an entry that carries none of its defining fields
+// (name, type, choices, current value) says nothing and keeps the stored one too.
+func mergeConfigOptions(stored, update json.RawMessage) json.RawMessage {
+	var base, next []map[string]json.RawMessage
+	if json.Unmarshal(update, &next) != nil {
+		return stored
+	}
+	_ = json.Unmarshal(stored, &base)
+	index := map[string]int{}
+	for i, o := range base {
+		var id string
+		_ = json.Unmarshal(o["id"], &id)
+		index[id] = i
+	}
+	for _, o := range next {
+		var id string
+		_ = json.Unmarshal(o["id"], &id)
+		if id == "" {
+			continue
+		}
+		if !carriesOption(o) {
+			continue
+		}
+		if i, ok := index[id]; ok {
+			base[i] = o
+		} else {
+			base = append(base, o)
+		}
+	}
+	out, err := json.Marshal(base)
+	if err != nil {
+		return stored
+	}
+	return out
+}
+
+// carriesOption reports whether an option entry defines anything — a bare id is
+// not a definition, and must not erase what the session already knows.
+func carriesOption(o map[string]json.RawMessage) bool {
+	for _, key := range []string{"name", "type", "options", "currentValue"} {
+		raw, ok := o[key]
+		if !ok {
+			continue
+		}
+		trimmed := strings.TrimSpace(string(raw))
+		if trimmed != "" && trimmed != "null" && trimmed != `""` && trimmed != "[]" {
+			return true
+		}
+	}
+	return false
 }
 
 // legacyModeID is the synthetic option id for agents that offer modes

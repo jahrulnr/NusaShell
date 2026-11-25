@@ -17,9 +17,11 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
+	repoagent "github.com/jahrulnr/nusashell/infrastructure/repository/agent"
 	repoworkspace "github.com/jahrulnr/nusashell/infrastructure/repository/workspace"
 	"github.com/jahrulnr/nusashell/infrastructure/service/agent/acp"
 )
@@ -1017,5 +1019,212 @@ func TestDeferredPicksRetryWithinTheBound(t *testing.T) {
 		if strings.Contains(raw, tc.line) != tc.want {
 			t.Fatalf("trace %q %v, want %v — full trace:\n%s", tc.line, !tc.want, tc.want, raw)
 		}
+	}
+}
+
+// setupCatalog is setup with a persisted catalog store wired in — the B-033
+// surface that survives a restart.
+func setupCatalog(t *testing.T, text string, store drepo.AgentCatalogStore) (*Runtime, dservice.AgentPrompt) {
+	t.Helper()
+	a, err := aggregate.NewAgent("fake", "Fake", buildFake(t), nil, enum.ApprovalPolicyAsk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv, err := aggregate.NewConversation("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conv.BindAgent(a.ID()); err != nil {
+		t.Fatal(err)
+	}
+	user, err := entity.NewMessage(enum.RoleUser, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv.Append(user)
+	rt := New(Options{ClientName: "nusashell-test", ClientVersion: "0", Catalog: store})
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+	return rt, dservice.AgentPrompt{Agent: &a, Conversation: conv, Workspace: t.TempDir(), Input: user}
+}
+
+// B-033: a live session writes the catalog; a runtime started after it —
+// the restart — serves the stored surface instead of falling to the probe.
+func TestCatalogSurvivesARestart(t *testing.T) {
+	dir := t.TempDir()
+	store := repoagent.New(dir, nil)
+	rt, in := setupCatalog(t, "hello", store)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in)
+
+	cat, err := store.Catalog(ctx, "fake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cat.Options) == 0 || cat.ProbedAt.IsZero() {
+		t.Fatalf("the live session wrote no catalog: %+v", cat)
+	}
+	if len(cat.Caps) == 0 {
+		t.Fatal("the agent's capabilities were not recorded")
+	}
+
+	// A "restart": a new runtime on the same store has no live session.
+	rt2 := New(Options{ClientName: "nusashell-test", ClientVersion: "0", Catalog: store})
+	t.Cleanup(func() { _ = rt2.Shutdown(context.Background()) })
+	opts, err := rt2.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != len(cat.Options) {
+		t.Fatalf("after restart Options() = %+v, want the stored catalog %+v", opts, cat.Options)
+	}
+}
+
+// The stored catalog beats the probe: what a real session last reported is
+// fresher than a throwaway session's list — seed a marker the fake never
+// offers and the picker must show it, not the probe's list.
+func TestStoredCatalogWinsOverTheProbe(t *testing.T) {
+	store := repoagent.New(t.TempDir(), nil)
+	marker := drepo.AgentCatalog{Options: []dservice.AgentOption{
+		{ID: "catalog-marker", Name: "Marker", Type: "boolean", Current: "true"},
+	}, ProbedAt: time.Now()}
+	if err := store.SaveCatalog(context.Background(), "fake", marker); err != nil {
+		t.Fatal(err)
+	}
+	rt, in := setupCatalog(t, "hello", store)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != 1 || opts[0].ID != "catalog-marker" {
+		t.Fatalf("Options() = %+v, want the stored marker — the probe leaked through", opts)
+	}
+}
+
+// A config_option_update is the newest seen surface: the catalog follows it.
+func TestConfigUpdateRewritesTheCatalog(t *testing.T) {
+	dir := t.TempDir()
+	store := repoagent.New(dir, nil)
+	rt, in := setupCatalog(t, "hello", store)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in)
+	s := rt.sessions[in.Conversation.ID()]
+	if s == nil {
+		t.Fatal("no live session")
+	}
+	h := &handler{runtime: rt, proc: s.proc}
+	fresh := json.RawMessage(`{"sessionUpdate":"config_option_update","configOptions":[` +
+		`{"id":"effort","name":"Effort","type":"select","currentValue":"low","options":[{"value":"low"},{"value":"high"}]}]}`)
+	h.OnNotification("session/update", s.acpID, fresh, s.configSeq+1)
+	cat, err := store.Catalog(ctx, "fake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cat.Options) != 1 || cat.Options[0].ID != "effort" {
+		t.Fatalf("catalog after the update = %+v, want just effort", cat.Options)
+	}
+}
+
+// The catalog file holds wire values only — nothing from the launch
+// environment, no secret references.
+func TestCatalogFileCarriesNoSecrets(t *testing.T) {
+	dir := t.TempDir()
+	store := repoagent.New(dir, nil)
+	rt, in := setupCatalog(t, "hello", store)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in)
+	raw, err := os.ReadFile(filepath.Join(dir, "fake.catalog.json"))
+	if err != nil {
+		t.Fatalf("no catalog file: %v", err)
+	}
+	for _, leak := range []string{"secret:", "env:", "FAKE_ACP_", "TRACE"} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("catalog file contains %q:\n%s", leak, raw)
+		}
+	}
+}
+
+// The handshake advertises exactly one capability: session.configOptions.
+// boolean — the gate codex's fast-mode option reads. fs and terminal stay
+// off (dead surface on codex), elicitation stays off (no contract yet).
+// The fake agent dumps what it received, so this proves the wire shape.
+func TestClientCapsAdvertiseOnlyBooleanConfigOptions(t *testing.T) {
+	rt, in := setup(t, "hello")
+	dump := filepath.Join(t.TempDir(), "caps.json")
+	traceTo(t, in.Agent, map[string]string{"FAKE_ACP_CAPS_DUMP": dump})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatalf("the agent saw no clientCapabilities: %v", err)
+	}
+	var caps map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &caps); err != nil {
+		t.Fatal(err)
+	}
+	if len(caps) != 4 || caps["fs"] == nil || caps["terminal"] == nil || caps["session"] == nil || caps["auth"] == nil {
+		t.Fatalf("clientCapabilities keys = %s, want exactly fs/terminal/session/auth", raw)
+	}
+	var sess map[string]json.RawMessage
+	if err := json.Unmarshal(caps["session"], &sess); err != nil || len(sess) != 1 {
+		t.Fatalf("session caps = %s, want only configOptions", caps["session"])
+	}
+	var co map[string]json.RawMessage
+	if err := json.Unmarshal(sess["configOptions"], &co); err != nil || len(co) != 1 || string(co["boolean"]) != "{}" {
+		t.Fatalf("configOptions caps = %s, want only boolean:{}", sess["configOptions"])
+	}
+	if string(caps["terminal"]) != "false" {
+		t.Fatalf("terminal = %s, want unadvertised", caps["terminal"])
+	}
+	var fs, auth map[string]bool
+	if err := json.Unmarshal(caps["fs"], &fs); err != nil || fs["readTextFile"] || fs["writeTextFile"] {
+		t.Fatalf("fs = %s, want both readers off", caps["fs"])
+	}
+	if err := json.Unmarshal(caps["auth"], &auth); err != nil || auth["terminal"] {
+		t.Fatalf("auth = %s, want terminal off", caps["auth"])
+	}
+}
+
+// The gate end to end, the way codex's fast-mode works: the fake agent
+// offers cap_bool only when the client advertised the boolean flag — and
+// since this client always does, the option shows, and a pick on it is
+// applied and stored like any other (B-031), while a non-boolean value is
+// refused.
+func TestBooleanOptionGatedOnTheAdvertisedCapability(t *testing.T) {
+	rt, in := setup(t, "hello")
+	traceTo(t, in.Agent, map[string]string{"FAKE_ACP_BOOL_WHEN_CAP": "1"})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == "cap_bool" })
+	if i < 0 {
+		t.Fatalf("the gated option never materialized: %+v", opts)
+	}
+	if opts[i].Type != "boolean" || opts[i].Current != "false" {
+		t.Fatalf("cap_bool = %+v, want boolean/current false", opts[i])
+	}
+	if err := rt.SetOption(ctx, in.Conversation.ID(), "cap_bool", "true"); err != nil {
+		t.Fatalf("a boolean pick was refused: %v", err)
+	}
+	opts, _ = rt.Options(ctx, in.Agent, in.Conversation.ID())
+	i = slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == "cap_bool" })
+	if i < 0 || opts[i].Current != "true" {
+		t.Fatalf("after the pick cap_bool = %+v, want current true", opts[i:])
+	}
+	if err := rt.SetOption(ctx, in.Conversation.ID(), "cap_bool", "maybe"); err == nil {
+		t.Fatal("a non-boolean value was taken")
 	}
 }

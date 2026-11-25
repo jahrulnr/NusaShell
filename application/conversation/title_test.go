@@ -66,7 +66,7 @@ func TestAutoTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	mine := "My name"
-	if err := app.Annotate(ctx, "c_two", Annotation{Title: &mine}); err != nil {
+	if _, err := app.Annotate(ctx, "c_two", Annotation{Title: &mine}); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.AutoTitle(ctx, "c_two"); err != nil || calls != 1 || title("c_two") != "My name" {

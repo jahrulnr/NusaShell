@@ -122,7 +122,7 @@ func (r *fakeRooms) History(_ context.Context, id string, _, _ int) ([]entity.Me
 	defer r.mu.Unlock()
 	return r.history[id], nil
 }
-func (r *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) error {
+func (r *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	info := r.infos[id]
@@ -130,7 +130,7 @@ func (r *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Ann
 		info.Title = *a.Title
 	}
 	r.infos[id] = info
-	return nil
+	return false, nil
 }
 func (r *fakeRooms) PendingApprovals(id string) []valueobject.ApprovalRequest {
 	r.mu.Lock()

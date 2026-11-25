@@ -73,6 +73,22 @@ func (app *ConversationApp) UseLiveTurns(fn func(convID string) bool) {
 	app.mu.Unlock()
 }
 
+// running reports whether the room's worker is executing anything — a turn, a
+// fold, a delete. A pick taken now would wait behind it, so it parks instead of
+// being applied.
+func (app *ConversationApp) running(convID string) bool {
+	app.mu.Lock()
+	w := app.workers[convID]
+	app.mu.Unlock()
+	if w == nil {
+		return false
+	}
+	// Only a turn forbids the change: a background job (a fold, a delete) does
+	// not fix a runtime, so a pick may still be applied while it runs.
+	turn, ok := w.Running().(interface{ IsTurn() bool })
+	return ok && turn.IsTurn()
+}
+
 // busy reports whether a transport turn is live in the room.
 func (app *ConversationApp) busy(convID string) bool {
 	app.mu.Lock()

@@ -50,7 +50,7 @@ func bindDeps(t *testing.T) (Deps, *aggregate.Conversation) {
 func TestBindRuntimeMovesBetweenRuntimes(t *testing.T) {
 	d, conv := bindDeps(t)
 
-	if err := d.bindRuntime(t.Context(), conv, RuntimeBinding{AgentID: "claude"}); err != nil {
+	if err := BindRuntime(t.Context(), d, conv, RuntimeBinding{AgentID: "claude"}); err != nil {
 		t.Fatal(err)
 	}
 	if conv.Runtime() != enum.RuntimeAgent || conv.AgentID() != "claude" {
@@ -59,7 +59,7 @@ func TestBindRuntimeMovesBetweenRuntimes(t *testing.T) {
 
 	// Naming a provider route releases the agent; the agent's session and
 	// options belong to it and must not survive the move.
-	if err := d.bindRuntime(t.Context(), conv, RuntimeBinding{ProviderID: "deepseek", ModelID: "deepseek-v4.1-flash"}); err != nil {
+	if err := BindRuntime(t.Context(), d, conv, RuntimeBinding{ProviderID: "deepseek", ModelID: "deepseek-v4.1-flash"}); err != nil {
 		t.Fatal(err)
 	}
 	if conv.Runtime() != enum.RuntimeModel {
@@ -73,7 +73,7 @@ func TestBindRuntimeMovesBetweenRuntimes(t *testing.T) {
 	}
 
 	// And back: an agent binding clears the provider pair it replaced.
-	if err := d.bindRuntime(t.Context(), conv, RuntimeBinding{AgentID: "claude", AgentModel: "opus"}); err != nil {
+	if err := BindRuntime(t.Context(), d, conv, RuntimeBinding{AgentID: "claude", AgentModel: "opus"}); err != nil {
 		t.Fatal(err)
 	}
 	if conv.Runtime() != enum.RuntimeAgent || conv.AgentID() != "claude" {
@@ -103,7 +103,7 @@ func TestBindRuntimeRefusesUnknownTargets(t *testing.T) {
 		{"empty binding", RuntimeBinding{}, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := d.bindRuntime(t.Context(), conv, tc.binding)
+			err := BindRuntime(t.Context(), d, conv, tc.binding)
 			if got := apperror.As(err).StatusCode(); got != tc.want {
 				t.Fatalf("status = %d (%v), want %d", got, err, tc.want)
 			}
@@ -123,7 +123,7 @@ func TestBindRuntimeRefusesAgentOutsideLocalEnvironment(t *testing.T) {
 	if err := conv.SetEnvironment(enum.Environment("docker")); err != nil {
 		t.Fatalf("environment %q: %v", "docker", err)
 	}
-	err := d.bindRuntime(t.Context(), conv, RuntimeBinding{AgentID: "claude"})
+	err := BindRuntime(t.Context(), d, conv, RuntimeBinding{AgentID: "claude"})
 	if got := apperror.As(err).StatusCode(); got != 400 {
 		t.Fatalf("status = %d (%v), want 400", got, err)
 	}

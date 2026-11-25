@@ -7,7 +7,7 @@
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore } from '../lib/store.js';
 import { api } from '../lib/api.js';
-import { selection, setSelection, loadProviders, loadAgents, loadAgentModels, isBusy, loadAgentOptions, sessionOptionValue, setSessionOption } from '../lib/chat.js';
+import { selection, setSelection, loadProviders, loadAgents, loadAgentModels, isBusy, loadAgentOptions, sessionOptionValue, setSessionOption, agentOptionMap } from '../lib/chat.js';
 import { Icon } from './icons.js';
 import { FolderBrowser } from './folders.js';
 import { cx, Popover, Spinner, ErrorBlock, Select, fmtTokens } from './ui.js';
@@ -59,10 +59,10 @@ export function ModelPicker({ room }) {
   // composer's chip reads: opening this panel only asks the shared loader, so
   // a pick made in either control shows in both.
   const agentOpts = room.agentOptions;
-  // A turn holds the room's worker until it ends: a pick now would be queued
-  // behind it and canceled by its own timeout, so the controls say when it
-  // will apply instead of taking a change they cannot deliver.
-  const readOnly = isBusy(room);
+  // A pick while a turn runs is stored and applies to the next one — the
+  // controls stay open and say so, instead of refusing a change the room
+  // can already accept.
+  const busy = isBusy(room);
   useEffect(() => {
     if (!open || !sel.agentId) return;
     loadAgentOptions(room);
@@ -102,12 +102,17 @@ export function ModelPicker({ room }) {
 
   const label = sel.agentId ? agentModelLabel(s, sel.agentId, sel.modelId) : cur ? (cur.name || cur.id) : sel.modelId || 'Choose model';
   const chosen = !!(sel.agentId || sel.modelId);
+  // The record's pending is the pick that applies to the next turn — the
+  // chip names it already, and this small marker says it is not running yet.
+  const pending = room.info?.pending;
+  const pendOpts = agentOptionMap(pending?.options);
   return html`<div class="relative min-w-0">
     <button type="button" onClick=${() => setOpen(!open)} aria-haspopup="dialog" aria-expanded=${open}
       class=${cx('flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] hover:bg-hover max-w-[44vw] sm:max-w-64', chosen ? 'text-fg' : 'text-warn')}>
       ${sel.agentId && html`<${Icon} name="bot" size=${14} class="text-faint shrink-0" />`}
       <span class="truncate">${label}</span>
       ${!sel.agentId && sel.effort && sel.effort !== 'default' && html`<span class="text-faint shrink-0">${sel.effort}</span>`}
+      ${(pending?.agentId || pending?.providerId) && html`<span class="text-faint shrink-0 text-[11px]">next turn</span>`}
       <${Icon} name="chevronDown" size=${14} class="text-faint" />
     </button>
     <${Popover} open=${open} onClose=${() => setOpen(false)} placement="top-end" label="Choose model" class="sm:w-[400px] flex flex-col">
@@ -182,18 +187,27 @@ export function ModelPicker({ room }) {
         ${agentOpts.status === 'ready' && !agentOpts.list.length && html`<p class="text-faint text-xs">This agent offers no session options.</p>`}
         ${agentOpts.list.length > 0 && html`<div class="grid grid-cols-2 gap-x-3 gap-y-2">
           ${agentOpts.list.map((o) => html`<label class="flex flex-col gap-1 min-w-0 only-of-type:col-span-full" key=${o.id}>
-            <span class="text-xs text-muted truncate" title=${o.description || o.name}>${o.name}</span>
-            ${o.type === 'boolean'
-              ? html`<${Select} dense label=${o.name} class="w-full" disabled=${readOnly} value=${sessionOptionValue(room, o)}
-                  options=${[{ value: 'true', text: 'On' }, { value: 'false', text: 'Off' }]}
-                  onChange=${(v) => setSessionOption(room, o.id, v)} />`
-              : html`<${Select} dense label=${o.name} class="w-full" search=${(o.choices || []).length > 8} disabled=${readOnly} value=${sessionOptionValue(room, o)}
-                  options=${(o.choices || []).map((c) => ({ value: c.value, text: c.name || c.value }))}
-                  onChange=${(v) => setSessionOption(room, o.id, v)} />`}
+            <span class="flex items-center gap-1.5 text-xs text-muted min-w-0" title=${o.description || o.name}>
+              <span class="truncate">${o.name}</span>
+              ${pendOpts[o.id] !== undefined && html`<span class="text-[11px] text-faint shrink-0">next turn</span>`}
+            </span>
+            ${o.deferred != null
+              // A stored pick the session does not offer: shown as itself,
+              // never as the active choice, and kept for when it appears.
+              ? html`<${Select} dense label=${o.name} class="w-full" disabled value=${o.deferred}
+                    options=${[{ value: o.deferred, text: o.deferred }]} />
+                  <span class="text-[11px] text-faint">Not offered — saved for when it is.</span>`
+              : o.type === 'boolean'
+                ? html`<${Select} dense label=${o.name} class="w-full" value=${sessionOptionValue(room, o)}
+                    options=${[{ value: 'true', text: 'On' }, { value: 'false', text: 'Off' }]}
+                    onChange=${(v) => setSessionOption(room, o.id, v)} />`
+                : html`<${Select} dense label=${o.name} class="w-full" search=${(o.choices || []).length > 8} value=${sessionOptionValue(room, o)}
+                    options=${(o.choices || []).map((c) => ({ value: c.value, text: c.name || c.value }))}
+                    onChange=${(v) => setSessionOption(room, o.id, v)} />`}
           </label>`)}
         </div>`}
-        ${agentOpts.list.length > 0 && html`<p class="text-[11px] text-faint">${readOnly
-          ? 'Applies when this turn ends.'
+        ${agentOpts.list.length > 0 && html`<p class="text-[11px] text-faint">${busy || Object.keys(pendOpts).length
+          ? 'Applies to the next turn.'
           : !room.id ? 'Applies to the thread this message starts.' : ''}</p>`}
       </div>`}
       <div class="shrink-0 sticky bottom-0 z-10 bg-raised flex border-t border-line">

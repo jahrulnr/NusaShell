@@ -6,7 +6,7 @@ import { useStore, setPref, toast, emit, state, askConfirm } from '../lib/store.
 import { api, errorText, setCsrf } from '../lib/api.js';
 import { loadProviders, navigate, deleteAllRooms } from '../lib/chat.js';
 import { useSettingsDoc, getPath } from '../lib/settings.js';
-import { API_STYLES, STYLE_SHORT } from '../lib/providers.js';
+import { API_STYLES, STYLE_SHORT, MODEL_TYPES, UNUSED_MODEL_TYPES } from '../lib/providers.js';
 import { Icon } from './icons.js';
 import { cx, Button, Checkbox, Dialog, Select, Toggle, ErrorBlock, Spinner, fmtTokens } from './ui.js';
 import { MenuButton } from './chat.js';
@@ -306,19 +306,6 @@ function AddModel({ models, onAdd }) {
 }
 
 const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-const MODEL_TYPES = [
-  { value: '', text: 'Not declared (shown in picker)' },
-  { value: 'text', text: 'Text / chat' },
-  { value: 'image', text: 'Image' },
-  { value: 'audio', text: 'Audio' },
-  { value: 'decision', text: 'Decision (fixed choices)' },
-  { value: 'realtime', text: 'Realtime (live session)' },
-  { value: 'embedding', text: 'Embedding' },
-  { value: 'rerank', text: 'Rerank' },
-  { value: 'speech', text: 'Speech (TTS)' },
-  { value: 'transcription', text: 'Transcription (STT)' },
-  { value: 'video', text: 'Video' },
-];
 
 // ModelRow: one catalog entry with an inline editor for the per-model
 // overrides the provider document carries (API style pin, defaults, limits).
@@ -363,7 +350,8 @@ function ModelRow({ model: m, providerStyle, onChange, onRemove }) {
       <label class="flex flex-col gap-1 sm:col-span-2">
         <span class="text-xs text-muted">Model type</span>
         <${Select} label="Model type" value=${m.modelType || ''} options=${MODEL_TYPES} onChange=${(v) => put('modelType', v)} />
-        <span class="text-xs text-faint">Imported from the provider's catalog when it declares one. Only text models are offered in the chat picker — every other type is hidden after you save.</span>
+        <span class="text-xs text-faint">Imported from the provider's catalog when it declares one. The type decides where a model can be used — a type no role uses yet appears in no picker.</span>
+        ${UNUSED_MODEL_TYPES.has(m.modelType) && html`<span class="text-xs text-faint">A model with this type stays out of every picker.</span>`}
       </label>
       <label class="flex flex-col gap-1">
         <span class="text-xs text-muted">Display name</span>

@@ -254,6 +254,14 @@ func (w *Worker) Dead() bool {
 	return w.dead
 }
 
+// Running answers the job executing right now, nil when the worker is between
+// jobs. A caller that cares what is running reads it from the job itself.
+func (w *Worker) Running() Job {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.running
+}
+
 // Idle reports whether nothing is running and the queue is empty.
 func (w *Worker) Idle() bool {
 	w.mu.Lock()

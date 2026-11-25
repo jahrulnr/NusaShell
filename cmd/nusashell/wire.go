@@ -469,11 +469,12 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		Workspace:        workspaceStore,
 		BuiltinSkillsDir: builtinDir,
 		Uploads:          uploads,
+		Catalog:          agentRepo,
 	})
 
 	projectRepo := repoproject.New(db)
 	conversations := appconversation.New(convs, providers, environments, cfg, repoconfig.NewLocal(), configPath, terminals, summaryTool,
-		appconversation.WithAgents(agentRepo, agentRuntime),
+		appconversation.WithAgents(agentRepo, agentRepo, agentRuntime),
 		appconversation.WithProjects(projectRepo),
 		appconversation.WithUploads(uploads, picks))
 	conversations.UseMediaDescriptions(descriptions)

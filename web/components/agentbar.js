@@ -4,7 +4,7 @@
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { toast, useStore } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
-import { selection, isBusy, loadAgentOptions, sessionModeName, setSessionOption, sessionOptionValue } from '../lib/chat.js';
+import { selection, isBusy, loadAgentOptions, sessionModeName, setSessionOption, sessionOptionValue, agentOptionMap } from '../lib/chat.js';
 import { Icon } from './icons.js';
 import { Popover, Select, Spinner, Toggle } from './ui.js';
 
@@ -40,11 +40,12 @@ export function AgentOptions({ room: r }) {
     await setSessionOption(r, o.id, value);
     setBusy('');
   };
-  // A turn owns the room's worker until it ends: a write now would be queued
-  // behind it and canceled by its own timeout, so the controls say when it
-  // will apply instead of taking a change they cannot deliver.
-  const readOnly = busyTurn;
-  const hint = readOnly ? 'Applies when this turn ends' : '';
+  // A pick while a turn runs is stored and applies to the next one — the
+  // controls stay open and say so, instead of refusing a change the room
+  // can already accept. A pick the record is holding (pending) gets its
+  // own marker on the option it names.
+  const pendOpts = agentOptionMap(r.info?.pending?.options);
+  const hint = Object.keys(pendOpts).length ? 'Applies to the next turn' : '';
   return html`<div class="relative">
     <button type="button" onClick=${() => setOpen(!open)} aria-expanded=${open} title="Agent session options"
       class="flex items-center gap-1.5 h-8 px-2 rounded-lg text-[13px] text-muted hover:text-fg hover:bg-hover max-w-40">
@@ -60,11 +61,12 @@ export function AgentOptions({ room: r }) {
           <span class="flex items-center gap-1.5 text-xs text-muted min-w-0" title=${o.description || o.name}>
             <span class="truncate">${o.name}</span>
             ${busy === o.id && html`<${Spinner} size=${11} />`}
+            ${pendOpts[o.id] !== undefined && html`<span class="text-[11px] text-faint shrink-0">next turn</span>`}
           </span>
           ${o.type === 'boolean'
-            ? html`<span class="h-7 flex items-center"><${Toggle} checked=${sessionOptionValue(r, o) === 'true'} label=${o.name} disabled=${readOnly} onChange=${(v) => set(o, String(v))} /></span>`
+            ? html`<span class="h-7 flex items-center"><${Toggle} checked=${sessionOptionValue(r, o) === 'true'} label=${o.name} onChange=${(v) => set(o, String(v))} /></span>`
             : html`<${Select} dense label=${o.name} class="w-full" value=${sessionOptionValue(r, o)}
-                options=${(o.choices || []).map((c) => ({ value: c.value, text: c.name }))} disabled=${readOnly} onChange=${(v) => set(o, v)} />`}
+                options=${(o.choices || []).map((c) => ({ value: c.value, text: c.name }))} onChange=${(v) => set(o, v)} />`}
         </label>`)}
       </div>
       ${rules.length > 0 && html`<div class="shrink-0 border-t border-line px-3 py-2.5 text-[13px]">

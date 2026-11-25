@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,75 @@ func mustAttachment(t *testing.T, uri, mt string) valueobject.Attachment {
 		t.Fatal(err)
 	}
 	return a
+}
+
+// Verification reads the file through the door that serves it. A symlink
+// inside the workspace that points outside is refused by both, so the hash
+// reported here can only be the hash of the file send-time would hand over.
+func TestVerifyPinnedFileRefusesASymlinkServingRefuses(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.bin")
+	if err := os.WriteFile(outside, []byte("outside bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.bin")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	escaped := mustAttachment(t, "file://"+link, "application/octet-stream")
+	sum := sha256.Sum256([]byte("outside bytes"))
+	escaped.SetSHA256(hex.EncodeToString(sum[:]))
+
+	if _, _, err := ResolveBase64(escaped, localMediaRoot(root)); err == nil {
+		t.Fatal("serving followed a symlink out of the workspace")
+	}
+	if err := VerifyPinnedFile(escaped, localMediaRoot(root)); err == nil {
+		t.Fatal("verification followed a symlink serving refuses")
+	}
+}
+
+// A pinned file outside the root crosses under its pin; a changed one keeps its
+// own verdict instead of blurring into "unreadable".
+func TestVerifyPinnedFileKeepsThePinVerdict(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(path, []byte("original bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	att := mustAttachment(t, "file://"+path, "image/png")
+	sum := sha256.Sum256([]byte("original bytes"))
+	att.SetSHA256(hex.EncodeToString(sum[:]))
+	root := localMediaRoot(t.TempDir())
+
+	if err := VerifyPinnedFile(att, root); err != nil {
+		t.Fatalf("an intact pinned file outside the root = %v", err)
+	}
+	if err := os.WriteFile(path, []byte("different bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPinnedFile(att, root); !errors.Is(err, ErrPinChanged) {
+		t.Fatalf("a changed file = %v, want ErrPinChanged", err)
+	}
+	// The serving path agrees, and says so the same way.
+	if _, _, err := ResolveBase64(att, root); !errors.Is(err, ErrPinChanged) {
+		t.Fatalf("serving a changed file = %v, want ErrPinChanged", err)
+	}
+}
+
+// An unpinned file has nothing to verify; the confinement rule belongs to the
+// door that serves it, and that door still refuses a file outside the root.
+func TestVerifyPinnedFileLeavesAnUnpinnedFileToTheServingRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "note.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	att := mustAttachment(t, "file://"+path, "text/plain")
+	root := localMediaRoot(t.TempDir())
+	if err := VerifyPinnedFile(att, root); err != nil {
+		t.Fatalf("an unpinned file claimed a pin: %v", err)
+	}
+	if _, err := readLocal(att, root); err == nil {
+		t.Fatal("an unpinned file outside the root must not cross")
+	}
 }
 
 func TestResolveURI(t *testing.T) {

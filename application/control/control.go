@@ -33,17 +33,16 @@ type Rooms interface {
 	Info(ctx context.Context, id string) (drepo.ConversationInfo, error)
 	History(ctx context.Context, id string, start, end int) ([]entity.Message, error)
 	PendingApprovals(convID string) []valueobject.ApprovalRequest
-	Annotate(ctx context.Context, convID string, a appconversation.Annotation) error
+	Annotate(ctx context.Context, convID string, a appconversation.Annotation) (bool, error)
 	// Environment is where the target's workspace and commands run: a path
 	// only means something to a local target, so the attachment form depends
 	// on it.
 	Environment(ctx context.Context, convID string) (enum.Environment, error)
 }
 
-// Turns runs and steers turns; the hub, so the web sees them live.
+// Turns runs and cancels turns; the hub, so the web sees them live.
 type Turns interface {
 	Run(ctx context.Context, convID, providerID, modelID, content string, attachments []valueobject.Attachment, opts appjob.SendOptions, observe event.TurnEventHandler) (string, appconversation.SendResult, error)
-	Steer(convID, text string) bool
 	Cancel(convID string) bool
 	Busy(convID string) bool
 }
@@ -385,16 +384,13 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 		a.discardUploads(copies)
 		return nil, err
 	}
-	// A steer folds text into the live turn; a turn already running cannot take
-	// a new attachment, so a message that carries files always queues.
 	text = a.relayHead(ctx, self) + text
-	// A busy room is not a refusal: fold into the live turn when it can take
-	// input, otherwise let the message wait in the room's own queue.
+	// A busy room is not a refusal: the message waits in the room's own queue.
+	// It never folds into the live turn — steer writes no user-role record, and
+	// the provenance that tells a tab this prompt came from another thread
+	// rides that record. Trading "folded into the running turn" for a message
+	// the receiver can still attribute is the right trade.
 	if a.turns.Busy(info.ID) {
-		if len(attachments) == 0 && a.turns.Steer(info.ID, text) {
-			return map[string]any{"threadId": info.ID, "delivery": "steer", "afterSeq": info.MessageCount - 1,
-				"thread": a.thread(self, info)}, nil
-		}
 		out, err := a.queueSend(ctx, self, info, text, attachments)
 		if err != nil {
 			return refused(err)

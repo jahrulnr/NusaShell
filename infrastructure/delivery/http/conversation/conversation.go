@@ -26,6 +26,8 @@ type Reader interface {
 	List(ctx context.Context) ([]drepo.ConversationInfo, error)
 	History(ctx context.Context, id string, start, end int) ([]entity.Message, error)
 	ContextFooterStats(ctx context.Context, convID, providerID, modelID string) (appconversation.ContextFooterStats, error)
+	// Pending is the room's waiting pick, false when it waits for nothing.
+	Pending(ctx context.Context, convID string) (drepo.PendingSelection, bool, error)
 }
 
 // Writer is the mutation surface: Rename is synchronous; Delete is an
@@ -35,7 +37,10 @@ type Reader interface {
 // (compact, clear, fork) are commands, not writer verbs.
 // *appconversation.ConversationApp satisfies it.
 type Writer interface {
-	Annotate(ctx context.Context, id string, a appconversation.Annotation) error
+	// Annotate applies or parks the change. It answers true when a pick is now
+	// waiting for the room's next turn — the caller renders that as 202, never
+	// as "done".
+	Annotate(ctx context.Context, id string, a appconversation.Annotation) (parked bool, err error)
 	Delete(ctx context.Context, id string) error
 	// DeleteAll removes every conversation and purges the artifacts only
 	// threads own (uploads, picks, recordings, views); it answers with
@@ -127,7 +132,7 @@ func Register(api *gin.RouterGroup, d Deps) {
 		api.POST("/conversations/:id/elicitations/:elicitationId", e.answer)
 	}
 	if d.Agent != nil {
-		registerAgent(api, d.Agent)
+		registerAgent(api, d.Agent, d.Reads)
 	}
 	if d.Commands != nil {
 		api.GET("/commands", s.listCommands)

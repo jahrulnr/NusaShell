@@ -14,6 +14,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	workspacerepo "github.com/jahrulnr/nusashell/infrastructure/repository/workspace"
 	"github.com/jahrulnr/nusashell/infrastructure/service/agent/acp"
 )
 
@@ -25,7 +26,11 @@ func quietSession() *session {
 
 func blocksOf(t *testing.T, in dservice.AgentPrompt, s *session) []acp.ContentBlock {
 	t.Helper()
-	blocks, _ := new(Runtime).promptBlocks(context.Background(), in, s)
+	// A real workspace store, the way the composition wires it: a link's pin is
+	// verified through the same door that serves the file.
+	rt := New(Options{ClientName: "nusashell-test", ClientVersion: "0", Workspace: workspacerepo.NewLocal()})
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+	blocks, _ := rt.promptBlocks(context.Background(), in, s)
 	return blocks
 }
 
@@ -111,7 +116,11 @@ func TestAttachmentLinkVerifiesThePinFirst(t *testing.T) {
 	msg, _ := entity.NewMessage(enum.RoleUser, "look at this")
 	msg.AddAttachment(pinned)
 	conv, _ := aggregate.NewConversation("")
-	blocks := blocksOf(t, dservice.AgentPrompt{Conversation: conv, Input: msg}, quietSession())
+	// A pinned file outside the room's workspace still crosses: the pin is what
+	// vouches for it, and it is read through the host door.
+	room := t.TempDir()
+	prompt := dservice.AgentPrompt{Conversation: conv, Input: msg, Workspace: room}
+	blocks := blocksOf(t, prompt, quietSession())
 	// The prompt text comes first; the attachment follows as its link.
 	if len(blocks) != 2 || blocks[1].Type != "resource_link" || blocks[1].URI != "file://"+path {
 		t.Fatalf("intact pinned file blocks = %+v, want the link", blocks)
@@ -121,7 +130,7 @@ func TestAttachmentLinkVerifiesThePinFirst(t *testing.T) {
 	if err := os.WriteFile(path, []byte("different bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	blocks = blocksOf(t, dservice.AgentPrompt{Conversation: conv, Input: msg}, quietSession())
+	blocks = blocksOf(t, prompt, quietSession())
 	for _, b := range blocks {
 		if b.Type == "resource_link" {
 			t.Fatalf("a changed file was handed over as a link: %+v", b)
@@ -136,7 +145,7 @@ func TestAttachmentLinkVerifiesThePinFirst(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	blocks = blocksOf(t, dservice.AgentPrompt{Conversation: conv, Input: msg}, quietSession())
+	blocks = blocksOf(t, prompt, quietSession())
 	for _, b := range blocks {
 		if b.Type == "resource_link" {
 			t.Fatalf("a vanished file was handed over as a link: %+v", b)
@@ -144,6 +153,43 @@ func TestAttachmentLinkVerifiesThePinFirst(t *testing.T) {
 	}
 	if note := blocks[len(blocks)-1]; !strings.Contains(note.Text, "unreadable now") {
 		t.Fatalf("vanished file blocks = %+v, want its own reason", blocks)
+	}
+}
+
+// The link the agent receives obeys the serving rule: a symlink inside the
+// workspace that points outside is refused here too, even when the pin matches
+// the target's bytes — that hash proves nothing about what would have been
+// served.
+func TestAttachmentLinkRefusesASymlinkOutOfTheWorkspace(t *testing.T) {
+	room := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.png")
+	if err := os.WriteFile(outside, []byte("outside bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(room, "shot.png")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	escaped, err := valueobject.NewAttachment("file://"+link, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	escaped.SetName("shot.png")
+	sum := sha256.Sum256([]byte("outside bytes"))
+	escaped.SetSHA256(hex.EncodeToString(sum[:]))
+
+	msg, _ := entity.NewMessage(enum.RoleUser, "look at this")
+	msg.AddAttachment(escaped)
+	conv, _ := aggregate.NewConversation("")
+	blocks := blocksOf(t, dservice.AgentPrompt{Conversation: conv, Input: msg, Workspace: room}, quietSession())
+	for _, b := range blocks {
+		if b.Type == "resource_link" {
+			t.Fatalf("the agent was handed a link the server refuses to serve: %+v", b)
+		}
+	}
+	note := blocks[len(blocks)-1]
+	if note.Type != "text" || !strings.Contains(note.Text, "omitted") {
+		t.Fatalf("blocks = %+v, want the attachment omitted with a note", blocks)
 	}
 }
 

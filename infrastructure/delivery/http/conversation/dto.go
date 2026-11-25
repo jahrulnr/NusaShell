@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/internal/transport"
@@ -56,6 +57,65 @@ type conversationDTO struct {
 	// never saw a `conversation.queued` frame still opens on the real
 	// count; writes leave it empty, like the turn above. Not persisted.
 	Waiting int `json:"waiting,omitempty"`
+	// Pending is a pick the room has taken but not applied yet: a turn's
+	// runtime and session options are fixed when it starts, so the pick waits
+	// for the next one. Absent when nothing waits. Detail and list items set
+	// it, so the "applies to the next turn" line survives a reload.
+	Pending *pendingDTO `json:"pending,omitempty"`
+}
+
+// pendingDTO is one room's waiting pick — the object a 202 answers with and the
+// room projection carries, so a tab renders the same thing before and after a
+// reload. It is never a claim that the pick is applied.
+type pendingDTO struct {
+	// One runtime only: an agent pick names the model the agent reports, a
+	// provider pick names its catalog entry.
+	AgentID    string `json:"agentId,omitempty"`
+	ModelID    string `json:"modelId,omitempty"`
+	ProviderID string `json:"providerId,omitempty"`
+	Effort     string `json:"effort,omitempty"`
+	Upstream   string `json:"upstream,omitempty"`
+	// Options is an array, sorted by id: a map would reorder between reads and
+	// the surface showing it must not flicker.
+	Options    []pendingOption `json:"options,omitempty"`
+	AcceptedAt time.Time       `json:"acceptedAt"`
+}
+
+type pendingOption struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+// toPending projects a parked selection. The selection stores an agent's model
+// beside the agent id; on the wire both runtimes use modelId.
+func toPending(sel drepo.PendingSelection) *pendingDTO {
+	out := &pendingDTO{
+		AgentID: sel.AgentID, ProviderID: sel.ProviderID,
+		Upstream: deref(sel.Upstream), AcceptedAt: sel.AcceptedAt,
+	}
+	if sel.Effort != nil {
+		out.Effort = sel.Effort.String()
+	}
+	out.ModelID = sel.ModelID
+	if sel.AgentID != "" {
+		out.ModelID = sel.AgentModel
+	}
+	ids := make([]string, 0, len(sel.Options))
+	for id := range sel.Options {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		out.Options = append(out.Options, pendingOption{ID: id, Value: sel.Options[id]})
+	}
+	return out
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func toConversation(i drepo.ConversationInfo) conversationDTO {

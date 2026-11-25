@@ -49,6 +49,9 @@ type Deps struct {
 	// three may be nil when the composition registers no agent runtime.
 	Agents       drepo.Agent
 	AgentRuntime dservice.AgentRuntime
+	// AgentCatalog is the persisted per-agent offered surface — what a pick
+	// can be validated against when no live session answers.
+	AgentCatalog drepo.AgentCatalogStore
 	Approvals    *Approvals
 	// Projects resolves the folders of rooms that belong to a project;
 	// nil means projects are not wired and project bindings are ignored.
@@ -135,6 +138,11 @@ func (j *Base) finish(err *error) {
 // Cancellable's store-then-check so a racing Interrupt can't slip through.
 // The cause names the owner: a tool whose process this killed says
 // "interrupted by user" instead of reporting an unexplained SIGKILL.
+// IsTurn reports whether this job is a turn. A background job does not fix a
+// runtime, so a pick may still be applied while it runs; a turn does, so the pick
+// waits.
+func (j *Base) IsTurn() bool { return false }
+
 func (j *Base) Interrupt() {
 	j.interrupted.Store(true)
 	if c, ok := j.cancel.Load().(context.CancelCauseFunc); ok {

@@ -233,10 +233,25 @@ type SessionState struct {
 	SessionID     string            `json:"sessionId,omitempty"`
 	Modes         *SessionModeState `json:"modes,omitempty"`
 	ConfigOptions json.RawMessage   `json:"configOptions,omitempty"`
+	Models        *SessionModels    `json:"models,omitempty"`
 	Meta          json.RawMessage   `json:"_meta,omitempty"`
 	// WireSeq is the response's position on the agent's stream; state it
 	// carries applies over earlier-wire notifications, never under them.
 	WireSeq uint64 `json:"-"`
+}
+
+// SessionModels is the session's model block: the offered list and the
+// current id verbatim — composite ids like "gpt-6-luna[high]" are wire
+// syntax and are kept as sent, never parsed apart.
+type SessionModels struct {
+	AvailableModels []SessionModel `json:"availableModels"`
+	CurrentModelID  string         `json:"currentModelId"`
+}
+
+type SessionModel struct {
+	ModelID     string `json:"modelId"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type PromptRequest struct {
@@ -446,10 +461,15 @@ type FileSystemCapabilities struct {
 }
 
 type ClientSessionCapabilities struct {
-	ConfigOptions *struct {
-		Boolean *struct{} `json:"boolean,omitempty"`
-	} `json:"configOptions,omitempty"`
-	Notices json.RawMessage `json:"notices,omitempty"`
+	ConfigOptions *SessionConfigOptionsCapabilities `json:"configOptions,omitempty"`
+	Notices       json.RawMessage                   `json:"notices,omitempty"`
+}
+
+// SessionConfigOptionsCapabilities flags the session config-option shapes the
+// client understands; today only boolean exists — an empty object is the
+// capability, so a non-nil pointer means yes.
+type SessionConfigOptionsCapabilities struct {
+	Boolean *struct{} `json:"boolean,omitempty"`
 }
 
 type AuthClientCapabilities struct {
@@ -467,9 +487,7 @@ func DefaultClientCapabilities() ClientCapabilities {
 		// config-option updates and setters as our existing dynamic picker.
 		Meta: json.RawMessage(`{"parameterizedModelPicker":true}`),
 	}
-	caps.Session.ConfigOptions = &struct {
-		Boolean *struct{} `json:"boolean,omitempty"`
-	}{Boolean: &struct{}{}}
+	caps.Session.ConfigOptions = &SessionConfigOptionsCapabilities{Boolean: &struct{}{}}
 	return caps
 }
 

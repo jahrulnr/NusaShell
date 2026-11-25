@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -261,35 +260,21 @@ func verifyPin(a valueobject.Attachment, raw []byte) error {
 	return nil
 }
 
-// VerifyPinnedFile re-checks a local attachment's content pin without
-// materializing what it will send. The inline path verifies while it reads; a
-// reference handed to an agent is read by the agent itself, so the pin has to
-// be checked before the reference crosses — one rule, both paths, or a changed
-// file is served as a different picture through the other door.
+// VerifyPinnedFile re-checks a pinned local attachment without handing its
+// bytes back: it reads the file through the same door that serves it. A
+// workspace file is opened confined, so a symlink that leaves the folder is
+// refused here exactly as it would be at send time, and a file outside the root
+// crosses only under a pin. Hashing one file and serving another proves
+// nothing.
 //
-// An unpinned reference and a remote URI have nothing to verify here: a remote
-// reference is the provider's to fetch, and an unpinned file never claimed a
-// hash.
-func VerifyPinnedFile(a valueobject.Attachment) error {
-	uri := a.URI()
-	if !strings.HasPrefix(uri, "file://") || a.SHA256() == "" {
+// An unpinned file has nothing to check, and a remote URI is the provider's to
+// fetch: both are left to the serving path, which owns the confinement rule.
+func VerifyPinnedFile(a valueobject.Attachment, fileRoot MediaRoot) error {
+	if !strings.HasPrefix(a.URI(), "file://") || a.SHA256() == "" {
 		return nil
 	}
-	path := strings.TrimPrefix(uri, "file://")
-	f, err := os.Open(path)
-	if err != nil {
-		return apperror.New(400, "attachment unreadable", err)
-	}
-	defer f.Close()
-	limit := MaxAttachmentBytes(a.Modality())
-	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return apperror.New(400, "attachment unreadable", err)
-	}
-	if int64(len(raw)) > limit {
-		return apperror.New(400, "attachment exceeds media limit", nil)
-	}
-	return verifyPin(a, raw)
+	_, err := readLocal(a, fileRoot)
+	return err
 }
 
 // decodeDataURI extracts the base64 payload of a data: URI.

@@ -44,6 +44,10 @@ func (j *Resume) RecallSteer() (string, bool) { return j.steers.popLast() }
 func (j *Resume) IsPreempt() bool { return true }
 
 // Execute continues the turn on the worker's goroutine.
+// IsTurn marks this job as a turn: a runtime pick must not be applied under it,
+// because a turn fixes its runtime when it starts.
+func (*Resume) IsTurn() bool { return true }
+
 func (j *Resume) Execute(execCtx context.Context) (err error) {
 	defer j.finish(&err)
 	ctx := j.Cancellable(execCtx, j.Ctx)

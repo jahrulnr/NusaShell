@@ -86,7 +86,8 @@ func (s *server) annotate(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	if err := s.writes.Annotate(ctx, id, a); err != nil {
+	parked, err := s.writes.Annotate(ctx, id, a)
+	if err != nil {
 		transport.RespondError(c, err)
 		return
 	}
@@ -95,7 +96,19 @@ func (s *server) annotate(c *gin.Context) {
 		transport.RespondError(c, err)
 		return
 	}
-	c.JSON(200, toConversation(info))
+	doc, err := s.project(ctx, info)
+	if err != nil {
+		transport.RespondError(c, err)
+		return
+	}
+	status := 200
+	if parked {
+		// The pick is taken but a turn's runtime is fixed when it starts, so
+		// nothing is applied yet. The projection already carries the pending
+		// object; 202 is what says it is not "done".
+		status = 202
+	}
+	c.JSON(status, doc)
 }
 
 func (s *server) delete(c *gin.Context) {

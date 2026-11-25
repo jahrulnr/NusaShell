@@ -86,14 +86,14 @@ func (r *fakeRooms) Info(_ context.Context, id string) (drepo.ConversationInfo, 
 	return drepo.ConversationInfo{ID: id}, nil
 }
 
-func (r *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) error {
+func (r *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.known[id] = true
 	if a.Title != nil {
 		r.titles[id] = *a.Title
 	}
-	return nil
+	return false, nil
 }
 
 type fakeChats struct {

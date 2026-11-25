@@ -232,9 +232,10 @@ type Option func(*ConversationApp)
 // WithAgents registers the agent runtime: rooms bound to a configured
 // agent run their turns through it, and their permission requests wait in
 // a broker the owner answers through Approve.
-func WithAgents(agents drepo.Agent, runtime dservice.AgentRuntime) Option {
+func WithAgents(agents drepo.Agent, catalog drepo.AgentCatalogStore, runtime dservice.AgentRuntime) Option {
 	return func(app *ConversationApp) {
 		app.deps.Agents = agents
+		app.deps.AgentCatalog = catalog
 		app.deps.AgentRuntime = runtime
 		app.deps.Approvals = appjob.NewApprovals()
 		app.deps.Elicitations = appjob.NewElicitations()

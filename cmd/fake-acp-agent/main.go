@@ -51,6 +51,9 @@ type server struct {
 	cwd string
 	// authed reports a sign-in; with FAKE_ACP_AUTH=1 sessions need one.
 	authed bool
+	// clientCaps is the clientCapabilities object of the latest initialize —
+	// agents gate offered options on what the client says it understands.
+	clientCaps map[string]any
 }
 
 type mcpServer struct {
@@ -88,6 +91,9 @@ func main() {
 		cancel:  make(chan struct{}),
 		values:  map[string]any{"mode": "ask", "model": "fake-fast"},
 		legacy:  os.Getenv("FAKE_ACP_MODES") == "legacy",
+	}
+	if os.Getenv("FAKE_ACP_BOOL_WHEN_CAP") == "1" {
+		s.values["cap_bool"] = false
 	}
 	fmt.Fprintln(os.Stderr, "fake-acp: started, pid", os.Getpid())
 	sc := bufio.NewScanner(os.Stdin)
@@ -185,6 +191,17 @@ func (s *server) closeCancel() {
 func (s *server) handle(msg message) {
 	switch msg.Method {
 	case "initialize":
+		var init struct {
+			ClientCapabilities map[string]any `json:"clientCapabilities"`
+		}
+		_ = json.Unmarshal(msg.Params, &init)
+		s.mu.Lock()
+		s.clientCaps = init.ClientCapabilities
+		s.mu.Unlock()
+		if dump := os.Getenv("FAKE_ACP_CAPS_DUMP"); dump != "" {
+			raw, _ := json.Marshal(init.ClientCapabilities)
+			_ = os.WriteFile(dump, raw, 0o600)
+		}
 		caps := map[string]any{
 			"loadSession": true,
 			"promptCapabilities": map[string]any{
@@ -331,7 +348,18 @@ func (s *server) handle(msg message) {
 			s.values["effort"] = "low"
 		}
 		s.mu.Unlock()
-		s.respond(msg.ID, map[string]any{"configOptions": s.configOptions()})
+		options := s.configOptions()
+		if os.Getenv("FAKE_ACP_PARTIAL_CONFIG") == "1" {
+			// Emulate agents that answer a write with the entry it changed and
+			// nothing else — the response is not the offered list.
+			options = nil
+			for _, o := range s.configOptions() {
+				if m, ok := o.(map[string]any); ok && m["id"] == req.ConfigID {
+					options = append(options, m)
+				}
+			}
+		}
+		s.respond(msg.ID, map[string]any{"configOptions": options})
 	case "session/set_mode":
 		var req struct {
 			ModeID string `json:"modeId"`
@@ -449,6 +477,15 @@ func (s *server) configOptions() []any {
 		return options
 	}
 	options = append(options, map[string]any{"id": "strict", "name": "Strict mode", "category": "behavior", "type": "boolean", "currentValue": strict})
+	// Codex's fast-mode gate: a boolean option offered only when the client
+	// advertised session.configOptions.boolean in its capabilities.
+	if os.Getenv("FAKE_ACP_BOOL_WHEN_CAP") == "1" {
+		if sess, _ := s.clientCaps["session"].(map[string]any); sess != nil {
+			if co, _ := sess["configOptions"].(map[string]any); co != nil && co["boolean"] != nil {
+				options = append(options, map[string]any{"id": "cap_bool", "name": "Cap bool", "type": "boolean", "currentValue": s.values["cap_bool"]})
+			}
+		}
+	}
 	mode := map[string]any{
 		"id": "mode", "name": "Session Mode", "category": "mode", "type": "select",
 		"currentValue": s.values["mode"], "options": []any{

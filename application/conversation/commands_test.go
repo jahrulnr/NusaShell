@@ -240,7 +240,7 @@ func TestRunCommandForkCopies(t *testing.T) {
 	app, _ := fixture(t, okHandler)
 	room := seedRoom(t, app)
 	title := "release notes"
-	if err := app.Annotate(t.Context(), room, Annotation{Title: &title}); err != nil {
+	if _, err := app.Annotate(t.Context(), room, Annotation{Title: &title}); err != nil {
 		t.Fatal(err)
 	}
 	source, err := app.Info(t.Context(), room)

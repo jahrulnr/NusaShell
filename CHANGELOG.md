@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A model or session option picked while a turn runs is kept as pending and applies to the **next** turn: the answer says 202 with `pending`, the room keeps both the running value and the waiting one through a reload, and the marker disappears on its own once the turn consumes it. A pick the agent no longer accepts is dropped with a notice instead of failing the turn.
+- An option a room's agent does not offer yet (a reasoning effort that only exists once a model is chosen) is saved as deferred, shown as "not offered — saved for when it is", and applied when the agent starts offering it.
 - Stored agent picks carry their order, and the model is applied first: an option that only exists once a model is chosen (a reasoning effort) is now reached in the same turn instead of being skipped, and the list is read again after each change until it settles (bounded).
 - A compacted thread shows where its history was folded: a rule labelled `Compacted`, with the checkpoint kept behind it instead of a plain note in the transcript.
 
@@ -26,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `nusashell config set` and `PATCH /api/settings` name the setting and the type it expects when a value has the wrong shape — `config key "media.reading_consent" expects a boolean value like false` — instead of answering only `invalid value`. The CLI prints that sentence once.
 
 ### Changed
+
+- A prompt another thread hands over always takes the queue instead of folding into the running turn: steering writes no message record, so the provenance a relay needs had nowhere to live. A busy room reports `queued`, and the relayed prompt renders as a relay block with its header instead of raw `[From thread …]` text in the owner's lane.
 
 - A published release is the full binary: the workflow builds with the symbol-map tags read from the Makefile, so what users download carries the tree-sitter index instead of falling back to the regex-only build. `build-lean` stays a local choice.
 - `exec` caps a call at 300 s (was 600 s) and `write_stdin` polls for at most 60 s, so a command that never exits cannot hold a turn for ten minutes. A capped poll now says "no new output" instead of staying silent.

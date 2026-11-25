@@ -48,6 +48,10 @@ func (j *Edit) RecallSteer() (string, bool) { return j.steers.popLast() }
 func (j *Edit) IsPreempt() bool { return true }
 
 // Execute applies the rewrite on the worker's goroutine, then resends.
+// IsTurn marks this job as a turn: a runtime pick must not be applied under it,
+// because a turn fixes its runtime when it starts.
+func (*Edit) IsTurn() bool { return true }
+
 func (j *Edit) Execute(execCtx context.Context) (err error) {
 	defer j.finish(&err)
 	ctx := j.Cancellable(execCtx, j.Ctx)

@@ -67,11 +67,11 @@ func TestRoomsWorkInTheirProjectFolders(t *testing.T) {
 
 	// Pin a room; delete the project — the room stays, outside any project.
 	pinned := true
-	if err := app.Annotate(ctx, "c_proj1", appconversation.Annotation{Pinned: &pinned}); err != nil {
+	if _, err := app.Annotate(ctx, "c_proj1", appconversation.Annotation{Pinned: &pinned}); err != nil {
 		t.Fatal(err)
 	}
 	bogus := "p_nope"
-	if err := app.Annotate(ctx, "c_proj1", appconversation.Annotation{ProjectID: &bogus}); apperror.As(err).StatusCode() != 400 {
+	if _, err := app.Annotate(ctx, "c_proj1", appconversation.Annotation{ProjectID: &bogus}); apperror.As(err).StatusCode() != 400 {
 		t.Fatalf("moving into an unknown project err = %v", err)
 	}
 	if _, err := app.Send(ctx, "c_proj2", "", "", "second", nil, appjob.SendOptions{Agent: "fake", Project: p2.ID}, nil); err != nil {
@@ -92,7 +92,7 @@ func TestRoomsWorkInTheirProjectFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Annotate(ctx, "c_proj2", appconversation.Annotation{ProjectID: &other.ID}); err != nil {
+	if _, err := app.Annotate(ctx, "c_proj2", appconversation.Annotation{ProjectID: &other.ID}); err != nil {
 		t.Fatal(err)
 	}
 	back, rejoined, err := pa.Restore(ctx, p2.ID, p2.Name, p2.Folders, p2.Pinned, append(released, "c_gone"))

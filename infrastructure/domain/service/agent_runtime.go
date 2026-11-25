@@ -69,6 +69,11 @@ type AgentOption struct {
 	Type        string         `json:"type"` // select or boolean
 	Current     string         `json:"current"`
 	Choices     []OptionChoice `json:"choices,omitempty"`
+	// Deferred marks an entry that is not a real offered option: a stored
+	// pick whose id the session does not offer. It carries the picked value
+	// apart from Current — deferred is a stored intent, never the active
+	// choice — and the entry disappears when the option materializes.
+	Deferred string `json:"deferred,omitempty"`
 }
 
 // Offers reports whether value is one this option accepts: a listed choice for

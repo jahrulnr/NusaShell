@@ -76,11 +76,11 @@ func (f *fakeRooms) PendingApprovals(convID string) []valueobject.ApprovalReques
 	return f.approvals[convID]
 }
 
-func (f *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) error {
+func (f *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.named[id] = *a.Title
-	return nil
+	return false, nil
 }
 
 func (f *fakeRooms) add(id string, role enum.Role, text string) {
@@ -100,12 +100,8 @@ type fakeTurns struct {
 	mu    sync.Mutex
 	runs  chan run
 	busy  map[string]bool
-	steer []string
 	rooms *fakeRooms
 	gate  chan struct{}
-	// steerRefuses models a live turn that takes no more input: full steer
-	// capacity, or a turn kind that cannot fold a message.
-	steerRefuses bool
 }
 
 func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string, attachments []valueobject.Attachment, opts appjob.SendOptions, _ event.TurnEventHandler) (string, appconversation.SendResult, error) {
@@ -130,16 +126,6 @@ func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string,
 		<-gate
 	}
 	return convID, appconversation.SendResult{}, nil
-}
-
-func (f *fakeTurns) Steer(convID, text string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.steerRefuses {
-		return false
-	}
-	f.steer = append(f.steer, convID+": "+text)
-	return true
 }
 
 func (f *fakeTurns) Cancel(convID string) bool { return f.Busy(convID) }
@@ -357,11 +343,12 @@ func TestSendStopAndSpawn(t *testing.T) {
 		t.Fatalf("send origin = %+v, want another thread", r.origin)
 	}
 
-	// A busy thread takes the text into its running turn.
+	// A busy thread takes the message into its queue, never into the running
+	// turn: the relay provenance only exists on a stored user-role message.
 	turns.busy["c_other"] = true
 	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "also this"})
-	if err != nil || out["delivery"] != "steer" || len(turns.steer) != 1 {
-		t.Fatalf("send to busy = %v, %v, steer %v", out, err, turns.steer)
+	if err != nil || out["delivery"] != "queued" {
+		t.Fatalf("send to busy = %v, %v, want queued", out, err)
 	}
 	stop, _ := app.Stop(ctx, "c_self", StopInput{Thread: "c_other"})
 	if stop["stopped"] != true {
@@ -455,33 +442,23 @@ func TestWait(t *testing.T) {
 	}
 }
 
-// A busy room is not a refusal. When the live turn can fold the text it does;
-// when it cannot, the message waits in the room's queue and the caller is told
-// its position — never "wait and try again".
-func TestSendSteersOrQueuesOnABusyThread(t *testing.T) {
+// A busy room is not a refusal, and a relayed prompt never folds into the
+// running turn: steer writes no user-role record, so the provenance that tells
+// a tab where the message came from would be lost with it. The message waits in
+// the room's own queue — arrival order, and the surface already shows how many
+// wait.
+func TestSendQueuesOnABusyThread(t *testing.T) {
 	q := &fakeQueue{}
 	app, _, turns := setupWith(t, q, nil)
 	ctx := context.Background()
 	turns.busy["c_other"] = true
 
-	// A send turn with steer capacity: the message joins it.
-	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "also this"})
-	if err != nil || out["delivery"] != "steer" || out["afterSeq"] == nil {
-		t.Fatalf("steer = %v, %v", out, err)
-	}
-	if len(turns.steer) != 1 {
-		t.Fatalf("steer = %v, want the text folded in", turns.steer)
-	}
-
-	// A turn that takes no input (a resume, or full steer capacity): queued.
-	// The queue arrived through the constructor, like a real composition's.
-	turns.steerRefuses = true
-	out, err = app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "and this"})
+	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "and this"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out["delivery"] != "queued" || out["position"] != 1 {
-		t.Fatalf("queued = %v, want position 1", out)
+		t.Fatalf("busy send = %v, want queued at position 1", out)
 	}
 	if _, ok := out["afterSeq"]; ok {
 		t.Fatalf("queued carries afterSeq %v — an acceptance is not a promise", out["afterSeq"])
@@ -518,7 +495,6 @@ func TestSendRefusesAFullQueue(t *testing.T) {
 	q := &fakeQueue{full: true, depth: 7}
 	app, _, turns := setupWith(t, q, nil)
 	turns.busy["c_other"] = true
-	turns.steerRefuses = true
 	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if code := apperror.As(err).StatusCode(); code != 429 {
 		t.Fatalf("full queue = %v (status %d), want 429", err, code)
@@ -535,7 +511,6 @@ func TestSendRefusesAFullQueue(t *testing.T) {
 func TestSendRefusesWhileStopping(t *testing.T) {
 	app, _, turns := setupWith(t, &fakeQueue{stopping: true}, nil)
 	turns.busy["c_other"] = true
-	turns.steerRefuses = true
 	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if code := apperror.As(err).StatusCode(); code != 503 {
 		t.Fatalf("stopping = %v (status %d), want 503", err, code)

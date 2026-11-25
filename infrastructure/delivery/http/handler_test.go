@@ -37,6 +37,7 @@ func TestMain(m *testing.M) {
 
 type fakeConversations struct {
 	infos   []drepo.ConversationInfo
+	pending map[string]drepo.PendingSelection
 	history []entity.Message
 	tools   []valueobject.ToolSchema
 	err     error
@@ -78,6 +79,12 @@ func (f *fakeConversations) History(_ context.Context, id string, start, end int
 
 func (f *fakeConversations) ToolSchemas(context.Context, string) ([]valueobject.ToolSchema, error) {
 	return f.tools, nil
+}
+
+// pending is what a room waits to apply on its next turn, by room id.
+func (f *fakeConversations) Pending(_ context.Context, id string) (drepo.PendingSelection, bool, error) {
+	sel, ok := f.pending[id]
+	return sel, ok, nil
 }
 
 func (f *fakeConversations) ContextFooterStats(context.Context, string, string, string) (appconversation.ContextFooterStats, error) {

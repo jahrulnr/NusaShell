@@ -95,7 +95,7 @@ func TestConcurrentRenamesToOneLabelLeaveOneOwner(t *testing.T) {
 			defer wg.Done()
 			<-start
 			label := handle
-			errs[i] = app.Annotate(context.Background(), id, Annotation{Label: &label})
+			_, errs[i] = app.Annotate(context.Background(), id, Annotation{Label: &label})
 		}(i, id)
 	}
 	close(start)

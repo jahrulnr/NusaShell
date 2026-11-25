@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"slices"
 
 	"github.com/gin-gonic/gin"
@@ -67,6 +68,12 @@ func (s *server) list(c *gin.Context) {
 		}
 		if s.queue != nil {
 			dto.Waiting = s.queue.QueueDepth(i.ID)
+		}
+		if sel, ok, err := s.reads.Pending(context.Background(), i.ID); err != nil {
+			transport.RespondError(c, err)
+			return
+		} else if ok {
+			dto.Pending = toPending(sel)
 		}
 		out.Data = append(out.Data, dto)
 	}

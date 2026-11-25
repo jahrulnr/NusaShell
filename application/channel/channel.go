@@ -50,7 +50,7 @@ type Rooms interface {
 	Info(ctx context.Context, id string) (drepo.ConversationInfo, error)
 	List(ctx context.Context) ([]drepo.ConversationInfo, error)
 	History(ctx context.Context, id string, start, end int) ([]entity.Message, error)
-	Annotate(ctx context.Context, convID string, a appconversation.Annotation) error
+	Annotate(ctx context.Context, convID string, a appconversation.Annotation) (bool, error)
 	PendingApprovals(convID string) []valueobject.ApprovalRequest
 	Approve(convID, requestID, optionID string) error
 	AnswerElicitation(convID, id string, a valueobject.ElicitationAnswer) error
@@ -403,7 +403,7 @@ func (a *App) runTurn(ctx context.Context, in dservice.InboundMessage, convID, b
 	stopTyping()
 	if fresh && err == nil {
 		title := chatTitle(in)
-		_ = a.rooms.Annotate(ctx, convID, appconversation.Annotation{Title: &title})
+		_, _ = a.rooms.Annotate(ctx, convID, appconversation.Annotation{Title: &title})
 	}
 	if err != nil {
 		if apperror.As(err).StatusCode() == 408 {

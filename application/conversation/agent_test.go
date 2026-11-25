@@ -3,6 +3,7 @@ package appconversation
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
@@ -59,6 +61,9 @@ type scriptedAgent struct {
 	beforePrompt func(context.Context) error
 	// refuseValue is the one option value the agent turns down.
 	refuseValue string
+	// options replaces the offered list when set — a session that no longer
+	// offers an option a stored catalog still remembers.
+	options []dservice.AgentOption
 }
 
 func (a *scriptedAgent) Prompt(ctx context.Context, p dservice.AgentPrompt, onEvent event.TurnEventHandler, approve dservice.Approver) error {
@@ -208,6 +213,11 @@ func (a *scriptedAgent) retiredSessions(t *testing.T, want int) []string {
 func (a *scriptedAgent) Warm(context.Context, *aggregate.Agent) error { return nil }
 func (a *scriptedAgent) ReapIdle(time.Duration)                       {}
 func (a *scriptedAgent) Options(context.Context, *aggregate.Agent, string) ([]dservice.AgentOption, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.options != nil {
+		return a.options, nil
+	}
 	// The catalog a real agent reports. The picker and the store now validate
 	// against it, so the scripted agent has to offer what a test picks.
 	return []dservice.AgentOption{
@@ -285,7 +295,7 @@ func agentFixture(t *testing.T, policy enum.ApprovalPolicy, opts ...Option) (*Co
 			Services:    map[enum.Style]dservice.TextModelService{enum.StyleCompletion: textcompletion.New(coretext.Options{})},
 		}},
 		config.NewConfig(), nil, "", nil, nil,
-		append([]Option{WithAgents(agents, rt)}, opts...)...,
+		append([]Option{WithAgents(agents, agents, rt)}, opts...)...,
 	)
 	t.Cleanup(func() { _ = app.Shutdown(context.Background()) })
 	return app, rt, &bodies
@@ -449,7 +459,7 @@ func TestAgentNamesTheThread(t *testing.T) {
 	}
 
 	renamed := "My own name"
-	if err := app.Annotate(ctx, "c_title", Annotation{Title: &renamed}); err != nil {
+	if _, err := app.Annotate(ctx, "c_title", Annotation{Title: &renamed}); err != nil {
 		t.Fatal(err)
 	}
 	rt.title = "The agent's second idea"
@@ -587,7 +597,7 @@ func TestAgentDefaultsApplyUnderTheRoomsPicks(t *testing.T) {
 	if _, err := app.Send(ctx, "c_defaults", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.SetAgentOption(ctx, "c_defaults", "mode", "build"); err != nil {
+	if _, err := app.SetAgentOption(ctx, "c_defaults", "mode", "build"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := app.Send(ctx, "c_defaults", "", "", "again", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
@@ -621,10 +631,10 @@ func TestRefusedAgentOptionIsNotStored(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.mu.Lock()
-	rt.refuseValue = "ludicrous"
+	rt.refuseValue = "ask" // offered, so validation passes and the agent's refusal is what must refuse it
 	rt.mu.Unlock()
 
-	err := app.SetAgentOption(ctx, "c_opt", "mode", "ludicrous")
+	_, err := app.SetAgentOption(ctx, "c_opt", "mode", "ask")
 	if code := apperror.As(err).StatusCode(); code != 502 {
 		t.Fatalf("a refused option = %v (status %d), want the agent's 502", err, code)
 	}
@@ -640,7 +650,7 @@ func TestRefusedAgentOptionIsNotStored(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompts := rt.Prompts()
-	if got, _ := prompts[len(prompts)-1].Options.Value("mode"); got == "ludicrous" {
+	if got, _ := prompts[len(prompts)-1].Options.Value("mode"); got == "ask" {
 		t.Fatalf("the next turn applied the refused value: %q", got)
 	}
 	// A value the agent takes is still stored — the reorder must not turn
@@ -648,7 +658,7 @@ func TestRefusedAgentOptionIsNotStored(t *testing.T) {
 	rt.mu.Lock()
 	rt.refuseValue = ""
 	rt.mu.Unlock()
-	if err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
+	if _, err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
 		t.Fatal(err)
 	}
 	conv, err = app.deps.Convs.Load(ctx, "c_opt")
@@ -672,7 +682,7 @@ func TestAgentOptionAnnouncesTheChangedRoom(t *testing.T) {
 	var mu sync.Mutex
 	var changed []string
 	app.OnChanged(func(id string) { mu.Lock(); changed = append(changed, id); mu.Unlock() })
-	if err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
+	if _, err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -692,7 +702,7 @@ func TestAnnotateDropsProviderPicksOnAnAgentRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	effort, upstream := enum.EffortMax, "Alpha"
-	if err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); err != nil {
+	if _, err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); err != nil {
 		t.Fatal(err)
 	}
 	// The record, not a loaded aggregate: Load replays BindAgent, which
@@ -714,7 +724,7 @@ func TestAnnotateStoresProviderPicksOnAProviderRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	effort, upstream := enum.EffortMax, "Alpha"
-	if err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); err != nil {
+	if _, err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := app.deps.Convs.Info(ctx, "c_eff")
@@ -741,7 +751,7 @@ func TestAgentOptionIsCheckedAgainstTheCatalogWithoutALiveSession(t *testing.T) 
 		{"mode", "nope"},  // the option exists, the value does not
 		{"strict", "yes"}, // a boolean takes true or false
 	} {
-		err := app.SetAgentOption(ctx, "c_opt", pick[0], pick[1])
+		_, err := app.SetAgentOption(ctx, "c_opt", pick[0], pick[1])
 		if code := apperror.As(err).StatusCode(); code != 400 {
 			t.Fatalf("%v = %v (status %d), want 400", pick, err, code)
 		}
@@ -754,10 +764,10 @@ func TestAgentOptionIsCheckedAgainstTheCatalogWithoutALiveSession(t *testing.T) 
 		t.Fatalf("refused picks were stored: %v", info.AgentOptions)
 	}
 	// What the catalog does offer is recorded, still with no session.
-	if err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
+	if _, err := app.SetAgentOption(ctx, "c_opt", "mode", "build"); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.SetAgentOption(ctx, "c_opt", "strict", "true"); err != nil {
+	if _, err := app.SetAgentOption(ctx, "c_opt", "strict", "true"); err != nil {
 		t.Fatal(err)
 	}
 	info, err = app.deps.Convs.Info(ctx, "c_opt")
@@ -781,7 +791,7 @@ func TestAgentOptionsNeverReportACurrentOutsideItsChoices(t *testing.T) {
 	}
 	// Written through the annotation job, the way a build before this fix did.
 	poison := [2]string{"mode", "nope"}
-	if err := app.Annotate(ctx, "c_opt", Annotation{AgentOption: &poison}); err != nil {
+	if _, err := app.Annotate(ctx, "c_opt", Annotation{AgentOption: &poison}); err != nil {
 		t.Fatal(err)
 	}
 	opts, err := app.AgentOptions(ctx, "c_opt")
@@ -1009,5 +1019,163 @@ func TestRoomSwitchesBetweenAgentAndProvider(t *testing.T) {
 			t.Fatalf("discarded = %v", got)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// failingCatalog is the AgentCatalogStore that cannot answer: a pick that
+// needs it must refuse the write rather than guess at what the agent once
+// offered.
+type failingCatalog struct{}
+
+func (failingCatalog) Catalog(context.Context, string) (drepo.AgentCatalog, error) {
+	return drepo.AgentCatalog{}, fmt.Errorf("catalog unreadable")
+}
+func (failingCatalog) SaveCatalog(context.Context, string, drepo.AgentCatalog) error {
+	return fmt.Errorf("catalog unwritable")
+}
+
+// D1: a pick for an id the stored catalog knows but the session does not
+// offer is stored deferred — and the DTO shows it marked, apart from current.
+func TestSetAgentOptionStoresAKnownUnofferedPickAsDeferred(t *testing.T) {
+	cat := repoagent.New(t.TempDir(), nil)
+	if err := cat.SaveCatalog(t.Context(), "fake", drepo.AgentCatalog{Options: []dservice.AgentOption{
+		{ID: "effort", Name: "Reasoning effort", Category: "thought_level", Type: "select", Current: "low",
+			Choices: []dservice.OptionChoice{{Value: "low"}, {Value: "high"}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll, func(app *ConversationApp) {
+		app.deps.AgentCatalog = cat
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetAgentOption(ctx, "c_opt", "effort", "high"); err != nil {
+		t.Fatalf("a known-but-unoffered pick was refused: %v", err)
+	}
+	list, err := app.AgentOptions(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(list, func(o dservice.AgentOption) bool { return o.ID == "effort" })
+	if i < 0 || list[i].Deferred != "high" || list[i].Current != "" {
+		t.Fatalf("deferred entry = %+v, want effort marked deferred=high with empty current", list)
+	}
+	if list[i].Name != "Reasoning effort" {
+		t.Fatalf("the stored catalog's name was not kept: %+v", list[i])
+	}
+}
+
+// D1: an id no catalog has ever seen is refused — nothing is stored.
+func TestSetAgentOptionRefusesAnIdNoCatalogKnows(t *testing.T) {
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := app.SetAgentOption(ctx, "c_opt", "nosuch", "x")
+	if err == nil || apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("unknown pick err = %v, want 400", err)
+	}
+}
+
+// D1: a deferred candidate whose value the stored catalog does not list is
+// refused the same way an offered option refuses it.
+func TestSetAgentOptionRefusesAValueOutsideTheStoredChoices(t *testing.T) {
+	cat := repoagent.New(t.TempDir(), nil)
+	if err := cat.SaveCatalog(t.Context(), "fake", drepo.AgentCatalog{Options: []dservice.AgentOption{
+		{ID: "effort", Name: "Effort", Type: "select", Current: "low",
+			Choices: []dservice.OptionChoice{{Value: "low"}, {Value: "high"}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll, func(app *ConversationApp) {
+		app.deps.AgentCatalog = cat
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := app.SetAgentOption(ctx, "c_opt", "effort", "max")
+	if err == nil || apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("out-of-choices deferred pick err = %v, want 400", err)
+	}
+}
+
+// D1: when the catalog cannot be read the write refuses with 503 — an
+// unverified pick is never stored.
+func TestSetAgentOptionRefusesWhenTheCatalogCannotBeRead(t *testing.T) {
+	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll, func(app *ConversationApp) {
+		app.deps.AgentCatalog = failingCatalog{}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := app.SetAgentOption(ctx, "c_opt", "nosuch", "x")
+	if err == nil || apperror.As(err).StatusCode() != 503 {
+		t.Fatalf("unreadable catalog err = %v, want 503", err)
+	}
+}
+
+// The deferred mark is derived, not stored: when the session offers the
+// option again the entry rejoins the list and the pick reads as its value.
+func TestDeferredPickRejoinsTheOfferedListWhenItMaterializes(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := app.Send(ctx, "c_opt", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Stored directly: a pick made while "effort" was still offered.
+	if _, err := app.Annotate(ctx, "c_opt", Annotation{AgentOption: &[2]string{"effort", "high"}}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := app.AgentOptions(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(list, func(o dservice.AgentOption) bool { return o.ID == "effort" })
+	if i < 0 || list[i].Deferred != "high" {
+		t.Fatalf("unoffered stored pick did not show deferred: %+v", list)
+	}
+	// The option materializes — the next read finds it offered again, the
+	// pick as its value, and no deferred entry left.
+	rt.mu.Lock()
+	rt.options = []dservice.AgentOption{
+		{ID: "effort", Name: "Effort", Type: "select", Current: "low",
+			Choices: []dservice.OptionChoice{{Value: "low"}, {Value: "high"}}},
+	}
+	rt.mu.Unlock()
+	list, err = app.AgentOptions(ctx, "c_opt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(list, func(o dservice.AgentOption) bool { return o.Deferred != "" }) {
+		t.Fatalf("a deferred entry survived materialization: %+v", list)
+	}
+	if list[0].Current != "high" {
+		t.Fatalf("materialized option shows current = %q, want the pick", list[0].Current)
+	}
+}
+
+// A provider room refuses agent-option picks the same way it always did —
+// the domain rule answers before any catalog is consulted, so a catalog
+// failing on every read cannot change the outcome.
+func TestSetAgentOptionOnAProviderRoomSkipsTheCatalog(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	app.deps.AgentCatalog = failingCatalog{}
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_prov", "gw1", "m1", "hi", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := app.SetAgentOption(ctx, "c_prov", "anything", "x")
+	if err == nil || !strings.Contains(err.Error(), "bound to an agent") {
+		t.Fatalf("provider room refusal changed: %v", err)
 	}
 }

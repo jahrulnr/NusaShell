@@ -19,7 +19,7 @@ const LIST = (current = 'code') => [MODE(current), { id: 'thinking', name: 'Thin
 // serveRoom answers the reads a room view makes, plus its agent options. The
 // option routes answer with the list a write produced, so the controller can be
 // checked against what the server would really say next.
-function serveRoom(id, { current = 'code', put = null, info = {} } = {}) {
+function serveRoom(id, { current = 'code', put = null, info = {}, get = null } = {}) {
   let mode = current;
   // mockApi matches a path prefix, so the longer paths come first: the option
   // routes live under the conversation route, not beside it.
@@ -31,7 +31,7 @@ function serveRoom(id, { current = 'code', put = null, info = {} } = {}) {
       return [200, { data: LIST(mode) }];
     },
     [`GET /api/conversations/${id}/messages`]: { messages: [{ id: 'm1', role: 'user', content: 'hi' }], effectiveStart: 0, total: 1 },
-    [`GET /api/conversations/${id}`]: { id, title: 'Agent room', workspace: '', agentId: 'claude', ...info },
+    [`GET /api/conversations/${id}`]: get || { id, title: 'Agent room', workspace: '', agentId: 'claude', ...info },
     'GET /api/approval-rules': { data: [] },
   });
 }
@@ -211,8 +211,20 @@ test('a stored pick list reads the same in array form and in object form', async
   assert.equal(chat.sessionModeName(home), 'Bypass Permissions');
 });
 
-test('nothing is written while a turn runs, and the controls say when it applies', async () => {
-  serveRoom('c_ao4');
+test('a pick while a turn runs is written at once and shown from the record\'s pending', async () => {
+  // The room was busy, so the pick parks in the record's pending: the list
+  // the write answers with still reports the running session's value, and
+  // the read that follows carries the pick under pending.options. The
+  // controls show the pending value — stored, so a reload shows it too.
+  let parked = null;
+  serveRoom('c_ao4', {
+    put: (call, mode) => {
+      parked = { id: 'c_ao4', title: 'Agent room', workspace: '', agentId: 'claude',
+        pending: { options: [{ id: 'mode', value: call.body.value }], acceptedAt: '2026-11-25T23:15:04Z' } };
+      return [202, { data: LIST(mode) }];
+    },
+    get: () => parked || { id: 'c_ao4', title: 'Agent room', workspace: '', agentId: 'claude' },
+  });
   chat.navigate('#/c/c_ao4');
   await sleep(40);
   const r = state.rooms.c_ao4;
@@ -220,10 +232,47 @@ test('nothing is written while a turn runs, and the controls say when it applies
   calls.length = 0;
 
   const outcome = await chat.setSessionOption(r, 'mode', 'bypass');
-  assert.equal(outcome, 'busy');
-  assert.equal(optionWrites('c_ao4'), 0, 'no write is sent while the room is busy');
-  assert.equal(chat.sessionModeName(r), 'Code');
+  assert.equal(outcome, 'saved');
+  assert.equal(optionWrites('c_ao4'), 1, 'the write is sent while the room is busy');
+  await sleep(40); // the record read the write asked for
+  const opt = r.agentOptions.list.find((o) => o.id === 'mode');
+  assert.equal(opt.current, 'code', 'the running session still reports its value');
+  assert.equal(r.info.pending.options[0].value, 'bypass', 'the record carries the pick as pending');
+  assert.equal(chat.sessionOptionValue(r, opt), 'bypass', 'the pending pick is what shows');
+  assert.equal(chat.sessionModeName(r), 'Bypass Permissions');
+
+  // A reload shows the same value — it comes from the record, not this tab.
+  const fresh = { ...state.rooms.c_ao4, sel: {}, id: 'c_ao4', info: r.info, agentOptions: r.agentOptions };
+  assert.equal(chat.sessionOptionValue(fresh, opt), 'bypass');
+
+  // The next turn drains it: the record no longer carries pending, the list
+  // reports the pick, and the controls keep naming it off the list alone.
+  parked = null;
+  serveRoom('c_ao4', { current: 'bypass' });
+  await chat.loadAgentOptions(r, { force: true });
+  await chat.loadInfo(r, { force: true });
+  const after = r.agentOptions.list.find((o) => o.id === 'mode');
+  assert.equal(after.current, 'bypass');
+  assert.equal(r.info.pending, undefined, 'pending drained');
+  assert.equal(chat.sessionOptionValue(r, after), 'bypass');
   r.settling = false;
+});
+
+test('a pending pick the turn drops goes back to the running value', async () => {
+  // The parked pick was dropped as invalid — the record drains without the
+  // option ever reporting it — and the controls name the running value again.
+  const room = { id: 'c_ao6', title: 'Agent room', workspace: '', agentId: 'claude' };
+  serveRoom('c_ao6', { get: () => ({ ...room, pending: { options: [{ id: 'mode', value: 'plan' }], acceptedAt: '2026-11-25T23:15:04Z' } }) });
+  chat.navigate('#/c/c_ao6');
+  await sleep(40);
+  const r = state.rooms.c_ao6;
+  const opt = r.agentOptions.list.find((o) => o.id === 'mode');
+  assert.equal(chat.sessionOptionValue(r, opt), 'plan', 'pending shows while parked');
+
+  serveRoom('c_ao6');
+  await chat.loadInfo(r, { force: true });
+  assert.equal(r.info.pending, undefined);
+  assert.equal(chat.sessionOptionValue(r, opt), 'code', 'the running value shows again once pending is gone');
 });
 
 test('a change announced by the server is read once, not once per control', async () => {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 
@@ -113,26 +114,97 @@ type Annotation struct {
 // application passes it through untouched.
 type RuntimeBinding = appjob.RuntimeBinding
 
-// Annotate applies an Annotation. The write is queued on the room's worker
-// so it cannot race a turn's metadata saves. A room that actually changed is
-// announced — the same notice a title or a fork sends — so every open tab
-// re-reads it instead of keeping the record it loaded.
-func (app *ConversationApp) Annotate(ctx context.Context, convID string, a Annotation) error {
+// Annotate applies an Annotation. A runtime binding, a reasoning effort, an
+// upstream pin, and an agent session-option pick are never applied now: they are
+// parked for the room's next turn, because a running turn owns the record they
+// would be written to and a turn's runtime is fixed when it starts. Everything
+// else is queued on the room's worker as before, and a room that actually
+// changed is announced — the same notice a title or a fork sends.
+//
+// parked reports that a pick waits for the next turn: the difference between
+// "accepted, applies to the next turn" and "done", which a caller must not blur.
+func (app *ConversationApp) Annotate(ctx context.Context, convID string, a Annotation) (parked bool, err error) {
+	if sel, ok := pickOf(a); ok && app.running(convID) {
+		if err := app.parkSelection(ctx, convID, a, sel); err != nil {
+			return false, err
+		}
+		parked = true
+		a.Runtime, a.Effort, a.Upstream, a.AgentOption = nil, nil, nil, nil
+		if a.nothingElse() {
+			return true, nil
+		}
+	}
 	res := make(chan error, 1)
 	j := &appjob.Annotate{Ctx: ctx, Title: a.Title, IfTitle: a.IfTitle, ProjectID: a.ProjectID, FromProjectID: a.FromProjectID, Pinned: a.Pinned, MemoryOff: a.MemoryOff,
-		Label: a.Label, Routing: a.Routing, ResetRouting: a.ResetRouting, AgentOption: a.AgentOption, Runtime: a.Runtime, Effort: a.Effort, Upstream: a.Upstream}
+		Label: a.Label, Routing: a.Routing, ResetRouting: a.ResetRouting, AgentOption: a.AgentOption, Runtime: a.Runtime,
+		Effort: a.Effort, Upstream: a.Upstream}
 	j.Result = res
 	app.post(convID, j)
 	select {
 	case err := <-res:
 		if err != nil {
-			return err
+			return parked, err
 		}
 		app.notifyChanged(convID)
-		return nil
+		return parked, nil
 	case <-ctx.Done():
-		return apperror.New(408, "update request canceled", ctx.Err())
+		return parked, apperror.New(408, "update request canceled", ctx.Err())
 	}
+}
+
+// pickOf answers the part of an annotation that waits for the next turn, if it
+// carries one.
+func pickOf(a Annotation) (drepo.PendingSelection, bool) {
+	if a.Runtime == nil && a.Effort == nil && a.Upstream == nil && a.AgentOption == nil {
+		return drepo.PendingSelection{}, false
+	}
+	sel := drepo.PendingSelection{}
+	if a.Runtime != nil {
+		sel.AgentID, sel.AgentModel = a.Runtime.AgentID, a.Runtime.AgentModel
+		sel.ProviderID, sel.ModelID = a.Runtime.ProviderID, a.Runtime.ModelID
+	}
+	if a.Effort != nil {
+		effort := *a.Effort
+		sel.Effort = &effort
+	}
+	if a.Upstream != nil {
+		upstream := *a.Upstream
+		sel.Upstream = &upstream
+	}
+	if a.AgentOption != nil {
+		sel.Options = map[string]string{a.AgentOption[0]: a.AgentOption[1]}
+	}
+	return sel, true
+}
+
+// nothingElse reports whether an annotation carries nothing but the pick that
+// was just parked.
+func (a Annotation) nothingElse() bool {
+	return a.Title == nil && a.ProjectID == nil && a.Pinned == nil && a.MemoryOff == nil &&
+		a.Label == nil && a.Routing == nil && !a.ResetRouting
+}
+
+// parkSelection writes the pick where the next turn will find it, validating a
+// binding on the way: a deleted agent or a model the catalog dropped is refused
+// while the owner is still here, not discovered at the turn.
+func (app *ConversationApp) parkSelection(ctx context.Context, convID string, a Annotation, sel drepo.PendingSelection) error {
+	deps := app.depsSnapshot()
+	if a.Runtime != nil {
+		conv, err := deps.Convs.Load(ctx, convID)
+		if err != nil {
+			return err
+		}
+		if err := appjob.BindRuntime(ctx, deps, conv, *a.Runtime); err != nil {
+			return err
+		}
+	}
+	sel.AcceptedAt = time.Now().UTC()
+	return deps.Convs.SavePendingSelection(ctx, convID, sel)
+}
+
+// Pending answers what the room waits to apply on its next turn.
+func (app *ConversationApp) Pending(ctx context.Context, convID string) (drepo.PendingSelection, bool, error) {
+	return app.depsSnapshot().Convs.PendingSelection(ctx, convID)
 }
 
 // AgentOptions lists the session options of the room's agent, with the
@@ -158,7 +230,28 @@ func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]
 			opts[i].Current = v
 		}
 	}
-	return opts, nil
+	// A stored pick whose id the offered list does not carry is deferred —
+	// a stored intent, retried when the option materializes, never the
+	// active choice. It shows as its own marked entry, named from the
+	// stored catalog when that remembers the id.
+	deferred := make([]dservice.AgentOption, 0)
+	for _, pick := range info.AgentOptions {
+		if slices.ContainsFunc(opts, func(o dservice.AgentOption) bool { return o.ID == pick.ID }) {
+			continue
+		}
+		entry := dservice.AgentOption{ID: pick.ID, Name: pick.ID, Type: "select", Deferred: pick.Value}
+		if deps.AgentCatalog != nil {
+			if cat, err := deps.AgentCatalog.Catalog(ctx, info.AgentID); err == nil {
+				if j := slices.IndexFunc(cat.Options, func(o dservice.AgentOption) bool { return o.ID == pick.ID }); j >= 0 {
+					stored := cat.Options[j]
+					entry.Name, entry.Description, entry.Category, entry.Type, entry.Choices =
+						stored.Name, stored.Description, stored.Category, stored.Type, stored.Choices
+				}
+			}
+		}
+		deferred = append(deferred, entry)
+	}
+	return append(opts, deferred...), nil
 }
 
 // optionReport reads the room's option catalog — the report the picker draws:
@@ -186,29 +279,50 @@ func (app *ConversationApp) optionReport(ctx context.Context, deps appjob.Deps, 
 // session — every room after a restart — has nothing to apply the pick to, so
 // the catalog is the only thing standing between the store and a value the
 // agent never took.
-func (app *ConversationApp) SetAgentOption(ctx context.Context, convID, id, value string) error {
+func (app *ConversationApp) SetAgentOption(ctx context.Context, convID, id, value string) (parked bool, err error) {
 	deps := app.depsSnapshot()
-	if deps.AgentRuntime != nil && value != "" {
-		if err := deps.AgentRuntime.SetOption(ctx, convID, id, value); err != nil {
-			return err
-		}
-	}
 	if value != "" {
 		info, err := deps.Convs.Info(ctx, convID)
 		if err != nil {
-			return err
+			return false, err
 		}
 		opts, err := app.optionReport(ctx, deps, info)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if opts != nil {
 			i := slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == id })
 			if i < 0 {
-				return apperror.New(400, fmt.Sprintf("the agent offers no option %q", id), nil)
+				// Not offered — storable only when some catalog knows the id
+				// (a deferred pick retried on materialize). The stored
+				// catalog is that memory; its read failure refuses the
+				// write, and an id no catalog knows is refused outright.
+				var stored drepo.AgentCatalog
+				if deps.AgentCatalog != nil {
+					if stored, err = deps.AgentCatalog.Catalog(ctx, info.AgentID); err != nil {
+						return false, apperror.New(503, "the agent catalog could not be read", err)
+					}
+				}
+				j := slices.IndexFunc(stored.Options, func(o dservice.AgentOption) bool { return o.ID == id })
+				if j < 0 {
+					return false, apperror.New(400, fmt.Sprintf("the agent offers no option %q", id), nil)
+				}
+				if !stored.Options[j].Offers(value) {
+					return false, apperror.New(400, fmt.Sprintf("option %q does not offer %q", id, value), nil)
+				}
+			} else if !opts[i].Offers(value) {
+				return false, apperror.New(400, fmt.Sprintf("option %q does not offer %q", id, value), nil)
 			}
-			if !opts[i].Offers(value) {
-				return apperror.New(400, fmt.Sprintf("option %q does not offer %q", id, value), nil)
+		}
+		if app.running(convID) {
+			// A turn fixes its runtime when it starts, so applying the pick to
+			// the live session now would change a session under a running turn.
+			// It waits for the next turn instead — no refusal, no half state.
+			return true, app.parkSelection(ctx, convID, Annotation{}, drepo.PendingSelection{Options: map[string]string{id: value}})
+		}
+		if deps.AgentRuntime != nil {
+			if err := deps.AgentRuntime.SetOption(ctx, convID, id, value); err != nil {
+				return false, err
 			}
 		}
 	}

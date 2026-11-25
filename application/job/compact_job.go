@@ -112,11 +112,13 @@ type RuntimeBinding struct {
 	ModelID    string
 }
 
-// bindRuntime applies a binding with the same rules a turn applies: an
-// agent wins over a provider, and naming a provider route releases the
-// agent. Both BindAgent and UnbindAgent clear the provider/model pair, so
-// the pair is set after them, never before.
-func (d Deps) bindRuntime(ctx context.Context, conv *aggregate.Conversation, b RuntimeBinding) error {
+// BindRuntime applies a binding with the same rules a turn applies: an agent wins
+// over a provider, and naming a provider route releases the agent. Both
+// BindAgent and UnbindAgent clear the provider/model pair, so the pair is set
+// after them, never before. It is exported because the parked selection is
+// validated against it when it arrives and applied through it when a turn starts
+// — one rule for both moments.
+func BindRuntime(ctx context.Context, d Deps, conv *aggregate.Conversation, b RuntimeBinding) error {
 	switch {
 	case b.AgentID != "":
 		if d.Agents == nil {
@@ -231,7 +233,7 @@ func (j *Annotate) Execute(execCtx context.Context) (err error) {
 			}
 		}
 		if j.Runtime != nil {
-			if err := d.bindRuntime(ctx, conv, *j.Runtime); err != nil {
+			if err := BindRuntime(ctx, d, conv, *j.Runtime); err != nil {
 				return err
 			}
 		}

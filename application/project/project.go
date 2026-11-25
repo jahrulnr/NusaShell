@@ -22,7 +22,7 @@ import (
 // *appconversation.ConversationApp satisfies it.
 type Rooms interface {
 	List(ctx context.Context) ([]drepo.ConversationInfo, error)
-	Annotate(ctx context.Context, convID string, a appconversation.Annotation) error
+	Annotate(ctx context.Context, convID string, a appconversation.Annotation) (bool, error)
 }
 
 // ProjectApp is the project management use case.
@@ -208,7 +208,7 @@ func (a *ProjectApp) Delete(ctx context.Context, id string) ([]string, error) {
 		if info.ProjectID != id {
 			continue
 		}
-		err := a.rooms.Annotate(ctx, info.ID, appconversation.Annotation{ProjectID: &none, FromProjectID: &id})
+		_, err := a.rooms.Annotate(ctx, info.ID, appconversation.Annotation{ProjectID: &none, FromProjectID: &id})
 		if apperror.As(err).StatusCode() == apperror.StatusConflict {
 			continue // moved to another project meanwhile
 		}
@@ -251,7 +251,7 @@ func (a *ProjectApp) Restore(ctx context.Context, id, name string, folders []str
 	var rejoined []string
 	var errs []error
 	for _, roomID := range roomIDs {
-		err := a.rooms.Annotate(ctx, roomID, appconversation.Annotation{ProjectID: &id, FromProjectID: &none})
+		_, err := a.rooms.Annotate(ctx, roomID, appconversation.Annotation{ProjectID: &id, FromProjectID: &none})
 		switch apperror.As(err).StatusCode() {
 		case apperror.StatusConflict, apperror.StatusNotFound:
 			continue // joined another project, or deleted, since
