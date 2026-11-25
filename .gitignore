@@ -6,6 +6,7 @@ data/
 tasks/
 .playwright-mcp
 .claude/
+tmp/
 
 # Playwright run output
 web/test-results/
