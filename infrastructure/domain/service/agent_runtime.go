@@ -46,9 +46,10 @@ type AgentPrompt struct {
 	// MCPServers are the tool servers the agent gets in this room's
 	// session.
 	MCPServers []MCPServer
-	// Options are the owner's picks of the agent's session options, by
-	// option id; applied before the turn.
-	Options map[string]string
+	// Options are the owner's picks of the agent's session options,
+	// applied in list order before the turn: agent defaults first, room
+	// picks after, the model pick ahead of what it materializes.
+	Options valueobject.ConfigSelections
 	// Elicit asks the owner for input the agent requests; nil declines
 	// every request.
 	Elicit Elicitor

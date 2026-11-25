@@ -65,8 +65,8 @@ func (r *ConversationRepository) Load(ctx context.Context, convID string) (*aggr
 			return nil, err
 		}
 		c.SetAgentSession(meta.AgentSession)
-		for id, v := range meta.AgentOptions {
-			_ = c.SetAgentOption(id, v)
+		for _, pick := range meta.AgentOptions {
+			_ = c.SetAgentOption(pick.ID, pick.Value)
 		}
 		if r := meta.AgentContext; r != nil {
 			a, err := valueobject.NewAgentContext(r.Used, r.Size, r.CostAmount, r.CostCurrency)

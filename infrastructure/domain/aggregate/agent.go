@@ -25,9 +25,9 @@ type Agent struct {
 	// autoStart keeps the agent's process running: it starts with the
 	// server and the idle reaper leaves it alone.
 	autoStart bool
-	// defaults are the owner's picks of the agent's session options, by
-	// option id, for every room that has not picked its own.
-	defaults map[string]string
+	// defaults are the owner's picks of the agent's session options, in
+	// apply order, for every room that has not picked its own.
+	defaults valueobject.ConfigSelections
 }
 
 // NewAgent validates identity, command, and policy. Name defaults to the id.
@@ -72,21 +72,21 @@ func (a *Agent) SetAutoStart(on bool) { a.autoStart = on }
 
 // SetDefaults replaces the agent's default session options. Ids and values
 // are the agent's own, so only their shape is checked here.
-func (a *Agent) SetDefaults(defaults map[string]string) error {
-	for id, value := range defaults {
-		if strings.TrimSpace(id) == "" || len(id) > 128 || len(value) > 256 || value == "" {
-			return fmt.Errorf("invalid default for option %q", id)
+func (a *Agent) SetDefaults(defaults valueobject.ConfigSelections) error {
+	for _, s := range defaults {
+		if strings.TrimSpace(s.ID) == "" || len(s.ID) > 128 || len(s.Value) > 256 || s.Value == "" {
+			return fmt.Errorf("invalid default for option %q", s.ID)
 		}
 	}
-	a.defaults = maps.Clone(defaults)
+	a.defaults = slices.Clone(defaults)
 	return nil
 }
 
-func (a Agent) AutoStart() bool             { return a.autoStart }
-func (a Agent) Defaults() map[string]string { return maps.Clone(a.defaults) }
-func (a Agent) ID() string                  { return a.id }
-func (a Agent) Name() string                { return a.name }
-func (a Agent) Command() string             { return a.command }
-func (a Agent) Args() []string              { return slices.Clone(a.args) }
-func (a Agent) Env() map[string]string      { return maps.Clone(a.env) }
-func (a Agent) Policy() enum.ApprovalPolicy { return a.policy }
+func (a Agent) AutoStart() bool                        { return a.autoStart }
+func (a Agent) Defaults() valueobject.ConfigSelections { return slices.Clone(a.defaults) }
+func (a Agent) ID() string                             { return a.id }
+func (a Agent) Name() string                           { return a.name }
+func (a Agent) Command() string                        { return a.command }
+func (a Agent) Args() []string                         { return slices.Clone(a.args) }
+func (a Agent) Env() map[string]string                 { return maps.Clone(a.env) }
+func (a Agent) Policy() enum.ApprovalPolicy            { return a.policy }

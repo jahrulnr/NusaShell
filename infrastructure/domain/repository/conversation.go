@@ -33,8 +33,9 @@ type ConversationInfo struct {
 	MemoryOff bool
 	// Label is the room's @handle; empty = none.
 	Label string
-	// AgentOptions are the owner's picks of the agent's session options.
-	AgentOptions map[string]string
+	// AgentOptions are the owner's picks of the agent's session options,
+	// in apply order.
+	AgentOptions valueobject.ConfigSelections
 	// AgentSession is the bound agent's own handle for the room's session;
 	// empty when none was opened.
 	AgentSession string

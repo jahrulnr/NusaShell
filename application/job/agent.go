@@ -2,7 +2,7 @@ package job
 
 import (
 	"context"
-	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -217,14 +217,18 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 	}
 }
 
-// agentOptions are the session options a turn applies: the agent's defaults,
-// overridden by what the owner picked for this room.
-func agentOptions(agent *aggregate.Agent, conv *aggregate.Conversation) map[string]string {
-	options := agent.Defaults()
-	if options == nil {
-		options = map[string]string{}
+// agentOptions are the session options a turn applies, in order: the
+// agent's defaults first, each room pick replacing a default at its own
+// position or appending when the agent defaults do not name it.
+func agentOptions(agent *aggregate.Agent, conv *aggregate.Conversation) valueobject.ConfigSelections {
+	options := slices.Clone(agent.Defaults())
+	for _, pick := range conv.AgentOptions() {
+		if i := slices.IndexFunc(options, func(s valueobject.ConfigSelection) bool { return s.ID == pick.ID }); i >= 0 {
+			options[i].Value = pick.Value
+		} else {
+			options = append(options, pick)
+		}
 	}
-	maps.Copy(options, conv.AgentOptions())
 	return options
 }
 

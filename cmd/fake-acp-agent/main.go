@@ -36,7 +36,11 @@ type server struct {
 	cancel  chan struct{}
 	values  map[string]any
 	legacy  bool
-	busy    bool
+	// modelSet records whether a set_config_option picked the model, as
+	// opposed to the value the process was seeded with — the gate behind
+	// which EFFORT_AFTER_MODEL's dependent option hides.
+	modelSet bool
+	busy     bool
 	// sessionCounter mints a unique id per session/new like a real agent.
 	// current is the id the latest session call addressed; updates carry it.
 	sessionCounter int
@@ -318,6 +322,9 @@ func (s *server) handle(msg message) {
 		trace(fmt.Sprintf("config %s %v", req.ConfigID, req.Value))
 		s.mu.Lock()
 		s.values[req.ConfigID] = req.Value
+		if req.ConfigID == "model" {
+			s.modelSet = true
+		}
 		if req.ConfigID == "model" && os.Getenv("FAKE_ACP_MODEL_RESETS_EFFORT") == "1" {
 			// Emulate agents whose model value implies an effort level (like
 			// Devin's swe-2-high): picking a model resets effort to its default.
@@ -398,7 +405,7 @@ func (s *server) configOptions() []any {
 			},
 		},
 	}
-	if os.Getenv("FAKE_ACP_DYNAMIC_CONFIG") == "1" || os.Getenv("FAKE_ACP_MODEL_RESETS_EFFORT") == "1" {
+	if os.Getenv("FAKE_ACP_DYNAMIC_CONFIG") == "1" || os.Getenv("FAKE_ACP_MODEL_RESETS_EFFORT") == "1" || os.Getenv("FAKE_ACP_EFFORT_AFTER_MODEL") == "1" {
 		effort := []any{
 			map[string]any{"value": "low", "name": "Low"},
 			map[string]any{"value": "high", "name": "High"},
@@ -409,11 +416,34 @@ func (s *server) configOptions() []any {
 				effort = append(effort, map[string]any{"value": "high", "name": "High"})
 			}
 		}
-		current := s.values["effort"]
-		if current == nil {
-			current = "low"
+		// Codex gates reasoning_effort on the current model: the option
+		// exists only once a model pick resolved (B-038).
+		if os.Getenv("FAKE_ACP_EFFORT_AFTER_MODEL") != "1" || s.modelSet {
+			current := s.values["effort"]
+			if current == nil {
+				current = "low"
+			}
+			options = append(options, map[string]any{"id": "effort", "name": "Effort", "category": "thought_level", "type": "select", "currentValue": current, "options": effort})
 		}
-		options = append(options, map[string]any{"id": "effort", "name": "Effort", "category": "thought_level", "type": "select", "currentValue": current, "options": effort})
+	}
+	if os.Getenv("FAKE_ACP_LADDER") == "1" {
+		// A chain that always materializes the next rung when the previous
+		// one resolves — exercises the bounded retry that must stop anyway.
+		options = append(options, map[string]any{"id": "ladder", "name": "Ladder", "type": "select",
+			"currentValue": s.values["ladder"], "options": []any{
+				map[string]any{"value": "a", "name": "A"},
+				map[string]any{"value": "b", "name": "B"},
+			}})
+		prev := "ladder"
+		for k := 1; k <= 5 && s.values[prev] != nil; k++ {
+			id := fmt.Sprintf("ladder%d", k)
+			options = append(options, map[string]any{"id": id, "name": "Ladder " + id, "type": "select",
+				"currentValue": s.values[id], "options": []any{
+					map[string]any{"value": "a", "name": "A"},
+					map[string]any{"value": "b", "name": "B"},
+				}})
+			prev = id
+		}
 	}
 	if s.legacy {
 		return options

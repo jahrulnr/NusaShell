@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"io"
 	"slices"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
 // command is the client→server envelope. Every field is declared so the
@@ -72,7 +74,7 @@ type sendPayload struct {
 	// AgentOptions are the agent's session options picked before the room
 	// existed (its mode, for one). An existing room keeps its own, set
 	// through PUT /api/conversations/{id}/agent-options.
-	AgentOptions map[string]string `json:"agentOptions,omitempty"`
+	AgentOptions valueobject.ConfigSelections `json:"agentOptions,omitempty"`
 	// ProjectID opens a new room inside a project; ignored for an
 	// existing room.
 	ProjectID string `json:"projectId,omitempty"`

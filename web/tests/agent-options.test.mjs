@@ -156,10 +156,59 @@ test('a thread that does not exist yet stages the pick and carries it on its fir
   assert.equal(calls.filter((c) => c.method === 'PUT').length, 0, 'nothing to write on the server yet');
   assert.equal(home.sel.agentOptions.mode, 'plan');
 
-  // the first turn carries the staged picks
+  // the first turn carries the staged picks in the wire's ordered form
   chat.submit(home, 'hello');
   const sent = ws.sent.filter((c) => c.type === 'turn.send').at(-1);
-  assert.equal(sent.payload.agentOptions?.mode, 'plan');
+  assert.deepEqual(sent.payload.agentOptions, [{ id: 'mode', value: 'plan' }]);
+});
+
+// The stored pick list changed wire form: an ordered [{id, value}] array is
+// what the server writes now, while the {id: value} object still decodes.
+// A turn carries the array in the order the picker draws, and both forms
+// read into the same values for the controls.
+test('staged picks ride the first turn as the ordered array the picker shows', async () => {
+  mockApi({
+    'GET /api/agents/claude/options': { data: LIST('code') },
+    'GET /api/providers': { items: [], page: { total: 0 } },
+    'GET /api/agents': { items: [{ id: 'claude', name: 'Claude' }], page: { total: 1 } },
+  });
+  const home = chat.freshRoom();
+  chat.setSelection(home, { agentId: 'claude' });
+  await chat.loadAgentOptions(home);
+
+  // picked in reverse of the display order on purpose: the map's own order
+  // is thinking-then-mode, the picker's list is mode-then-thinking
+  await chat.setSessionOption(home, 'thinking', 'true');
+  await chat.setSessionOption(home, 'mode', 'plan');
+
+  chat.submit(home, 'hello');
+  const sent = ws.sent.filter((c) => c.type === 'turn.send').at(-1);
+  assert.deepEqual(sent.payload.agentOptions, [
+    { id: 'mode', value: 'plan' },
+    { id: 'thinking', value: 'true' },
+  ], 'the body is an array in the order the picker draws, not the order clicked');
+});
+
+test('a stored pick list reads the same in array form and in object form', async () => {
+  mockApi({
+    'GET /api/agents/claude/options': { data: LIST('code') },
+    'GET /api/providers': { items: [], page: { total: 0 } },
+    'GET /api/agents': { items: [{ id: 'claude', name: 'Claude' }], page: { total: 1 } },
+  });
+  const home = chat.freshRoom();
+  chat.setSelection(home, { agentId: 'claude' });
+  await chat.loadAgentOptions(home);
+  const mode = home.agentOptions.list.find((o) => o.id === 'mode');
+
+  // the array the server writes now
+  chat.setSelection(home, { agentOptions: [{ id: 'mode', value: 'plan' }] });
+  assert.equal(chat.sessionOptionValue(home, mode), 'plan');
+  assert.equal(chat.sessionModeName(home), 'Plan');
+
+  // the object older state carries — a tab staged before this change, for one
+  chat.setSelection(home, { agentOptions: { mode: 'bypass' } });
+  assert.equal(chat.sessionOptionValue(home, mode), 'bypass');
+  assert.equal(chat.sessionModeName(home), 'Bypass Permissions');
 });
 
 test('nothing is written while a turn runs, and the controls say when it applies', async () => {

@@ -5,7 +5,7 @@
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, toast, state, emit } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
-import { loadAgents, loadAgentModels, navigate } from '../lib/chat.js';
+import { loadAgents, loadAgentModels, navigate, agentOptionMap, agentOptionList } from '../lib/chat.js';
 import { Icon } from './icons.js';
 import { Button, Dialog, Select, ErrorBlock, Spinner, Toggle } from './ui.js';
 import { useXterm } from './terminal.js';
@@ -117,9 +117,12 @@ const parseArgs = (text) => text.split('\n').map((x) => x.trim()).filter(Boolean
 // DefaultOptions picks what a thread of this agent starts with, for the
 // session options the agent offers (its mode, a model parameter, …). The
 // options come from the agent itself, so reading them starts it; a thread
-// that picks its own keeps its pick.
+// that picks its own keeps its pick. value carries the wire's ordered
+// [{id, value}] form; the rows index it through agentOptionMap so an older
+// {id: value} document reads the same.
 function DefaultOptions({ id, value, onChange }) {
   const [doc, setDoc] = useState({ status: 'idle' });
+  const picks = agentOptionMap(value);
   const load = async () => {
     setDoc({ status: 'loading' });
     try { setDoc({ status: 'ready', options: (await api.agentOptionsFor(id)).data || [] }); }
@@ -127,7 +130,7 @@ function DefaultOptions({ id, value, onChange }) {
   };
   if (doc.status === 'idle') {
     return html`<div class="flex items-center gap-3"><${Button} kind="ghost" onClick=${load}>Choose defaults</${Button}>
-      <span class="text-xs text-faint">${Object.keys(value).length ? `${Object.keys(value).length} set. ` : ''}Starts the agent to read its options.</span></div>`;
+      <span class="text-xs text-faint">${Object.keys(picks).length ? `${Object.keys(picks).length} set. ` : ''}Starts the agent to read its options.</span></div>`;
   }
   if (doc.status === 'loading') return html`<div class="flex items-center gap-2 text-muted"><${Spinner} /> Asking the agent for its options…</div>`;
   if (doc.status === 'error') return html`<${ErrorBlock} title="Could not read the agent's options" message=${doc.error} onRetry=${load} />`;
@@ -136,9 +139,9 @@ function DefaultOptions({ id, value, onChange }) {
     const choices = o.type === 'boolean' ? [{ value: 'true', text: 'On' }, { value: 'false', text: 'Off' }] : (o.choices || []).map((c) => ({ value: c.value, text: c.name || c.value }));
     return html`<div key=${o.id} class="flex items-center gap-3">
       <span class="flex-1 min-w-0 truncate" title=${o.description || o.name}>${o.name || o.id}</span>
-      <${Select} dense label=${o.name || o.id} class="w-44" value=${value[o.id] || ''}
+      <${Select} dense label=${o.name || o.id} class="w-44" value=${picks[o.id] || ''}
         options=${[{ value: '', text: 'Agent’s default' }, ...choices]}
-        onChange=${(v) => { const next = { ...value }; if (v) next[o.id] = v; else delete next[o.id]; onChange(next); }} />
+        onChange=${(v) => { const next = { ...picks }; if (v) next[o.id] = v; else delete next[o.id]; onChange(agentOptionList(next, doc.options.map((x) => x.id))); }} />
     </div>`;
   })}</div>`;
 }
@@ -149,7 +152,7 @@ function AgentDialog({ agent, onClose }) {
   const [f, setF] = useState(() => ({
     id: agent?.id || '', name: agent?.name || '', command: agent?.command || '',
     args: (agent?.args || []).join('\n'), env: envText(agent?.env), policy: agent?.policy || 'ask',
-    autoStart: !!agent?.autoStart, defaults: agent?.defaults || {},
+    autoStart: !!agent?.autoStart, defaults: agentOptionList(agent?.defaults),
   }));
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');

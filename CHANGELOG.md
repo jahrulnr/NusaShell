@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Stored agent picks carry their order, and the model is applied first: an option that only exists once a model is chosen (a reasoning effort) is now reached in the same turn instead of being skipped, and the list is read again after each change until it settles (bounded).
 - A compacted thread shows where its history was folded: a rule labelled `Compacted`, with the checkpoint kept behind it instead of a plain note in the transcript.
 
 - Sending a message to a busy thread queues it instead of failing. The answer names one of `steer`, `turn`, or `queued` with its position, a full queue answers 429 with its depth, and a room shows how many messages wait — a Stop cancels the running turn but leaves them. `queued` is an acceptance, not a promise: a restart before the turn runs loses the message.
@@ -31,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Only the installed binary may install itself. An instance running from anywhere else refuses the install with a message naming both paths, and a restart is only taken through the service manager that owns this process.
 
 ### Fixed
+
+- A pick the agent does not offer yet is kept as deferred and reported as such, instead of being counted as applied and silently ignored — the turn still runs.
+- A file an agent hands over with no type (a voice note as `application/octet-stream`) is named by its bytes and file name, so it reaches the tool that can transcribe it instead of being stored as an opaque blob.
 
 - An agent option no longer reverts to an older value: every session update and response carries its place in the wire order, so a late notification cannot overwrite the response that came after it — the same guard covers the session mode.
 - An option an agent stops offering disappears instead of lingering: a session update replaces the offered list, so the picker stops showing a choice the agent would refuse with `-32602` and fail the turn.

@@ -57,15 +57,15 @@ type View struct {
 	Policy  string   `json:"policy"`
 	// AutoStart keeps the agent's process running from the server's start.
 	AutoStart bool `json:"autoStart"`
-	// Defaults are the session options a room starts with, by option id.
-	Defaults map[string]string `json:"defaults"`
+	// Defaults are the session options a room starts with, in apply order.
+	Defaults valueobject.ConfigSelections `json:"defaults"`
 }
 
 func view(a aggregate.Agent) View {
 	v := View{ID: a.ID(), Name: a.Name(), Command: a.Command(), Args: a.Args(), Policy: a.Policy().String(), Env: []EnvVar{},
 		AutoStart: a.AutoStart(), Defaults: a.Defaults()}
 	if v.Defaults == nil {
-		v.Defaults = map[string]string{}
+		v.Defaults = valueobject.ConfigSelections{}
 	}
 	if v.Args == nil {
 		v.Args = []string{}
@@ -113,7 +113,7 @@ type Input struct {
 	Policy  string
 	// AutoStart and Defaults replace the stored ones.
 	AutoStart bool
-	Defaults  map[string]string
+	Defaults  valueobject.ConfigSelections
 }
 
 // Upsert creates or replaces an agent. The running process of an edited
@@ -164,7 +164,7 @@ func (app *AgentApp) Upsert(ctx context.Context, in Input) (View, error) {
 // agent as it is stored, which starts it; an agent not yet stored, or a
 // process with no runtime to ask (the CLI), has nothing to check against,
 // and a default the agent no longer offers is ignored when a room starts.
-func (app *AgentApp) checkDefaults(ctx context.Context, id string, defaults map[string]string) error {
+func (app *AgentApp) checkDefaults(ctx context.Context, id string, defaults valueobject.ConfigSelections) error {
 	if len(defaults) == 0 || app.runtime == nil {
 		return nil
 	}
@@ -179,15 +179,13 @@ func (app *AgentApp) checkDefaults(ctx context.Context, id string, defaults map[
 	if err != nil {
 		return apperror.New(502, "could not check the defaults against the agent", err)
 	}
-	for optionID, value := range defaults {
-		i := slices.IndexFunc(options, func(o dservice.AgentOption) bool { return o.ID == optionID })
+	for _, pick := range defaults {
+		i := slices.IndexFunc(options, func(o dservice.AgentOption) bool { return o.ID == pick.ID })
 		switch {
 		case i < 0:
-			return apperror.New(400, "the agent has no option "+optionID, nil)
-		case options[i].Type == "boolean" && value != "true" && value != "false":
-			return apperror.New(400, "option "+optionID+" is on or off", nil)
-		case options[i].Type == "select" && !slices.ContainsFunc(options[i].Choices, func(c dservice.OptionChoice) bool { return c.Value == value }):
-			return apperror.New(400, "the agent does not offer "+value+" for "+optionID, nil)
+			return apperror.New(400, "the agent has no option "+pick.ID, nil)
+		case !options[i].Offers(pick.Value):
+			return apperror.New(400, "the agent does not offer "+pick.Value+" for "+pick.ID, nil)
 		}
 	}
 	return nil

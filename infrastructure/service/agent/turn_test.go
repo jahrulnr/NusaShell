@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
@@ -29,6 +32,97 @@ func contextReports(events []event.TurnEvent) []valueobject.AgentContext {
 		}
 	}
 	return out
+}
+
+// keptMedia is one payload the sink handed the store.
+type keptMedia struct {
+	name      string
+	mediaType string
+	raw       []byte
+}
+
+// mediaSink builds a sink whose saved media land in the returned slice, and
+// feeds it one content block the way the agent's turn would.
+func mediaSink(t *testing.T) (*turnSink, *[]keptMedia) {
+	t.Helper()
+	kept := []keptMedia{}
+	sink := newTurnSink(context.Background(), func(event.TurnEvent) {}, nil)
+	sink.save = func(_ context.Context, name, mediaType string, raw []byte) (valueobject.Attachment, error) {
+		kept = append(kept, keptMedia{name: name, mediaType: mediaType, raw: raw})
+		return valueobject.NewAttachment("file:///tmp/kept/"+name, mediaType)
+	}
+	return sink, &kept
+}
+
+func (s *turnSink) addMediaLocked(b acp.ContentBlock) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addMedia(b)
+}
+
+// blob wraps payload bytes the way the agent sends them.
+func blob(raw []byte) string { return base64.StdEncoding.EncodeToString(raw) }
+
+// An agent that sends a voice note without a media type is answered with the
+// file's own name: the bytes alone read as video, and only the extension says
+// it is audio.
+func TestKeptMediaSniffsWithTheFilesName(t *testing.T) {
+	sink, kept := mediaSink(t)
+	sink.addMediaLocked(acp.ContentBlock{Type: "resource", Name: "voice.m4a",
+		Resource: &acp.EmbeddedResource{MIMEType: "application/octet-stream",
+			Blob: blob([]byte("\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00"))}})
+	if len(*kept) != 1 || (*kept)[0].mediaType != "audio/mp4" {
+		t.Fatalf("kept = %+v, want audio/mp4", *kept)
+	}
+}
+
+// A payload with no name at all is still named by its bytes — the sniffer's
+// extension tie-break simply has nothing to add.
+func TestKeptMediaWithoutANameFallsBackToItsBytes(t *testing.T) {
+	sink, kept := mediaSink(t)
+	sink.addMediaLocked(acp.ContentBlock{Type: "resource",
+		Resource: &acp.EmbeddedResource{MIMEType: "application/octet-stream",
+			Blob: blob([]byte("OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00"))}})
+	if len(*kept) != 1 || (*kept)[0].mediaType != "audio/ogg" {
+		t.Fatalf("kept = %+v, want audio/ogg", *kept)
+	}
+	if (*kept)[0].name == "" {
+		t.Fatal("the store still needs a name for a payload that arrived without one")
+	}
+}
+
+// A media type the agent states is its own answer and is kept as given: these
+// are Ogg bytes, but the agent says wav, and the sink must not overrule it.
+func TestKeptMediaKeepsTheDeclaredType(t *testing.T) {
+	sink, kept := mediaSink(t)
+	sink.addMediaLocked(acp.ContentBlock{Type: "audio", Name: "voice.wav", MIMEType: "audio/wav",
+		Data: blob([]byte("OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00"))})
+	if len(*kept) != 1 || (*kept)[0].mediaType != "audio/wav" {
+		t.Fatalf("kept = %+v, want the declared audio/wav", *kept)
+	}
+}
+
+// One sniffer names payloads in this package: no caller sniffs content types
+// itself, where the extension tie-break would be lost.
+func TestNoRawContentTypeSniffingInThePackage(t *testing.T) {
+	needle := "Detect" + "ContentType" // split so this file never matches itself
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), needle) {
+			t.Fatalf("%s sniffs content types itself; call dservice.SniffMediaType instead", name)
+		}
+	}
 }
 
 func TestUsageUpdateReportsTheAgentsContext(t *testing.T) {

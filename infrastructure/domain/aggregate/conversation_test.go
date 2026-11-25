@@ -399,24 +399,54 @@ func TestAgentDefaultsAndAutoStart(t *testing.T) {
 		t.Fatal("a new agent starts on demand with no defaults")
 	}
 	a.SetAutoStart(true)
-	if err := a.SetDefaults(map[string]string{"mode": "plan", "thought_level": "high"}); err != nil {
+	if err := a.SetDefaults(valueobject.ConfigSelections{{ID: "mode", Value: "plan"}, {ID: "thought_level", Value: "high"}}); err != nil {
 		t.Fatal(err)
 	}
-	if !a.AutoStart() || a.Defaults()["mode"] != "plan" {
+	if v, _ := a.Defaults().Value("mode"); !a.AutoStart() || v != "plan" {
 		t.Fatalf("defaults = %v", a.Defaults())
 	}
 	// The aggregate hands out copies.
-	a.Defaults()["mode"] = "tampered"
-	if a.Defaults()["mode"] != "plan" {
+	a.Defaults()[0].Value = "tampered"
+	if v, _ := a.Defaults().Value("mode"); v != "plan" {
 		t.Fatal("defaults were shared with the caller")
 	}
-	for name, bad := range map[string]map[string]string{
-		"blank id":    {" ": "x"},
-		"empty value": {"mode": ""},
-		"long id":     {strings.Repeat("i", 129): "x"},
+	for name, bad := range map[string]valueobject.ConfigSelections{
+		"blank id":    {{ID: " ", Value: "x"}},
+		"empty value": {{ID: "mode", Value: ""}},
+		"long id":     {{ID: strings.Repeat("i", 129), Value: "x"}},
 	} {
 		if err := a.SetDefaults(bad); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+// Stored picks are ordered: a room pick for an id already recorded keeps its
+// place, a new id appends, and clearing removes only that entry.
+func TestSetAgentOptionKeepsApplyOrder(t *testing.T) {
+	c, err := NewConversation("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BindAgent("a_x"); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range [][2]string{{"mode", "plan"}, {"effort", "high"}, {"strict", "true"}, {"mode", "build"}} {
+		if err := c.SetAgentOption(p[0], p[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := c.AgentOptions()
+	want := valueobject.ConfigSelections{
+		{ID: "mode", Value: "build"}, {ID: "effort", Value: "high"}, {ID: "strict", Value: "true"},
+	}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("picks = %v, want %v", got, want)
+	}
+	if err := c.SetAgentOption("effort", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.AgentOptions(); len(got) != 2 || got[0] != want[0] || got[1] != want[2] {
+		t.Fatalf("after clear picks = %v", got)
 	}
 }

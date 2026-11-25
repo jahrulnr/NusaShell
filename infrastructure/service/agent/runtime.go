@@ -164,6 +164,11 @@ type session struct {
 	// cannot roll the session back.
 	configSeq uint64
 	modesSeq  uint64
+	// modelSet records whether a model pick was set on this session since
+	// it opened — as opposed to the value it arrived with. It gates the
+	// one-time list refresh below: a session resumed onto a model it never
+	// picked needs one republish, a pinned room does not need one per turn.
+	modelSet bool
 	// preamble is what the agent still has to be told before the next
 	// ordinary input: the session's instructions, when it cannot take them
 	// as a system prompt, and a recap of the thread, when its own session
@@ -525,17 +530,68 @@ func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent e
 	if err := r.selectModel(ctx, s, in.Model); err != nil {
 		return err
 	}
-	for id, value := range in.Options {
-		if err := r.applyOption(ctx, s, id, value); err != nil {
-			// The room's stored picks are applied before every turn. One the
-			// agent's options no longer list is stale — the agent narrowed
-			// its choices since — so the turn runs on the session's current
-			// value instead of failing on a record nothing here can fix.
-			if errors.Is(err, errOptionValueNotOffered) {
-				continue
+	// The stored picks apply in order, and the pick that selects the model
+	// goes first: dependent options — codex's reasoning_effort, for one —
+	// materialize only once the model pick resolves to a listed model, so
+	// any read before that sees a shorter list (B-038).
+	s.mu.Lock()
+	modelOptID, _, _ := modelOption(s.configs)
+	s.mu.Unlock()
+	picks := in.Options
+	if modelOptID != "" {
+		picks = make(valueobject.ConfigSelections, 0, len(in.Options))
+		for _, pick := range in.Options {
+			if pick.ID == modelOptID {
+				picks = append(picks, pick)
 			}
-			return err
 		}
+		for _, pick := range in.Options {
+			if pick.ID != modelOptID {
+				picks = append(picks, pick)
+			}
+		}
+	}
+	// Applying a pick can materialize the options another pick waits for
+	// (the effort a model pick publishes, for one): re-read the offered
+	// list after every SetConfig — applyOption already reads the fresh
+	// configs — and retry what was deferred, bounded and stopping when a
+	// round makes no progress. Picks already at their value recheck too:
+	// a later set may have reset them. What stays unoffered is deferred,
+	// never counted as applied.
+	pending := picks
+	for round := 0; round < applyOptionMaxRounds && len(pending) > 0; round++ {
+		next := make(valueobject.ConfigSelections, 0, len(pending))
+		progressed := false
+		for _, pick := range pending {
+			outcome, err := r.applyOption(ctx, s, pick.ID, pick.Value)
+			switch {
+			case err != nil:
+				// The room's stored picks are applied before every turn. One
+				// the agent's options no longer list is stale — the agent
+				// narrowed its choices since — so the turn runs on the
+				// session's current value instead of failing on a record
+				// nothing here can fix.
+				if errors.Is(err, errOptionValueNotOffered) {
+					continue
+				}
+				return err
+			case outcome == optionApplied:
+				progressed = true
+			default:
+				// optionDeferred waits for a set to publish it;
+				// optionAlreadyCurrent rechecks in case a later set
+				// (a resetting parent) moved the value underneath it.
+				next = append(next, pick)
+			}
+		}
+		pending = next
+		if !progressed {
+			break
+		}
+	}
+	if len(pending) > 0 {
+		r.log.Warn("agent option picks deferred: the session does not offer them",
+			"conversation", in.Conversation.ID(), "picks", pending)
 	}
 
 	blocks, taken := r.promptBlocks(ctx, in, s)
@@ -621,7 +677,33 @@ func (r *Runtime) selectModel(ctx context.Context, s *session, model string) err
 	s.mu.Lock()
 	configID, current, models := modelOption(s.configs)
 	s.mu.Unlock()
-	if configID == "" || current == model {
+	if configID == "" {
+		return nil
+	}
+	if current == model {
+		// The model already matches the pick, so nothing is set — but a
+		// session resumed on an older offered list may still miss the
+		// dependent options this model materializes. A set to the current
+		// value is the only read the protocol gives: the response republishes
+		// the list. Once per session — a model set some agents answer by
+		// resetting the dependent values is churn a pinned room does not
+		// need every turn — and only when the value itself is offered.
+		if s.modelSet || !slices.ContainsFunc(models, func(m dservice.AgentModel) bool { return m.ID == model }) {
+			return nil
+		}
+		state, err := s.proc.client.SetConfig(ctx, s.acpID, configID, model)
+		if err != nil {
+			// A refresh changes nothing: the turn keeps the list it has.
+			r.log.Warn("the model refresh was refused", "agent", s.proc.agentID, "session", s.acpID, "error", err)
+			return nil
+		}
+		s.mu.Lock()
+		s.modelSet = true
+		if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
+			s.configs = state.ConfigOptions
+			s.configSeq = state.WireSeq
+		}
+		s.mu.Unlock()
 		return nil
 	}
 	if !slices.ContainsFunc(models, func(m dservice.AgentModel) bool { return m.ID == model }) {
@@ -632,6 +714,7 @@ func (r *Runtime) selectModel(ctx context.Context, s *session, model string) err
 		return apperror.New(502, "agent refused the model change", err)
 	}
 	s.mu.Lock()
+	s.modelSet = true
 	if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
 		s.configs = state.ConfigOptions
 		s.configSeq = state.WireSeq
@@ -1492,7 +1575,8 @@ func (r *Runtime) SetOption(ctx context.Context, conversationID, id, value strin
 	if s == nil || s.proc.isDead() {
 		return nil
 	}
-	return r.applyOption(ctx, s, id, value)
+	_, err := r.applyOption(ctx, s, id, value)
+	return err
 }
 
 // errOptionValueNotOffered marks a pick of an option the session does offer but
@@ -1501,21 +1585,68 @@ func (r *Runtime) SetOption(ctx context.Context, conversationID, id, value strin
 // stale record must not fail a turn the owner can no longer fix from there.
 var errOptionValueNotOffered = errors.New("option value not offered")
 
+// optionOutcome is what applyOption did with one pick. Step 5 turns the
+// deferred kind into stored-pick semantics; the turn already must not count
+// an unoffered id as applied.
+type optionOutcome int
+
+const (
+	// optionApplied: a SetConfig/SetMode ran and the session took it.
+	optionApplied optionOutcome = iota
+	// optionAlreadyCurrent: the session already held the pick's value.
+	optionAlreadyCurrent
+	// optionDeferred: no option by this id is offered now — kept for a
+	// later round or a later session, never reported as applied.
+	optionDeferred
+)
+
+// applyOptionMaxRounds bounds the apply-retry fixpoint: three rounds apply a
+// chain three deep (model → dependent → dependent-of-dependent), and an
+// endlessly-materializing chain stops there instead of holding the turn.
+const applyOptionMaxRounds = 3
+
 // applyOption sets one option when the session offers it with another
 // value: legacy modes through session/set_mode, config options through
-// session/set_config_option. Options the session does not offer are
-// skipped — they belonged to another agent version. A value the offered
-// option does not list is not one of them: it is refused, so no caller can
-// record a pick the agent would never take.
-func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string) error {
+// session/set_config_option. An id the session does not offer is deferred,
+// not silently applied — a later SetConfig may materialize it. A value the
+// offered option does not list is refused, so no caller can record a pick
+// the agent would never take.
+func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string) (optionOutcome, error) {
 	s.mu.Lock()
 	opts := sessionOptions(s.configs, s.modes)
 	s.mu.Unlock()
 	i := slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == id })
-	if i < 0 || opts[i].Current == value {
-		return nil
+	var o dservice.AgentOption
+	if i >= 0 {
+		if opts[i].Current == value {
+			return optionAlreadyCurrent, nil
+		}
+		o = opts[i]
+	} else {
+		// The model option is kept out of the picker's list but a stored
+		// pick on its id still applies — ahead of the dependent options the
+		// model pick materializes. Any other id is an option the session
+		// does not offer: deferred, to be retried after a SetConfig that may
+		// publish it or kept until it does.
+		s.mu.Lock()
+		configID, current, models := modelOption(s.configs)
+		modelSet := s.modelSet
+		s.mu.Unlock()
+		if id != configID {
+			return optionDeferred, nil
+		}
+		if current == value && modelSet {
+			return optionAlreadyCurrent, nil
+		}
+		// current == value without a resolved set still goes through: the
+		// same once-per-session republish selectModel runs — a resumed
+		// session may sit on this model without its dependents offered.
+		o = dservice.AgentOption{ID: configID, Type: "select", Current: current,
+			Choices: make([]dservice.OptionChoice, 0, len(models))}
+		for _, m := range models {
+			o.Choices = append(o.Choices, dservice.OptionChoice{Value: m.ID, Name: m.Name})
+		}
 	}
-	o := opts[i]
 	// A value the offered option does not list is refused, so no caller can
 	// record a pick the agent would never take. Offers is the same rule the
 	// picker validates against, so the two can never disagree.
@@ -1524,7 +1655,7 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 		if o.Type == "boolean" {
 			message = fmt.Sprintf("option %q takes true or false, not %q", id, value)
 		}
-		return apperror.New(400, message, errOptionValueNotOffered)
+		return optionDeferred, apperror.New(400, message, errOptionValueNotOffered)
 	}
 	// The synthetic mode option is legacy: no config option carries its id.
 	s.mu.Lock()
@@ -1541,7 +1672,7 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 	if legacy {
 		seq, err := s.proc.client.SetMode(ctx, s.acpID, value)
 		if err != nil {
-			return apperror.New(502, "agent refused the mode change", err)
+			return optionDeferred, apperror.New(502, "agent refused the mode change", err)
 		}
 		s.mu.Lock()
 		if seq > s.modesSeq {
@@ -1549,7 +1680,7 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 			s.modesSeq = seq
 		}
 		s.mu.Unlock()
-		return nil
+		return optionApplied, nil
 	}
 	var v any = value
 	if o.Type == "boolean" {
@@ -1557,15 +1688,18 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 	}
 	state, err := s.proc.client.SetConfig(ctx, s.acpID, id, v)
 	if err != nil {
-		return apperror.New(502, "agent refused the option change", err)
+		return optionDeferred, apperror.New(502, "agent refused the option change", err)
 	}
 	s.mu.Lock()
+	if i < 0 {
+		s.modelSet = true
+	}
 	if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
 		s.configs = state.ConfigOptions
 		s.configSeq = state.WireSeq
 	}
 	s.mu.Unlock()
-	return nil
+	return optionApplied, nil
 }
 
 // Commands lists the slash commands of the room's live session.

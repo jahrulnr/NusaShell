@@ -12,6 +12,7 @@ import (
 	appagent "github.com/jahrulnr/nusashell/application/agent"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/internal/transport"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
 // Service is the agent management surface. *appagent.AgentApp satisfies it.
@@ -90,8 +91,8 @@ type putBody struct {
 	Policy  string            `json:"policy"`
 	// AutoStart keeps the agent's process running; Defaults are the session
 	// options its rooms start with, by option id.
-	AutoStart bool              `json:"autoStart"`
-	Defaults  map[string]string `json:"defaults"`
+	AutoStart bool                         `json:"autoStart"`
+	Defaults  valueobject.ConfigSelections `json:"defaults"`
 }
 
 func (s *server) put(c *gin.Context) {

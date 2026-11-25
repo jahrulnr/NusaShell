@@ -14,31 +14,31 @@ import (
 // metaRecord is meta.json — conversation-level state plus the counters
 // Info serves, so inspection never scans message files.
 type metaRecord struct {
-	ID             string              `json:"id"`
-	Title          string              `json:"title,omitempty"`
-	ProviderID     string              `json:"providerId,omitempty"`
-	ModelID        string              `json:"modelId,omitempty"`
-	Effort         string              `json:"effort,omitempty"`
-	Upstream       string              `json:"upstream,omitempty"`
-	Workspace      string              `json:"workspace,omitempty"`
-	Environment    string              `json:"environment"`
-	AgentID        string              `json:"agentId,omitempty"`
-	ProjectID      string              `json:"projectId,omitempty"`
-	Pinned         bool                `json:"pinned,omitempty"`
-	MemoryOff      bool                `json:"memoryOff,omitempty"`
-	Label          string              `json:"label,omitempty"`
-	Routing        *routingRecord      `json:"routing,omitempty"`
-	AgentSession   string              `json:"agentSession,omitempty"`
-	AgentOptions   map[string]string   `json:"agentOptions,omitempty"`
-	AgentContext   *agentContextRecord `json:"agentContext,omitempty"`
-	AgentTitle     string              `json:"agentTitle,omitempty"`
-	Tools          []toolSchemaRecord  `json:"tools,omitempty"`
-	Usage          usageRecord         `json:"usage"`
-	MessageCount   int                 `json:"messageCount"`
-	ActiveCount    int                 `json:"activeCount"`
-	SealedSegments int                 `json:"sealedSegments"`
-	CreatedAt      time.Time           `json:"createdAt"`
-	UpdatedAt      time.Time           `json:"updatedAt"`
+	ID             string                       `json:"id"`
+	Title          string                       `json:"title,omitempty"`
+	ProviderID     string                       `json:"providerId,omitempty"`
+	ModelID        string                       `json:"modelId,omitempty"`
+	Effort         string                       `json:"effort,omitempty"`
+	Upstream       string                       `json:"upstream,omitempty"`
+	Workspace      string                       `json:"workspace,omitempty"`
+	Environment    string                       `json:"environment"`
+	AgentID        string                       `json:"agentId,omitempty"`
+	ProjectID      string                       `json:"projectId,omitempty"`
+	Pinned         bool                         `json:"pinned,omitempty"`
+	MemoryOff      bool                         `json:"memoryOff,omitempty"`
+	Label          string                       `json:"label,omitempty"`
+	Routing        *routingRecord               `json:"routing,omitempty"`
+	AgentSession   string                       `json:"agentSession,omitempty"`
+	AgentOptions   valueobject.ConfigSelections `json:"agentOptions,omitempty"`
+	AgentContext   *agentContextRecord          `json:"agentContext,omitempty"`
+	AgentTitle     string                       `json:"agentTitle,omitempty"`
+	Tools          []toolSchemaRecord           `json:"tools,omitempty"`
+	Usage          usageRecord                  `json:"usage"`
+	MessageCount   int                          `json:"messageCount"`
+	ActiveCount    int                          `json:"activeCount"`
+	SealedSegments int                          `json:"sealedSegments"`
+	CreatedAt      time.Time                    `json:"createdAt"`
+	UpdatedAt      time.Time                    `json:"updatedAt"`
 	// SymbolMapRefusedAt is the root the symbol-map gate refused; absent
 	// means "never evaluated", so no migration is needed for older records.
 	SymbolMapRefusedAt string `json:"symbolMapRefusedAt,omitempty"`

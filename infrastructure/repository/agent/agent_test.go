@@ -5,6 +5,7 @@ import (
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
 func TestAutoStartAndDefaultsPersist(t *testing.T) {
@@ -14,7 +15,7 @@ func TestAutoStartAndDefaultsPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.SetAutoStart(true)
-	if err := a.SetDefaults(map[string]string{"mode": "plan", "thought_level": "high"}); err != nil {
+	if err := a.SetDefaults(valueobject.ConfigSelections{{ID: "mode", Value: "plan"}, {ID: "thought_level", Value: "high"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.Save(t.Context(), &a); err != nil {
@@ -24,7 +25,9 @@ func TestAutoStartAndDefaultsPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.AutoStart() || got.Defaults()["mode"] != "plan" || got.Defaults()["thought_level"] != "high" {
+	mode, _ := got.Defaults().Value("mode")
+	lvl, _ := got.Defaults().Value("thought_level")
+	if !got.AutoStart() || mode != "plan" || lvl != "high" {
 		t.Fatalf("loaded autoStart=%v defaults=%v", got.AutoStart(), got.Defaults())
 	}
 

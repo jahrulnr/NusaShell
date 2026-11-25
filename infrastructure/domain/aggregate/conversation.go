@@ -3,7 +3,7 @@ package aggregate
 import (
 	"errors"
 	"fmt"
-	"maps"
+	"slices"
 	"strings"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
@@ -33,16 +33,16 @@ type Conversation struct {
 	title        string // optional display title for conversation lists
 	workspace    string // absolute directory the room's tools work in; empty = the delivery's default
 	environment  enum.Environment
-	agentID      string                   // bound external agent; empty = the model runtime
-	agentSession string                   // the agent's own session handle, opaque to the domain
-	agentOptions map[string]string        // the owner's picks of the agent's session options (mode, …), by option id
-	agentContext valueobject.AgentContext // what the agent last reported about its session's context; belongs to agentSession
-	agentTitle   string                   // the title an agent last gave the room; a title that differs is the owner's
-	projectID    string                   // owning project; empty = none
-	pinned       bool                     // kept at the top of the owner's list
-	memoryOff    bool                     // the owner keeps memory out of this room
-	label        string                   // short @handle chats use to name the room; "" = none
-	routing      *valueobject.Routing     // nil = the server's default routing
+	agentID      string                       // bound external agent; empty = the model runtime
+	agentSession string                       // the agent's own session handle, opaque to the domain
+	agentOptions valueobject.ConfigSelections // the owner's picks of the agent's session options (mode, …), in apply order
+	agentContext valueobject.AgentContext     // what the agent last reported about its session's context; belongs to agentSession
+	agentTitle   string                       // the title an agent last gave the room; a title that differs is the owner's
+	projectID    string                       // owning project; empty = none
+	pinned       bool                         // kept at the top of the owner's list
+	memoryOff    bool                         // the owner keeps memory out of this room
+	label        string                       // short @handle chats use to name the room; "" = none
+	routing      *valueobject.Routing         // nil = the server's default routing
 	messages     []entity.Message
 	tools        []valueobject.ToolSchema
 	usage        valueobject.Usage
@@ -94,7 +94,7 @@ func (c Conversation) Fork() (*Conversation, error) {
 		if err := fork.BindAgent(c.agentID); err != nil {
 			return nil, err
 		}
-		fork.agentOptions = maps.Clone(c.agentOptions)
+		fork.agentOptions = slices.Clone(c.agentOptions)
 	} else {
 		fork.SetProviderID(c.providerID)
 		fork.SetModelID(c.modelID)
@@ -450,18 +450,24 @@ func (c *Conversation) SetAgentOption(id, value string) error {
 		return fmt.Errorf("invalid agent option")
 	}
 	if value == "" {
-		delete(c.agentOptions, id)
+		c.agentOptions = slices.DeleteFunc(c.agentOptions, func(s valueobject.ConfigSelection) bool { return s.ID == id })
 		return nil
 	}
-	if c.agentOptions == nil {
-		c.agentOptions = map[string]string{}
+	// A pick for an id already stored keeps its place in the apply order;
+	// a new one appends — agent defaults first, room picks after.
+	if i := slices.IndexFunc(c.agentOptions, func(s valueobject.ConfigSelection) bool { return s.ID == id }); i >= 0 {
+		c.agentOptions[i].Value = value
+	} else {
+		c.agentOptions = append(c.agentOptions, valueobject.ConfigSelection{ID: id, Value: value})
 	}
-	c.agentOptions[id] = value
 	return nil
 }
 
-// AgentOptions are the owner's picks of the agent's session options.
-func (c Conversation) AgentOptions() map[string]string { return maps.Clone(c.agentOptions) }
+// AgentOptions are the owner's picks of the agent's session options, in
+// apply order.
+func (c Conversation) AgentOptions() valueobject.ConfigSelections {
+	return slices.Clone(c.agentOptions)
+}
 
 // SetProject moves the room into a project, or out of any with "". While in
 // a project the room works in the project's folders rather than its own

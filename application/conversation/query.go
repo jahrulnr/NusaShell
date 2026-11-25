@@ -154,7 +154,7 @@ func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]
 	for i, o := range opts {
 		// A stored value this option does not offer is not a current one: the
 		// session would refuse it, and the picker must not draw it as applied.
-		if v, ok := info.AgentOptions[o.ID]; ok && o.Offers(v) {
+		if v, ok := info.AgentOptions.Value(o.ID); ok && o.Offers(v) {
 			opts[i].Current = v
 		}
 	}

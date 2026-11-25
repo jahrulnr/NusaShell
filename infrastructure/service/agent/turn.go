@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
-	"net/http"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -312,7 +311,11 @@ func (t *turnSink) keep(kind, name, mediaType, data string) (valueobject.Attachm
 		return valueobject.Attachment{}, fmt.Errorf("media does not decode")
 	}
 	if mediaType == "application/octet-stream" {
-		mediaType = http.DetectContentType(raw)
+		// The agent sent bytes without naming what they are. Read them the way
+		// every other caller does — bytes first, the file's own extension as
+		// the tie-breaker — so a voice note the raw sniffer calls video (or
+		// plain data) is still an audio attachment here.
+		mediaType = dservice.SniffMediaType(raw, name)
 	}
 	if name = strings.TrimSpace(name); name == "" {
 		ext := ""

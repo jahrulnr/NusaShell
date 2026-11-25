@@ -8,6 +8,7 @@ import (
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoagent "github.com/jahrulnr/nusashell/infrastructure/repository/agent"
 )
@@ -66,21 +67,21 @@ func TestDefaultsAreCheckedAgainstWhatTheAgentOffers(t *testing.T) {
 	if err := save(t, app, Input{}); err != nil {
 		t.Fatal(err)
 	}
-	for name, defaults := range map[string]map[string]string{
-		"unknown option": {"theme": "dark"},
-		"unknown choice": {"mode": "yolo"},
-		"not a boolean":  {"fast": "maybe"},
+	for name, defaults := range map[string]valueobject.ConfigSelections{
+		"unknown option": {{ID: "theme", Value: "dark"}},
+		"unknown choice": {{ID: "mode", Value: "yolo"}},
+		"not a boolean":  {{ID: "fast", Value: "maybe"}},
 	} {
 		err := save(t, app, Input{Defaults: defaults})
 		if err == nil || apperror.As(err).StatusCode() != 400 {
 			t.Errorf("%s: err = %v, want a 400", name, err)
 		}
 	}
-	if err := save(t, app, Input{Defaults: map[string]string{"mode": "plan", "fast": "true"}}); err != nil {
+	if err := save(t, app, Input{Defaults: valueobject.ConfigSelections{{ID: "mode", Value: "plan"}, {ID: "fast", Value: "true"}}}); err != nil {
 		t.Fatalf("valid defaults refused: %v", err)
 	}
 	v, err := app.Get(context.Background(), "claude")
-	if err != nil || v.Defaults["mode"] != "plan" || v.Defaults["fast"] != "true" {
+	if err != nil || len(v.Defaults) != 2 || v.Defaults[0].ID != "mode" || v.Defaults[0].Value != "plan" || v.Defaults[1].ID != "fast" || v.Defaults[1].Value != "true" {
 		t.Fatalf("view = %+v, %v", v, err)
 	}
 }
@@ -91,7 +92,7 @@ func TestDefaultsNeedTheAgentToAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.probe = apperror.New(502, "agent failed to start", nil)
-	if err := save(t, app, Input{Defaults: map[string]string{"mode": "plan"}}); err == nil || apperror.As(err).StatusCode() != 502 {
+	if err := save(t, app, Input{Defaults: valueobject.ConfigSelections{{ID: "mode", Value: "plan"}}}); err == nil || apperror.As(err).StatusCode() != 502 {
 		t.Fatalf("err = %v, want a 502", err)
 	}
 	// Clearing defaults asks nothing of the agent.

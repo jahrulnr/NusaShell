@@ -580,6 +580,30 @@ const agentOptionsKey = (r) => {
   return r.id ? `c:${r.id}` : agentId ? `a:${agentId}` : '';
 };
 
+// agentOptionMap reads a pick list in either wire form — the ordered
+// [{id, value}] array the server writes now, or the {id: value} object older
+// records and this tab's own staging carry — into the map the controls index
+// by option id.
+export function agentOptionMap(v) {
+  const out = {};
+  if (Array.isArray(v)) {
+    for (const p of v) if (p && p.id != null) out[p.id] = p.value;
+  } else if (v && typeof v === 'object') Object.assign(out, v);
+  return out;
+}
+
+// agentOptionList writes a pick map in the wire's ordered form: the picks the
+// offered list names come in that list's order — the order the picker draws —
+// then any the list did not name, in the map's own order.
+export function agentOptionList(picks, order = []) {
+  const m = agentOptionMap(picks);
+  const seen = new Set();
+  const out = [];
+  for (const id of order) if (id in m && !seen.has(id)) { seen.add(id); out.push({ id, value: m[id] }); }
+  for (const id of Object.keys(m)) if (!seen.has(id)) out.push({ id, value: m[id] });
+  return out;
+}
+
 // loadAgentOptions reads the list the room shows. Deduped (one fetch in
 // flight, a need that lands mid-flight queues one follow-up) and TTL-gated, so
 // a frame, a component mounting, and a turn ending collapse into one read.
@@ -617,7 +641,7 @@ export async function loadAgentOptions(r, { force = false } = {}) {
 // for a thread that does not exist yet — the one staged for it.
 export function sessionOptionValue(r, o) {
   if (r.id) return o.current ?? '';
-  const staged = r.sel.agentOptions || {};
+  const staged = agentOptionMap(r.sel.agentOptions);
   return staged[o.id] ?? o.current ?? '';
 }
 
@@ -644,7 +668,7 @@ export async function setSessionOption(r, optionId, value) {
   // without a trace. Refusing here is the same answer, said now.
   if (isBusy(r)) return 'busy';
   if (!r.id) {
-    setSelection(r, { agentOptions: { ...(r.sel.agentOptions || {}), [optionId]: value } });
+    setSelection(r, { agentOptions: { ...agentOptionMap(r.sel.agentOptions), [optionId]: value } });
     return 'staged';
   }
   try {
@@ -747,10 +771,12 @@ function turnPayload(r, extra, resend = false) {
       p.agentId = s.agentId;
       if (s.modelId) p.modelId = s.modelId;
       // Options staged before the thread existed ride the turn that opens
-      // it. An existing thread keeps its own, written as they change.
+      // it. An existing thread keeps its own, written as they change. The
+      // wire's ordered form carries them — picks in the order the picker
+      // draws — so a dependent option applies after the pick it depends on.
       if (!r.id) {
-        const staged = r.sel.agentOptions;
-        if (staged && Object.keys(staged).length) p.agentOptions = staged;
+        const staged = agentOptionList(r.sel.agentOptions, r.agentOptions.list.map((o) => o.id));
+        if (staged.length) p.agentOptions = staged;
       }
     }
   } else {

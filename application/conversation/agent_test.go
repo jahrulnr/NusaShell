@@ -578,7 +578,7 @@ func TestAgentDefaultsApplyUnderTheRoomsPicks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := agent.SetDefaults(map[string]string{"mode": "plan", "effort": "high"}); err != nil {
+	if err := agent.SetDefaults(valueobject.ConfigSelections{{ID: "mode", Value: "plan"}, {ID: "effort", Value: "high"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.deps.Agents.Save(ctx, agent); err != nil {
@@ -594,11 +594,20 @@ func TestAgentDefaultsApplyUnderTheRoomsPicks(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompts := rt.Prompts()
-	if first := prompts[0].Options; first["mode"] != "plan" || first["effort"] != "high" {
-		t.Fatalf("first turn options = %v", first)
+	mode, _ := prompts[0].Options.Value("mode")
+	effort, _ := prompts[0].Options.Value("effort")
+	if mode != "plan" || effort != "high" {
+		t.Fatalf("first turn options = %v", prompts[0].Options)
 	}
-	if second := prompts[1].Options; second["mode"] != "build" || second["effort"] != "high" {
-		t.Fatalf("second turn options = %v", second)
+	mode, _ = prompts[1].Options.Value("mode")
+	effort, _ = prompts[1].Options.Value("effort")
+	if mode != "build" || effort != "high" {
+		t.Fatalf("second turn options = %v", prompts[1].Options)
+	}
+	// The room pick replaces the default at its own position — not
+	// appended, and not duplicated.
+	if got := prompts[1].Options; len(got) != 2 || got[0] != (valueobject.ConfigSelection{ID: "mode", Value: "build"}) || got[1] != (valueobject.ConfigSelection{ID: "effort", Value: "high"}) {
+		t.Fatalf("merged picks = %v", got)
 	}
 }
 
@@ -631,7 +640,7 @@ func TestRefusedAgentOptionIsNotStored(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompts := rt.Prompts()
-	if got := prompts[len(prompts)-1].Options["mode"]; got == "ludicrous" {
+	if got, _ := prompts[len(prompts)-1].Options.Value("mode"); got == "ludicrous" {
 		t.Fatalf("the next turn applied the refused value: %q", got)
 	}
 	// A value the agent takes is still stored — the reorder must not turn
@@ -646,7 +655,7 @@ func TestRefusedAgentOptionIsNotStored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := conv.AgentOptions()["mode"]; got != "build" {
+	if got, _ := conv.AgentOptions().Value("mode"); got != "build" {
 		t.Fatalf("an accepted pick = %q, want build recorded", got)
 	}
 }
@@ -755,7 +764,9 @@ func TestAgentOptionIsCheckedAgainstTheCatalogWithoutALiveSession(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.AgentOptions["mode"] != "build" || info.AgentOptions["strict"] != "true" {
+	mode, _ := info.AgentOptions.Value("mode")
+	strict, _ := info.AgentOptions.Value("strict")
+	if mode != "build" || strict != "true" {
 		t.Fatalf("stored picks = %v", info.AgentOptions)
 	}
 }

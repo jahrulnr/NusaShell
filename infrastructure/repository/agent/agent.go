@@ -35,8 +35,8 @@ type agentRecord struct {
 	Policy  string            `json:"policy"`
 	// AutoStart and Defaults are the owner's settings for the agent's
 	// process and for the session options its rooms start with.
-	AutoStart bool              `json:"autoStart,omitempty"`
-	Defaults  map[string]string `json:"defaults,omitempty"`
+	AutoStart bool                         `json:"autoStart,omitempty"`
+	Defaults  valueobject.ConfigSelections `json:"defaults,omitempty"`
 }
 
 // Repository is the JSON-file Agent store. The mutex serializes writes.

@@ -97,7 +97,7 @@ type SendOptions struct {
 	// AgentOptions are the agent's session options chosen before the room
 	// existed — its mode, for one. They apply to the room this send opens;
 	// an existing room sets its own through the conversation.
-	AgentOptions map[string]string
+	AgentOptions valueobject.ConfigSelections
 	// References are the selections the owner made in the message text.
 	References []valueobject.Reference
 	// Annotations are the marks the owner made on the live page; their
@@ -212,8 +212,8 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 			if conv.Runtime() != enum.RuntimeAgent {
 				return apperror.New(400, "agent options need a room bound to an agent", nil)
 			}
-			for id, value := range j.Opts.AgentOptions {
-				if err := conv.SetAgentOption(id, value); err != nil {
+			for _, pick := range j.Opts.AgentOptions {
+				if err := conv.SetAgentOption(pick.ID, pick.Value); err != nil {
 					return apperror.New(400, err.Error(), err)
 				}
 			}

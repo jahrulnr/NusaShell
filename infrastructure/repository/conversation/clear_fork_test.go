@@ -2,6 +2,7 @@ package repoconversation
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -105,7 +106,7 @@ func TestClearKeepsIdentity(t *testing.T) {
 		after.ModelID != before.ModelID || !after.Pinned || !after.MemoryOff || after.Usage != before.Usage {
 		t.Fatalf("identity changed: before %+v after %+v", before, after)
 	}
-	if after.AgentID != before.AgentID || after.AgentOptions["mode"] != "plan" {
+	if v, _ := after.AgentOptions.Value("mode"); after.AgentID != before.AgentID || v != "plan" {
 		t.Fatalf("agent binding changed: %+v", after)
 	}
 	if after.AgentSession != "" {
@@ -842,5 +843,79 @@ func TestForkMetaFailureLeavesNothing(t *testing.T) {
 	msgs, err := repo.LoadAt(t.Context(), src.ID(), 0, 0)
 	if err != nil || len(msgs) != before.MessageCount {
 		t.Fatalf("source history after a failed fork = %d messages, %v", len(msgs), err)
+	}
+}
+
+// Stored picks reload in their apply order — the list is what a map could
+// not keep.
+func TestAgentOptionsKeepApplyOrderThroughStorage(t *testing.T) {
+	repo := newRepo(t).(*ConversationRepository)
+	room := newConv(t, "c_order")
+	if err := room.BindAgent("a_x"); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range [][2]string{{"mode", "plan"}, {"effort", "high"}, {"mode", "build"}} {
+		if err := room.SetAgentOption(p[0], p[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.Save(t.Context(), room); err != nil {
+		t.Fatal(err)
+	}
+	live, err := repo.Load(t.Context(), room.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := live.AgentOptions()
+	if len(got) != 2 || got[0].ID != "mode" || got[0].Value != "build" || got[1].ID != "effort" || got[1].Value != "high" {
+		t.Fatalf("picks after reload = %v", got)
+	}
+}
+
+// Rooms written when picks were a {id: value} object still load — as the
+// list in id order, with no value lost.
+func TestAgentOptionsFromTheOldMapForm(t *testing.T) {
+	root := t.TempDir()
+	repo := NewConversationRepository(root)
+	room := newConv(t, "c_oldopts")
+	if err := room.BindAgent("a_x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := room.SetAgentOption("mode", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(t.Context(), room); err != nil {
+		t.Fatal(err)
+	}
+	meta := filepath.Join(root, room.ID(), "meta.json")
+	raw, err := os.ReadFile(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["agentOptions"] = map[string]string{"strict": "true", "effort": "high", "mode": "build"}
+	raw, err = json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(meta, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	live, err := repo.Load(t.Context(), room.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := live.AgentOptions()
+	want := []string{"effort=high", "mode=build", "strict=true"}
+	if len(got) != 3 {
+		t.Fatalf("picks = %v", got)
+	}
+	for i, w := range want {
+		if got[i].ID+"="+got[i].Value != w {
+			t.Fatalf("pick %d = %v, want %s in %v", i, got[i], w, got)
+		}
 	}
 }

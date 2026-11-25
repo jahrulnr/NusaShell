@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -599,7 +600,7 @@ func TestPromptSkipsAStaleStoredPick(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	mode := liveMode(t, ctx, rt, in)
-	in.Options = map[string]string{mode.ID: "ludicrous"}
+	in.Options = valueobject.ConfigSelections{{ID: mode.ID, Value: "ludicrous"}}
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatalf("a stale stored pick failed the turn: %v", err)
 	}
@@ -643,7 +644,7 @@ func TestPromptSkipsAStaleStoredBoolean(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	liveMode(t, ctx, rt, in) // open the session
-	in.Options = map[string]string{"strict": "yes"}
+	in.Options = valueobject.ConfigSelections{{ID: "strict", Value: "yes"}}
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatalf("a stale stored boolean failed the turn: %v", err)
 	}
@@ -893,4 +894,128 @@ func TestSteerUnsupported(t *testing.T) {
 		t.Fatal("steer taken by an agent without support")
 	}
 	cancel()
+}
+
+// B-038: a dependent option exists only once the model pick resolves — the
+// fake offers "effort" only after "model" is set. The stored order must not
+// decide this: the model pick applies first either way, and the dependent
+// pick lands on the list it materialized.
+func TestPromptAppliesTheModelPickBeforeTheDependentsItMaterializes(t *testing.T) {
+	rt, in := setup(t, "hello")
+	trace := traceTo(t, in.Agent, map[string]string{"FAKE_ACP_EFFORT_AFTER_MODEL": "1"})
+	// Stored effort-first: what a pick saved before the ordering fix looks
+	// like, and the order a map would lose anyway.
+	in.Options = valueobject.ConfigSelections{
+		{ID: "effort", Value: "high"},
+		{ID: "model", Value: "fake-smart"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw := readTrace(t, trace)
+	modelAt := strings.Index(raw, "config model fake-smart")
+	effortAt := strings.Index(raw, "config effort high")
+	if modelAt < 0 || effortAt < 0 || modelAt > effortAt {
+		t.Fatalf("apply order in trace = %q, want config model before config effort", raw)
+	}
+	// The dependent pick landed: the session now offers effort at high.
+	if got := currentOption(t, ctx, rt, in, "effort"); got != "high" {
+		t.Fatalf("effort after the turn = %q, want high", got)
+	}
+}
+
+// B-039: a pick the session does not offer is deferred — retried while
+// rounds still make progress, never counted as applied.
+func TestUnofferedPickIsDeferredNotApplied(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in)
+	s := rt.sessions[in.Conversation.ID()]
+	if s == nil {
+		t.Fatal("no live session")
+	}
+	outcome, err := rt.applyOption(ctx, s, "nosuch", "x")
+	if err != nil || outcome != optionDeferred {
+		t.Fatalf("applyOption(unoffered) = (%v, %v), want (optionDeferred, nil)", outcome, err)
+	}
+	// A deferred pick does not fail the turn: the room keeps it and runs on
+	// what the session does offer.
+	in.Options = valueobject.ConfigSelections{{ID: "nosuch", Value: "x"}}
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatalf("a turn carrying an unoffered pick failed: %v", err)
+	}
+}
+
+// B-039: a model pick equal to the session's current model still republishes
+// the offered list — a resumed session can sit on a model without the
+// dependent options a resolved pick would have materialized (codex resume
+// lands on the account default).
+func TestSelectModelRefreshesTheOfferedListWithoutAChange(t *testing.T) {
+	rt, in := setup(t, "hello")
+	trace := traceTo(t, in.Agent, map[string]string{"FAKE_ACP_EFFORT_AFTER_MODEL": "1"})
+	// "fake-fast" is the model the session already reports — the pick changes
+	// nothing, and without the refresh nothing republishes effort either.
+	in.Model = "fake-fast"
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readTrace(t, trace), "config model fake-fast") {
+		t.Fatal("no refresh set_config_option ran on an unchanged model pick")
+	}
+	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(opts, func(o dservice.AgentOption) bool { return o.ID == "effort" }) {
+		t.Fatalf("the unchanged model pick never republished the dependent option: %+v", opts)
+	}
+	// Once per session: a pinned-model room's later turns do not pay a
+	// republish that changes nothing (and some agents answer a model set by
+	// resetting the dependent values).
+	next(t, &in, "again")
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(readTrace(t, trace), "config model fake-fast"); n != 1 {
+		t.Fatalf("model refresh ran %d times over two turns, want 1", n)
+	}
+}
+
+// B-039: deferred picks retry only while a round still applies something,
+// bounded — a chain that keeps materializing the next rung stops at three
+// rounds instead of looping the turn. Stored deepest-first: each round
+// resolves exactly one rung.
+func TestDeferredPicksRetryWithinTheBound(t *testing.T) {
+	rt, in := setup(t, "hello")
+	trace := traceTo(t, in.Agent, map[string]string{"FAKE_ACP_LADDER": "1"})
+	in.Options = valueobject.ConfigSelections{
+		{ID: "ladder4", Value: "a"}, {ID: "ladder3", Value: "a"},
+		{ID: "ladder2", Value: "a"}, {ID: "ladder1", Value: "a"},
+		{ID: "ladder", Value: "a"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw := readTrace(t, trace)
+	for _, tc := range []struct {
+		line string
+		want bool
+	}{
+		{"config ladder a", true},
+		{"config ladder1 a", true},
+		{"config ladder2 a", true},
+		{"config ladder3 a", false},
+		{"config ladder4 a", false},
+	} {
+		if strings.Contains(raw, tc.line) != tc.want {
+			t.Fatalf("trace %q %v, want %v — full trace:\n%s", tc.line, !tc.want, tc.want, raw)
+		}
+	}
 }

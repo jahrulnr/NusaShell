@@ -5,12 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"maps"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	appagent "github.com/jahrulnr/nusashell/application/agent"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	repoagent "github.com/jahrulnr/nusashell/infrastructure/repository/agent"
 	serviceagent "github.com/jahrulnr/nusashell/infrastructure/service/agent"
 )
@@ -158,8 +157,8 @@ func printAgent(w io.Writer, v appagent.View) {
 	if v.AutoStart {
 		fmt.Fprintf(w, "start:   with the server\n")
 	}
-	for _, k := range slices.Sorted(maps.Keys(v.Defaults)) {
-		fmt.Fprintf(w, "default: %s=%s\n", k, v.Defaults[k])
+	for _, d := range v.Defaults {
+		fmt.Fprintf(w, "default: %s=%s\n", d.ID, d.Value)
 	}
 	for _, e := range v.Env {
 		fmt.Fprintf(w, "env:     %s (%s)\n", e.Name, e.Ref)
@@ -190,7 +189,7 @@ func agentWrite(ctx context.Context, app *appagent.AgentApp, update bool, args [
 		return 2
 	}
 	in := appagent.Input{ID: id, Name: *name, Command: *command, Args: argList, Policy: *policy, Env: map[string]string{},
-		AutoStart: *autoStart, Defaults: map[string]string{}}
+		AutoStart: *autoStart, Defaults: valueobject.ConfigSelections{}}
 	if *autoStart && *noAutoStart {
 		fmt.Fprintln(stderr, CLIName+": --auto-start and --no-auto-start contradict each other")
 		return 2
@@ -201,7 +200,7 @@ func agentWrite(ctx context.Context, app *appagent.AgentApp, update bool, args [
 			fmt.Fprintf(stderr, "%s: --default wants ID=VALUE, got %q\n", CLIName, kv)
 			return 2
 		}
-		in.Defaults[k] = v
+		in.Defaults = append(in.Defaults, valueobject.ConfigSelection{ID: k, Value: v})
 	}
 	if update {
 		cur, err := app.Get(ctx, id)
