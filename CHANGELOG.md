@@ -7,11 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Known issues
-
-- Agent session options can revert on their own while the machine is busy: a `session/update` notification is applied on its own goroutine and can land after the response that set the newer value, so the session shows the previous model, mode, or boolean. Picking again restores it, nothing is lost, and the next ACP batch fixes the ordering.
-
 ### Added
+
+- A compacted thread shows where its history was folded: a rule labelled `Compacted`, with the checkpoint kept behind it instead of a plain note in the transcript.
 
 - Sending a message to a busy thread queues it instead of failing. The answer names one of `steer`, `turn`, or `queued` with its position, a full queue answers 429 with its depth, and a room shows how many messages wait — a Stop cancels the running turn but leaves them. `queued` is an acceptance, not a promise: a restart before the turn runs loses the message.
 - `exec` results always end with a status line that carries the duration, and an interruption names who stopped it — the owner, the agent, a NusaShell restart, or a caller that went away — instead of a bare signal.
@@ -33,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Only the installed binary may install itself. An instance running from anywhere else refuses the install with a message naming both paths, and a restart is only taken through the service manager that owns this process.
 
 ### Fixed
+
+- An agent option no longer reverts to an older value: every session update and response carries its place in the wire order, so a late notification cannot overwrite the response that came after it — the same guard covers the session mode.
+- An option an agent stops offering disappears instead of lingering: a session update replaces the offered list, so the picker stops showing a choice the agent would refuse with `-32602` and fail the turn.
 
 - A restart no longer reports itself as an owner stop: shutdown names its cause, a cut tool keeps the output it already captured, and a cancelled stream keeps its partial reply instead of losing it.
 - The tool status line now reaches the live row, so a timed-out or stopped command no longer looks successful until the page is reloaded.

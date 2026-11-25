@@ -219,7 +219,7 @@ func TestSkillsHydrationReappearsAfterCompaction(t *testing.T) {
 			if err := d.runTurn(t.Context(), conv.ID(), conv, driver, nil, model, svc, nil, nil, valueobject.TurnOrigin{}); err != nil {
 				t.Fatal(err)
 			}
-			if conv.Messages()[0].UserType() != enum.LLMUserTypeSystem {
+			if conv.Messages()[0].UserType() != enum.LLMUserTypeCompaction {
 				t.Fatal("fixture did not compact")
 			}
 			calls := skillRecords(conv)

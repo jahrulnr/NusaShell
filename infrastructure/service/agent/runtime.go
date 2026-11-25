@@ -130,7 +130,14 @@ type proc struct {
 	lastUse time.Time
 	// early holds session updates that arrived before their session was
 	// registered (agents announce commands while answering session/new).
-	early map[string][]json.RawMessage
+	early map[string][]earlyUpdate
+}
+
+// earlyUpdate keeps the wire position of a pre-registration update so
+// replaying it cannot roll back state the session/open response carried.
+type earlyUpdate struct {
+	raw json.RawMessage
+	seq uint64
 }
 
 // session is one conversation's context inside an agent process.
@@ -150,6 +157,13 @@ type session struct {
 	configs  json.RawMessage       // the session's config options as last reported
 	modes    *acp.SessionModeState // legacy modes, when the agent reports them
 	commands []dservice.AgentCommand
+	// configSeq and modesSeq are the wire positions of the newest applied
+	// config options and modes. Notifications and responses are processed
+	// concurrently, so each writer applies only when it is newer on the
+	// wire — an update that overtook the response it preceded on the wire
+	// cannot roll the session back.
+	configSeq uint64
+	modesSeq  uint64
 	// preamble is what the agent still has to be told before the next
 	// ordinary input: the session's instructions, when it cannot take them
 	// as a system prompt, and a recap of the thread, when its own session
@@ -211,7 +225,7 @@ func (r *Runtime) ensureProc(ctx context.Context, a *aggregate.Agent) (*proc, er
 	r.mu.Unlock()
 
 	p := &proc{agentID: a.ID(), fingerprint: fp, autoStart: a.AutoStart(), lastUse: time.Now(),
-		sessions: map[string]*session{}, early: map[string][]json.RawMessage{}}
+		sessions: map[string]*session{}, early: map[string][]earlyUpdate{}}
 	caps := acp.ClientCapabilities{}
 	client, err := acp.Start(ctx, acp.ClientConfig{
 		Command:      a.Command(),
@@ -422,7 +436,19 @@ func (r *Runtime) ensureSession(ctx context.Context, p *proc, conv *aggregate.Co
 		}
 	}
 
+	// The response is the newest wire position: it stamps the seqs of the
+	// state it carries so the pre-response updates replayed from early
+	// below lose to it. A field the response did not carry stays at zero,
+	// leaving those early updates the only source to apply.
+	configSeq, modesSeq := uint64(0), uint64(0)
+	if len(state.ConfigOptions) > 0 {
+		configSeq = state.WireSeq
+	}
+	if state.Modes != nil {
+		modesSeq = state.WireSeq
+	}
 	s = &session{convID: conv.ID(), acpID: state.SessionID, proc: p, folders: folders, tools: tools, configs: state.ConfigOptions, modes: state.Modes,
+		configSeq: configSeq, modesSeq: modesSeq,
 		instructions: instructions, preamble: preamble{recap: !restored, instructions: !takesSystemPrompt && (!restored || replaced)}}
 	p.mu.Lock()
 	// Notifications and requests are routed by session id, so an agent that
@@ -440,8 +466,8 @@ func (r *Runtime) ensureSession(ctx context.Context, p *proc, conv *aggregate.Co
 	r.sessions[conv.ID()] = s
 	r.mu.Unlock()
 	h := &handler{runtime: r, proc: p}
-	for _, raw := range early {
-		h.OnNotification("session/update", s.acpID, raw)
+	for _, e := range early {
+		h.OnNotification("session/update", s.acpID, e.raw, e.seq)
 	}
 	return s, opened{fresh: !restored, recovered: stored != "" && !restored}, nil
 }
@@ -606,8 +632,9 @@ func (r *Runtime) selectModel(ctx context.Context, s *session, model string) err
 		return apperror.New(502, "agent refused the model change", err)
 	}
 	s.mu.Lock()
-	if len(state.ConfigOptions) > 0 {
+	if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
 		s.configs = state.ConfigOptions
+		s.configSeq = state.WireSeq
 	}
 	s.mu.Unlock()
 	return nil
@@ -1209,7 +1236,7 @@ func (h *handler) session(acpID string) *session {
 	return h.proc.sessions[acpID]
 }
 
-func (h *handler) OnNotification(method, sessionID string, raw json.RawMessage) {
+func (h *handler) OnNotification(method, sessionID string, raw json.RawMessage, seq uint64) {
 	if method != "session/update" {
 		return
 	}
@@ -1218,7 +1245,7 @@ func (h *handler) OnNotification(method, sessionID string, raw json.RawMessage) 
 		// Not registered yet: keep a few for when it is.
 		h.proc.mu.Lock()
 		if list := h.proc.early[sessionID]; len(list) < 20 && len(h.proc.early) < 16 {
-			h.proc.early[sessionID] = append(list, append(json.RawMessage(nil), raw...))
+			h.proc.early[sessionID] = append(list, earlyUpdate{raw: append(json.RawMessage(nil), raw...), seq: seq})
 		}
 		h.proc.mu.Unlock()
 		return
@@ -1229,9 +1256,19 @@ func (h *handler) OnNotification(method, sessionID string, raw json.RawMessage) 
 	}
 	switch u.SessionUpdate {
 	case "config_option_update":
-		s.mu.Lock()
-		s.configs = mergeConfigOptions(s.configs, u.ConfigOptions)
-		s.mu.Unlock()
+		// The notification carries the authoritative offered list: replace,
+		// never merge. An option the update does not name is gone — keeping it
+		// would leave a ghost the next set_config_option fails on.
+		if len(u.ConfigOptions) > 0 {
+			s.mu.Lock()
+			// Newer wire position than every applied write only: an update
+			// dispatched before a response may still run after it.
+			if seq > s.configSeq {
+				s.configs = u.ConfigOptions
+				s.configSeq = seq
+			}
+			s.mu.Unlock()
+		}
 		return
 	case "available_commands_update":
 		var list []struct {
@@ -1261,8 +1298,9 @@ func (h *handler) OnNotification(method, sessionID string, raw json.RawMessage) 
 		return
 	case "current_mode_update":
 		s.mu.Lock()
-		if s.modes != nil {
+		if s.modes != nil && seq > s.modesSeq {
 			s.modes.CurrentModeID = u.CurrentModeID
+			s.modesSeq = seq
 		}
 		s.mu.Unlock()
 		return
@@ -1501,11 +1539,15 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 	})
 	s.mu.Unlock()
 	if legacy {
-		if err := s.proc.client.SetMode(ctx, s.acpID, value); err != nil {
+		seq, err := s.proc.client.SetMode(ctx, s.acpID, value)
+		if err != nil {
 			return apperror.New(502, "agent refused the mode change", err)
 		}
 		s.mu.Lock()
-		s.modes.CurrentModeID = value
+		if seq > s.modesSeq {
+			s.modes.CurrentModeID = value
+			s.modesSeq = seq
+		}
 		s.mu.Unlock()
 		return nil
 	}
@@ -1518,8 +1560,9 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 		return apperror.New(502, "agent refused the option change", err)
 	}
 	s.mu.Lock()
-	if len(state.ConfigOptions) > 0 {
+	if len(state.ConfigOptions) > 0 && state.WireSeq > s.configSeq {
 		s.configs = state.ConfigOptions
+		s.configSeq = state.WireSeq
 	}
 	s.mu.Unlock()
 	return nil

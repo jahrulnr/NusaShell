@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoworkspace "github.com/jahrulnr/nusashell/infrastructure/repository/workspace"
+	"github.com/jahrulnr/nusashell/infrastructure/service/agent/acp"
 )
 
 var (
@@ -482,6 +484,110 @@ func TestSetOptionSkipsAnOptionTheSessionDoesNotOffer(t *testing.T) {
 	liveMode(t, ctx, rt, in) // open the session
 	if err := rt.SetOption(ctx, in.Conversation.ID(), "from-another-agent-version", "x"); err != nil {
 		t.Fatalf("an option the session does not offer = %v, want it skipped", err)
+	}
+}
+
+// A config_option_update is the authoritative offered list: an option it
+// does not name is gone, not merged into what the session reported before.
+// Merge-by-id kept ghosts a later set_config_option refuses with -32602.
+func TestConfigOptionUpdateReplacesTheOfferedList(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in) // open the session: [mode, model, strict] offered
+	s := rt.sessions[in.Conversation.ID()]
+	if s == nil {
+		t.Fatal("no live session")
+	}
+	if got := currentOption(t, ctx, rt, in, "strict"); got == "" {
+		t.Fatal("precondition: strict is offered")
+	}
+	// The agent re-publishes its list without the strict option.
+	update := json.RawMessage(`{"sessionUpdate":"config_option_update","configOptions":[` +
+		`{"id":"mode","name":"Session Mode","category":"mode","type":"select","currentValue":"ask","options":[{"value":"ask","name":"Ask"}]},` +
+		`{"id":"model","name":"Model","category":"model","type":"select","currentValue":"fake-fast","options":[{"value":"fake-fast","name":"Fake Fast"}]}]}`)
+	h := &handler{runtime: rt, proc: s.proc}
+	s.mu.Lock()
+	seq := s.configSeq + 1
+	s.mu.Unlock()
+	h.OnNotification("session/update", s.acpID, update, seq)
+	// The stored list is exactly what the update carried — not a union.
+	var ids []struct {
+		ID string `json:"id"`
+	}
+	s.mu.Lock()
+	_ = json.Unmarshal(s.configs, &ids)
+	s.mu.Unlock()
+	if len(ids) != 2 || ids[0].ID != "mode" || ids[1].ID != "model" {
+		t.Fatalf("session configs = %+v, want [mode model]", ids)
+	}
+	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range opts {
+		if o.ID == "strict" {
+			t.Fatalf("the dropped option is still offered: %+v", opts)
+		}
+	}
+	// And an update carrying nothing at all does not wipe the list.
+	h.OnNotification("session/update", s.acpID, json.RawMessage(`{"sessionUpdate":"config_option_update"}`), seq+1)
+	s.mu.Lock()
+	empty := len(s.configs) == 0
+	s.mu.Unlock()
+	if empty {
+		t.Fatal("an update without configOptions must not clear the list")
+	}
+}
+
+// B-041: the wire is ordered but notification handling and the waiting
+// caller are not, so an update dispatched before a set_config_option
+// response can still be processed after it. The wire sequence stamps every
+// message in read order; state applies only forward, so the response —
+// newer on the wire — wins deterministically whichever goroutine ran first.
+func TestConfigUpdateCannotOvertakeANewerSetConfigResponse(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	liveMode(t, ctx, rt, in)
+	s := rt.sessions[in.Conversation.ID()]
+	if s == nil {
+		t.Fatal("no live session")
+	}
+	h := &handler{runtime: rt, proc: s.proc}
+	// Wire order: an update carrying model=fake-fast, then the
+	// set_config_option(model=fake-smart) response. Processed in the order
+	// the goroutines happen to run: the response first, the stale update
+	// after.
+	freshSeq := s.configSeq + 2
+	stale := json.RawMessage(`{"sessionUpdate":"config_option_update","configOptions":[` +
+		`{"id":"model","name":"Model","category":"model","type":"select","currentValue":"fake-fast","options":[{"value":"fake-fast","name":"Fake Fast"},{"value":"fake-smart","name":"Fake Smart"}]}]}`)
+	s.mu.Lock()
+	s.configs = json.RawMessage(`[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"fake-smart","options":[{"value":"fake-fast"},{"value":"fake-smart"}]}]`)
+	s.configSeq = freshSeq
+	s.mu.Unlock()
+	h.OnNotification("session/update", s.acpID, stale, freshSeq-1)
+	if _, current, _ := modelOption(s.configs); current != "fake-smart" {
+		t.Fatalf("an update older than the applied response rolled the model back to %q", current)
+	}
+	// The same rule covers modes: a current_mode_update older than the
+	// applied session/set_mode response cannot roll the mode back either.
+	s.mu.Lock()
+	s.modes = &acp.SessionModeState{CurrentModeID: "accept-edits"}
+	s.modesSeq = freshSeq
+	s.mu.Unlock()
+	h.OnNotification("session/update", s.acpID, json.RawMessage(`{"sessionUpdate":"current_mode_update","currentModeId":"ask"}`), freshSeq-1)
+	s.mu.Lock()
+	mode := s.modes.CurrentModeID
+	s.mu.Unlock()
+	if mode != "accept-edits" {
+		t.Fatalf("a stale mode update rolled the mode back to %q", mode)
+	}
+	// And a genuinely newer update still applies — the guard orders, it
+	// does not drop.
+	h.OnNotification("session/update", s.acpID, stale, freshSeq+1)
+	if _, current, _ := modelOption(s.configs); current != "fake-fast" {
+		t.Fatalf("a newer update was ignored, model = %q", current)
 	}
 }
 

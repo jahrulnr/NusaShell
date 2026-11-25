@@ -2,7 +2,9 @@ package appconversation
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -39,6 +41,55 @@ func (s *environmentCompactSvc) Send(ctx context.Context, conv *aggregate.Conver
 		}
 	}
 	return s.compactSvc.Send(ctx, conv, prov, model, onEvent)
+}
+
+// The checkpoint keeps reaching the model as context: its own provenance
+// changes what the UI draws, not how the turn is built.
+func TestCompactionCheckpointStaysInThePrompt(t *testing.T) {
+	svc := &promptSvc{}
+	app, _ := compactApp(t, svc, 64_060)
+	ctx := t.Context()
+	for _, content := range []string{"first", "second"} {
+		if _, err := app.Send(ctx, "room", "gw1", "m1", content, nil, appjob.SendOptions{}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := app.Send(ctx, "room", "gw1", "m1", "third", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	seen := svc.roomPrompt()
+	var checkpoint bool
+	for _, m := range seen {
+		if m.Role() == enum.RoleUser && m.UserType() == enum.LLMUserTypeCompaction && strings.Contains(m.Content(), "CHECKPOINT") {
+			checkpoint = true
+		}
+	}
+	if !checkpoint {
+		t.Fatalf("the turn's prompt lost the checkpoint: %+v", seen)
+	}
+}
+
+// promptSvc records the messages of the room's own requests — the scratch
+// dialogue the fold runs on is a different conversation.
+type promptSvc struct {
+	compactSvc
+	mu   sync.Mutex
+	room []entity.Message
+}
+
+func (s *promptSvc) Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) error {
+	if conv.ID() == "room" {
+		s.mu.Lock()
+		s.room = slices.Clone(conv.Messages())
+		s.mu.Unlock()
+	}
+	return s.compactSvc.Send(ctx, conv, prov, model, onEvent)
+}
+
+func (s *promptSvc) roomPrompt() []entity.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.room
 }
 
 func TestManualCompactKeepsEnvironmentAndWorkspace(t *testing.T) {
@@ -208,8 +259,12 @@ func TestSendCompactsOverflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs := conv.Messages()
-	if msgs[0].UserType() != enum.LLMUserTypeSystem || !strings.Contains(msgs[0].Content(), "CHECKPOINT") {
-		t.Fatalf("head must be the continue checkpoint: %+v", msgs[0])
+	if msgs[0].UserType() != enum.LLMUserTypeCompaction || !strings.Contains(msgs[0].Content(), "CHECKPOINT") {
+		t.Fatalf("head must be the continue checkpoint with its own provenance: %+v", msgs[0])
+	}
+	// It is still no owner words: the transcript never offers to rewrite it.
+	if msgs[0].Editable() {
+		t.Fatal("the checkpoint must not be editable")
 	}
 	if conv.Last().Content() != "done" {
 		t.Fatalf("compacted turn must still answer: %+v", msgs)

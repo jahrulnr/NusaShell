@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -23,7 +24,11 @@ var (
 )
 
 type Handler interface {
-	OnNotification(method string, sessionID string, update json.RawMessage)
+	// seq is the message's position on the agent's stdout stream: the one
+	// reader assigns it in order, so it totally orders notifications
+	// against responses. Session state an update and a response can both
+	// write applies only when its seq is newer than the last applied.
+	OnNotification(method string, sessionID string, update json.RawMessage, seq uint64)
 	OnRequest(ctx context.Context, method string, params json.RawMessage) (any, *RPCError)
 	OnStderr(line string)
 	OnExit(err error)
@@ -49,6 +54,7 @@ type rpcMessage struct {
 type callResult struct {
 	result json.RawMessage
 	err    *RPCError
+	seq    uint64
 }
 
 type pendingCall struct {
@@ -110,12 +116,18 @@ type Process struct {
 	ring      *Ring
 	pid       int
 	startedAt time.Time
+	// wireSeq numbers inbound messages in read order. The readStdout
+	// goroutine is the only writer, so it is a total order over everything
+	// the agent sent — including notifications that the notification loop
+	// and responses that their waiters process concurrently.
+	wireSeq atomic.Uint64
 }
 
 type notifMsg struct {
 	method    string
 	sessionID string
 	update    json.RawMessage
+	seq       uint64
 	barrier   chan struct{}
 }
 
@@ -265,6 +277,7 @@ func (p *Process) readStdout() {
 }
 
 func (p *Process) handleMessage(msg rpcMessage) {
+	seq := p.wireSeq.Add(1)
 	switch {
 	case msg.Method != "" && len(msg.ID) > 0:
 		// An agent request (a permission question, a form) must not
@@ -291,13 +304,13 @@ func (p *Process) handleMessage(msg rpcMessage) {
 		if err := json.Unmarshal(msg.Params, &notif); err != nil || len(notif.Update) == 0 {
 			// Non-session notifications (e.g. _cognition.ai/output) are passed through too.
 			select {
-			case p.notifCh <- notifMsg{method: msg.Method, update: msg.Params}:
+			case p.notifCh <- notifMsg{method: msg.Method, update: msg.Params, seq: seq}:
 			case <-p.done:
 			}
 			return
 		}
 		select {
-		case p.notifCh <- notifMsg{method: msg.Method, sessionID: notif.SessionID, update: notif.Update}:
+		case p.notifCh <- notifMsg{method: msg.Method, sessionID: notif.SessionID, update: notif.Update, seq: seq}:
 		case <-p.done:
 		}
 	case len(msg.ID) > 0:
@@ -314,19 +327,19 @@ func (p *Process) handleMessage(msg rpcMessage) {
 				go func() {
 					select {
 					case <-barrier:
-						p.handleResponse(msg)
+						p.handleResponse(msg, seq)
 					case <-p.done:
 					}
 				}()
 			case <-p.done:
 			}
 		} else {
-			p.handleResponse(msg)
+			p.handleResponse(msg, seq)
 		}
 	}
 }
 
-func (p *Process) handleResponse(msg rpcMessage) {
+func (p *Process) handleResponse(msg rpcMessage, seq uint64) {
 	key := idKey(msg.ID)
 	p.mu.Lock()
 	call, ok := p.pending[key]
@@ -337,7 +350,7 @@ func (p *Process) handleResponse(msg rpcMessage) {
 	if !ok {
 		return
 	}
-	call.ch <- callResult{result: msg.Result, err: msg.Error}
+	call.ch <- callResult{result: msg.Result, err: msg.Error, seq: seq}
 }
 
 func (p *Process) handleRequest(msg rpcMessage) {
@@ -401,7 +414,7 @@ func (p *Process) notificationLoop() {
 						p.log.Error("panic in notification handler", "panic", r)
 					}
 				}()
-				p.handler.OnNotification(n.method, n.sessionID, n.update)
+				p.handler.OnNotification(n.method, n.sessionID, n.update, n.seq)
 			}()
 		case <-p.done:
 			// Drain anything already queued before exiting.
@@ -414,7 +427,7 @@ func (p *Process) notificationLoop() {
 					}
 					func() {
 						defer func() { _ = recover() }()
-						p.handler.OnNotification(n.method, n.sessionID, n.update)
+						p.handler.OnNotification(n.method, n.sessionID, n.update, n.seq)
 					}()
 				default:
 					return
@@ -497,11 +510,18 @@ func (p *Process) wait() {
 }
 
 func (p *Process) Call(ctx context.Context, method string, params any, out any) error {
+	_, err := p.CallSeq(ctx, method, params, out)
+	return err
+}
+
+// CallSeq is Call plus the response's wire position, for callers whose
+// session state must apply in the order the agent sent it.
+func (p *Process) CallSeq(ctx context.Context, method string, params any, out any) (uint64, error) {
 	if p.isClosed() {
-		return ErrProcessExited
+		return 0, ErrProcessExited
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	p.mu.Lock()
 	p.nextID++
@@ -527,7 +547,7 @@ func (p *Process) Call(ctx context.Context, method string, params any, out any) 
 			case <-ctx.Done():
 			}
 		}
-		return err
+		return 0, err
 	}
 	if sent := requestSent(ctx); sent != nil {
 		sent()
@@ -536,23 +556,23 @@ func (p *Process) Call(ctx context.Context, method string, params any, out any) 
 	select {
 	case res := <-call.ch:
 		if res.err != nil {
-			return res.err
+			return 0, res.err
 		}
 		if out != nil && len(res.result) > 0 {
 			if err := json.Unmarshal(res.result, out); err != nil {
-				return fmt.Errorf("decode %s response: %w", method, err)
+				return 0, fmt.Errorf("decode %s response: %w", method, err)
 			}
 		}
-		return nil
+		return res.seq, nil
 	case <-ctx.Done():
 		p.removePending(key)
 		if method != "session/prompt" {
 			_ = p.Notify("$/cancel_request", map[string]any{"requestId": id})
 		}
-		return ctx.Err()
+		return 0, ctx.Err()
 	case <-p.done:
 		p.removePending(key)
-		return ErrProcessExited
+		return 0, ErrProcessExited
 	}
 }
 

@@ -68,7 +68,7 @@ func (app *ConversationApp) AutoTitle(ctx context.Context, convID string) error 
 	users := 0
 	for _, m := range conv.Messages() {
 		switch {
-		case m.Role() == enum.RoleUser && m.UserType() != enum.LLMUserTypeSystem:
+		case m.Role() == enum.RoleUser && !m.UserType().SystemPayload():
 			users++
 			if users == 1 {
 				asked = m.Content()

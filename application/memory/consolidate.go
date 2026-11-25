@@ -74,7 +74,7 @@ func (a *App) Consolidate(ctx context.Context, convID string, sealed []entity.Me
 	owners := map[string]string{} // message id → its text as the model saw it
 	for _, m := range sealed {
 		switch {
-		case m.Role() == enum.RoleUser && m.UserType() != enum.LLMUserTypeSystem:
+		case m.Role() == enum.RoleUser && !m.UserType().SystemPayload():
 			text := a.scrub(clipRunes(m.Content(), consolidateOwnerMax))
 			if strings.TrimSpace(text) == "" {
 				continue

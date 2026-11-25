@@ -20,7 +20,9 @@ import (
 )
 
 // fatHistory is an earlier checkpoint followed by n tool steps whose
-// outputs are 20 KB each.
+// outputs are 20 KB each. The head keeps the older "system" userType on
+// purpose: a checkpoint written before that provenance existed must still be
+// read as one.
 func fatHistory(t *testing.T, n int) []entity.Message {
 	t.Helper()
 	head, _ := entity.NewMessage(enum.RoleUser, "CHECKPOINT: before")
@@ -77,6 +79,11 @@ func TestFitCompactionInput(t *testing.T) {
 	}
 	if sizeOf(got) > 1_500 {
 		t.Fatalf("still %d bytes", sizeOf(got))
+	}
+	// The note says what is missing; it is a system payload, not a checkpoint,
+	// so the UI draws no fold boundary for it.
+	if got[1].UserType() != enum.LLMUserTypeSystem {
+		t.Fatalf("the left-out note carries %q, want system", got[1].UserType())
 	}
 }
 
@@ -154,7 +161,7 @@ func TestRunTurnFoldsAgainInALongTurn(t *testing.T) {
 func TestCompactionRetriesASmallerHandoffOn413(t *testing.T) {
 	svc := &longTurnSvc{failHandoff: 1}
 	conv := longTurn(t, svc)
-	if conv.Last().Content() != "done" || conv.Messages()[0].UserType() != enum.LLMUserTypeSystem {
+	if conv.Last().Content() != "done" || conv.Messages()[0].UserType() != enum.LLMUserTypeCompaction {
 		t.Fatalf("the refused handoff must be retried: %+v", conv.Messages())
 	}
 }

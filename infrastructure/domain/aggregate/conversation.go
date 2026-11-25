@@ -280,7 +280,7 @@ func (c *Conversation) SetTitle(title string) {
 // model, or an agent.
 func (c Conversation) TitleIsDefault() bool {
 	for _, m := range c.messages {
-		if m.Role() == enum.RoleUser && m.UserType() != enum.LLMUserTypeSystem {
+		if m.Role() == enum.RoleUser && !m.UserType().SystemPayload() {
 			return c.title == titleFrom(m.Content())
 		}
 	}

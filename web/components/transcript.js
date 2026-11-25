@@ -465,6 +465,20 @@ export function Transcript({ room, scroller }) {
         <summary class="cursor-pointer py-1">Context note</summary>
         <pre class="rawtext mt-1">${it.msg.content}</pre>
       </details>`;
+      // A compaction checkpoint marks where earlier history was sealed: a
+      // thin rule naming it, not a bubble — the summary it kept stays one
+      // click behind the line. The flanking rules give the label all the
+      // room that is left, so at any width the word stays whole.
+      case 'compaction': return html`<details key=${it.id} class="text-[13px] text-muted">
+        <summary class="list-none cursor-pointer py-1" title="History compacted — read the summary it kept">
+          <span role="separator" aria-label="History compacted" class="flex items-center gap-3">
+            <span class="flex-1 border-t border-line"></span>
+            <span class="shrink-0">Compacted</span>
+            <span class="flex-1 border-t border-line"></span>
+          </span>
+        </summary>
+        <pre class="rawtext mt-1">${it.msg.content}</pre>
+      </details>`;
       case 'text': return html`<${Markdown} key=${it.id} text=${it.text} room=${r} quote />`;
       case 'activity': return html`<${Activity} key=${it.id} room=${r} item=${it} live=${live} cwd=${cwd} />`;
       case 'interrupted': return html`<div key=${it.id} class="text-xs text-faint">— interrupted</div>`;

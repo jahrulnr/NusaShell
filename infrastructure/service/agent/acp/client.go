@@ -104,7 +104,8 @@ func (c *Client) NewSession(ctx context.Context, req NewSessionRequest) (Session
 		req.MCPServers = []MCPServerConfig{}
 	}
 	var res SessionState
-	err := c.proc.Call(ctx, "session/new", req, &res)
+	seq, err := c.proc.CallSeq(ctx, "session/new", req, &res)
+	res.WireSeq = seq
 	return res, err
 }
 
@@ -116,7 +117,8 @@ func (c *Client) LoadSession(ctx context.Context, req LoadSessionRequest) (Sessi
 		req.MCPServers = []MCPServerConfig{}
 	}
 	var res SessionState
-	err := c.proc.Call(ctx, "session/load", req, &res)
+	seq, err := c.proc.CallSeq(ctx, "session/load", req, &res)
+	res.WireSeq = seq
 	return res, err
 }
 
@@ -128,7 +130,8 @@ func (c *Client) ResumeSession(ctx context.Context, req ResumeSessionRequest) (S
 		req.MCPServers = []MCPServerConfig{}
 	}
 	var res SessionState
-	err := c.proc.Call(ctx, "session/resume", req, &res)
+	seq, err := c.proc.CallSeq(ctx, "session/resume", req, &res)
+	res.WireSeq = seq
 	return res, err
 }
 
@@ -165,12 +168,12 @@ func (c *Client) SetConfig(ctx context.Context, sessionID, configID string, valu
 		req["type"] = "boolean"
 	}
 	var res SetConfigResult
-	err := c.proc.Call(ctx, "session/set_config_option", req, &res)
-	return SessionState{ConfigOptions: res.ConfigOptions}, err
+	seq, err := c.proc.CallSeq(ctx, "session/set_config_option", req, &res)
+	return SessionState{ConfigOptions: res.ConfigOptions, WireSeq: seq}, err
 }
 
-func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
-	return c.proc.Call(ctx, "session/set_mode", SetModeRequest{SessionID: sessionID, ModeID: modeID}, nil)
+func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) (uint64, error) {
+	return c.proc.CallSeq(ctx, "session/set_mode", SetModeRequest{SessionID: sessionID, ModeID: modeID}, nil)
 }
 
 func (c *Client) CloseSession(ctx context.Context, sessionID string) error {

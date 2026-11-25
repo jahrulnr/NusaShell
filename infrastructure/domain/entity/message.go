@@ -184,8 +184,7 @@ func EditableMessage(role enum.Role, userType enum.LLMUserType) bool {
 	if role != enum.RoleUser {
 		return false
 	}
-	switch userType {
-	case enum.LLMUserTypeSystem, enum.LLMUserTypeRelay:
+	if userType.SystemPayload() || userType == enum.LLMUserTypeRelay {
 		return false
 	}
 	return true

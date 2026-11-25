@@ -57,36 +57,6 @@ func modelOption(raw json.RawMessage) (id, current string, models []dservice.Age
 	return "", "", nil
 }
 
-// mergeConfigOptions applies a config_option_update: options it names
-// replace the stored ones by id, others stay.
-func mergeConfigOptions(stored, update json.RawMessage) json.RawMessage {
-	var base, next []map[string]json.RawMessage
-	if json.Unmarshal(update, &next) != nil {
-		return stored
-	}
-	_ = json.Unmarshal(stored, &base)
-	index := map[string]int{}
-	for i, o := range base {
-		var id string
-		_ = json.Unmarshal(o["id"], &id)
-		index[id] = i
-	}
-	for _, o := range next {
-		var id string
-		_ = json.Unmarshal(o["id"], &id)
-		if i, ok := index[id]; ok {
-			base[i] = o
-		} else {
-			base = append(base, o)
-		}
-	}
-	out, err := json.Marshal(base)
-	if err != nil {
-		return stored
-	}
-	return out
-}
-
 // legacyModeID is the synthetic option id for agents that offer modes
 // through session/set_mode instead of a config option.
 const legacyModeID = "mode"

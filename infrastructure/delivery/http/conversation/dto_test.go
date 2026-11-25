@@ -9,6 +9,28 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
+// The wire tells a fold's checkpoint apart from every other system payload:
+// both are user-role notes the owner never typed, but only the checkpoint is a
+// boundary, and the UI needs the string to draw it.
+func TestCompactionCheckpointCarriesItsOwnUserType(t *testing.T) {
+	checkpoint, err := entity.NewMessage(enum.RoleUser, "CHECKPOINT: the handoff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint.SetUserType(enum.LLMUserTypeCompaction)
+	if got := toMessage(checkpoint).UserType; got != "compaction" {
+		t.Fatalf("checkpoint userType = %q, want compaction", got)
+	}
+	note, err := entity.NewMessage(enum.RoleUser, "a system note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note.SetUserType(enum.LLMUserTypeSystem)
+	if got := toMessage(note).UserType; got != "system" {
+		t.Fatalf("system note userType = %q, want system", got)
+	}
+}
+
 // A file an agent put in its reply is served like any attachment: by
 // reference, without the content pin the server keeps to itself.
 func TestMediaPartIsServedWithoutItsPin(t *testing.T) {

@@ -496,7 +496,9 @@ export function historyItems(messages, cwd = '') {
   for (const m of messages) {
     if (m.role === 'user') {
       out.push({
-        id: m.id, kind: m.userType === 'system' ? 'note' : 'user', msg: m,
+        // A compaction checkpoint is a boundary in the history, not the
+        // owner's word — its own row, so it never renders as a message.
+        id: m.id, kind: m.userType === 'compaction' ? 'compaction' : m.userType === 'system' ? 'note' : 'user', msg: m,
         steerInput: m[STEER_INPUT] || '',
         // A prompt another thread sent is the server's to say (userType), never
         // something the transcript guesses from the text.

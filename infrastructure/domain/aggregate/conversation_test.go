@@ -302,6 +302,27 @@ func titledRoom(t *testing.T, first string) *Conversation {
 	return c
 }
 
+// A fold's checkpoint is not an owner message, so it never stands in for the
+// first line the room was named after.
+func TestTitleIsDefaultIgnoresTheCheckpoint(t *testing.T) {
+	c := mustConv(t)
+	checkpoint, err := entity.NewMessage(enum.RoleUser, "CHECKPOINT: sealed seam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint.SetUserType(enum.LLMUserTypeCompaction)
+	c.Append(checkpoint)
+	first, err := entity.NewMessage(enum.RoleUser, "hello there")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Append(first)
+	c.SetTitle("hello there")
+	if !c.TitleIsDefault() {
+		t.Fatal("the checkpoint must not be read as the owner's first line")
+	}
+}
+
 func TestTitleIsDefaultUntilSomeoneNamesTheRoom(t *testing.T) {
 	c := titledRoom(t, "  fix the login bug \n")
 	if !c.TitleIsDefault() {

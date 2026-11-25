@@ -234,6 +234,9 @@ type SessionState struct {
 	Modes         *SessionModeState `json:"modes,omitempty"`
 	ConfigOptions json.RawMessage   `json:"configOptions,omitempty"`
 	Meta          json.RawMessage   `json:"_meta,omitempty"`
+	// WireSeq is the response's position on the agent's stream; state it
+	// carries applies over earlier-wire notifications, never under them.
+	WireSeq uint64 `json:"-"`
 }
 
 type PromptRequest struct {

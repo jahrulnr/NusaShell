@@ -708,6 +708,34 @@ test('a relayed prompt is told by its field, not by its text', () => {
   assert.equal(historyItems([{ id: 'm3', role: 'user', userType: 'system', content: 'note' }])[0].kind, 'note');
 });
 
+// A compaction checkpoint is a boundary, not a message: its own kind once,
+// between what came before it and what followed — never a note, never a
+// prompt, and the transcript pipeline leaves it in place.
+test('a compaction checkpoint becomes one divider between the messages it seals', () => {
+  const messages = [
+    { id: 'm1', role: 'user', content: 'earlier ask' },
+    { id: 'm2', role: 'assistant', content: 'earlier answer' },
+    { id: 'm3', role: 'user', userType: 'compaction', content: '[COMPACTION CHECKPOINT]\n\n…summary…' },
+    { id: 'm4', role: 'assistant', content: 'after the seal' },
+    { id: 'm5', role: 'user', content: 'next ask' },
+  ];
+  // the raw flattening: one item, in place
+  const kinds = historyItems(messages).map((i) => i.kind);
+  assert.deepEqual(kinds, ['user', 'text', 'compaction', 'text', 'user']);
+  assert.equal(kinds.indexOf('compaction'), 2, 'between the sealed turn and what followed');
+  // and it survives the transcript's own pipeline untouched, once
+  const piped = group(joinText(historyItems(messages))).map((i) => i.kind);
+  assert.deepEqual(piped, ['user', 'text', 'compaction', 'text', 'user']);
+  assert.equal(piped.filter((k) => k === 'compaction').length, 1, 'one divider per checkpoint');
+
+  // a plain system note stays a note
+  assert.equal(historyItems([{ id: 'm6', role: 'user', userType: 'system', content: 'note' }])[0].kind, 'note');
+  // the owner's own and a relayed prompt are still prompts
+  const relay = historyItems([{ id: 'm7', role: 'user', userType: 'relay', content: 'x' }])[0];
+  assert.equal(relay.kind, 'user');
+  assert.equal(relay.relayed, true);
+});
+
 // A tool row that points at another room shows a name, never a raw id: the
 // label, else the title, else the last six characters of the id as a handle.
 // The name is read from the tool's own result — the thread object the server

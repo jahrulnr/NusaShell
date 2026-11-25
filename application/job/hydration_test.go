@@ -284,7 +284,7 @@ func TestRunTurn413KeepTailOneLeavesSingleContext(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("history = %d msgs, want checkpoint+context+answer: %+v", len(msgs), msgs)
 	}
-	if msgs[0].UserType() != enum.LLMUserTypeSystem || len(msgs[0].ToolCalls()) != 0 {
+	if msgs[0].UserType() != enum.LLMUserTypeCompaction || len(msgs[0].ToolCalls()) != 0 {
 		t.Fatalf("head = %+v, want the compaction checkpoint", msgs[0])
 	}
 	requireWorkspaceContext(t, msgs[1], "")
@@ -599,7 +599,7 @@ func TestRunTurnCompactRepinsWorkspaceContext(t *testing.T) {
 	if len(msgs) != 4 {
 		t.Fatalf("history = %d msgs, want checkpoint+call+record+answer: %+v", len(msgs), msgs)
 	}
-	if msgs[0].UserType() != enum.LLMUserTypeSystem || len(msgs[0].ToolCalls()) != 0 {
+	if msgs[0].UserType() != enum.LLMUserTypeCompaction || len(msgs[0].ToolCalls()) != 0 {
 		t.Fatalf("head = %+v, want the compaction checkpoint", msgs[0])
 	}
 	if msgs[1].Role() != enum.RoleAssistant || !msgs[1].ToolCalls()[0].HasOutput() {
@@ -652,7 +652,7 @@ func TestRunTurn413FoldRepinsWorkspaceContext(t *testing.T) {
 	if len(msgs) != 4 {
 		t.Fatalf("history = %d msgs, want checkpoint+call+record+answer: %+v", len(msgs), msgs)
 	}
-	if msgs[0].UserType() != enum.LLMUserTypeSystem || len(msgs[0].ToolCalls()) != 0 {
+	if msgs[0].UserType() != enum.LLMUserTypeCompaction || len(msgs[0].ToolCalls()) != 0 {
 		t.Fatalf("head = %+v, want the compaction checkpoint", msgs[0])
 	}
 	if msgs[1].Role() != enum.RoleAssistant || !msgs[1].ToolCalls()[0].HasOutput() {

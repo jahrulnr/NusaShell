@@ -34,7 +34,7 @@ func TestParseRoundtrips(t *testing.T) {
 			t.Fatalf("TurnOriginKind %q roundtrip failed", v)
 		}
 	}
-	for _, v := range []LLMUserType{LLMUserTypeOrigin, LLMUserTypeSystem} {
+	for _, v := range []LLMUserType{LLMUserTypeOrigin, LLMUserTypeSystem, LLMUserTypeCompaction, LLMUserTypeRelay} {
 		if got, f := ParseLLMUserType(v.String()); !f || got != v {
 			t.Fatalf("LLMUserType %q roundtrip failed", v)
 		}

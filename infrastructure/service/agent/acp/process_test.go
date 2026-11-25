@@ -17,7 +17,7 @@ type blockingHandler struct {
 	release chan struct{}
 }
 
-func (h *blockingHandler) OnNotification(string, string, json.RawMessage) {
+func (h *blockingHandler) OnNotification(string, string, json.RawMessage, uint64) {
 	close(h.started)
 	<-h.release
 }
@@ -86,7 +86,7 @@ func TestRequestWaitsForEarlierUpdates(t *testing.T) {
 
 type ownerHandler struct{ got chan string }
 
-func (h *ownerHandler) OnNotification(string, string, json.RawMessage) {}
+func (h *ownerHandler) OnNotification(string, string, json.RawMessage, uint64) {}
 func (h *ownerHandler) OnRequest(ctx context.Context, _ string, _ json.RawMessage) (any, *RPCError) {
 	h.got <- RequestOwner(ctx)
 	return map[string]any{}, nil
@@ -106,7 +106,7 @@ func TestRequestScopedInputUsesOriginatingConversation(t *testing.T) {
 
 type silentHandler struct{}
 
-func (silentHandler) OnNotification(string, string, json.RawMessage) {}
+func (silentHandler) OnNotification(string, string, json.RawMessage, uint64) {}
 func (silentHandler) OnRequest(context.Context, string, json.RawMessage) (any, *RPCError) {
 	return map[string]any{}, nil
 }

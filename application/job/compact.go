@@ -54,7 +54,7 @@ func fitCompactionInput(history []entity.Message, fits func([]entity.Message) bo
 		}
 	}
 	head := 0
-	if len(clipped) > 0 && clipped[0].Role() == enum.RoleUser && clipped[0].UserType() == enum.LLMUserTypeSystem {
+	if len(clipped) > 0 && clipped[0].Role() == enum.RoleUser && clipped[0].UserType().SystemPayload() {
 		head = 1 // an earlier checkpoint
 	}
 	for drop := 1; head+drop < len(clipped); drop++ {
@@ -195,7 +195,9 @@ func (d Deps) compact(ctx context.Context, convID string, conv *aggregate.Conver
 	if err != nil {
 		return err
 	}
-	next.SetUserType(enum.LLMUserTypeSystem)
+	// The checkpoint is a system payload the UI draws as a boundary: it keeps
+	// every system handling and gains its own provenance on the wire.
+	next.SetUserType(enum.LLMUserTypeCompaction)
 
 	// Keep the most recent messages live; the checkpoint is written for
 	// exactly this tail plus it. Tool outputs ride inside their call's
