@@ -10,7 +10,6 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"path"
 	"sort"
 	"strings"
 	"testing"
@@ -221,21 +220,4 @@ func Run(t *testing.T, factory func() svc.SymbolIndex) {
 			}
 		}
 	})
-}
-
-// RequireKindNames is a helper for adapter-specific tests that want the full
-// (path,kind,name) set.
-func RequireKindNames(t *testing.T, syms []svc.Symbol, file string, want [][2]string) {
-	t.Helper()
-	got := map[[2]string]bool{}
-	for _, s := range syms {
-		if s.Path == file || path.Base(s.Path) == file {
-			got[[2]string{s.Kind, s.Name}] = true
-		}
-	}
-	for _, p := range want {
-		if !got[p] {
-			t.Errorf("%s: missing %s %q", file, p[0], p[1])
-		}
-	}
 }

@@ -33,9 +33,17 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          # Install only; make lint-go runs the configured pass.
+          install-only: true
       - run: make fmt-check
+      - run: make lint-go
       - run: make test
-      - run: make test-web
+      - run: make check-web
 
   race:
     runs-on: ubuntu-latest

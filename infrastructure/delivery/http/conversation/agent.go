@@ -16,7 +16,7 @@ import (
 // AgentSurface is a room's agent session: its options and approval rules.
 // *appconversation.ConversationApp satisfies it.
 type AgentSurface interface {
-	AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, error)
+	AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, dservice.OptionsState, error)
 	// SetAgentOption validates the pick and parks it for the room's next turn;
 	// parked is what the answer renders as 202 rather than "applied".
 	SetAgentOption(ctx context.Context, convID, id, value string) (parked bool, err error)
@@ -44,12 +44,16 @@ type agentServer struct {
 }
 
 func (a *agentServer) options(c *gin.Context) {
-	opts, err := a.svc.AgentOptions(c.Request.Context(), c.Param("id"))
+	opts, state, err := a.svc.AgentOptions(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		transport.RespondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": opts})
+	// status is only ever "ready" or "empty" here: "unavailable" always
+	// travels with err and became the error response above. The HTTP
+	// status already says the request failed; the body's job is to
+	// describe the list — never re-add "unavailable" as a wire value.
+	c.JSON(http.StatusOK, gin.H{"data": opts, "status": state})
 }
 
 func (a *agentServer) setOption(c *gin.Context) {
@@ -67,12 +71,12 @@ func (a *agentServer) setOption(c *gin.Context) {
 		transport.RespondError(c, err)
 		return
 	}
-	opts, err := a.svc.AgentOptions(ctx, c.Param("id"))
+	opts, state, err := a.svc.AgentOptions(ctx, c.Param("id"))
 	if err != nil {
 		transport.RespondError(c, err)
 		return
 	}
-	out := gin.H{"data": opts}
+	out := gin.H{"data": opts, "status": state}
 	status := http.StatusOK
 	if parked {
 		// The pick is taken but nothing is applied yet: a turn fixes its

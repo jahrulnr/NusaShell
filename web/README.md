@@ -212,15 +212,19 @@ make build && NUSASHELL_WEB_DIR=web ./bin/nusashell serve --port 18080
 
 `NUSASHELL_WEB_DIR` serves the UI from disk instead of the embedded copy, so
 edits show on reload. `make test-web` syntax-checks the sources.
+`make lint-web` (Biome unused imports/vars + Knip module graph) uses
+devDependencies under `web/node_modules` only — still no runtime npm or
+build step; `vendor/` remains what the browser loads.
 
 ## Tests
 
-`make test-web` (part of `make check`) syntax-checks every source and runs
-`tests/*.test.mjs` with Node's built-in runner — no npm. `tests/register.mjs`
-lets the modules load under Node (their `/vendor/...` imports are paths
-under `web/`), and `tests/env.mjs` stands in for the browser: `location`
-with `hashchange`, `localStorage`, a scriptable `fetch` (`mockApi`), and a
-`WebSocket` the test opens and feeds frames by hand. `chat.test.mjs` drives
-the real controller that way; `turn.test.mjs`, `references.test.mjs`, and
-`api.test.mjs` cover the pure modules. What needs a DOM — components,
-`follow.js`, Markdown rendering — is checked in the browser.
+`make test-web` (part of `make check-web` / `make check`) syntax-checks
+every source and runs `tests/*.test.mjs` with Node's built-in runner.
+`tests/register.mjs` lets the modules load under Node (their `/vendor/...`
+imports are paths under `web/`), and `tests/env.mjs` stands in for the
+browser: `location` with `hashchange`, `localStorage`, a scriptable
+`fetch` (`mockApi`), and a `WebSocket` the test opens and feeds frames by
+hand. `chat.test.mjs` drives the real controller that way;
+`turn.test.mjs`, `references.test.mjs`, and `api.test.mjs` cover the pure
+modules. What needs a DOM — components, `follow.js`, Markdown rendering —
+is checked in the browser.

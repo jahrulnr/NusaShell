@@ -582,5 +582,5 @@ flow; this document is the map, but the `AGENTS.md` chain (root →
 The read-only verification loop:
 
 ```sh
-make fmt-check && make test && make test-web
+make check
 ```

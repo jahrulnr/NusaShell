@@ -1,0 +1,30 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.6.9/schema.json",
+	"files": {
+		"includes": [
+			"app.js",
+			"lib/**",
+			"components/**",
+			"tests/**",
+			"!**/vendor/**",
+			"!**/node_modules/**"
+		]
+	},
+	"formatter": {
+		"enabled": false
+	},
+	"assist": {
+		"enabled": false
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "none",
+			"correctness": {
+				"noUnusedVariables": "error",
+				"noUnusedImports": "error",
+				"noUnusedFunctionParameters": "error"
+			}
+		}
+	}
+}

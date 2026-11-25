@@ -15,7 +15,6 @@ var (
 	reExport   = reWord(`export`)
 	rePub      = reWord(`pub`)
 	rePublic   = reWord(`public`)
-	reOpenKw   = reWord(`open`)
 	reInternal = reWord(`internal`)
 	reProtect  = reWord(`protected`)
 	rePrivate  = reWord(`private`)

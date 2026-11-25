@@ -20,7 +20,7 @@ const harness = () => {
 };
 
 test('a refused pick is pushed back onto the value the server kept', () => {
-  const { el, ss, pushed, selected } = harness();
+  const { el, ss, selected } = harness();
   // The mount push marks the stored value.
   selectResync(el, ss, 'accept-edits', OPTS);
   assert.equal(selected(), 'accept-edits');
@@ -58,7 +58,7 @@ test('a steady control does not rewrite itself every render', () => {
 });
 
 test('grouped options mark the stored value inside their group', () => {
-  const { el, ss, pushed, selected } = harness();
+  const { el, ss, pushed } = harness();
   const grouped = [{ label: 'Session', options: OPTS }];
   el._value = 'bypass';
   selectResync(el, ss, 'accept-edits', grouped);

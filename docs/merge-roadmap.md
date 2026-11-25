@@ -27,8 +27,9 @@ fit the NusaLLM layers, not imported as a dependency. The license is GPLv3.
 
 ## Verification
 
-`make check` is the read-only gate: gofmt, the WebUI syntax check, the host
-build, vet, the tests, and a cross-compile of every package for `windows`
+`make check` is the read-only gate: gofmt, Go unused/deadcode, the WebUI
+syntax/unit/lint checks, the host build, vet, the tests, and a cross-compile
+of every package for `windows`
 and `darwin`. `make test` is the fixing variant — it runs `go fix` and
 rewrites sources before verifying them, so it cannot report on what it was
 handed. Run `make check` before a commit, and before calling a merge item

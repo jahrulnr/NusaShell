@@ -421,7 +421,7 @@ obsolete. Tests assert current intended behavior, not historical behavior.
 ## The verify loop
 
 ```sh
-make fmt-check && make test && make test-web
+make check
 ```
 
 Run the whole chain — it's the bar each `AGENTS.md` sets, and it's fast in
@@ -429,14 +429,16 @@ this module. The `Makefile` mirrors it: `make build` produces
 `bin/nusashell`, `make serve`
 launches the WebUI, and `make provider-add` is a convenience recipe for one
 provider. `make fmt-check` fails on unformatted files instead of
-rewriting them, `make test` builds `bin/nusashell` before vet + test, and
-`make test-web` syntax-checks the WebUI sources under `web/`
-(see `web/README.md`). Media fixtures for end-to-end
-attachment paths live in `test/media/` and are pinned by
-`TestMediaFixtures` in `infrastructure/domain/valueobject/attachment_test.go`
-— if an adapter change touches attachment serialization, that test is the
-tripwire. Beyond that, test the contract at the boundary you changed —
-observable port behavior, ordering, persisted state — not helper names.
+rewriting them, `make test` builds `bin/nusashell` before vet + test,
+`make lint-go` runs golangci-lint (`unused`) plus `go tool deadcode` with
+the release build tags, and `make check-web` syntax-checks and unit-tests
+the WebUI then runs Biome/Knip over `web/` (see `web/README.md`). Media
+fixtures for end-to-end attachment paths live in `test/media/` and are
+pinned by `TestMediaFixtures` in
+`infrastructure/domain/valueobject/attachment_test.go` — if an adapter
+change touches attachment serialization, that test is the tripwire. Beyond
+that, test the contract at the boundary you changed — observable port
+behavior, ordering, persisted state — not helper names.
 
 ---
 

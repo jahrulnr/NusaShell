@@ -1,0 +1,14 @@
+# Go static analysis for make lint-go. default:none keeps the gate focused
+# on unused/dead symbols and the same checks go vet already covers; expand
+# only when a new class of finding is worth blocking the tree on.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - unused
+    - ineffassign
+    - govet

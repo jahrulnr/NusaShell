@@ -1,7 +1,7 @@
 // A browser recording attaches to a message like a file does: it rides
 // the composer chip into turn.send's recordingId, survives queueing and
 // restore, and never leaves through a steer.
-import { calls, mockApi, sleep, sockets } from './env.mjs';
+import { mockApi, sockets } from './env.mjs';
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from '../lib/store.js';

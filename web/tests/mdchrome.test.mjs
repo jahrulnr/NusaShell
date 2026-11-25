@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import './env.mjs';
 import {
-  CHROME_ATTRS, CHROME_CLASSES, NONCE_ATTR, newNonce, stripForeignChrome, diagramParts,
+  CHROME_ATTRS, NONCE_ATTR, newNonce, stripForeignChrome, diagramParts,
 } from '../lib/mdchrome.js';
 
 // el is the slice of Element the strip and the diagram guard use: attributes,
@@ -48,7 +48,6 @@ function el(tag, attrs = {}, kids = []) {
 
 const attrsOf = (node) => CHROME_ATTRS.filter((a) => node.hasAttribute(a));
 const classesOf = (node) => (node.getAttribute('class') || '').split(/\s+/).filter(Boolean);
-const chromeClassesOf = (node) => classesOf(node).filter((c) => CHROME_CLASSES.has(c));
 
 test('a message that writes the renderer’s chrome loses it, and keeps its words', () => {
   const nonce = newNonce();
@@ -58,7 +57,7 @@ test('a message that writes the renderer’s chrome loses it, and keeps its word
     el('span', { class: 'md-media', 'data-media': 'a.png', 'data-kind': 'image' }, ['shot']),
     el('button', { 'data-fn': 'x' }, ['1'])]);
   stripForeignChrome(text, nonce);
-  const [p, box, code, media, fn] = text.kids;
+  const [, box, code, media, fn] = text.kids;
   assert.deepEqual(attrsOf(box), [], 'the diagram attribute does not survive');
   assert.deepEqual(classesOf(box), [], 'nor the class that made it look like one');
   assert.deepEqual(attrsOf(code.kids[0]), [], 'a forged copy button is just a button');

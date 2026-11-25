@@ -548,6 +548,29 @@ func (s *server) prompt(id json.RawMessage, sessionID string, prompt []struct {
 		s.elicitDemo(id, sessionID, variant)
 		return
 	}
+	if strings.Contains(text.String(), "sparse-update") {
+		// What opencode does after a model change: an authoritative
+		// config_option_update that names only what changed. The list is
+		// the whole offered surface now — everything it omits is gone.
+		s.mu.Lock()
+		modelOnly := []any{
+			map[string]any{
+				"id": "model", "name": "Model", "category": "model", "type": "select",
+				"currentValue": s.values["model"], "options": []any{
+					map[string]any{"value": "fake-fast", "name": "Fake Fast"},
+					map[string]any{"value": "fake-smart", "name": "Fake Smart"},
+				},
+			},
+		}
+		s.mu.Unlock()
+		s.notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update":    map[string]any{"sessionUpdate": "config_option_update", "configOptions": modelOnly},
+		})
+		s.chunk("options shrunk")
+		s.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
 	if strings.Contains(text.String(), "fs-demo") {
 		s.fsDemo(id, sessionID)
 		return

@@ -47,10 +47,9 @@ type defRule struct {
 // langRule describes one language: the extensions it claims, its definition
 // patterns, and how scopes close (braces or significant indentation).
 type langRule struct {
-	exts    []string
-	indent  bool
-	comment *regexp.Regexp
-	defs    []defRule
+	exts   []string
+	indent bool
+	defs   []defRule
 	// memberKinds are promoted from "function" to "method" when emitted
 	// inside a container scope.
 	members bool

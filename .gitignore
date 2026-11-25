@@ -10,5 +10,10 @@ tasks/
 # Playwright run output
 web/test-results/
 
-# a bare build output at the repo root (go build ./cmd/nusashell)
-/nusashell
+# WebUI check tooling (Biome/Knip); runtime stays vendored, no node_modules in the binary.
+web/node_modules/
+
+# A build output never belongs at the repo root: build with
+# `go build -o bin/<name> ./cmd/<name>`, so `bin/` above covers every binary
+# for every cmd, once. Do not add a line here for each new cmd — the gate
+# (`make artifacts`) refuses a binary anywhere in the tree instead.

@@ -1,0 +1,15 @@
+{
+  "name": "nusashell-web-check",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only WebUI lint and dead-code checks. Not a runtime dependency — the browser client stays vendored under vendor/ with no build step.",
+  "scripts": {
+    "lint": "node ./node_modules/@biomejs/biome/bin/biome check app.js lib components tests",
+    "deadcode": "node ./node_modules/knip/bin/knip.js",
+    "check": "npm run lint && npm run deadcode"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.9",
+    "knip": "5.88.1"
+  }
+}

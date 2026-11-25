@@ -53,7 +53,7 @@ export function useXterm(box, path, params, gen, failed) {
     loadXterm().then((Terminal) => {
       if (closed) return;
       const t = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', theme: theme(), allowProposedApi: false });
-      if (window.WebLinksAddon) t.loadAddon(new window.WebLinksAddon.WebLinksAddon((e, uri) => window.open(uri, '_blank', 'noopener')));
+      if (window.WebLinksAddon) t.loadAddon(new window.WebLinksAddon.WebLinksAddon((_e, uri) => window.open(uri, '_blank', 'noopener')));
       t.open(box.current);
       term.current = t;
       fit(t, box.current);

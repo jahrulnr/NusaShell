@@ -85,3 +85,23 @@ with a written reason.
 The tree is shared: never run `git checkout`, `git restore`, `git stash`, or
 `git reset` — another room's uncommitted work lives in the same tree, and
 those commands delete it.
+
+## Artifacts
+
+A build output, dump, recording, coverage file, or any other generated file is
+**never created inside the tree**. The only place for one is `bin/` (ignored
+once, for every `cmd`) or outside the repository — `/tmp`, a data directory,
+`web/test-results/`. Build with an explicit output path:
+`go build -o bin/<name> ./cmd/<name>`. Bare `go build ./cmd/<name>` drops the
+binary at the repo root and is a defect even when nothing commits it.
+
+Never solve an artifact with a new `.gitignore` line. A rule per file is a list
+that grows with every `cmd`, and a listed artifact is an ignored one — which is
+how a 7.2 MB `fake-acp-agent` binary was committed and left to history
+rewriting. The tree stays clean by never putting the file there, not by
+teaching git to look away.
+
+`make artifacts` enforces it: it fails when any tracked or untracked-unignored
+file in the tree is a binary, and it runs as part of `make check`.
+
+

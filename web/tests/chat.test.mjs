@@ -1006,7 +1006,7 @@ test('a replayed terminal confirms a retry whose opening reply was lost', async 
 });
 
 test('steer carries the full draft — references, uploads, annotations — and restores them on rejection', async () => {
-  const { r, cmd } = await openBusyThread();
+  const { r } = await openBusyThread();
   const refs = [{ kind: 'conversation', id: 'c_dog', label: '@dog', start: 4, end: 8 }];
   const files = [
     { key: 'k1', status: 'ready', id: 'u_1', name: 'shot.png', mediaType: 'image/png' },

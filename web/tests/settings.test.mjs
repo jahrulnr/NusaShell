@@ -103,7 +103,7 @@ test('the roles that do take an effort still write one, and clear it when it can
 // the model picker and the effort select. An effort select offered for a role
 // the server does not know would fail its own write, after the model change.
 test('a role without an effort leaf writes none, from either select', async () => {
-  mockApi({ 'PATCH /api/settings': (call) => [200, { models: { threads: {} } }] });
+  mockApi({ 'PATCH /api/settings': () => [200, { models: { threads: {} } }] });
   calls.length = 0;
 
   const vision = role('vision');

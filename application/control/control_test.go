@@ -186,12 +186,6 @@ type perRoomQueue struct {
 
 func (q perRoomQueue) QueueDepth(convID string) int { return q.waits[convID] }
 
-func (q *fakeQueue) drain() {
-	q.mu.Lock()
-	q.depth = 0
-	q.mu.Unlock()
-}
-
 type fakeProjects struct{ drepo.Project }
 
 func (fakeProjects) Get(_ context.Context, id string) (*aggregate.Project, error) {

@@ -29,8 +29,8 @@ type stubRuntime struct {
 	warmed []string
 }
 
-func (s *stubRuntime) Options(context.Context, *aggregate.Agent, string) ([]dservice.AgentOption, error) {
-	return s.options, s.probe
+func (s *stubRuntime) Options(context.Context, *aggregate.Agent, string) ([]dservice.AgentOption, dservice.OptionsState, error) {
+	return s.options, dservice.OptionsReady, s.probe
 }
 func (s *stubRuntime) Reload(string) {}
 func (s *stubRuntime) Warm(_ context.Context, a *aggregate.Agent) error {

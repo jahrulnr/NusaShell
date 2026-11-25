@@ -368,7 +368,7 @@ func TestOptionsAndCommands(t *testing.T) {
 	rt, in := setup(t, "hello")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestOptionsAndCommands(t *testing.T) {
 	if len(cmds) == 0 || cmds[0].Name != "compact" {
 		t.Fatalf("commands = %+v", cmds)
 	}
-	live, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	live, _, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	var mode *dservice.AgentOption
 	for i := range live {
 		if live[i].Category == "mode" {
@@ -396,7 +396,7 @@ func TestOptionsAndCommands(t *testing.T) {
 	if err := rt.SetOption(ctx, in.Conversation.ID(), mode.ID, next); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	after, _, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	for _, o := range after {
 		if o.ID == mode.ID && o.Current != next {
 			t.Fatalf("mode after set = %q, want %q", o.Current, next)
@@ -411,7 +411,7 @@ func liveMode(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentP
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func liveMode(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentP
 // currentOption answers one option's current value on the live session.
 func currentOption(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentPrompt, id string) string {
 	t.Helper()
-	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestConfigOptionUpdateReplacesTheOfferedList(t *testing.T) {
 	if len(ids) != 2 || ids[0].ID != "mode" || ids[1].ID != "model" {
 		t.Fatalf("session configs = %+v, want [mode model]", ids)
 	}
-	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1003,7 +1003,7 @@ func TestSelectModelRefreshesTheOfferedListWithoutAChange(t *testing.T) {
 	if !strings.Contains(readTrace(t, trace), "config model fake-fast") {
 		t.Fatal("no refresh set_config_option ran on an unchanged model pick")
 	}
-	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1105,12 +1105,71 @@ func TestCatalogSurvivesARestart(t *testing.T) {
 	// A "restart": a new runtime on the same store has no live session.
 	rt2 := New(Options{ClientName: "nusashell-test", ClientVersion: "0", Catalog: store})
 	t.Cleanup(func() { _ = rt2.Shutdown(context.Background()) })
-	opts, err := rt2.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt2.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(opts) != len(cat.Options) {
 		t.Fatalf("after restart Options() = %+v, want the stored catalog %+v", opts, cat.Options)
+	}
+}
+
+// A live session whose config_option_update shrinks the offered surface to
+// model-only reports empty — transient, never ready-with-nothing — and the
+// sparse write must not overwrite a good stored catalog.
+func TestOptionsEmptyWhenLiveSurfaceShrinks(t *testing.T) {
+	dir := t.TempDir()
+	store := repoagent.New(dir, nil)
+	rt, in := setupCatalog(t, "look", store)
+	approve := func(_ context.Context, req valueobject.ApprovalRequest) (string, error) {
+		opt, _ := req.AutoAnswer(enum.ApprovalPolicyAutoAll)
+		return opt.ID, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, approve); err != nil {
+		t.Fatal(err)
+	}
+	// A live session with its full surface answers ready — never empty.
+	opts, state, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil || state != dservice.OptionsReady || len(opts) == 0 {
+		t.Fatalf("full session = %d options, state %q, %v — want ready non-empty", len(opts), state, err)
+	}
+	cat, err := store.Catalog(ctx, in.Agent.ID())
+	if err != nil || len(cat.Options) == 0 {
+		t.Fatalf("registration wrote no catalog: %+v, %v", cat.Options, err)
+	}
+
+	// A sparse authoritative update retracts everything but the model.
+	user, _ := entity.NewMessage(enum.RoleUser, "sparse-update")
+	in.Conversation.Append(user)
+	in.Input = user
+	if err := rt.Prompt(ctx, in, nil, approve); err != nil {
+		t.Fatal(err)
+	}
+
+	// The state flips to empty once the notification lands — poll for it,
+	// since updates apply on the reader goroutine.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		opts, state, err = rt.Options(ctx, in.Agent, in.Conversation.ID())
+		if err == nil && state == dservice.OptionsEmpty {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after the sparse update: %d options, state %q, %v — want empty", len(opts), state, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(opts) != 0 {
+		t.Fatalf("an empty state must carry no list, got %+v", opts)
+	}
+
+	// The stored catalog keeps the last non-empty surface: a transient
+	// retraction never records itself as "the agent offers nothing".
+	cat, err = store.Catalog(ctx, in.Agent.ID())
+	if err != nil || len(cat.Options) == 0 {
+		t.Fatalf("the sparse write overwrote the catalog: %+v, %v", cat.Options, err)
 	}
 }
 
@@ -1128,7 +1187,7 @@ func TestStoredCatalogWinsOverTheProbe(t *testing.T) {
 	rt, in := setupCatalog(t, "hello", store)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1245,7 +1304,7 @@ func TestBooleanOptionGatedOnTheAdvertisedCapability(t *testing.T) {
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1259,7 +1318,7 @@ func TestBooleanOptionGatedOnTheAdvertisedCapability(t *testing.T) {
 	if err := rt.SetOption(ctx, in.Conversation.ID(), "cap_bool", "true"); err != nil {
 		t.Fatalf("a boolean pick was refused: %v", err)
 	}
-	opts, _ = rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _ = rt.Options(ctx, in.Agent, in.Conversation.ID())
 	i = slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == "cap_bool" })
 	if i < 0 || opts[i].Current != "true" {
 		t.Fatalf("after the pick cap_bool = %+v, want current true", opts[i:])

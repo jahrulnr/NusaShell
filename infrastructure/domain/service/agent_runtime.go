@@ -127,6 +127,27 @@ type AgentModel struct {
 	Current bool
 }
 
+// OptionsState says what an Options answer means for a picker right now.
+type OptionsState string
+
+const (
+	// OptionsReady is the authoritative offered list — empty included. An
+	// empty ready list means the agent offers no session options, and the
+	// picker may say so. It never comes from a live session: a session
+	// reporting nothing is warming up or shrinking transiently, which is
+	// OptionsEmpty instead.
+	OptionsReady OptionsState = "ready"
+	// OptionsEmpty is a reachable agent whose offered surface is empty at
+	// this moment — a live session that has not offered anything yet or
+	// just retracted its options. It is transient: the picker should say
+	// "nothing offered right now" and offer a refresh, never the permanent
+	// "this agent has no options".
+	OptionsEmpty OptionsState = "empty"
+	// OptionsUnavailable means the agent could not be asked; err carries
+	// the cause.
+	OptionsUnavailable OptionsState = "unavailable"
+)
+
 // AgentRuntime runs turns on external agents — the agent-side counterpart
 // of TextModelService. One Prompt is one agent turn: the agent runs its own
 // tool loop, streams progress through onEvent, asks approve for permission
@@ -141,8 +162,9 @@ type AgentRuntime interface {
 	// does not let clients choose.
 	Models(ctx context.Context, agent *aggregate.Agent) ([]AgentModel, error)
 	// Options lists the agent's session options for a room: its live
-	// session's when one runs, else the agent's defaults.
-	Options(ctx context.Context, agent *aggregate.Agent, conversationID string) ([]AgentOption, error)
+	// session's when one runs, else the agent's defaults. The state says
+	// what the answer means — see OptionsState.
+	Options(ctx context.Context, agent *aggregate.Agent, conversationID string) ([]AgentOption, OptionsState, error)
 	// SetOption applies one option to the room's live session, if any.
 	SetOption(ctx context.Context, conversationID, id, value string) error
 	// Commands lists the slash commands the room's live session offers;

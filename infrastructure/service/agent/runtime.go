@@ -724,6 +724,14 @@ func (r *Runtime) writeCatalog(s *session) {
 		ProbedAt:     time.Now(),
 	}
 	s.mu.Unlock()
+	if len(cat.Options) == 0 {
+		// An empty list is "the session reported nothing" — a warm-up or
+		// a transient retraction, never proof the agent offers nothing.
+		// Keeping the last non-empty snapshot is not a merge: it adds no
+		// option, it only refuses to record "don't know" as "none".
+		r.log.Info("agent catalog write skipped: the offered list is empty", "agent", s.proc.agentID)
+		return
+	}
 	if err := r.opts.Catalog.SaveCatalog(context.Background(), s.proc.agentID, cat); err != nil {
 		r.log.Warn("the agent catalog could not be saved", "agent", s.proc.agentID, "error", err)
 	}
@@ -827,10 +835,18 @@ func (r *Runtime) Models(ctx context.Context, a *aggregate.Agent) ([]dservice.Ag
 	r.mu.Unlock()
 	if r.opts.Catalog != nil {
 		catModels, catCurrent := sessionCatalogModels(&state)
-		cat := drepo.AgentCatalog{Options: sessionOptions(state.ConfigOptions, state.Modes), Models: catModels,
-			CurrentModel: catCurrent, Caps: p.caps, ProbedAt: time.Now()}
-		if err := r.opts.Catalog.SaveCatalog(ctx, a.ID(), cat); err != nil {
-			r.log.Warn("the agent catalog could not be saved", "agent", a.ID(), "error", err)
+		options := sessionOptions(state.ConfigOptions, state.Modes)
+		if len(options) == 0 {
+			// Same rule as writeCatalog: an empty probe list is "the
+			// session reported nothing", not "the agent offers nothing" —
+			// a good stored snapshot outlives it.
+			r.log.Info("agent catalog write skipped: the probe offered nothing", "agent", a.ID())
+		} else {
+			cat := drepo.AgentCatalog{Options: options, Models: catModels,
+				CurrentModel: catCurrent, Caps: p.caps, ProbedAt: time.Now()}
+			if err := r.opts.Catalog.SaveCatalog(ctx, a.ID(), cat); err != nil {
+				r.log.Warn("the agent catalog could not be saved", "agent", a.ID(), "error", err)
+			}
 		}
 	}
 	return slices.Clone(models), nil
@@ -1632,19 +1648,23 @@ func sensitivePath(p string) bool {
 }
 
 // Options lists the room's session options: the live session's, else the
-// agent's defaults from the probe session.
-func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationID string) ([]dservice.AgentOption, error) {
+// agent's defaults from the probe session. A live session reporting nothing
+// answers empty — the session may be warming up or just retracted its
+// options, and the picker must not read a transient as "no options". An
+// empty probe, on the other hand, is the best statement available for an
+// agent nobody runs: it stays ready.
+func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationID string) ([]dservice.AgentOption, dservice.OptionsState, error) {
 	r.mu.Lock()
 	s := r.sessions[conversationID]
 	r.mu.Unlock()
 	if s != nil && s.proc.agentID == a.ID() && !s.proc.isDead() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return sessionOptions(s.configs, s.modes), nil
+		if opts := sessionOptions(s.configs, s.modes); len(opts) > 0 {
+			return opts, dservice.OptionsReady, nil
+		}
+		return nil, dservice.OptionsEmpty, nil
 	}
-	// Stored before the probe: the catalog holds the list a real session
-	// last reported — a throwaway probe session can offer less (codex's
-	// default model never surfaces its effort option).
 	// Stored before the probe: the catalog holds the list a real session
 	// last reported — a throwaway probe session can offer less (codex's
 	// default model never surfaces its effort option).
@@ -1652,15 +1672,15 @@ func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationI
 		if cat, err := r.opts.Catalog.Catalog(ctx, a.ID()); err != nil {
 			r.log.Warn("the agent catalog could not be read", "agent", a.ID(), "error", err)
 		} else if len(cat.Options) > 0 {
-			return slices.Clone(cat.Options), nil
+			return slices.Clone(cat.Options), dservice.OptionsReady, nil
 		}
 	}
 	if _, err := r.Models(ctx, a); err != nil {
-		return nil, err
+		return nil, dservice.OptionsUnavailable, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return slices.Clone(r.models[a.ID()].options), nil
+	return slices.Clone(r.models[a.ID()].options), dservice.OptionsReady, nil
 }
 
 // SetOption applies an option to the room's live session; without one the
