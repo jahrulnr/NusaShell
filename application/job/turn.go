@@ -151,7 +151,7 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 						input.receipt.markPersisted()
 					}
 					if onEvent != nil {
-						onEvent(event.NewSteerEvent(input.input.Text, input.input.Attachments...))
+						onEvent(event.NewRecordedSteerEvent(input.input.Text, input.record.ID(), input.input.Attachments...))
 					}
 					continue
 				}

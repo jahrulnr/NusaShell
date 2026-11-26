@@ -140,6 +140,13 @@ type Send struct {
 	// agentRoom is the runtime the turn ran on, read when the room loads: the
 	// rescue needs it after the turn, when the aggregate is out of scope.
 	agentRoom bool
+	// active is the binding this turn actually runs on, once it resolved one.
+	// A projection reads it to answer "what is answering me now"; it is cleared
+	// when the turn ends, at the same defer that releases the room.
+	activeMu       sync.Mutex
+	activeProvider string
+	activeModel    string
+	active         bool
 	Base
 	Deps    Deps
 	Ctx     context.Context
@@ -210,6 +217,26 @@ func (j *Send) rescueSteers() {
 // Steer buffers user input for the running turn — the worker's
 // out-of-band control path. The turn loop folds it at the next safe
 // point; it never interrupts the in-flight provider call.
+// ActiveModel answers the binding this turn is using, false when the turn has
+// not resolved one or has already ended.
+func (j *Send) ActiveModel() (providerID, modelID string, ok bool) {
+	j.activeMu.Lock()
+	defer j.activeMu.Unlock()
+	return j.activeProvider, j.activeModel, j.active
+}
+
+func (j *Send) setActive(providerID, modelID string) {
+	j.activeMu.Lock()
+	j.activeProvider, j.activeModel, j.active = providerID, modelID, true
+	j.activeMu.Unlock()
+}
+
+func (j *Send) clearActive() {
+	j.activeMu.Lock()
+	j.activeProvider, j.activeModel, j.active = "", "", false
+	j.activeMu.Unlock()
+}
+
 func (j *Send) Steer(text string) { j.mailbox().push(text) }
 
 // SteerInput buffers a full input — text with its selections, uploads, marks
@@ -283,6 +310,21 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 
 		// A room that moves to another agent, or back to a provider, leaves
 		// its old agent's session behind; remember it to remove afterwards.
+		// What this turn answers with, from the moment it resolved its binding
+		// until it ends: a projection reads this, never the stored binding a
+		// later turn will use.
+		// The binding this turn was ASKED for answers "what is answering me now":
+		// the room's stored pair still names the previous turn until this one
+		// succeeds, and a projection must not read the future.
+		activeProvider, activeModel := j.ProviderID, j.ModelID
+		if activeProvider == "" {
+			activeProvider = conv.ProviderID()
+		}
+		if activeModel == "" {
+			activeModel = conv.ModelID()
+		}
+		j.setActive(activeProvider, activeModel)
+		defer j.clearActive()
 		prevAgent, prevSession := conv.AgentID(), conv.AgentSession()
 		prevEnv := conv.Environment()
 		prevWorkspace := conv.Workspace()

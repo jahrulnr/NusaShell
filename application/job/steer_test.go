@@ -592,3 +592,20 @@ func TestRescueLogsNothingWhenItSucceeds(t *testing.T) {
 		t.Fatalf("a working rescue logged: %s", buf.String())
 	}
 }
+
+// ActiveModel answers only while the turn runs: a projection must not keep
+// naming a binding after the turn that used it ended.
+func TestActiveModelLivesOnlyAsLongAsTheTurn(t *testing.T) {
+	j := &Send{}
+	if _, _, ok := j.ActiveModel(); ok {
+		t.Fatal("a turn that never resolved a binding reports one")
+	}
+	j.setActive("gw1", "m1")
+	if p, m, ok := j.ActiveModel(); !ok || p != "gw1" || m != "m1" {
+		t.Fatalf("active = %s/%s,%v", p, m, ok)
+	}
+	j.clearActive()
+	if _, _, ok := j.ActiveModel(); ok {
+		t.Fatal("the active binding outlived the turn")
+	}
+}

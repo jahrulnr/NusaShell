@@ -22,6 +22,18 @@ function itemChoices(spec) {
   return [];
 }
 
+// drawnFields answers the schema's fields when the panel can draw every one of
+// them, or null when it cannot. A field of a type the panel does not know is never
+// drawn as a guess (a text box the schema never asked for): the question is then
+// only its message, and decline is the answer.
+const DRAWN = new Set(['string', 'number', 'integer', 'boolean', 'array']);
+export function drawnFields(schema) {
+  if (!schema || schema.type !== 'object') return null;
+  const entries = Object.entries(schema.properties || {});
+  const known = (s) => !!s && (DRAWN.has(s.type) || Array.isArray(s.enum) || Array.isArray(s.oneOf));
+  return entries.every(([, s]) => known(s)) ? entries : null;
+}
+
 function Field({ rid, name, spec, required, value, onChange }) {
   const label = spec.title || name;
   const opts = choices(spec);
@@ -67,7 +79,8 @@ const OUTCOME = { accept: 'Answered', decline: 'Declined', cancel: 'Cancelled' }
 export function ElicitationCard({ room, seg }) {
   const r = seg.request;
   const pending = seg.status === 'pending';
-  const props = r.schema?.properties || {};
+  const drawn = drawnFields(r.schema);
+  const props = Object.fromEntries(drawn || []);
   const required = r.schema?.required || [];
   const [values, setValues] = useState(() => {
     const v = {};
@@ -92,7 +105,7 @@ export function ElicitationCard({ room, seg }) {
     <div class="flex items-start gap-2.5">
       <${Icon} name=${isURL ? 'link' : 'message'} class=${pending ? 'text-accent mt-0.5' : 'text-faint mt-0.5'} />
       <div class="flex-1 min-w-0">
-        <div class="font-medium break-words">${r.message || (isURL ? 'The agent asks you to open a page' : 'The agent needs some input')}</div>
+        <div class="font-medium break-words">${r.message || (isURL ? 'The agent asks you to open a page' : drawn ? 'The agent needs some input' : 'The agent asked for input this panel cannot draw')}</div>
         ${!pending && html`<div class="text-muted mt-1">
           ${seg.status === 'answered' ? OUTCOME[seg.action] || seg.action : 'Withdrawn — the turn ended before an answer.'}
         </div>`}
@@ -105,14 +118,14 @@ export function ElicitationCard({ room, seg }) {
       </a>
       <span class="text-xs text-faint break-all">${r.url}</span>
     </div>`}
-    ${pending && !isURL && html`<div class="mt-3 flex flex-col gap-2.5">
+    ${pending && !isURL && drawn && html`<div class="mt-3 flex flex-col gap-2.5">
       ${Object.entries(props).map(([k, s]) => html`<${Field} key=${k} rid=${r.id} name=${k} spec=${s} required=${required.includes(k)}
         value=${values[k]} onChange=${(v) => setValues({ ...values, [k]: v })} />`)}
     </div>`}
     ${pending && seg.error && html`<div class="mt-2 text-xs text-bad">${seg.error}</div>`}
     ${pending && html`<div class="flex flex-wrap justify-end gap-2 mt-3">
       <${Button} kind="ghost" disabled=${!!seg.answering} busy=${seg.answering === 'decline'} onClick=${() => answerElicitation(room, seg, 'decline')}>Decline</${Button}>
-      <${Button} type="submit" kind="primary" disabled=${!!seg.answering || (!isURL && missing)} busy=${seg.answering === 'accept'}>${isURL ? 'I’m done' : 'Submit'}</${Button}>
+      ${(isURL || drawn) && html`<${Button} type="submit" kind="primary" disabled=${!!seg.answering || (!isURL && missing)} busy=${seg.answering === 'accept'}>${isURL ? 'I’m done' : 'Submit'}</${Button}>`}
     </div>`}
   </form>`;
 }

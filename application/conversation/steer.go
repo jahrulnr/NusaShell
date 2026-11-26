@@ -80,6 +80,9 @@ func (app *ConversationApp) persistRelayLine(ctx context.Context, convID string,
 	}
 	msg.SetUserType(enum.LLMUserTypeRelay)
 	msg.SetRelay(*in.Relay)
+	// The line's own id is the identity the live steer event names: a frontend
+	// pairs them and draws one bubble, never the row plus a second live copy.
+	msg.SetInputID(msg.ID())
 	if _, err := app.depsSnapshot().Convs.AppendMessage(context.WithoutCancel(ctx), convID, msg); err != nil {
 		return nil
 	}

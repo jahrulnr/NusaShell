@@ -27,6 +27,10 @@ type TurnEvent struct {
 	media            valueobject.Attachment
 	toolFailed       bool
 	steerAttachments []valueobject.Attachment
+	// steerRecordID names the history line an accepted prompt already has, when
+	// one exists: the identity that lets a frontend draw the live steer and the
+	// row as one.
+	steerRecordID string
 }
 
 // NewStatusEvent reports a harness-side wait while no provider output is
@@ -75,6 +79,14 @@ func NewToolResultEvent(call entity.ToolCall, failed bool) TurnEvent {
 // uploads it carried ride in SteerAttachments().
 func NewSteerEvent(text string, attachments ...valueobject.Attachment) TurnEvent {
 	return TurnEvent{kind: enum.TurnEventSteer, delta: text, steerAttachments: attachments}
+}
+
+// NewRecordedSteerEvent is NewSteerEvent for a prompt the room already wrote a
+// line for: the line's id rides along, so a frontend can pair the live bubble
+// with the row it belongs to and draw one, not two. An input with no such line
+// (an owner's own steer) keeps NewSteerEvent and its empty id.
+func NewRecordedSteerEvent(text, recordID string, attachments ...valueobject.Attachment) TurnEvent {
+	return TurnEvent{kind: enum.TurnEventSteer, delta: text, steerAttachments: attachments, steerRecordID: recordID}
 }
 
 func NewFinishedEvent(reason enum.FinishReason, usage valueobject.Usage) TurnEvent {
@@ -156,6 +168,10 @@ func (e TurnEvent) Delta() string            { return e.delta }
 func (e TurnEvent) SteerAttachments() []valueobject.Attachment {
 	return e.steerAttachments
 }
+
+// SteerRecordID names the line a folded prompt already had in history; empty for
+// a steer whose only trace is this event.
+func (e TurnEvent) SteerRecordID() string           { return e.steerRecordID }
 func (e TurnEvent) ToolCall() entity.ToolCall       { return e.toolCall }
 func (e TurnEvent) ToolFailed() bool                { return e.toolFailed }
 func (e TurnEvent) FinishReason() enum.FinishReason { return e.finishReason }

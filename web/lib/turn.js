@@ -9,6 +9,10 @@
 // settled on). One constant, so a different final name is a one-line change.
 export const STEER_INPUT = 'inputId';
 
+// turnSeconds is how long a live turn has run on the server's clock: null until the
+// server has said when it started (turn.opened), because a tab never invents a start.
+export const turnSeconds = (t, now = Date.now()) => (t?.startedAt ? Math.floor((now - t.startedAt) / 1000) : null);
+
 export function newTurn({ turnId, requestId, conversationId, kind, startedAt }) {
   return {
     turnId, requestId, conversationId, kind,
@@ -16,7 +20,7 @@ export function newTurn({ turnId, requestId, conversationId, kind, startedAt }) 
     segments: [],
     phase: null,          // { phase, retryAfterMs, at }
     usage: null,
-    startedAt: startedAt || Date.now(),
+    startedAt: startedAt || null,
     terminal: null,       // the terminal frame once it arrives
     n: 0,
   };

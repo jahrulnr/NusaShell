@@ -3,7 +3,7 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds } from '../lib/turn.js';
+import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds, turnSeconds } from '../lib/turn.js';
 import { queuedFor, watchQueued } from '../lib/queued.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
@@ -330,11 +330,11 @@ function Status({ room }) {
     text = `Provider busy — retrying in ${left}s`;
   } else if (live?.phase?.phase === 'compacting') text = 'Compacting history to fit the context window';
   else if (live?.phase?.phase === 'reasoning') text = 'Thinking';
-  const secs = live ? Math.floor((Date.now() - live.startedAt) / 1000) : 0;
+  const secs = live ? turnSeconds(live) : 0;
   return html`<div class="flex items-center gap-2 text-[13px] text-muted py-1" role="status">
     <span class=${live?.phase?.phase === 'retry_wait' ? 'orb live' : 'orb live'} style=${live?.phase?.phase === 'retry_wait' ? 'background:var(--bad)' : ''}></span>
     <span class="shimmer">${text}…</span>
-    ${secs > 2 && html`<span class="text-faint text-xs">${secs >= 60 ? Math.floor(secs / 60) + 'm ' : ''}${secs % 60}s</span>`}
+    ${secs === null ? html`<span class="text-faint text-xs">—</span>` : secs > 2 && html`<span class="text-faint text-xs">${secs >= 60 ? Math.floor(secs / 60) + 'm ' : ''}${secs % 60}s</span>`}
   </div>`;
 }
 

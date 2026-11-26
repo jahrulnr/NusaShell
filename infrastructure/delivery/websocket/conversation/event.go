@@ -140,6 +140,13 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 			inputID = rec.inputID
 			break
 		}
+		// A relayed prompt was already persisted at accept with an id of its
+		// own, and the accept line carries it — the fold frame must name the
+		// same id or the watcher renders the message twice. An owner steer
+		// has no record and keeps the receipt correlation above.
+		if recordID := ev.SteerRecordID(); recordID != "" {
+			inputID = recordID
+		}
 		chunks := splitDelta(ev.Delta(), outboundChunkBytes)
 		if len(chunks) == 0 {
 			// An attachment-only steer has no text — still emit one

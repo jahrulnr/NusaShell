@@ -268,12 +268,12 @@ test('a stored steer part projects its uploads, even without text', () => {
   assert.equal(steers[1].text, 'go left');
 });
 
-test('turn.opened adopts the server clock; a fresh turn falls back to now', () => {
+test('turn.opened adopts the server clock; a turn without one has no start, and none is invented', () => {
   const t = turn();
   applyFrame(t, frame('turn.opened', { startedAt: 1700000000000 }, 0));
   assert.equal(t.startedAt, 1700000000000);
   const bare = turn();
-  assert.ok(Math.abs(bare.startedAt - Date.now()) < 5000);
+  assert.equal(bare.startedAt, null);
 });
 
 test('snapshotSegments rebuilds live content; live frames merge after it', () => {

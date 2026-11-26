@@ -203,6 +203,10 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 			}
 		}
 		for _, in := range claimed {
+			if in.record != nil {
+				emit(event.NewRecordedSteerEvent(in.input.Text, in.record.ID(), in.input.Attachments...))
+				continue
+			}
 			emit(event.NewSteerEvent(in.input.Text, in.input.Attachments...))
 		}
 		// The prompt carries every text: the relayed ones live in their own

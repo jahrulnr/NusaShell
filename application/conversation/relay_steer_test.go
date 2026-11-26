@@ -2,6 +2,7 @@ package appconversation
 
 import (
 	"encoding/json"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	"io"
 	"net/http"
 	"strings"
@@ -26,6 +27,10 @@ type probeTurn struct {
 	release chan struct{}
 	calls   int
 	bodies  []string
+	// needsArm keeps the block for a turn a test arms explicitly: the first
+	// turn's calls then pass through instead of absorbing blockOn.
+	needsArm bool
+	armed    bool
 	// releaseOnce lets the test and its cleanup release the turn exactly once.
 	releaseOnce sync.Once
 }
@@ -49,7 +54,7 @@ func (p *probeTurn) handler(w http.ResponseWriter, r *http.Request) {
 	n := p.calls
 	p.bodies = append(p.bodies, string(body))
 	p.mu.Unlock()
-	if n == p.blockOn {
+	if n == p.blockOn && (!p.needsArm || p.armed) {
 		close(p.entered)
 		<-p.release
 	}
@@ -76,6 +81,25 @@ func (p *probeTurn) handler(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		http.Error(w, "fixture", http.StatusInternalServerError)
 	}
+}
+
+// arm restarts the call counter, so a test can hold the call of the turn it
+// means to hold instead of the Nth call of the whole fixture.
+func (p *probeTurn) arm() {
+	p.mu.Lock()
+	p.calls, p.armed = 0, true
+	p.mu.Unlock()
+}
+
+// newProbeTurnAfter is a probe whose block waits for arm(): a test that runs one
+// turn before the turn it means to hold counts that turn's calls as noise.
+func newProbeTurnAfter(t *testing.T, blockOn int) *probeTurn {
+	t.Helper()
+	p := newProbeTurn(t, blockOn)
+	p.mu.Lock()
+	p.needsArm = true
+	p.mu.Unlock()
+	return p
 }
 
 // lastBody answers the newest request body the model was given.
@@ -376,5 +400,49 @@ func TestRelaySteerTakenByTheAgentWritesOneLine(t *testing.T) {
 	}
 	if rows[0].UserType() != enum.LLMUserTypeRelay || rows[0].Relay().ID != "c_pa" {
 		t.Fatalf("the line lost its record: %s %+v", rows[0].UserType(), rows[0].Relay())
+	}
+}
+
+// A folded relay names its own line in the steer event: the identity a frontend
+// pairs on, so the row and the live bubble are drawn once.
+func TestFoldedRelaySteerNamesItsLine(t *testing.T) {
+	p := newProbeTurn(t, 1)
+	app, _ := fixture(t, p.handler)
+	var mu sync.Mutex
+	var ids []string
+	done := make(chan error, 1)
+	go func() {
+		_, err := app.Send(t.Context(), "c_pair", "gw1", "m1", "go", nil, appjob.SendOptions{}, func(ev event.TurnEvent) {
+			if ev.Kind() == enum.TurnEventSteer {
+				mu.Lock()
+				ids = append(ids, ev.SteerRecordID())
+				mu.Unlock()
+			}
+		})
+		done <- err
+	}()
+	select {
+	case <-p.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn never reached the provider")
+	}
+	if taken, err := app.SteerInput(t.Context(), "c_pair", valueobject.UserInput{
+		Text: "verdict", Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote"},
+	}); err != nil || !taken {
+		t.Fatalf("steer = %v, %v", taken, err)
+	}
+	release(t, app, p, done, "c_pair")
+	rows := relayedUserRows(t, app, "c_pair")
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want one", len(rows))
+	}
+	mu.Lock()
+	got := append([]string(nil), ids...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != rows[0].ID() {
+		t.Fatalf("steer events named %v, want the row id %s", got, rows[0].ID())
+	}
+	if rows[0].InputID() != rows[0].ID() {
+		t.Fatalf("the line carries inputId %q, want its own id %q", rows[0].InputID(), rows[0].ID())
 	}
 }

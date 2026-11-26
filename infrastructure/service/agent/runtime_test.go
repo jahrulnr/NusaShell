@@ -1241,11 +1241,13 @@ func TestCatalogFileCarriesNoSecrets(t *testing.T) {
 	}
 }
 
-// The handshake advertises exactly two capabilities: session.configOptions.
-// boolean — the gate codex's fast-mode option reads — and elicitation form,
-// the one mode the owner-answer contract covers. fs and terminal stay off
-// (dead surface on codex), url stays unpromised (nothing sends it yet).
-// The fake agent dumps what it received, so this proves the wire shape.
+// The handshake advertises a narrow surface: session.configOptions.boolean —
+// the gate codex's fast-mode option reads — elicitation form, the one mode
+// the owner-answer contract covers, and a _meta opt-in to Cursor's
+// parameterized model picker, whose knobs ride the config-option setter we
+// already serve. fs and terminal stay off (dead surface on codex), url stays
+// unpromised (nothing sends it yet). The fake agent dumps what it received,
+// so this proves the wire shape.
 func TestClientCapsAdvertiseOnlyBooleanConfigOptions(t *testing.T) {
 	rt, in := setup(t, "hello")
 	dump := filepath.Join(t.TempDir(), "caps.json")
@@ -1264,8 +1266,11 @@ func TestClientCapsAdvertiseOnlyBooleanConfigOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("clientCapabilities on the wire: %s", raw)
-	if len(caps) != 5 || caps["fs"] == nil || caps["terminal"] == nil || caps["session"] == nil || caps["auth"] == nil || caps["elicitation"] == nil {
-		t.Fatalf("clientCapabilities keys = %s, want exactly fs/terminal/session/auth/elicitation", raw)
+	if len(caps) != 6 || caps["fs"] == nil || caps["terminal"] == nil || caps["session"] == nil || caps["auth"] == nil || caps["elicitation"] == nil || caps["_meta"] == nil {
+		t.Fatalf("clientCapabilities keys = %s, want exactly fs/terminal/session/auth/elicitation/_meta", raw)
+	}
+	if string(caps["_meta"]) != `{"parameterizedModelPicker":true}` {
+		t.Fatalf("_meta = %s, want the parameterized-model-picker opt-in and nothing else", caps["_meta"])
 	}
 	var elic map[string]json.RawMessage
 	if err := json.Unmarshal(caps["elicitation"], &elic); err != nil || len(elic) != 1 || string(elic["form"]) != "{}" {

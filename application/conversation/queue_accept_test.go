@@ -1,6 +1,10 @@
 package appconversation
 
 import (
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -114,5 +118,109 @@ func TestAcceptedRelaySurvivesARestart(t *testing.T) {
 	waitIdle(t, app, "c_keep")
 	if rows := userRowsWithText(t, restarted, "c_keep", "verdict that must survive"); len(rows) != 1 {
 		t.Fatalf("the queued turn wrote a second line: %d", len(rows))
+	}
+}
+
+// A projection answers "what is answering me now": while a turn runs it names the
+// binding that turn uses, and after it ends the stored one answers — the active
+// binding is gone, not merely ignored.
+func TestInfoShowsTheRunningTurnsModel(t *testing.T) {
+	p := newProbeTurnAfter(t, 1)
+	app, prov := fixture(t, p.handler)
+	ctx := t.Context()
+	addModel(t, app, prov, "m2")
+	if _, err := app.Send(ctx, "c_model", "gw1", "m1", "first", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	p.arm() // the next turn's first call is the one this test holds
+	done := make(chan error, 1)
+	go func() {
+		_, err := app.Send(ctx, "c_model", "gw1", "m2", "second", nil, appjob.SendOptions{}, nil)
+		done <- err
+	}()
+	select {
+	case <-p.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn never reached the provider")
+	}
+	info, err := app.Info(ctx, "c_model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ModelID != "m2" {
+		t.Fatalf("mid-turn the projection shows %q, want the running turn's m2", info.ModelID)
+	}
+	// The job reference, held while the turn runs: after it ends the same job
+	// must report no active binding. Reading the worker instead would answer
+	// "nothing is running" and prove nothing about the clear.
+	app.mu.Lock()
+	w := app.workers["c_model"]
+	app.mu.Unlock()
+	var job interface {
+		ActiveModel() (string, string, bool)
+	}
+	if w != nil {
+		if running := w.Running(); running != nil {
+			job, _ = running.(interface {
+				ActiveModel() (string, string, bool)
+			})
+		}
+	}
+	if job == nil {
+		t.Fatal("the running job does not expose its binding")
+	}
+	release(t, app, p, done, "c_model")
+	info, err = app.Info(ctx, "c_model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ModelID != "m2" {
+		t.Fatalf("after the turn the projection shows %q, want the stored m2", info.ModelID)
+	}
+	if _, _, ok := job.ActiveModel(); ok {
+		t.Fatal("the active binding outlived its turn on the job that ran it")
+	}
+}
+
+// A failed turn never rebinds: the projection keeps answering with the model the
+// room stored, not the one that was attempted.
+func TestFailedTurnKeepsTheStoredModel(t *testing.T) {
+	var calls atomic.Int32
+	app, prov := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			okHandler(w, r)
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	ctx := t.Context()
+	addModel(t, app, prov, "m2")
+	if _, err := app.Send(ctx, "c_fail", "gw1", "m1", "first", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Send(ctx, "c_fail", "gw1", "m2", "second", nil, appjob.SendOptions{}, nil); err == nil {
+		t.Fatal("the failing turn reported success")
+	}
+	info, err := app.Info(ctx, "c_fail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ModelID != "m1" {
+		t.Fatalf("after a failed turn the projection shows %q, want the stored m1", info.ModelID)
+	}
+}
+
+// addModel offers one more model on the fixture's provider, so a turn can switch
+// to a binding the room does not store yet.
+func addModel(t *testing.T, app *ConversationApp, prov *aggregate.Provider, id string) {
+	t.Helper()
+	m, err := entity.NewModel(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := append(prov.Models(), m)
+	prov.SetModels(models)
+	if err := app.deps.Providers.Save(t.Context(), prov); err != nil {
+		t.Fatal(err)
 	}
 }

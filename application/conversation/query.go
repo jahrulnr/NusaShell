@@ -18,9 +18,48 @@ import (
 )
 
 // Info returns the lightweight projection for one conversation.
+//
+// While a turn runs, the binding it uses answers "what is answering me now":
+// the stored binding is what a later turn will use, which is a different
+// question. Once the turn ends the active binding is empty and the stored one
+// answers again — a failed turn never rebinds, so it reads as the old model.
 func (app *ConversationApp) Info(ctx context.Context, id string) (drepo.ConversationInfo, error) {
 	deps := app.depsSnapshot()
-	return deps.Convs.Info(ctx, id)
+	info, err := deps.Convs.Info(ctx, id)
+	if err != nil {
+		return info, err
+	}
+	if providerID, modelID, ok := app.activeModel(id); ok {
+		info.ProviderID, info.ModelID = providerID, modelID
+	}
+	return info, nil
+}
+
+// activeModelBinding is the small contract a running job satisfies when it
+// knows the binding it runs on. A job that does not satisfy it simply answers
+// nothing — no job type grows a method for a reader it has no use for.
+type activeModelBinding interface {
+	ActiveModel() (providerID, modelID string, ok bool)
+}
+
+// activeModel reads the running job's own binding. ok=false when no turn runs
+// or it already cleared the binding at its end.
+func (app *ConversationApp) activeModel(convID string) (string, string, bool) {
+	app.mu.Lock()
+	w := app.workers[convID]
+	app.mu.Unlock()
+	if w == nil {
+		return "", "", false
+	}
+	job := w.Running()
+	if job == nil {
+		return "", "", false
+	}
+	binding, ok := job.(activeModelBinding)
+	if !ok {
+		return "", "", false
+	}
+	return binding.ActiveModel()
 }
 
 // CanCompact reports whether manual compaction would fold new live history.

@@ -4,7 +4,7 @@
 import { state, emit, toast, dismissToast, askConfirm } from './store.js';
 import { api, errorText, ApiError } from './api.js';
 import { TurnSocket, newRequestId } from './socket.js';
-import { newTurn, applyFrame, snapshotSegments, isPrompt, roomSubjects, shortHandle } from './turn.js';
+import { newTurn, applyFrame, snapshotSegments, isPrompt, roomSubjects, shortHandle, STEER_INPUT } from './turn.js';
 import { forgetQueued, resetQueued, setQueued, queuedFor, queuedNote } from './queued.js';
 import { referencesForSend, referencesToDraft, liveReferences } from './references.js';
 import { parseCommand, isNativeCommand, catalogRow, loadCommands } from './commands.js';
@@ -103,6 +103,13 @@ export function knownRoom(id) {
   const t = loaded.find((x) => x && (x.label || x.title)) || {};
   return { label: t.label || '', title: t.title || '', handle: shortHandle(id, seenRooms) };
 }
+
+// releaseSteers drops the tray entries whose steer has landed: a final steer frame,
+// or a history row carrying its inputId. Released when the turn folded it; the
+// history row takes it from there. The two releases are not duplicates: the frame
+// says the steer is no longer waiting, the row says it has a permanent place.
+const releaseSteers = (r, ids) => { const landed = new Set(ids.filter(Boolean)); if (landed.size) r.steers = r.steers.filter((x) => !landed.has(x.inputId)); };
+const releaseSteersInHistory = (r) => releaseSteers(r, (r.messages || []).map((m) => m[STEER_INPUT]));
 
 export function room(key) {
   if (!state.rooms[key]) { state.rooms[key] = blankRoom(key, key === FRESH ? null : key); if (key !== FRESH) noteRooms([key]); }
@@ -551,6 +558,7 @@ export async function loadHistory(r, { force = false } = {}) {
         const page = await api.messages(r.id, -HISTORY_PAGE, HISTORY_PAGE);
         r.messages = page.messages;
         noteMessages(page.messages);
+        releaseSteersInHistory(r);
         Object.assign(r.hist, { status: 'ready', error: null, start: page.effectiveStart, total: page.total, more: page.effectiveStart > 0 });
         r.histAt = Date.now();
         r.histStale = false;
@@ -577,6 +585,7 @@ export async function loadEarlier(r) {
     const known = new Set(r.messages.map((m) => m.id));
     r.messages = [...page.messages.filter((m) => !known.has(m.id)), ...r.messages];
     noteMessages(page.messages);
+    releaseSteersInHistory(r);
     r.hist.start = page.effectiveStart;
     r.hist.more = page.effectiveStart > 0;
   } catch (err) {
@@ -1210,6 +1219,7 @@ async function readNewestPage(r) {
   const known = new Set(r.messages.map((m) => m.id));
   r.messages = [...r.messages.map((m) => fresh.get(m.id) || m), ...page.messages.filter((m) => !known.has(m.id))];
   noteMessages(page.messages);
+  releaseSteersInHistory(r);
   r.hist.total = page.total;
   r.histAt = Date.now();
   r.histStale = false;
@@ -1409,7 +1419,7 @@ function onFrame(f) {
     const picks = (mine?.files || []).filter((x) => x.pickId);
     const seg = r.live.segments.find((x) => x.kind === 'steer' && x.inputId === inputId);
     if (seg && picks.length && !seg.annotations) seg.annotations = picks;
-    if (f.payload?.final) r.steers = r.steers.filter((x) => x.inputId !== inputId);
+    if (f.payload?.final) releaseSteers(r, [inputId]);
   }
   // A provider call reports the size it was sent; an agent's figure comes from its own reports.
   if (f.type === 'turn.step_finished' && f.payload?.usage && r.ctx && !selection(r).agentId) r.ctx.live = f.payload.usage.totalInputTokens;

@@ -251,6 +251,11 @@ func (r *Runtime) ensureProc(ctx context.Context, a *aggregate.Agent) (*proc, er
 	// a request arrives anyway, but no agent has been shown to send one.
 	caps.Session.ConfigOptions = &acp.SessionConfigOptionsCapabilities{Boolean: &struct{}{}}
 	caps.Elicitation = map[string]any{"form": map[string]any{}}
+	// Opt into Cursor's parameterized model picker — its effort/fast/context
+	// knobs ride the same config-option updates and setters as the dynamic
+	// picker we already serve. This is the one piece of
+	// DefaultClientCapabilities this surface adopts; fs/terminal stay off.
+	caps.Meta = json.RawMessage(`{"parameterizedModelPicker":true}`)
 	client, err := acp.Start(ctx, acp.ClientConfig{
 		Command:      a.Command(),
 		Args:         a.Args(),
