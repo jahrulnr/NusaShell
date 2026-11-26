@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 )
@@ -16,17 +16,20 @@ const digestClip = 600
 // Window is the turn the signals and the log read: its opening owner line and
 // every non-system message after it, in order.
 type Window struct {
-	AnchorID string
-	Msgs     []entity.Message
-	Owner    string // newest owner line of the window, verbatim
-	Digest   string // Msgs rendered as text, the basis of the size reads
+	AnchorID   string
+	AnchorText string    // the opening owner line, verbatim — Msgs starts after it
+	AnchorAt   time.Time // when the opening line was written
+	Msgs       []entity.Message
+	Owner      string // newest owner line of the window, verbatim
+	Digest     string // Msgs rendered as text, the basis of the size reads
 }
 
 // TurnWindow reads the turn that opened at the newest owner line without a
 // steer id. A steer line is an owner line too, so it joins the window, but it
-// never moves the anchor. ok is false when the live tail holds no such line.
-func TurnWindow(conv *aggregate.Conversation) (Window, bool) {
-	all := conv.Messages()
+// never moves the anchor. ok is false when the slice holds no such line. The
+// caller picks the snapshot: a synchronous reader may pass the live tail, an
+// async one must pass a clone.
+func TurnWindow(all []entity.Message) (Window, bool) {
 	anchor := -1
 	for i, m := range slices.Backward(all) {
 		if m.Editable() && m.InputID() == "" {
@@ -37,7 +40,7 @@ func TurnWindow(conv *aggregate.Conversation) (Window, bool) {
 	if anchor < 0 {
 		return Window{}, false
 	}
-	w := Window{AnchorID: all[anchor].ID(), Owner: all[anchor].Content()}
+	w := Window{AnchorID: all[anchor].ID(), AnchorText: all[anchor].Content(), AnchorAt: all[anchor].CreatedAt(), Owner: all[anchor].Content()}
 	for _, m := range all[anchor+1:] {
 		if m.Role() == enum.RoleSystem {
 			continue

@@ -1,0 +1,33 @@
+{
+  "name": "tool-success-skill",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "The integration tests flaked again. From now on, whenever they flake, first rerun them with TZ=UTC before suspecting the code \u2014 the timezone-dependent cases lie. Try it now."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Rerunning the integration tests with TZ=UTC.",
+      "tools": [
+        {
+          "name": "bash",
+          "output": "ok  integration/auth 12.4s\nok  integration/billing 8.1s\nPASS \u2014 34 of 34 passed"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "id": "m_3",
+      "text": "All 34 pass under TZ=UTC \u2014 the flake was the timezone-dependent cases, not the code."
+    }
+  ],
+  "expect": [
+    {
+      "op": "create",
+      "kind": "tool",
+      "evidence_kind": "call"
+    }
+  ]
+}

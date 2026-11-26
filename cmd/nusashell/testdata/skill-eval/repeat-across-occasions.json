@@ -1,0 +1,32 @@
+{
+  "name": "repeat-across-occasions",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Please squash my fixup commits before this merges, like we always do."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Squashed the three fixup commits into one."
+    },
+    {
+      "role": "user",
+      "id": "m_3",
+      "text": "And the same thing again on this branch \u2014 squash the fixups before anything merges."
+    },
+    {
+      "role": "assistant",
+      "id": "m_4",
+      "text": "Squashed these two as well."
+    }
+  ],
+  "expect": [
+    {
+      "op": "create",
+      "kind": "method",
+      "evidence_kind": "repeat"
+    }
+  ]
+}

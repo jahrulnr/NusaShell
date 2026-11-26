@@ -1,4 +1,4 @@
-.PHONY: build build-lean serve install test check check-full fmt-check lint-go deadcode lint-web test-web check-web tags provider-add memory-eval docs-serve docs-build
+.PHONY: build build-lean serve install test check check-full fmt-check lint-go deadcode lint-web test-web check-web tags provider-add memory-eval skill-eval docs-serve docs-build
 
 # The build version comes from the VERSION file. A checkout without one builds
 # as "dev", and "dev" turns the update check off.
@@ -103,6 +103,12 @@ check-web: test-web lint-web
 # not part of `test` or `check`; those only compile it.
 memory-eval:
 	go test -tags memoryeval -run TestMemoryConsolidationEval -count=1 -v ./cmd/nusashell/
+
+# skill-eval runs the candidate pass with the real utility model over
+# cmd/nusashell/testdata/skill-eval. It calls the real model, so it is
+# manual like memory-eval, never part of check.
+skill-eval:
+	go test -tags skilleval -run TestSkillCandidateEval -count=1 -v ./cmd/nusashell/
 
 docs-serve:
 	zensical serve

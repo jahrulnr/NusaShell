@@ -72,7 +72,7 @@ function blankRoom(key, id) {
     // composer's chip and the picker's Session Mode both read (see
     // loadAgentOptions). A room without an id keeps the agent's own probe here
     // and stages the pick on `sel`.
-    agentOptions: { status: 'idle', list: [], error: null, at: 0, key: '' },
+    agentOptions: { status: 'idle', list: [], error: null, at: 0, key: '', failures: 0, toastId: null },
     // Load bookkeeping: *At stamps a successful read, *Stale marks what
     // a broadcast said changed while the room was out of view, *Flight
     // holds the running fetch so concurrent triggers share it.
@@ -682,7 +682,7 @@ export function setSelection(r, patch) {
     r.sel = { ...r.sel, agentOptions: undefined };
     // Another agent offers another list: the room's copy is read again, and
     // until it is, nothing of the last agent's is shown.
-    r.agentOptions = { status: 'idle', list: [], error: null, at: 0, key: '' };
+    r.agentOptions = { status: 'idle', list: [], error: null, at: 0, key: '', failures: 0, toastId: null };
     loadAgentOptions(r, { force: true });
   }
   if (patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined || patch.effort !== undefined || patch.upstream !== undefined) {
@@ -740,20 +740,43 @@ export function agentOptionList(picks, order = []) {
   return out;
 }
 
+// inlineOptions counts, per room, the panels now showing that room's options
+// inline. The notice mounts only while its panel is open, and says so here.
+const inlineOptions = new Map();
+
+// showOptionsInline records that a panel showing the room's options opened
+// (true) or closed (false). An outage toast still up comes down when one opens:
+// the panel says the same, where the owner is looking.
+export function showOptionsInline(r, shown) {
+  const n = (inlineOptions.get(r.id) || 0) + (shown ? 1 : -1);
+  if (n > 0) inlineOptions.set(r.id, n); else inlineOptions.delete(r.id);
+  const o = r.agentOptions;
+  if (shown && o.toastId != null) { dismissToast(o.toastId); o.toastId = null; }
+}
+
+// optionsShownInline is the one answer to whether the owner already sees this
+// room's options outage inline. Every decision to toast about it asks here.
+export const optionsShownInline = (r) => inlineOptions.has(r.id);
+
 // loadAgentOptions reads the list the room shows. Deduped (one fetch in
 // flight, a need that lands mid-flight queues one follow-up) and TTL-gated, so
 // a frame, a component mounting, and a turn ending collapse into one read.
-export async function loadAgentOptions(r, { force = false } = {}) {
+// One outage is one notice: the first failed read toasts, and reads that fail
+// again while it stands add none, because the panel says so inline until a read
+// succeeds. A caller that announces its own failure passes silent.
+export async function loadAgentOptions(r, { force = false, silent = false } = {}) {
   const o = r.agentOptions;
   const key = agentOptionsKey(r);
   if (!key) { o.status = 'idle'; o.list = []; return; }
   if (o.flight) {
     if (force) o.again = true;
+    if (silent) o.silent = true;
     return o.flight;
   }
   // A list read for another agent says nothing about this one.
-  if (o.key && o.key !== key) Object.assign(o, { status: 'idle', list: [], error: null, at: 0, key });
-  if (!force && o.status === 'ready' && o.key === key && fresh(o.at)) return;
+  if (o.key && o.key !== key) Object.assign(o, { status: 'idle', list: [], error: null, at: 0, failures: 0, key });
+  if (!force && o.key === key && fresh(o.at)) return;
+  o.silent = silent;
   const flight = (async () => {
     do {
       o.again = false;
@@ -765,10 +788,17 @@ export async function loadAgentOptions(r, { force = false } = {}) {
         // answer (an empty list then means it truly offers no options), while
         // 'empty' is transient — the agent has nothing right now and a later
         // read may fill the list without anything changing.
-        Object.assign(o, { status: 'ready', list: res.data || [], report: res.status === 'empty' ? 'empty' : 'ready', error: null, at: Date.now(), key });
+        Object.assign(o, { status: 'ready', list: res.data || [], report: res.status === 'empty' ? 'empty' : 'ready', error: null, at: Date.now(), key, failures: 0 });
       } catch (e) {
-        Object.assign(o, { status: o.list.length ? 'ready' : 'error', error: errorText(e) });
-        if (o.list.length) toast('Could not refresh agent options: ' + errorText(e), 'error');
+        // An error already standing means the outage was announced; this read
+        // only repeats it, and the count in the notice grows. The attempt counts
+        // for the TTL too, so the next control to mount does not ask the agent
+        // again straight away.
+        const starts = !o.error;
+        Object.assign(o, { status: o.list.length ? 'ready' : 'error', error: errorText(e), at: Date.now(), key, failures: o.failures + 1 });
+        // The outage is announced once, where the owner looks: a toast only when
+        // no panel already shows it inline.
+        if (starts && o.list.length && !o.silent && !optionsShownInline(r)) o.toastId = toast('Could not refresh agent options: ' + errorText(e), 'error');
       }
       emit();
     } while (o.again);
@@ -817,7 +847,7 @@ export async function setSessionOption(r, optionId, value) {
   }
   try {
     const res = await api.setAgentOption(r.id, optionId, value);
-    Object.assign(o, { status: 'ready', list: res.data || [], report: res.status === 'empty' ? 'empty' : 'ready', error: null, at: Date.now(), key: agentOptionsKey(r) });
+    Object.assign(o, { status: 'ready', list: res.data || [], report: res.status === 'empty' ? 'empty' : 'ready', error: null, at: Date.now(), key: agentOptionsKey(r), failures: 0 });
     // A pick taken while the room was busy waits in the record's pending:
     // pull it so the controls name the stored value, not the running one.
     loadInfo(r, { force: true }).catch(() => { /* the next read shows it */ });
@@ -826,12 +856,13 @@ export async function setSessionOption(r, optionId, value) {
   } catch (e) {
     // The stored value is the only one the controls may show: read it again
     // and keep that. A refusal says why once; a write whose fate is unknown
-    // says it could not be confirmed and is not retried.
+    // says it could not be confirmed and is not retried. The read is silent:
+    // this pick's notice is the one the owner gets.
     const refused = typeof e?.status === 'number' && e.status >= 400 && e.status < 500;
     toast(refused
       ? `Could not set ${option.name}: ${errorText(e)}`
       : `Could not confirm ${option.name} — the room's options were read again.`, 'error');
-    await loadAgentOptions(r, { force: true }).catch(() => { /* the next read shows it */ });
+    await loadAgentOptions(r, { force: true, silent: true }).catch(() => { /* the next read shows it */ });
     return refused ? 'refused' : 'unknown';
   }
 }

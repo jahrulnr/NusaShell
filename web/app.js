@@ -23,6 +23,11 @@ function applyAppearance() {
 }
 dark.addEventListener('change', applyAppearance);
 
+// The drawer is shown only below the md breakpoint. Widening the window while it is
+// open would leave it "open" with nothing showing it, and its held toasts with it.
+const desktop = window.matchMedia('(min-width: 768px)');
+desktop.addEventListener('change', (e) => { if (e.matches) state.sidebarOpen = false; });
+
 function App() {
   const s = useStore();
   const sidebar = useRef();

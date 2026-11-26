@@ -9,6 +9,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
@@ -64,9 +65,57 @@ type conversationDTO struct {
 	TurnActive bool `json:"turnActive,omitempty"`
 	// Pending is a pick the room has taken but not applied yet: a turn's
 	// runtime and session options are fixed when it starts, so the pick waits
-	// for the next one. Absent when nothing waits. Detail and list items set
-	// it, so the "applies to the next turn" line survives a reload.
-	Pending *pendingDTO `json:"pending,omitempty"`
+	// for the next one. It is always present on a room projection and on the
+	// answers to a pick: null when nothing waits, never a missing field, so a
+	// client reads one shape and re-derives no supersede rule of its own.
+	Pending *pendingDTO `json:"pending"`
+	// AgentOptions are the bound agent's session options in use for this
+	// room: the value each one holds for the next turn — the owner's pick
+	// where the agent offers it, the agent's own value otherwise. Kept apart
+	// from Effort, which is the provider's reasoning effort and stays empty
+	// on an agent room. Present only on an agent room whose agent answered,
+	// with that answer's status: ready, or empty while a live session has
+	// offered nothing yet. Absent on a provider room, and on an agent room
+	// whose options cannot be read, which AgentOptionsUnreadable says. Set on
+	// the detail projection and writes, not on list items.
+	AgentOptions *agentOptionsDTO `json:"agentOptions,omitempty"`
+	// AgentOptionsUnreadable is set on an agent room whose options could not be
+	// read. The room itself still answers, so an absent agentOptions means
+	// unknown on such a room, never "no options".
+	AgentOptionsUnreadable bool `json:"agentOptionsUnreadable,omitempty"`
+	// PendingUnreadable is set on a list or export row whose waiting pick could
+	// not be read. Its pending is then null, which here means unknown, not
+	// "nothing waits". A room's own detail fails instead, so the reason shows.
+	PendingUnreadable bool `json:"pendingUnreadable,omitempty"`
+}
+
+// agentOptionsDTO is an agent room's session options as the agent answered: the
+// status (ready, or empty) and the options in use. It carries the keys the
+// agent-options route answers with, so one reader serves both.
+type agentOptionsDTO struct {
+	Status string           `json:"status"`
+	Data   []agentOptionDTO `json:"data"`
+}
+
+// agentOptionDTO is one agent session option in use for the room.
+type agentOptionDTO struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// toAgentOptions keeps the options that hold a value the session runs. A
+// deferred entry is a stored pick the agent does not offer, so the session
+// never runs it; an entry with no current value holds nothing to report.
+func toAgentOptions(opts []dservice.AgentOption) []agentOptionDTO {
+	out := []agentOptionDTO{}
+	for _, o := range opts {
+		if o.Deferred != "" || o.Current == "" {
+			continue
+		}
+		out = append(out, agentOptionDTO{ID: o.ID, Name: o.Name, Value: o.Current})
+	}
+	return out
 }
 
 // pendingDTO is one room's waiting pick — the object a 202 answers with and the

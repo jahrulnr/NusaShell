@@ -366,6 +366,12 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		}
 		agentRoom := conv.Runtime() == enum.RuntimeAgent
 		j.agentRoom = agentRoom
+		// The runtime is the one this turn runs on, after the parked pick above
+		// was applied in memory. Refused here, nothing has been saved: the parked
+		// pick stays in its file for the next turn that can take it.
+		if err := AgentPickRefusal(agentRoom, &j.Opts.Effort, &j.Opts.Upstream); err != nil {
+			return err
+		}
 		if agentRoom && conv.Environment() != enum.EnvironmentLocal {
 			return apperror.New(400, "agents run only in the local environment", nil)
 		}

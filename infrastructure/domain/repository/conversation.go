@@ -75,6 +75,25 @@ type PendingSelection struct {
 	AcceptedAt time.Time `json:"acceptedAt,omitempty"`
 }
 
+// Empty reports that no pick survives in the selection — the one definition
+// of emptiness, so a store dropping superseded fields and any future reader
+// never disagree about what "nothing parked" means. AcceptedAt is metadata,
+// not a pick: a generation stamp alone does not make a selection non-empty.
+func (s PendingSelection) Empty() bool {
+	return s.AgentID == "" && s.AgentModel == "" && s.ProviderID == "" && s.ModelID == "" &&
+		s.Effort == nil && s.Upstream == nil && len(s.Options) == 0
+}
+
+// Covered names which parked fields an explicit idle pick supersedes: the
+// fields it just applied, never anything else — a pick that covers only the
+// runtime must leave parked options waiting with their notice intact.
+type Covered struct {
+	Runtime  bool
+	Effort   bool
+	Upstream bool
+	Options  []string
+}
+
 // Conversation is the conversation store port. Ordering contract: Save
 // creates/upserts the record and must precede AppendMessage. Errors carry
 // the apperror contract — a missing convID surfaces as 404, distinct from
@@ -150,6 +169,10 @@ type Conversation interface {
 	// is left alone: it has not been applied yet, and removing the file would lose
 	// it silently.
 	ClearPendingSelection(ctx context.Context, convID string, acceptedAt time.Time) error
+	// SupersedePendingSelection drops only the pending fields an explicit idle
+	// pick just applied, so a parked older generation never folds over the
+	// newer value at the next turn. Fields the pick does not cover stay parked.
+	SupersedePendingSelection(ctx context.Context, convID string, cover Covered) error
 
 	// SaveCompletions parks the asynchronous finishes a room has not read yet
 	// beside its record, merging with what already waits: a finish whose

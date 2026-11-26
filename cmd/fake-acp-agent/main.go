@@ -71,6 +71,10 @@ func main() {
 	// chunks with a pause between them and exit 3. Deterministic output and a
 	// nonzero exit code without depending on a system shell, which is not
 	// guaranteed to exist on Windows.
+	if len(os.Args) > 1 && os.Args[1] == "--emit-terminal-hang" {
+		// A child that never exits — the wait_for_exit cap test's subject.
+		select {}
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--emit-terminal-demo" {
 		fmt.Print("first")
 		time.Sleep(500 * time.Millisecond)
@@ -530,6 +534,10 @@ func (s *server) prompt(id json.RawMessage, sessionID string, prompt []struct {
 			text.WriteString(p.Text)
 		}
 	}
+	if strings.Contains(text.String(), "terminal-hang-test") {
+		s.hangDemo(id, sessionID)
+		return
+	}
 	if strings.Contains(text.String(), "timeline-terminal-test") || strings.Contains(text.String(), "timeline-background-test") {
 		s.terminalDemo(id, sessionID, strings.Contains(text.String(), "timeline-background-test"))
 		return
@@ -868,6 +876,27 @@ func (s *server) terminalDemo(id json.RawMessage, sessionID string, background b
 	s.respond(id, map[string]any{"stopReason": "end_turn"})
 }
 
+func (s *server) hangDemo(id json.RawMessage, sessionID string) {
+	exe, err := os.Executable()
+	if err != nil {
+		s.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+	result := s.callClient("terminal/create", map[string]any{"sessionId": sessionID, "command": exe, "args": []string{"--emit-terminal-hang"}})
+	var terminal struct {
+		TerminalID string `json:"terminalId"`
+	}
+	if json.Unmarshal(result, &terminal) != nil || terminal.TerminalID == "" {
+		s.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+	wait := s.callClient("terminal/wait_for_exit", map[string]any{"sessionId": sessionID, "terminalId": terminal.TerminalID})
+	// The demo never releases on purpose: the cap's enforcement must be
+	// what cleans the terminal up, not the agent's good behavior.
+	s.chunk(fmt.Sprintf("wait-returned: %v", wait != nil))
+	s.respond(id, map[string]any{"stopReason": "end_turn"})
+}
+
 type fakeTool struct {
 	id, title, name, kind string
 }
@@ -1182,6 +1211,7 @@ func (s *server) fsDemo(id json.RawMessage, sessionID string) {
 	_ = json.Unmarshal(raw, &read)
 	refused := s.callClient("fs/write_text_file", map[string]any{"sessionId": sessionID, "path": filepath.Join(cwd, ".env"), "content": "X=1"}) == nil
 	outside := s.callClient("fs/read_text_file", map[string]any{"sessionId": sessionID, "path": "/etc/hostname"}) == nil
-	s.chunk(fmt.Sprintf("read: %q env-refused: %v outside-refused: %v", read.Content, refused, outside))
+	outwrite := s.callClient("fs/write_text_file", map[string]any{"sessionId": sessionID, "path": filepath.Join(cwd, "..", "ns-outwrite-probe.txt"), "content": "x"}) == nil
+	s.chunk(fmt.Sprintf("read: %q env-refused: %v outside-refused: %v outwrite-refused: %v", read.Content, refused, outside, outwrite))
 	s.respond(id, map[string]any{"stopReason": "end_turn"})
 }

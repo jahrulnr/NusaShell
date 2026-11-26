@@ -16,6 +16,8 @@ import (
 	appconversation "github.com/jahrulnr/nusashell/application/conversation"
 	appprovider "github.com/jahrulnr/nusashell/application/provider"
 	"github.com/jahrulnr/nusashell/infrastructure/config"
+	httpskill "github.com/jahrulnr/nusashell/infrastructure/delivery/http/skill"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
@@ -779,5 +781,58 @@ func TestNonAppErrorBecomes500WithoutCause(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "sqlite") || strings.Contains(rec.Body.String(), "/data/") {
 		t.Fatalf("raw error leaked: %s", rec.Body.String())
+	}
+}
+
+// --- skills routes ---
+
+// The fakes answer nothing; the point is the wiring, not the data — a
+// handler that forgets to pass Deps.Skills through to Register answers 404
+// while the boundary's own tests stay green, so this shot goes through the
+// constructor.
+type noSkillCatalog struct{}
+
+func (noSkillCatalog) List(context.Context, string) (drepo.SkillCatalog, error) {
+	return drepo.SkillCatalog{Skills: []drepo.Skill{}}, nil
+}
+func (noSkillCatalog) Read(context.Context, string, string) (drepo.Skill, string, error) {
+	return drepo.Skill{}, "", apperror.New(404, "no such skill", nil)
+}
+
+type noSkillOwnership struct{}
+
+func (noSkillOwnership) List(context.Context) ([]*aggregate.SkillOwnership, error) { return nil, nil }
+func (noSkillOwnership) Get(_ context.Context, _ enum.SkillRoot, _ string) (*aggregate.SkillOwnership, error) {
+	return nil, apperror.New(404, "no ownership row for this skill", nil)
+}
+func (noSkillOwnership) Save(context.Context, *aggregate.SkillOwnership, string) error { return nil }
+
+type noSkillProposals struct{}
+
+func (noSkillProposals) Add(context.Context, *aggregate.SkillProposal) error { return nil }
+func (noSkillProposals) Get(context.Context, string) (*aggregate.SkillProposal, error) {
+	return nil, apperror.New(404, "no such skill proposal", nil)
+}
+func (noSkillProposals) Pending(context.Context) ([]*aggregate.SkillProposal, error) { return nil, nil }
+func (noSkillProposals) Seen(context.Context, string, enum.SkillProposalOp, time.Time) (bool, error) {
+	return false, nil
+}
+
+func TestSkillsRoutesRegisterThroughTheConstructor(t *testing.T) {
+	h := newTestHandler(t, Deps{Skills: httpskill.Deps{
+		Catalog:   noSkillCatalog{},
+		Ownership: noSkillOwnership{},
+		Proposals: noSkillProposals{},
+	}})
+	rec := do(t, h, "GET", "/api/skills", "", "")
+	if rec.Code != 200 {
+		t.Fatalf("with the ports wired the page answered %d: %s", rec.Code, rec.Body)
+	}
+	// Without the ports no route answers at all — a hand-built handler
+	// keeps working and the feature stays invisible.
+	h = newTestHandler(t, Deps{})
+	rec = do(t, h, "GET", "/api/skills", "", "")
+	if rec.Code != 404 {
+		t.Fatalf("without the ports the page answered %d, want no route: %s", rec.Code, rec.Body)
 	}
 }

@@ -94,7 +94,7 @@ func TestTurnWindowAnchorsOnTheNewestOwnerLine(t *testing.T) {
 		newMsg(t, "m2", enum.RoleUser, "second"),
 		finalReply(t, "a2", "final"),
 	)
-	w, ok := TurnWindow(conv)
+	w, ok := TurnWindow(conv.Messages())
 	if !ok || w.AnchorID != "m2" || w.Owner != "second" || len(w.Msgs) != 1 || w.Msgs[0].ID() != "a2" {
 		t.Fatalf("window = anchor %q owner %q msgs %d, ok %v", w.AnchorID, w.Owner, len(w.Msgs), ok)
 	}
@@ -111,7 +111,7 @@ func TestTurnWindowSteerLineJoinsButDoesNotMoveTheAnchor(t *testing.T) {
 		steer,
 		finalReply(t, "a2", "done"),
 	)
-	w, ok := TurnWindow(conv)
+	w, ok := TurnWindow(conv.Messages())
 	if !ok || w.AnchorID != "m1" || w.Owner != "also check the lock" || len(w.Msgs) != 3 {
 		t.Fatalf("window = anchor %q owner %q msgs %d, ok %v", w.AnchorID, w.Owner, len(w.Msgs), ok)
 	}
@@ -123,7 +123,7 @@ func TestTurnWindowLeavesSystemRecordsOut(t *testing.T) {
 		originRecord(t, "o1", "web"),
 		finalReply(t, "a1", "done"),
 	)
-	w, ok := TurnWindow(conv)
+	w, ok := TurnWindow(conv.Messages())
 	if !ok || len(w.Msgs) != 1 || w.Msgs[0].ID() != "a1" {
 		t.Fatalf("msgs = %d, ok %v; want only the reply", len(w.Msgs), ok)
 	}
@@ -138,7 +138,7 @@ func TestTurnWindowRelayLineIsOtherTextNotAnOwnerLine(t *testing.T) {
 		relay,
 		finalReply(t, "a1", "done"),
 	)
-	w, ok := TurnWindow(conv)
+	w, ok := TurnWindow(conv.Messages())
 	if !ok || w.Owner != "mine" || !strings.Contains(w.Digest, "other: from another thread\n") || strings.Contains(w.Digest, "owner: from another thread") {
 		t.Fatalf("owner %q, digest %q, ok %v", w.Owner, w.Digest, ok)
 	}
@@ -147,7 +147,7 @@ func TestTurnWindowRelayLineIsOtherTextNotAnOwnerLine(t *testing.T) {
 func TestTurnWindowWithoutAnOwnerLineIsNotOK(t *testing.T) {
 	relay := newMsg(t, "r1", enum.RoleUser, "from another thread")
 	relay.SetUserType(enum.LLMUserTypeRelay)
-	if _, ok := TurnWindow(room(t, relay, finalReply(t, "a1", "done"))); ok {
+	if _, ok := TurnWindow(room(t, relay, finalReply(t, "a1", "done")).Messages()); ok {
 		t.Fatal("a tail with no owner line has a window")
 	}
 }
@@ -162,7 +162,7 @@ func TestTurnWindowKeepsOwnerLinesAndClipsModelText(t *testing.T) {
 		finalReply(t, "a2", strings.Repeat("é", 700)),
 		steer,
 	)
-	w, ok := TurnWindow(conv)
+	w, ok := TurnWindow(conv.Messages())
 	if !ok {
 		t.Fatal("no window")
 	}

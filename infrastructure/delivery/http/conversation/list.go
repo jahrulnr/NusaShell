@@ -1,7 +1,6 @@
 package conversation
 
 import (
-	"context"
 	"slices"
 
 	"github.com/gin-gonic/gin"
@@ -72,12 +71,9 @@ func (s *server) list(c *gin.Context) {
 		if s.turns != nil {
 			dto.TurnActive = s.turns.TurnActive(i.ID)
 		}
-		if sel, ok, err := s.reads.Pending(context.Background(), i.ID); err != nil {
-			transport.RespondError(c, err)
-			return
-		} else if ok {
-			dto.Pending = toPending(sel)
-		}
+		// One room's unreadable pick must not blind the owner to every other room:
+		// the row keeps its place and says so, and opening the room shows why.
+		dto.Pending, dto.PendingUnreadable = pendingView(c.Request.Context(), s.reads, i.ID)
 		out.Data = append(out.Data, dto)
 	}
 	c.JSON(200, out)

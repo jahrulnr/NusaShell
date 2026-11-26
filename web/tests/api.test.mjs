@@ -66,6 +66,30 @@ test('starting a thread\'s browser posts the address to that thread', async () =
   assert.equal(res.open, true);
 });
 
+test('the skills page reads one workspace root; none asks for the owner\'s roots only', async () => {
+  mockApi({ 'GET /api/skills': { data: [], diagnostics: [] } });
+  await api.skills('/w/a');
+  await api.skills();
+  assert.equal(calls[0].url, '/api/skills?workspace=%2Fw%2Fa');
+  assert.equal(calls[1].url, '/api/skills');
+});
+
+test('a level move names the skill, the level, the digest the page read, and the workspace', async () => {
+  mockApi({ 'POST /api/skills/': [204, null] });
+  assert.equal(await api.moveSkillLevel('deploy check', { workspace: '/w/a', level: 'agent', digest: 'sha256:abc' }), null);
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].url, '/api/skills/deploy%20check/level?workspace=%2Fw%2Fa');
+  assert.deepEqual(calls[0].body, { level: 'agent', digest: 'sha256:abc' });
+});
+
+test('a move on a file that changed since the page loaded rejects with its 409, not a silent success', async () => {
+  // The caller branches on the status to read the digest again; swallowing
+  // the error here would leave the row holding the old digest.
+  mockApi({ 'POST /api/skills/': [409, { code: 'conflict', detail: 'the skill changed since this page loaded' }] });
+  await assert.rejects(api.moveSkillLevel('deploy', { level: 'agent', digest: 'old' }), (err) =>
+    err instanceof ApiError && err.status === 409 && /changed since/.test(err.message));
+});
+
 test('errorText reads an ApiError, any Error, or a bare value', () => {
   assert.equal(errorText(new ApiError(500, 'x', 'boom')), 'boom');
   assert.equal(errorText(new Error('plain')), 'plain');

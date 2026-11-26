@@ -256,11 +256,17 @@ func (r *Runtime) ensureProc(ctx context.Context, a *aggregate.Agent) (*proc, er
 	// picker we already serve. This is the one piece of
 	// DefaultClientCapabilities this surface adopts; fs/terminal stay off.
 	caps.Meta = json.RawMessage(`{"parameterizedModelPicker":true}`)
-	// fs read is advertised: the handler is confined to the session's
-	// workspace folders and size-capped, so an agent reading through us is
-	// never a wider read than the tools already grant. Write stays off —
-	// it moves file writes into our hands and waits for an approval path.
+	// fs is advertised now that the handlers enforce what the surface
+	// promises: reads are confined to the session's workspace folders and
+	// size-capped; writes are confined the same way AND routed through the
+	// owner's approval — the advertisement follows the enforcement, and a
+	// room with no answer surface refuses the write instead of hanging.
 	caps.FS.ReadTextFile = true
+	caps.FS.WriteTextFile = true
+	// terminal is advertised only because the handler now owns the one
+	// hang it could cause: wait_for_exit is time-capped, and a timed-out
+	// terminal is killed and released by us rather than left to the agent.
+	caps.Terminal = true
 	client, err := acp.Start(ctx, acp.ClientConfig{
 		Command:      a.Command(),
 		Args:         a.Args(),
@@ -1608,6 +1614,28 @@ func (h *handler) file(ctx context.Context, method string, params json.RawMessag
 		defer ws.Close()
 		name := filepath.ToSlash(rel)
 		if write {
+			// Writes route through the owner, never straight to disk: the
+			// ask happens only after confinement already matched this
+			// folder, so permission is layered on top of confinement, never
+			// a substitute for it. A turn with no answer surface — automation,
+			// a clientless room, a finished turn — cancels the question, and
+			// the write is refused rather than left hanging.
+			t := s.activeTurn()
+			if t == nil {
+				return nil, &acp.RPCError{Code: acp.CodeInvalidParams, Message: "file writes need an answerable owner surface"}
+			}
+			ask := acp.PermissionRequest{
+				SessionID: req.SessionID,
+				ToolCall:  json.RawMessage(fmt.Sprintf(`{"title":%q,"kind":"edit","rawInput":%q}`, "Write "+name, string(req.Content[:min(len(req.Content), 200)]))),
+				Options: []acp.PermissionOption{
+					{OptionID: "allow-once", Name: "Allow once", Kind: "allow_once"},
+					{OptionID: "reject-once", Name: "Reject", Kind: "reject_once"},
+				},
+			}
+			res := t.permission(ctx, ask)
+			if res.Outcome.Outcome != "selected" || res.Outcome.OptionID != "allow-once" {
+				return nil, &acp.RPCError{Code: acp.CodeInvalidParams, Message: "file write was not allowed"}
+			}
 			if dir := filepath.ToSlash(filepath.Dir(rel)); dir != "." {
 				if err := ws.MkdirAll(dir, 0o755); err != nil {
 					return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: err.Error()}

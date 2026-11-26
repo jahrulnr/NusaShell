@@ -330,13 +330,17 @@ func TestSessionReopensWhenFoldersChange(t *testing.T) {
 func TestClientFiles(t *testing.T) {
 	rt, in := setup(t, "fs-demo")
 	rt.opts.Workspace = repoworkspace.NewLocal()
+	allow := func(_ context.Context, req valueobject.ApprovalRequest) (string, error) {
+		opt, _ := req.Option("allow-once")
+		return opt.ID, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+	if err := rt.Prompt(ctx, in, nil, allow); err != nil {
 		t.Fatal(err)
 	}
 	got := in.Conversation.Last().Content()
-	if got != `read: "line two\n" env-refused: true outside-refused: true` {
+	if got != `read: "line two\n" env-refused: true outside-refused: true outwrite-refused: true` {
 		t.Fatalf("answer = %q", got)
 	}
 	if data, err := os.ReadFile(filepath.Join(in.Workspace, "notes", "hello.txt")); err != nil || string(data) != "line one\nline two\n" {
@@ -344,6 +348,73 @@ func TestClientFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(in.Workspace, ".env")); err == nil {
 		t.Fatal(".env must not be written")
+	}
+	// Permission is layered on confinement, not a substitute: the write the
+	// owner would have approved never landed outside the workspace.
+	if _, err := os.Stat(filepath.Join(in.Workspace, "..", "ns-outwrite-probe.txt")); err == nil {
+		t.Fatal("the outside write landed despite confinement")
+	}
+}
+
+// A write with no answer surface is refused rather than written: the
+// approver is nil, the question cancels itself, and the file never lands.
+func TestClientFileWriteRefusedWithoutAnAnswer(t *testing.T) {
+	rt, in := setup(t, "fs-demo")
+	rt.opts.Workspace = repoworkspace.NewLocal()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := in.Conversation.Last().Content()
+	if !strings.HasPrefix(got, `read: ""`) {
+		t.Fatalf("answer = %q, want the write refused so the read-back is empty", got)
+	}
+	if _, err := os.Stat(filepath.Join(in.Workspace, "notes", "hello.txt")); err == nil {
+		t.Fatal("hello.txt was written without anyone allowing it")
+	}
+}
+
+// terminal/wait_for_exit is the one primitive that can hang a turn: a
+// child that never exits must not pin the session forever. The cap answers
+// with an error, kills the process tree, and releases the terminal itself —
+// the demo agent deliberately never releases, so anything clean here is
+// the enforcement's doing, not the agent's.
+func TestWaitForExitCapKillsAndReleases(t *testing.T) {
+	old := waitForExitCap
+	waitForExitCap = 300 * time.Millisecond
+	t.Cleanup(func() { waitForExitCap = old })
+	rt, in := setup(t, "terminal-hang-test")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := in.Conversation.Last().Content()
+	if got != "wait-returned: false" {
+		t.Fatalf("answer = %q — the capped wait must error, not return an exit status", got)
+	}
+	rt.terms.mu.Lock()
+	var term *terminal
+	for _, tt := range rt.terms.terms {
+		term = tt
+	}
+	rt.terms.mu.Unlock()
+	if term == nil {
+		t.Fatal("no terminal was ever created")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		term.mu.Lock()
+		released, running := term.released, term.running
+		term.mu.Unlock()
+		if released && !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("terminal released=%v running=%v — the cap must kill and release what it times out", released, running)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -1284,12 +1355,12 @@ func TestClientCapsAdvertiseOnlyBooleanConfigOptions(t *testing.T) {
 	if err := json.Unmarshal(sess["configOptions"], &co); err != nil || len(co) != 1 || string(co["boolean"]) != "{}" {
 		t.Fatalf("configOptions caps = %s, want only boolean:{}", sess["configOptions"])
 	}
-	if string(caps["terminal"]) != "false" {
-		t.Fatalf("terminal = %s, want unadvertised", caps["terminal"])
+	if string(caps["terminal"]) != "true" {
+		t.Fatalf("terminal = %s, want advertised now that wait_for_exit is capped", caps["terminal"])
 	}
 	var fs, auth map[string]bool
-	if err := json.Unmarshal(caps["fs"], &fs); err != nil || !fs["readTextFile"] || fs["writeTextFile"] {
-		t.Fatalf("fs = %s, want read on and write off", caps["fs"])
+	if err := json.Unmarshal(caps["fs"], &fs); err != nil || !fs["readTextFile"] || !fs["writeTextFile"] {
+		t.Fatalf("fs = %s, want read and write advertised now that writes enforce approval", caps["fs"])
 	}
 	if err := json.Unmarshal(caps["auth"], &auth); err != nil || auth["terminal"] {
 		t.Fatalf("auth = %s, want terminal off", caps["auth"])

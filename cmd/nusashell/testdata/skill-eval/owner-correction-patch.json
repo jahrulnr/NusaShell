@@ -1,0 +1,29 @@
+{
+  "name": "owner-correction-patch",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Our release checklist is missing a step \u2014 always check for pending migrations before tagging. We got burned by that exact hole last week."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Right \u2014 checking migrations before tagging would have caught it."
+    }
+  ],
+  "index": [
+    {
+      "name": "release-checklist",
+      "description": "The order of steps for preparing a release",
+      "body": "## Steps\n1. Tag the release\n2. Deploy the tag",
+      "level": "agent"
+    }
+  ],
+  "expect": [
+    {
+      "op": "patch",
+      "target": "release-checklist"
+    }
+  ]
+}

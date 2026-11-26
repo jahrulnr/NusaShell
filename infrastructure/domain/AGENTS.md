@@ -61,9 +61,17 @@ distinct invariant, or a meaningful interface boundary.
    catalog declared nothing.
 8. **Secrets are references, never plaintext.** Persisted values are
    `"env:NAME"` or `"secret:<key>"`, resolved via `SecretStore` at load.
-9. **One error contract.** Return `apperror` — public `Message`, internal
-   `Cause`, HTTP `StatusCode` for routing (413 = context overflow → compact,
-   429 = rate-limited → fallback, 401/403 = dead credential).
+9. **One error contract, mapped at the edge.** A domain rule reports failure
+   as a plain sentinel error with a stable identity (`ErrSkillExists`,
+   `ErrSkillChanged`, `ErrSkillOwnedByOwner`), so callers decide with
+   `errors.Is` and no aggregate, entity, value object, or domain service
+   imports the transport error type. Mapping to `apperror` — public `Message`,
+   internal `Cause`, routing `StatusCode` (413 = context overflow → compact,
+   429 = rate-limited → fallback, 401/403 = dead credential) — belongs to the
+   boundary that speaks a protocol: the HTTP/MCP delivery layer, or an adapter
+   translating its own failure for its port. Never the rule that decided the
+   failure — a domain that returns `apperror` has acquired an HTTP vocabulary
+   it must not have.
 10. **Diagnostics via `Logger`** — verbose JSONL sink; entries are scrubbed
     by `infrastructure/redact` before write.
 11. **Execution environment is a room binding.** `Conversation.Environment()`

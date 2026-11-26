@@ -18,11 +18,13 @@ import { useCommands, parseCommand, isNativeCommand, commandBusyLabel, firstEnab
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
-// CommandReceipt is the command as it runs: what was sent, what it is doing,
-// and — after two seconds — how long it has been doing it. The clock is
-// decoration for a reader: aria-hidden, so a screen reader hears the state
-// once instead of a number every second.
-function CommandReceipt({ command }) {
+// CommandReceipt is the command as it runs: what it is doing, and — after two
+// seconds — how long it has been doing it. The raw line is not echoed: the
+// busy label already names the action, and for any other command the fallback
+// "Running /name" carries the name itself. The clock is decoration for a
+// reader: aria-hidden, so a screen reader hears the state once instead of a
+// number every second.
+export function CommandReceipt({ command }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
@@ -31,7 +33,6 @@ function CommandReceipt({ command }) {
   const secs = Math.floor((Date.now() - command.startedAt) / 1000);
   return html`<div class="flex items-center gap-1.5 px-3 pt-2 min-w-0 text-[12px] text-muted" role="status">
     <${Spinner} size=${12} />
-    <span class="font-mono shrink-0">${command.text}</span>
     <span class="truncate">${commandBusyLabel(command.name)}…</span>
     ${secs >= 2 && html`<span class="ml-auto shrink-0 tabular-nums text-[11.5px] text-muted" aria-hidden="true">${secs}s</span>`}
   </div>`;
@@ -40,7 +41,7 @@ function CommandReceipt({ command }) {
 // CommandFailure is a command the server refused while the owner was already
 // writing the next message: the receipt stays, with the reason, and the text
 // stays where it is. Retry only when resending cannot run the action twice.
-function CommandFailure({ room, field }) {
+export function CommandFailure({ room, field }) {
   const c = room.command;
   return html`<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 pt-2 text-[12px]" role="alert">
     <${Icon} name="alert" size=${13} class="text-bad shrink-0" />

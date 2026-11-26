@@ -1,0 +1,21 @@
+{
+  "name": "owner-correction-method",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "No \u2014 when a migration fails halfway, never roll it back by hand. Restore the snapshot first, then apply the migration again from the start. That is the order, every single time."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Understood: restore the snapshot, then re-apply from the start \u2014 never a hand-rolled rollback."
+    }
+  ],
+  "expect": [
+    {
+      "op": "create",
+      "kind": "method"
+    }
+  ]
+}

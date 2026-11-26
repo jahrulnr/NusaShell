@@ -295,3 +295,23 @@ func BenchmarkWithoutBodies(b *testing.B) {
 		}
 	})
 }
+
+func TestCredentialShaped(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"an sk token", "use sk-abcdefghij123456 here", true},
+		{"a stripe key", "sk_live_abcdefgh12345", true},
+		{"a github token", "ghp_abcdefgh12345678mnop", true},
+		{"a pem block", "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", true},
+		{"a bearer placeholder", "Authorization: Bearer $TOKEN", false},
+		{"a basic placeholder", "Authorization: Basic $USERPASS", false},
+		{"plain prose", "read the log and group by area", false},
+	} {
+		if got := CredentialShaped(c.text); got != c.want {
+			t.Errorf("%s: CredentialShaped = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

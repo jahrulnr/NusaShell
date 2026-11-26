@@ -33,7 +33,11 @@ type PendingReader interface {
 func registerAgent(api *gin.RouterGroup, svc AgentSurface, pending PendingReader) {
 	a := &agentServer{svc: svc, pending: pending}
 	api.GET("/conversations/:id/agent-options", a.options)
-	api.PUT("/conversations/:id/agent-options", a.setOption)
+	// A pick's answer carries the room's pending state, which only a read
+	// surface can give; a writes-only composition leaves the route off.
+	if pending != nil {
+		api.PUT("/conversations/:id/agent-options", a.setOption)
+	}
 	api.GET("/conversations/:id/approval-rules", a.rules)
 	api.DELETE("/conversations/:id/approval-rules/:rule", a.deleteRule)
 }
@@ -76,21 +80,23 @@ func (a *agentServer) setOption(c *gin.Context) {
 		transport.RespondError(c, err)
 		return
 	}
-	out := gin.H{"data": opts, "status": state}
+	// The answer carries the room's pending state as the write left it: the
+	// same object the room projection carries, null when nothing waits. A pick
+	// that cannot be read back is null with pendingUnreadable set, so a client
+	// reads "unknown" rather than "nothing waits", and the write is not an error.
+	pending, unreadable := pendingView(ctx, a.pending, c.Param("id"))
+	// 202 says the pick waits for the next turn. A parked pick that cannot be
+	// read back still waits; a turn that took the pick in the meantime has
+	// applied it, and then the answer is plain 200.
 	status := http.StatusOK
-	if parked {
-		// The pick is taken but nothing is applied yet: a turn fixes its
-		// runtime when it starts, so the next one carries it. 202 says that;
-		// the pending object says which pick, in the same shape the room
-		// projection carries.
-		if a.pending != nil {
-			if sel, ok, err := a.pending.Pending(ctx, c.Param("id")); err == nil && ok {
-				out["pending"] = toPending(sel)
-			}
-		}
+	if parked && (pending != nil || unreadable) {
 		status = http.StatusAccepted
 	}
-	c.JSON(status, out)
+	answer := gin.H{"data": opts, "status": state, "pending": pending}
+	if unreadable {
+		answer["pendingUnreadable"] = true
+	}
+	c.JSON(status, answer)
 }
 
 func (a *agentServer) rules(c *gin.Context) {

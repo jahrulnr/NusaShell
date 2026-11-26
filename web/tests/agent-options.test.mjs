@@ -39,6 +39,8 @@ function serveRoom(id, { current = 'code', put = null, info = {}, get = null, op
 
 const optionReads = (id) => calls.filter((c) => c.method === 'GET' && c.url.includes(`/${id}/agent-options`)).length;
 const optionWrites = (id) => calls.filter((c) => c.method === 'PUT' && c.url.includes(`/${id}/agent-options`)).length;
+// refreshNotices are the toasts a failed read of the list announces.
+const refreshNotices = () => state.toasts.filter((t) => t.message.startsWith('Could not refresh agent options'));
 
 before(() => {
   mockApi();
@@ -141,6 +143,189 @@ test('a stale pick meets the 400: the server\'s reason reaches the owner and the
   assert.equal(chat.sessionModeName(r), 'Code', 'the stored value is what both controls show');
   const mode = r.agentOptions.list.find((o) => o.id === 'mode');
   assert.ok(!mode.choices.some((c) => c.value === 'bypass'), 'the vanished value is out of the list the controls draw');
+});
+
+test('one outage, one notice: reads that fail again while the first failure stands add no toast', async () => {
+  let up = true;
+  serveRoom('c_ao7', {
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao7');
+  await sleep(40);
+  const r = state.rooms.c_ao7;
+  up = false;
+  state.toasts = [];
+  calls.length = 0;
+
+  await chat.loadAgentOptions(r, { force: true });
+  await chat.loadAgentOptions(r, { force: true });
+  r.agentOptions.at = 0; // the TTL has passed: a read on mount asks again
+  await chat.loadAgentOptions(r);
+  assert.ok(optionReads('c_ao7') >= 3, 'every read still asked the server');
+  assert.equal(refreshNotices().length, 1, 'one outage, one notice');
+  assert.equal(r.agentOptions.list.length, 2, 'the last good list stays');
+  assert.ok(r.agentOptions.error, 'the failure still stands for the panel to say');
+});
+
+test('a failed read is an attempt too: a read on mount within the TTL does not ask the agent again', async () => {
+  let up = true;
+  serveRoom('c_ao12', {
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao12');
+  await sleep(40);
+  const r = state.rooms.c_ao12;
+  r.agentOptions.at = 0; // the good read is older than the TTL
+  up = false;
+  await chat.loadAgentOptions(r, { force: true });
+  calls.length = 0;
+
+  await chat.loadAgentOptions(r); // the second mounted control, a moment later
+  assert.equal(optionReads('c_ao12'), 0, 'the attempt just made stands for the TTL');
+});
+
+test('a first read that fails is an attempt too: a control mounting within the TTL does not ask again', async () => {
+  serveRoom('c_ao13', {
+    options: () => [503, { code: 'upstream_error', detail: 'the agent is not answering' }],
+  });
+  chat.navigate('#/c/c_ao13'); // the room's own read: there is no list yet to show
+  await sleep(40);
+  const r = state.rooms.c_ao13;
+  assert.equal(r.agentOptions.status, 'error', 'the first read failed and has no list');
+  calls.length = 0;
+
+  await chat.loadAgentOptions(r); // the chip mounting a moment later
+  assert.equal(optionReads('c_ao13'), 0, 'the failed attempt stands for the TTL');
+});
+
+test('a read queued behind a failing read adds no second notice', async () => {
+  let up = true;
+  serveRoom('c_ao8', {
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao8');
+  await sleep(40);
+  const r = state.rooms.c_ao8;
+  up = false;
+  state.toasts = [];
+  calls.length = 0;
+
+  await Promise.all([
+    chat.loadAgentOptions(r, { force: true }),
+    chat.loadAgentOptions(r, { force: true }), // queues one follow-up behind the first
+  ]);
+  assert.equal(optionReads('c_ao8'), 2, 'the follow-up asked again');
+  assert.equal(refreshNotices().length, 1, 'the follow-up fails inside the same outage');
+});
+
+test('a pick the server cannot confirm is said once, even when the read after it fails too', async () => {
+  let up = true;
+  serveRoom('c_ao9', {
+    put: () => [502, { code: 'upstream_error', detail: 'the agent did not answer' }],
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao9');
+  await sleep(40);
+  const r = state.rooms.c_ao9;
+  up = false;
+  state.toasts = [];
+
+  const outcome = await chat.setSessionOption(r, 'mode', 'bypass');
+  assert.equal(outcome, 'unknown');
+  assert.equal(state.toasts.length, 1, 'the pick says it could not confirm; the read it triggers adds nothing');
+  assert.match(state.toasts[0].message, /Could not confirm Session Mode/);
+  assert.equal(chat.sessionModeName(r), 'Code', 'the stored value is what both controls show');
+});
+
+test('an outage that starts after a good read announces again', async () => {
+  let up = true;
+  serveRoom('c_ao10', {
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao10');
+  await sleep(40);
+  const r = state.rooms.c_ao10;
+  state.toasts = [];
+
+  up = false;
+  await chat.loadAgentOptions(r, { force: true });
+  const first = refreshNotices();
+  assert.equal(first.length, 1, 'the first outage is announced');
+  up = true;
+  await chat.loadAgentOptions(r, { force: true });
+  up = false;
+  await chat.loadAgentOptions(r, { force: true });
+  // One notice is on screen at a time, so the second outage's notice replaces
+  // the first: the test reads its id, not a count of two on screen.
+  const second = refreshNotices();
+  assert.equal(second.length, 1, 'one notice on screen at a time');
+  assert.notEqual(second[0].id, first[0].id, 'the second outage is announced again, in its own notice');
+});
+
+test('an open panel carries the outage inline, so no toast repeats it', async () => {
+  let up = true;
+  serveRoom('c_ao14', {
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao14');
+  await sleep(40);
+  const r = state.rooms.c_ao14;
+  up = false;
+  state.toasts = [];
+
+  chat.showOptionsInline(r, true); // a panel showing the room's options is on screen
+  await chat.loadAgentOptions(r, { force: true });
+  assert.equal(refreshNotices().length, 0, 'the panel says it inline; no toast repeats it');
+  assert.equal(r.agentOptions.failures, 1, 'the failure is counted for the panel to show');
+  chat.showOptionsInline(r, false);
+});
+
+test('a toast already up comes down when a panel opens over the outage', async () => {
+  let up = true;
+  serveRoom('c_ao15', {
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao15');
+  await sleep(40);
+  const r = state.rooms.c_ao15;
+  up = false;
+  state.toasts = [];
+
+  await chat.loadAgentOptions(r, { force: true });
+  assert.equal(refreshNotices().length, 1, 'with no panel open, the outage is announced once');
+  chat.showOptionsInline(r, true);
+  assert.equal(refreshNotices().length, 0, 'the panel that opens says the same, so the toast comes down');
+  chat.showOptionsInline(r, false);
+});
+
+test('the toast waits for the last open panel to close, and a good read starts the count over', async () => {
+  let up = true;
+  serveRoom('c_ao16', {
+    options: () => (up ? [200, { data: LIST('code') }] : [503, { code: 'upstream_error', detail: 'the agent is not answering' }]),
+  });
+  chat.navigate('#/c/c_ao16');
+  await sleep(40);
+  const r = state.rooms.c_ao16;
+  up = false;
+  state.toasts = [];
+
+  chat.showOptionsInline(r, true);
+  chat.showOptionsInline(r, true); // two panels: the chip's and the drawer's
+  await chat.loadAgentOptions(r, { force: true });
+  await chat.loadAgentOptions(r, { force: true });
+  assert.equal(r.agentOptions.failures, 2, 'each failed read counts');
+  assert.equal(refreshNotices().length, 0, 'no toast while a panel shows the outage');
+  chat.showOptionsInline(r, false);
+  assert.equal(chat.optionsShownInline(r), true, 'one panel is still open');
+  chat.showOptionsInline(r, false);
+  assert.equal(chat.optionsShownInline(r), false, 'no panel shows the outage now');
+
+  up = true;
+  await chat.loadAgentOptions(r, { force: true });
+  assert.equal(r.agentOptions.failures, 0, 'a good read starts the count over');
+  up = false;
+  await chat.loadAgentOptions(r, { force: true });
+  assert.equal(refreshNotices().length, 1, 'a new outage with no panel open is announced');
 });
 
 test('a thread that does not exist yet stages the pick and carries it on its first turn', async () => {
@@ -277,6 +462,31 @@ test('a pending pick the turn drops goes back to the running value', async () =>
   await chat.loadInfo(r, { force: true });
   assert.equal(r.info.pending, undefined);
   assert.equal(chat.sessionOptionValue(r, opt), 'code', 'the running value shows again once pending is gone');
+});
+
+test('an idle pick supersedes the parked one: the record drops it and the controls name the pick', async () => {
+  // A pick parked while a turn ran ('plan'). The turn ended, and the owner picked
+  // 'bypass' while the room is idle: the server applies it and drops the parked
+  // pick for that option. Nothing may keep showing the superseded 'plan' as the
+  // value, or as a pick that still applies next turn.
+  let mode = 'code';
+  let parked = { options: [{ id: 'mode', value: 'plan' }], acceptedAt: '2026-11-25T23:15:04Z' };
+  serveRoom('c_ao9', {
+    options: () => [200, { data: LIST(mode) }],
+    put: (call) => { mode = call.body.value; parked = null; return [200, { data: LIST(mode) }]; },
+    get: () => ({ id: 'c_ao9', title: 'Agent room', workspace: '', agentId: 'claude', ...(parked ? { pending: parked } : {}) }),
+  });
+  chat.navigate('#/c/c_ao9');
+  await sleep(40);
+  const r = state.rooms.c_ao9;
+  const opt = () => r.agentOptions.list.find((o) => o.id === 'mode');
+  assert.equal(chat.sessionOptionValue(r, opt()), 'plan', 'the parked pick shows while it waits');
+
+  assert.equal(await chat.setSessionOption(r, 'mode', 'bypass'), 'saved');
+  await sleep(40); // the record read the write asked for
+  assert.equal(r.info.pending, undefined, 'the superseded pick is dropped from the record');
+  assert.equal(chat.sessionOptionValue(r, opt()), 'bypass', 'the controls name the running pick');
+  assert.equal(chat.sessionModeName(r), 'Bypass Permissions');
 });
 
 test('a change announced by the server is read once, not once per control', async () => {

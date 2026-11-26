@@ -1,6 +1,6 @@
-// Package skill holds skill improvement. Phase 0 only observes finished turns:
-// it reads the store and logs one line for each eligible turn. It writes
-// nothing, calls no model, and is wired only when skills.improvement is observe.
+// Package skill holds skill improvement. The observer reads the store and logs
+// one line for each eligible turn; the validator admits or refuses learned-skill
+// drafts against owner evidence, the live catalog, and the content scan.
 package skill
 
 import (
@@ -55,7 +55,7 @@ func (o *Observer) Observe(convID, kind string, origin valueobject.TurnOrigin, e
 		o.log.Warn("skill_observe_failed", "conv", convID, "err", o.redact(loadErr.Error()))
 		return
 	}
-	w, ok := TurnWindow(conv)
+	w, ok := TurnWindow(conv.Messages())
 	if !ok {
 		return
 	}

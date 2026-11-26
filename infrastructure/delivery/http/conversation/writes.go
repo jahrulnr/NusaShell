@@ -102,10 +102,12 @@ func (s *server) annotate(c *gin.Context) {
 		return
 	}
 	status := 200
-	if parked {
+	if parked && (doc.Pending != nil || doc.PendingUnreadable) {
 		// The pick is taken but a turn's runtime is fixed when it starts, so
-		// nothing is applied yet. The projection already carries the pending
-		// object; 202 is what says it is not "done".
+		// nothing is applied yet; 202 is what says it is not "done". A turn that
+		// took the pick in the meantime has applied it, and then the answer is
+		// plain 200. A parked pick that cannot be read back still waits: the park
+		// saved it, so the answer stays 202 and says it is unreadable.
 		status = 202
 	}
 	c.JSON(status, doc)

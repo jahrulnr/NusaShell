@@ -9,6 +9,7 @@ import (
 	appconversation "github.com/jahrulnr/nusashell/application/conversation"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/internal/transport"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 )
 
 // CommandSurface is the slash-command surface: the catalog a composer reads
@@ -66,6 +67,30 @@ func (s *server) runCommand(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"command": res.Command, "conversation": out})
 }
 
+// pendingOf reads the room's waiting pick as the object every projection and
+// every answer to a pick carries. It is nil when nothing waits — the wire says
+// null — and it is read at the moment of the call, so a caller that reads it
+// after a write answers the state the write left.
+func pendingOf(ctx context.Context, reads PendingReader, convID string) (*pendingDTO, error) {
+	sel, ok, err := reads.Pending(ctx, convID)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return toPending(sel), nil
+}
+
+// pendingView is the waiting pick as a read answers it. A pick that cannot be
+// read never fails the read: it answers nil and unreadable, and the caller says
+// so on the wire. Writes that would supersede or consume the pick refuse on
+// their own path instead.
+func pendingView(ctx context.Context, reads PendingReader, convID string) (pending *pendingDTO, unreadable bool) {
+	pending, err := pendingOf(ctx, reads, convID)
+	if err != nil {
+		return nil, true
+	}
+	return pending, false
+}
+
 // project finishes a room projection with the read-side facts a client paints
 // its header with: whether a manual fold would do anything, the live turn
 // this process's hub holds for the room, and how many jobs wait behind it.
@@ -88,10 +113,31 @@ func (s *server) project(ctx context.Context, info drepo.ConversationInfo) (conv
 	if s.turns != nil {
 		out.TurnActive = s.turns.TurnActive(info.ID)
 	}
-	if sel, ok, err := s.reads.Pending(ctx, info.ID); err != nil {
-		return conversationDTO{}, err
-	} else if ok {
-		out.Pending = toPending(sel)
+	// A waiting pick that cannot be read does not fail the room either: the room
+	// answers pending null and says it is unreadable, so the owner still opens it.
+	out.Pending, out.PendingUnreadable = pendingView(ctx, s.reads, info.ID)
+	// The room's agent options come from the reading the picker draws, so the
+	// two cannot disagree. A read that fails does not fail the room, which the
+	// owner still needs: the room says it is unreadable instead, and the
+	// agent-options route answers the reason.
+	if info.AgentID != "" {
+		out.AgentOptions = s.agentOptionsOf(ctx, info.ID)
+		out.AgentOptionsUnreadable = out.AgentOptions == nil
 	}
 	return out, nil
+}
+
+// agentOptionsOf is a room's agent options as the projection carries them: the
+// agent's answer with its status, when the answer is one the wire carries. It is
+// nil when there is no such answer: no agent surface composed, a read error, or
+// the unavailable state, which never reaches the wire.
+func (s *server) agentOptionsOf(ctx context.Context, convID string) *agentOptionsDTO {
+	if s.agent == nil {
+		return nil
+	}
+	opts, state, err := s.agent.AgentOptions(ctx, convID)
+	if err != nil || (state != dservice.OptionsReady && state != dservice.OptionsEmpty) {
+		return nil
+	}
+	return &agentOptionsDTO{Status: string(state), Data: toAgentOptions(opts)}
 }

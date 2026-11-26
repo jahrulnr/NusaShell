@@ -1,0 +1,22 @@
+{
+  "name": "owner-rewrite-method",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "When you prepare the release branch: first freeze the version file, then cherry-pick the approved fixes, then run the full suite twice \u2014 once before the merge and once after. Never merge with a red suite, not even once."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Merged the fixes and tagged the release."
+    }
+  ],
+  "rewrote": true,
+  "expect": [
+    {
+      "op": "create",
+      "kind": "method"
+    }
+  ]
+}

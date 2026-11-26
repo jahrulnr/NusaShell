@@ -4,11 +4,12 @@
 // effort and upstream choices; agents add the session options they report
 // (modes such as plan/build/bypass, and their own config). The product mode
 // hides the runtime it leaves out.
-import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
+import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore } from '../lib/store.js';
 import { api } from '../lib/api.js';
 import { selection, setSelection, loadProviders, loadAgents, loadAgentModels, isBusy, loadAgentOptions, sessionOptionValue, setSessionOption, agentOptionMap } from '../lib/chat.js';
 import { Icon } from './icons.js';
+import { AgentOptionsNotice } from './agentbar.js';
 import { FolderBrowser } from './folders.js';
 import { cx, Popover, Spinner, ErrorBlock, Select, fmtTokens, usePopoverOpen } from './ui.js';
 import { editProject } from './projects.js';
@@ -49,6 +50,11 @@ export function ModelPicker({ room }) {
   const s = useStore();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  const bodyRef = useRef();
+  // A changed filter is a new target: the body starts at its top. A refresh
+  // of what fills it — models, session options, upstreams — is not, so this
+  // listens to the query alone and never touches scroll or focus otherwise.
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [q]);
   const [upstreams, setUpstreams] = useState({ status: 'idle', list: [] });
   const sel = selection(room);
   const provs = s.providers;
@@ -73,6 +79,9 @@ export function ModelPicker({ room }) {
   // The session options are the room's list (lib/chat.js), the same one the
   // composer's chip reads: opening this panel only asks the shared loader, so
   // a pick made in either control shows in both.
+  // The picker's agent section answers the same way as the options panel: a failed
+  // read says Retry (AgentOptionsNotice), an empty answer says Refresh. The labels
+  // stay apart on purpose; see the comment in agentbar.js.
   const agentOpts = room.agentOptions;
   // A pick while a turn runs is stored and applies to the next one — the
   // controls stay open and say so, instead of refusing a change the room
@@ -135,12 +144,13 @@ export function ModelPicker({ room }) {
       ${(pending?.agentId || pending?.providerId) && html`<span class="text-faint shrink-0 text-[11px]">next turn</span>`}
       <${Icon} name="chevronDown" size=${14} class="text-faint" />
     </button>
-    <${Popover} open=${open} onClose=${() => setOpen(false)} placement="top-end" label="Choose model" class="sm:w-[400px] flex flex-col">
-      <div class="shrink-0 sticky top-0 z-10 bg-raised flex items-center gap-2 px-3 h-11 border-b border-line">
+    <${Popover} open=${open} onClose=${() => setOpen(false)} placement="top-end" label="Choose model" scroll="list" class="sm:w-[400px]">
+      <div class="shrink-0 bg-raised flex items-center gap-2 px-3 h-11 border-b border-line">
         <${Icon} name="search" class="text-faint" />
         <input autofocus value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search models"
           class="flex-1 bg-transparent outline-none text-[13px]" />
       </div>
+      <div ref=${bodyRef} class="flex-1 min-h-0 overflow-y-auto">
       <div class="py-1">
         ${loading && !groups.length && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} /> Loading providers…</div>`}
         ${provs.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Providers unavailable" message=${provs.error} onRetry=${loadProviders} /></div>`}
@@ -202,7 +212,7 @@ export function ModelPicker({ room }) {
       </div>`}
       ${sel.agentId && html`<div class="shrink-0 border-t border-line px-3 py-2.5 flex flex-col gap-2">
         ${agentOpts.status === 'loading' && html`<div class="flex items-center gap-2 text-faint text-xs"><${Spinner} size=${12} /> Asking the agent…</div>`}
-        ${agentOpts.status === 'error' && html`<p class="text-bad text-xs">${agentOpts.error}</p>`}
+        <${AgentOptionsNotice} room=${room} />
         ${agentOpts.status === 'ready' && !agentOpts.list.length && (agentOpts.report === 'empty'
           ? html`<div class="flex items-center gap-2 text-faint text-xs">
               <span class="flex-1">The agent reports no options right now.</span>
@@ -234,7 +244,8 @@ export function ModelPicker({ room }) {
           ? 'Applies to the next turn.'
           : !room.id ? 'Applies to the thread this message starts.' : ''}</p>`}
       </div>`}
-      <div class="shrink-0 sticky bottom-0 z-10 bg-raised flex border-t border-line">
+      </div>
+      <div class="shrink-0 bg-raised flex border-t border-line">
         <a href=${'#/settings/providers' + (sel.providerId ? '/' + encodeURIComponent(sel.providerId) : '')} onClick=${() => setOpen(false)}
           class="flex-1 flex items-center gap-2 px-3 h-9 text-muted hover:text-fg hover:bg-hover">
           <${Icon} name="server" size=${14} /> Providers

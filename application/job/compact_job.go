@@ -7,6 +7,7 @@ import (
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	repo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
@@ -247,19 +248,57 @@ func (j *Annotate) Execute(execCtx context.Context) (err error) {
 				return err
 			}
 		}
-		// Effort and upstream are picks of a provider call, and they are
-		// applied after any rebind above — so a PATCH that switches the room
-		// to an agent drops them instead of storing a value the agent never
-		// applies. A provider room stores them as before.
-		if conv.Runtime() != enum.RuntimeAgent {
-			if j.Effort != nil {
-				conv.SetEffort(*j.Effort)
-			}
-			if j.Upstream != nil {
-				conv.SetUpstream(strings.TrimSpace(*j.Upstream))
+		// Effort and upstream are picks of a provider call, judged on the runtime
+		// this PATCH leaves the room on: after its own rebind, so a switch to a
+		// provider keeps them, and a switch to an agent refuses them. The refusal
+		// comes before anything is saved, so a refused PATCH changes nothing.
+		if err := AgentPickRefusal(conv.Runtime() == enum.RuntimeAgent, j.Effort, j.Upstream); err != nil {
+			return err
+		}
+		if j.Effort != nil {
+			conv.SetEffort(*j.Effort)
+		}
+		if j.Upstream != nil {
+			conv.SetUpstream(strings.TrimSpace(*j.Upstream))
+		}
+		// The explicit pick just became the room's value NOW — any parked
+		// older generation of the same fields is superseded by it, and only
+		// those fields drop without notice. Everything else stays parked:
+		// its notice at the next turn is the one channel it has.
+		cover := repo.Covered{
+			Runtime:  j.Runtime != nil,
+			Effort:   j.Effort != nil,
+			Upstream: j.Upstream != nil,
+			Options:  optionKeys(j.AgentOption),
+		}
+		// A write that supersedes a parked pick is refused before it saves when
+		// that pick cannot be read: the save would land, and the unreadable
+		// generation would survive it unseen.
+		if cover.Runtime || cover.Effort || cover.Upstream || len(cover.Options) > 0 {
+			if _, _, err := d.Convs.PendingSelection(ctx, conv.ID()); err != nil {
+				return apperror.New(500, "the room's waiting pick cannot be read, so nothing was saved", err)
 			}
 		}
-		return d.Convs.Save(ctx, conv)
+		if err := d.Convs.Save(ctx, conv); err != nil {
+			return err
+		}
+		if err := d.Convs.SupersedePendingSelection(ctx, conv.ID(), cover); err != nil {
+			// The pick IS the room's value now — the save above landed —
+			// but the parked generation survives to fold over it at the
+			// next turn. The error must name that consequence: nothing
+			// about this failure reads as "the pick did not apply".
+			return apperror.New(500, "the pick was applied but the parked generation could not be cleared", err)
+		}
+		return nil
 	}()
 	return err
+}
+
+// optionKeys names the session-option key one pick carries, none when the
+// annotation is not an option pick.
+func optionKeys(opt *[2]string) []string {
+	if opt == nil {
+		return nil
+	}
+	return []string{opt[0]}
 }

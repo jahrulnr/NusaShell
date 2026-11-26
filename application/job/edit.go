@@ -131,6 +131,10 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 		if err != nil {
 			return err
 		}
+		// Refused before the rewrite below is stored, the same rule Send applies.
+		if err := AgentPickRefusal(conv.Runtime() == enum.RuntimeAgent, &j.Opts.Effort, &j.Opts.Upstream); err != nil {
+			return err
+		}
 		if conv.Runtime() == enum.RuntimeAgent {
 			// The agent forgets its session with the dropped turns and
 			// answers the edited line in a fresh one, with a recap.

@@ -228,17 +228,48 @@ func (a Annotation) nothingElse() bool {
 // while the owner is still here, not discovered at the turn.
 func (app *ConversationApp) parkSelection(ctx context.Context, convID string, a Annotation, sel drepo.PendingSelection) error {
 	deps := app.depsSnapshot()
-	if a.Runtime != nil {
+	if a.Runtime != nil || a.Effort != nil || a.Upstream != nil {
 		conv, err := deps.Convs.Load(ctx, convID)
 		if err != nil {
 			return err
 		}
-		if err := appjob.BindRuntime(ctx, deps, conv, *a.Runtime); err != nil {
-			return err
+		if a.Runtime != nil {
+			if err := appjob.BindRuntime(ctx, deps, conv, *a.Runtime); err != nil {
+				return err
+			}
+		}
+		if a.Effort != nil || a.Upstream != nil {
+			// The turn that applies a parked pick drops an effort or upstream it
+			// cannot take, so the refusal comes here, while the owner is present.
+			agent, err := parkedAgent(ctx, deps, conv, a.Runtime != nil)
+			if err != nil {
+				return err
+			}
+			if err := appjob.AgentPickRefusal(agent, a.Effort, a.Upstream); err != nil {
+				return err
+			}
 		}
 	}
 	sel.AcceptedAt = time.Now().UTC()
 	return deps.Convs.SavePendingSelection(ctx, convID, sel)
+}
+
+// parkedAgent reports whether the next turn runs on an agent once a pick parks.
+// bound says the pick's own binding is already applied to conv, and then conv
+// answers. Otherwise a binding that already waits decides, the same way the turn
+// will apply it, and the room's own runtime answers when nothing waits.
+func parkedAgent(ctx context.Context, deps appjob.Deps, conv *aggregate.Conversation, bound bool) (bool, error) {
+	if bound {
+		return conv.Runtime() == enum.RuntimeAgent, nil
+	}
+	waiting, ok, err := deps.Convs.PendingSelection(ctx, conv.ID())
+	if err != nil {
+		return false, err
+	}
+	if ok && (waiting.AgentID != "" || waiting.ProviderID != "") {
+		return waiting.AgentID != "", nil
+	}
+	return conv.Runtime() == enum.RuntimeAgent, nil
 }
 
 // Pending answers what the room waits to apply on its next turn.
@@ -275,7 +306,8 @@ func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]
 	if err != nil {
 		return nil, state, err
 	}
-	if opts == nil {
+	if info.AgentID == "" {
+		// A room that runs no agent has no options to report.
 		return []dservice.AgentOption{}, dservice.OptionsReady, nil
 	}
 	for i, o := range opts {
@@ -306,7 +338,13 @@ func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]
 		}
 		deferred = append(deferred, entry)
 	}
-	return append(opts, deferred...), state, nil
+	// The agent's state stands as it answered. An empty live session is
+	// OptionsEmpty, transient, and must never read as the permanent ready.
+	out := append(opts, deferred...)
+	if out == nil {
+		out = []dservice.AgentOption{}
+	}
+	return out, state, nil
 }
 
 // optionReport reads the room's option catalog — the report the picker draws:

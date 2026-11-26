@@ -1,0 +1,29 @@
+{
+  "name": "duplicate-class",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Remember this: always run the test suite before committing anything, no exceptions, even for tiny changes."
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Got it \u2014 tests before every commit."
+    }
+  ],
+  "index": [
+    {
+      "name": "pre-commit-tests",
+      "description": "Run the tests before every commit",
+      "body": "## Steps\n1. Run the tests\n2. Commit only when green",
+      "level": "user"
+    }
+  ],
+  "nothing": true,
+  "forbid": [
+    "test-before-commit",
+    "always-test-first",
+    "run-tests-before"
+  ]
+}

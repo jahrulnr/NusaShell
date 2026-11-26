@@ -1,0 +1,27 @@
+{
+  "name": "one-off-narrative",
+  "messages": [
+    {
+      "role": "user",
+      "id": "m_1",
+      "text": "Yesterday's deploy failed because the DNS provider flapped for ten minutes \u2014 the third retry went through, pure luck. Anyway, can you check why the staging build is suddenly so slow?"
+    },
+    {
+      "role": "assistant",
+      "id": "m_2",
+      "text": "Looking at the build timings.",
+      "tools": [
+        {
+          "name": "bash",
+          "output": "compile step: 4m12s (was 1m30s); link step: 22s; test step: 48s"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "id": "m_3",
+      "text": "The compile step tripled while link and test stayed flat, so the slowdown is in compilation, not the environment."
+    }
+  ],
+  "nothing": true
+}

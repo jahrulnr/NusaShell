@@ -1,13 +1,22 @@
 package repository
 
-import "context"
+import (
+	"context"
+	"time"
+
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+)
 
 // Skill is the discovery projection of a SKILL.md frontmatter and its location.
+// Digest covers the whole file, frontmatter included — it is what a patch is
+// read against and what the writer's compare-and-swap compares.
 type Skill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Path        string `json:"path"`
 	Source      string `json:"source"`
+	Digest      string `json:"digest"`
 }
 
 type SkillCatalog struct {
@@ -15,11 +24,91 @@ type SkillCatalog struct {
 	Diagnostics []string `json:"diagnostics,omitempty"`
 }
 
-// Skills resolves the effective catalog for one workspace: workspace entries
-// override global entries, which override builtins of the same declared name.
-// Read returns complete source, including frontmatter; supporting paths resolve
-// from Path. Missing roots are empty; malformed entries remain diagnostics.
+// Skills resolves the effective catalog for one workspace in root precedence:
+// builtin, then nusashell — the learned skills — then global, then workspace,
+// each overriding the same declared name of the roots before it. Read returns
+// complete source, including frontmatter; supporting paths resolve from Path.
+// Missing roots are empty; malformed entries remain diagnostics.
 type Skills interface {
 	List(ctx context.Context, workspace string) (SkillCatalog, error)
 	Read(ctx context.Context, workspace, name string) (Skill, string, error)
+}
+
+// SkillProposals keeps learned-skill proposals until the owner decides them.
+// Errors follow the apperror contract: a missing proposal is a 404.
+type SkillProposals interface {
+	// Add stores a new pending proposal; an id already stored is a 409, and so
+	// is a second pending proposal of the same skill name — two open rows for
+	// one class would decide against each other in the owner's queue, so the
+	// store, not the caller's discipline, enforces it.
+	Add(ctx context.Context, p *aggregate.SkillProposal) error
+	Get(ctx context.Context, id string) (*aggregate.SkillProposal, error)
+	Pending(ctx context.Context) ([]*aggregate.SkillProposal, error)
+	// Seen answers the candidate's cooldown: a pending proposal of this name holds
+	// it whatever its op, and a proposal of this op the owner decided since the
+	// cutoff holds it too, so the pass does not ask the owner twice about the same
+	// skill. A retirement the pass wrote is not a decision and holds nothing.
+	Seen(ctx context.Context, name string, op enum.SkillProposalOp, since time.Time) (bool, error)
+}
+
+// SkillDecisions is the one write that decides a proposal. Commit stores the
+// proposal's decision and the ownership row it leaves behind in one transaction,
+// or neither. row is nil for a dismissal and must be present for an accept.
+// A proposal decided meanwhile is a 409, and so is a row whose precondition no
+// longer holds: the name taken on a create, or the digest or level moved on a
+// patch. The file write happens before the commit, and a failed commit is what
+// the caller compensates, so a refused commit must not leave either write behind.
+type SkillDecisions interface {
+	Commit(ctx context.Context, p *aggregate.SkillProposal, row *aggregate.SkillOwnership) error
+}
+
+// SkillOwnership keeps the ownership row of each learned skill, keyed by its
+// root and name: a same-named skill of another root must never answer for a
+// learned one. Errors follow the apperror contract: a missing row is a 404.
+type SkillOwnership interface {
+	Get(ctx context.Context, root enum.SkillRoot, name string) (*aggregate.SkillOwnership, error)
+	// List returns every ownership row in one read: the skills page joins the
+	// catalog with levels and pending counts in a constant number of queries,
+	// never one per row.
+	List(ctx context.Context) ([]*aggregate.SkillOwnership, error)
+	// Save records an observed change; it never decides a proposal, so an
+	// accept's row goes through SkillDecisions.Commit and never through here.
+	// It is a compare-and-swap, like the writer's: an empty expectDigest writes
+	// only when no row exists, and a non-empty one writes only while the stored
+	// row's digest still equals it — a stale read must not overwrite a row a
+	// commit moved meanwhile. A mismatched write is a 409, a conditional write
+	// against no row a 404.
+	Save(ctx context.Context, o *aggregate.SkillOwnership, expectDigest string) error
+}
+
+// SkillDocument is the learned skill a writer renders: the domain values, never
+// the file bytes. The adapter owns the SKILL.md format — frontmatter, escaping,
+// layout — because the format written and the format read must live in one
+// place, and the application must not know that YAML exists.
+type SkillDocument struct {
+	Name        string
+	Description string
+	Body        string
+}
+
+// SkillWritten is what a write left on disk: the path it was written to, which
+// the proposal records, and the digest of the rendered bytes, which the
+// ownership row records — the digest a later read compares against.
+type SkillWritten struct {
+	Path   string
+	Digest string
+}
+
+// SkillWriter writes learned skills into the nusashell root, the only root they
+// live in. It renders the document itself and every digest covers the rendered
+// whole file, frontmatter included. An empty expectDigest is create-only: the
+// write is refused when the file already exists with other content. A non-empty
+// expectDigest replaces the file only while its digest on disk still equals it.
+// Either way, a file that already holds exactly the rendered bytes is a
+// successful no-op rather than a conflict: it is what a retry of an accept whose
+// commit failed finds, and the retry is how that row gets finished. A refused
+// write is a 409; archiving a missing skill is a 404.
+type SkillWriter interface {
+	Write(ctx context.Context, root enum.SkillRoot, doc SkillDocument, expectDigest string) (SkillWritten, error)
+	Archive(ctx context.Context, root enum.SkillRoot, name string) error
 }

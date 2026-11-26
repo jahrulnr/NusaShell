@@ -24,7 +24,7 @@ func TestDiscoveryRejectsFIFOSkillWithoutBlocking(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		catalog, err := NewLocal("", "").List(t.Context(), workspace)
+		catalog, err := NewLocal("", "", "").List(t.Context(), workspace)
 		if err != nil {
 			done <- err
 			return

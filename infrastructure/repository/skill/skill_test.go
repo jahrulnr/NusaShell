@@ -30,7 +30,7 @@ func TestDiscoveryPrecedenceRefreshAndRead(t *testing.T) {
 	writeSkill(t, global, "shared", "---\nname: shared\ndescription: Global\n---\nglobal body")
 	text := "---\r\nname: shared\r\ndescription: >-\r\n  Workspace skill\r\n  with folded YAML.\r\nmetadata:\r\n  short-description: useful\r\n---\r\nraw body\r\n"
 	path := writeSkill(t, local, "shared", text)
-	store := NewLocal(home, builtin)
+	store := NewLocal(home, "", builtin)
 	catalog, err := store.List(t.Context(), workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestDiscoveryPrecedenceRefreshAndRead(t *testing.T) {
 
 func TestMissingRootsMalformedMetadataAndCancellation(t *testing.T) {
 	home, workspace := t.TempDir(), t.TempDir()
-	store := NewLocal(home, filepath.Join(t.TempDir(), "missing"))
+	store := NewLocal(home, "", filepath.Join(t.TempDir(), "missing"))
 	catalog, err := store.List(t.Context(), workspace)
 	if err != nil || len(catalog.Skills) != 0 || len(catalog.Diagnostics) != 0 {
 		t.Fatalf("missing roots = %+v %v", catalog, err)
@@ -99,7 +99,7 @@ func TestDiscoveryRejectsOversizedSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Close()
-	catalog, err := NewLocal("", "").List(t.Context(), workspace)
+	catalog, err := NewLocal("", "", "").List(t.Context(), workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestInstallBuiltinsAndSymlinkDiscovery(t *testing.T) {
 	if err := os.Symlink(filepath.Join(builtin, "creator"), filepath.Join(root, "linked")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	catalog, err := NewLocal(home, builtin).List(t.Context(), "")
+	catalog, err := NewLocal(home, "", builtin).List(t.Context(), "")
 	if err != nil || len(catalog.Skills) != 1 || catalog.Skills[0].Source != "global" {
 		t.Fatalf("symlink = %+v %v", catalog, err)
 	}

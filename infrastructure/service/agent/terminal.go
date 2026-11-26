@@ -369,13 +369,30 @@ func (tm *TerminalManager) outputReq(raw json.RawMessage) (any, *acp.RPCError) {
 	return acp.TerminalOutputResponse{Output: out, Truncated: truncated, ExitStatus: exit}, nil
 }
 
+// waitForExitCap bounds one terminal/wait_for_exit call. It is the only
+// terminal primitive that can hang a turn — a child that never exits would
+// otherwise pin the session open forever — so the wait answers with an
+// error instead: the process tree is killed and the terminal released,
+// because an agent whose wait timed out cannot be counted on to clean up.
+// A var, not a const, so tests can shrink it.
+var waitForExitCap = 15 * time.Minute
+
 func (tm *TerminalManager) waitReq(ctx context.Context, raw json.RawMessage) (any, *acp.RPCError) {
 	t, rpcErr := tm.get(raw)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	timer := time.NewTimer(waitForExitCap)
+	defer timer.Stop()
 	select {
 	case <-t.done:
+	case <-timer.C:
+		tm.kill(t)
+		t.mu.Lock()
+		t.released = true
+		t.lastUsed = time.Now()
+		t.mu.Unlock()
+		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: "wait_for_exit exceeded its time cap; the process was killed and the terminal released — for long-running commands, poll terminal/output instead of waiting, or re-run with shorter waits"}
 	case <-ctx.Done():
 		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: "wait cancelled"}
 	}

@@ -98,11 +98,16 @@ func (s *server) export(c *gin.Context) {
 		transport.RespondError(c, err)
 		return
 	}
+	// The thread's projection carries its waiting pick like every other
+	// projection does, read now. An unreadable pick must not block the export of
+	// the whole thread: the thread says so, and opening the room shows the reason.
+	conv := toConversation(info)
+	conv.Pending, conv.PendingUnreadable = pendingView(ctx, s.reads, id)
 	out := struct {
 		ExportedAt   time.Time       `json:"exportedAt"`
 		Conversation conversationDTO `json:"conversation"`
 		Messages     []messageDTO    `json:"messages"`
-	}{ExportedAt: time.Now().UTC(), Conversation: toConversation(info), Messages: make([]messageDTO, 0, len(msgs))}
+	}{ExportedAt: time.Now().UTC(), Conversation: conv, Messages: make([]messageDTO, 0, len(msgs))}
 	for _, m := range msgs {
 		out.Messages = append(out.Messages, toMessage(m))
 	}

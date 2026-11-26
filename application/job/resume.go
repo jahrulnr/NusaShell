@@ -106,6 +106,9 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 		if _, err := d.applyProject(ctx, conv); err != nil {
 			return err
 		}
+		if err := AgentPickRefusal(conv.Runtime() == enum.RuntimeAgent, &j.Opts.Effort, &j.Opts.Upstream); err != nil {
+			return err
+		}
 		if conv.Runtime() == enum.RuntimeAgent {
 			// The agent keeps its own record of the dialogue, so only a
 			// turn that never got a reply can be handed to it again.

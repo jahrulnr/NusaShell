@@ -103,6 +103,58 @@ func (r *ConversationRepository) ClearPendingSelection(ctx context.Context, conv
 	return nil
 }
 
+// SupersedePendingSelection drops exactly the fields an explicit idle pick
+// just applied — a parked older generation of those fields must never fold
+// over the newer value at the next turn. Fields the pick does not cover stay
+// parked with their notice channel intact. The file's generation is kept, so
+// a turn that already consumed the older generation still clears by the same
+// acceptedAt. cover mirrors what was applied: a runtime binding covers the
+// agent/provider fields, a non-nil effort or upstream its own, and optionKeys
+// name the session-option entries the pick set.
+func (r *ConversationRepository) SupersedePendingSelection(ctx context.Context, convID string, cover repo.Covered) error {
+	if err := validID(convID); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	unlock, err := r.lockStore()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	dir := r.convDir(convID)
+	stored, ok, err := readPending(dir)
+	if err != nil || !ok {
+		return err
+	}
+	if cover.Runtime {
+		stored.AgentID, stored.AgentModel, stored.ProviderID, stored.ModelID = "", "", "", ""
+	}
+	if cover.Effort {
+		stored.Effort = nil
+	}
+	if cover.Upstream {
+		stored.Upstream = nil
+	}
+	for _, k := range cover.Options {
+		delete(stored.Options, k)
+	}
+	if stored.Empty() {
+		if err := os.Remove(filepath.Join(dir, pendingFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(dir, pendingFile), raw, 0o600)
+}
+
 // readPending decodes one room directory's parked selection. A missing file is
 // not an error; a corrupt one is — a pick nobody can read must be said out loud,
 // never silently dropped.

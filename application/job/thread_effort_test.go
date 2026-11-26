@@ -197,19 +197,127 @@ func TestBindingAnAgentDropsTheProviderSelection(t *testing.T) {
 	}
 }
 
-// A pick the caller sends with the first turn of an agent room never reaches
-// the record: the fresh-room path stores what a provider turn would use, and
-// an agent room has none.
-func TestAgentRoomIgnoresAPickedEffort(t *testing.T) {
+// An effort pick on an agent room is refused, not stored and not dropped: the
+// agent takes no effort, and the refusal says why before anything is written.
+// The first turn of a fresh room is refused the same way, so no room appears.
+func TestAnEffortPickOnAnAgentRoomIsRefused(t *testing.T) {
 	spy := &selectionSpy{}
 	d := hydrationDeps(t, spy)
 	d.ThreadsEffort = enum.EffortMax
 	useAgent(t, &d)
-	if err := send(t, d, spy, SendOptions{Effort: enum.EffortHigh, Upstream: "Alpha", Agent: "claude"}); err != nil {
+	err := send(t, d, spy, SendOptions{Effort: enum.EffortHigh, Upstream: "Alpha", Agent: "claude"})
+	if err == nil || apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("send = %v, want a 400 refusal", err)
+	}
+	if _, err := d.Convs.Info(t.Context(), "room"); apperror.As(err).StatusCode() != apperror.StatusNotFound {
+		t.Fatalf("a refused first turn created the room: %v", err)
+	}
+	if len(spy.efforts) != 0 {
+		t.Fatalf("provider calls = %v, want none", spy.efforts)
+	}
+}
+
+// The unset markers name no value — "default" and a blank upstream return a room
+// to its own setting — so an agent room passes them, as a provider room does.
+func TestAgentRoomPassesTheUnsetMarkers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts SendOptions
+	}{
+		{"default effort", SendOptions{Effort: enum.EffortDefault}},
+		{"blank upstream", SendOptions{Upstream: "  "}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spy := &selectionSpy{}
+			d := hydrationDeps(t, spy)
+			useAgent(t, &d)
+			opts := tc.opts
+			opts.Agent = "claude"
+			if err := send(t, d, spy, opts); err != nil {
+				t.Fatalf("send = %v, want the turn to run", err)
+			}
+		})
+	}
+}
+
+// A refused turn saves nothing, and the pick parked for the room's next turn stays
+// in its file: the turn that would have applied it never ran.
+func TestARefusedTurnLeavesTheParkedPickForTheNextTurn(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	useAgent(t, &d)
+	if err := send(t, d, spy, SendOptions{Agent: "claude"}); err != nil {
 		t.Fatal(err)
 	}
-	if effort, upstream := storedRecord(t, d); effort != "" || upstream != "" {
-		t.Fatalf("agent room stored %q, %q, want neither", effort, upstream)
+	parkAhead(t, d, "room", enum.EffortMax)
+	if err := send(t, d, spy, SendOptions{Effort: enum.EffortHigh, Agent: "claude"}); err == nil || apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("send = %v, want a 400 refusal", err)
+	}
+	if _, ok, err := d.Convs.PendingSelection(t.Context(), "room"); err != nil || !ok {
+		t.Fatalf("the refused turn took the parked pick: %v, %v", ok, err)
+	}
+}
+
+// An edit is a turn: it refuses an effort pick on an agent room the way a send
+// does, before the rewrite is stored, so the room keeps the messages it had.
+func TestAnEffortPickOnAnAgentEditIsRefused(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	useAgent(t, &d)
+	if err := send(t, d, spy, SendOptions{Agent: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	effort := enum.EffortHigh
+	j := &Edit{Deps: d, Ctx: t.Context(), MsgID: before.Messages()[0].ID(), Content: "rewritten", Opts: SendOptions{Effort: effort, Agent: "claude"}}
+	j.Result = make(chan error, 1)
+	j.Bind("room", nil)
+	err = j.Execute(t.Context())
+	if want := AgentPickRefusal(true, &effort, nil); err == nil || err.Error() != want.Error() {
+		t.Fatalf("edit = %v, want the refusal %q", err, want.Error())
+	}
+	after, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Messages()) != len(before.Messages()) || after.Messages()[0].Content() != before.Messages()[0].Content() {
+		t.Fatalf("a refused edit changed the room: %d messages, first %q", len(after.Messages()), after.Messages()[0].Content())
+	}
+}
+
+// A retry is a turn too: it refuses an effort pick on an agent room before any
+// provider or agent call, and the room keeps the turn it would have retried.
+func TestAnEffortPickOnAnAgentResumeIsRefused(t *testing.T) {
+	spy := &selectionSpy{}
+	d := hydrationDeps(t, spy)
+	useAgent(t, &d)
+	if err := send(t, d, spy, SendOptions{Agent: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	effort := enum.EffortHigh
+	j := &Resume{Deps: d, Ctx: t.Context(), Opts: SendOptions{Effort: effort}}
+	j.Result = make(chan error, 1)
+	j.Bind("room", nil)
+	err = j.Execute(t.Context())
+	if want := AgentPickRefusal(true, &effort, nil); err == nil || err.Error() != want.Error() {
+		t.Fatalf("resume = %v, want the refusal %q", err, want.Error())
+	}
+	if len(spy.efforts) != 0 {
+		t.Fatalf("provider calls = %v, want none", spy.efforts)
+	}
+	after, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Messages()) != len(before.Messages()) {
+		t.Fatalf("a refused retry changed the room: %d messages, had %d", len(after.Messages()), len(before.Messages()))
 	}
 }
 

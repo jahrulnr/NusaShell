@@ -66,6 +66,9 @@ type scriptedAgent struct {
 	// options replaces the offered list when set — a session that no longer
 	// offers an option a stored catalog still remembers.
 	options []dservice.AgentOption
+	// emptyLive makes the reading answer what a live session that has offered
+	// nothing yet answers: no options, and the transient OptionsEmpty state.
+	emptyLive bool
 }
 
 func (a *scriptedAgent) Prompt(ctx context.Context, p dservice.AgentPrompt, onEvent event.TurnEventHandler, approve dservice.Approver) error {
@@ -217,6 +220,9 @@ func (a *scriptedAgent) ReapIdle(time.Duration)                       {}
 func (a *scriptedAgent) Options(context.Context, *aggregate.Agent, string) ([]dservice.AgentOption, dservice.OptionsState, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.emptyLive {
+		return nil, dservice.OptionsEmpty, nil
+	}
 	if a.options != nil {
 		return a.options, dservice.OptionsReady, nil
 	}
@@ -698,17 +704,17 @@ func TestAgentOptionAnnouncesTheChangedRoom(t *testing.T) {
 }
 
 // An effort or an upstream is a pick of a provider call, and an agent room has
-// none: Annotate drops them instead of storing a value the agent never applies
-// — the same rule a turn already follows.
-func TestAnnotateDropsProviderPicksOnAnAgentRoom(t *testing.T) {
-	app, _, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+// none: Annotate refuses it and says why. It stores neither and parks neither,
+// idle or busy — the refusal comes before anything is written.
+func TestAnnotateRefusesProviderPicksOnAnAgentRoom(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
 	ctx := t.Context()
 	if _, err := app.Send(ctx, "c_eff", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	effort, upstream := enum.EffortMax, "Alpha"
-	if _, err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); err != nil {
-		t.Fatal(err)
+	if _, err := app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream}); apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("idle annotate = %v, want a 400 refusal", err)
 	}
 	// The record, not a loaded aggregate: Load replays BindAgent, which
 	// strips provider picks from an agent room either way.
@@ -718,6 +724,95 @@ func TestAnnotateDropsProviderPicksOnAnAgentRoom(t *testing.T) {
 	}
 	if info.Effort != "" || info.Upstream != "" {
 		t.Fatalf("agent room stored %q, %q, want neither", info.Effort, info.Upstream)
+	}
+	release := busyTurn(t, app, rt, "c_eff")
+	_, err = pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_eff", Annotation{Effort: &effort, Upstream: &upstream})
+	})
+	release()
+	if apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("busy annotate = %v, want a 400 refusal", err)
+	}
+	if _, ok, _ := app.Pending(ctx, "c_eff"); ok {
+		t.Fatal("a refused pick was parked anyway")
+	}
+}
+
+// The picker names a provider's effort in the same request as the provider, and
+// an effort alone lands on whichever runtime the next turn will run. So a provider
+// pick parks with its effort, an effort alone parks while a provider binding
+// waits, and the same effort is refused once an agent binding waits.
+func TestAProviderPickCarriesItsEffortPastAnAgentRoom(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_pp", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	effort := enum.EffortMax
+	release := busyTurn(t, app, rt, "c_pp")
+	defer release()
+	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_pp", Annotation{Runtime: &RuntimeBinding{ProviderID: "gw1", ModelID: "m1"}, Effort: &effort})
+	})
+	if err != nil || !parked {
+		t.Fatalf("provider pick with its effort = %v, %v; want parked", parked, err)
+	}
+	parked, err = pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_pp", Annotation{Effort: &effort})
+	})
+	if err != nil || !parked {
+		t.Fatalf("effort alone under a waiting provider = %v, %v; want parked", parked, err)
+	}
+	if _, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_pp", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+	}); err != nil {
+		t.Fatalf("agent binding = %v; want parked", err)
+	}
+	if _, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_pp", Annotation{Effort: &effort})
+	}); apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("effort under a waiting agent = %v, want a 400 refusal", err)
+	}
+}
+
+// unreadablePendingRepo fails the read of a room's waiting pick once broken is set,
+// as a store that cannot read the file does. Everything else passes through.
+type unreadablePendingRepo struct {
+	drepo.Conversation
+	broken bool
+}
+
+func (r *unreadablePendingRepo) PendingSelection(ctx context.Context, id string) (drepo.PendingSelection, bool, error) {
+	if r.broken {
+		return drepo.PendingSelection{}, false, fmt.Errorf("pending selection corrupt")
+	}
+	return r.Conversation.PendingSelection(ctx, id)
+}
+
+// A write that would supersede a parked pick is refused before it saves when that
+// pick cannot be read: the save would land and the unreadable generation would
+// survive it unseen. The room keeps the values it had.
+func TestWriteOverAnUnreadablePendingIsRefusedBeforeSave(t *testing.T) {
+	var store *unreadablePendingRepo
+	app, _ := fixtureWith(t, okHandler, func(c drepo.Conversation) drepo.Conversation {
+		store = &unreadablePendingRepo{Conversation: c}
+		return store
+	})
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_bad", "gw1", "m1", "hi", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	store.broken = true
+	effort, upstream := enum.EffortMax, "Alpha"
+	if _, err := app.Annotate(ctx, "c_bad", Annotation{Effort: &effort, Upstream: &upstream}); apperror.As(err).StatusCode() != 500 {
+		t.Fatalf("write over an unreadable pick = %v, want a 500 refusal", err)
+	}
+	info, err := app.deps.Convs.Info(ctx, "c_bad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Effort != "" || info.Upstream != "" {
+		t.Fatalf("refused write saved %q, %q; want the room unchanged", info.Effort, info.Upstream)
 	}
 }
 

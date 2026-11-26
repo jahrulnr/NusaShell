@@ -132,6 +132,15 @@ export const api = {
   deleteMemory: (mid) => request('DELETE', `/api/memories/${id(mid)}`),
   memorySuggestions: (f) => request('GET', '/api/memory-suggestions' + q(f || {})),
   decideMemorySuggestion: (sid, action, edit) => request('POST', `/api/memory-suggestions/${id(sid)}/actions`, { body: { action, edit } }),
+  // skills reads the Skills page for one workspace root (none: the owner's
+  // roots only). Not paged: the server bounds the catalog by its byte budget.
+  skills: (workspace = '') => request('GET', '/api/skills' + q({ workspace })),
+  // moveSkillLevel records one owner decision: the level the skill moves to and
+  // the digest the page read. A file that changed since answers 409 (an ApiError
+  // with status 409); the caller must read the row's digest again before it
+  // retries, because the same digest sent again answers 409 again.
+  moveSkillLevel: (name, { workspace = '', level, digest }) =>
+    request('POST', `/api/skills/${id(name)}/level` + q({ workspace }), { body: { level, digest } }),
   webSearch: () => request('GET', '/api/websearch'),
   updateWebSearch: (values) => request('PATCH', '/api/websearch', { body: values }),
   setWebSearchKey: (source, value) => request('PUT', `/api/websearch/keys/${id(source)}`, { body: { value } }),

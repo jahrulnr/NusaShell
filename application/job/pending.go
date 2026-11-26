@@ -6,6 +6,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -102,10 +103,20 @@ func ApplyPendingSelection(ctx context.Context, d Deps, conv *aggregate.Conversa
 			notice("the runtime you picked is no longer available: " + userReason(err))
 		}
 	}
-	if sel.Effort != nil {
+	// Effort and upstream are a provider call's picks, and an agent applies
+	// neither. The park path refuses such a pick at the source, so a row that
+	// reaches this turn was parked before that rule: an agent room drops the
+	// pick with the notice a refused pick gets — applying it would store a value
+	// nothing honours, and dropping it silently would hide the refusal from the
+	// owner. An unset marker is no pick and is stored as the room's own.
+	dropped := agentPickFields(conv.Runtime() == enum.RuntimeAgent, sel.Effort, sel.Upstream)
+	if len(dropped) > 0 {
+		notice(agentPickMessage(dropped) + ", so it is not applied")
+	}
+	if sel.Effort != nil && !slices.Contains(dropped, "effort") {
 		conv.SetEffort(*sel.Effort)
 	}
-	if sel.Upstream != nil {
+	if sel.Upstream != nil && !slices.Contains(dropped, "upstream") {
 		conv.SetUpstream(*sel.Upstream)
 	}
 	if len(sel.Options) > 0 {
@@ -133,6 +144,49 @@ func ApplyPendingSelection(ctx context.Context, d Deps, conv *aggregate.Conversa
 			notice(dropped[id])
 		}
 	}
+}
+
+// effortPick reports whether an effort names a pick. The unset markers ("" and
+// "default") return a room to its own setting, so they are not picks.
+func effortPick(e *enum.Effort) bool {
+	return e != nil && !e.IsUnset()
+}
+
+// upstreamPick reports whether an upstream names a pin. "" returns the room to
+// the provider's own choice, so it is not a pick.
+func upstreamPick(u *string) bool {
+	return u != nil && strings.TrimSpace(*u) != ""
+}
+
+// agentPickFields names the provider picks an agent room cannot take, in the
+// order the owner reads them. A provider room refuses none.
+func agentPickFields(agent bool, effort *enum.Effort, upstream *string) []string {
+	var what []string
+	if agent && effortPick(effort) {
+		what = append(what, "effort")
+	}
+	if agent && upstreamPick(upstream) {
+		what = append(what, "upstream")
+	}
+	return what
+}
+
+// agentPickMessage is the sentence a refused pick and a dropped pick share.
+func agentPickMessage(what []string) string {
+	return "this room runs an agent, which takes no " + strings.Join(what, " or ") + " pick"
+}
+
+// AgentPickRefusal refuses an effort or upstream pick that would land on an
+// agent room: the agent takes neither, so the pick would sit in the record where
+// no turn reads it. Every write path that can carry a pick asks here, before it
+// stores anything. The unset markers pass, because they store nothing an agent
+// room lacks.
+func AgentPickRefusal(agent bool, effort *enum.Effort, upstream *string) error {
+	what := agentPickFields(agent, effort, upstream)
+	if len(what) == 0 {
+		return nil
+	}
+	return apperror.New(400, agentPickMessage(what)+": effort and upstream are settings of a provider room", nil)
 }
 
 // userReason is the public half of an app error — what a notice may say without

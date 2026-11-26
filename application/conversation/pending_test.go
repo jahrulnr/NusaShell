@@ -184,6 +184,85 @@ func TestPendingModelWaitsForTheNextTurn(t *testing.T) {
 	}
 }
 
+// A model picked while the room is busy parks generation N. The owner then picks
+// another model while the room is idle: that pick is the room's value now. The
+// parked generation must not be applied over it, or the next turn would run the
+// older model and the idle pick would look like it changed nothing.
+func TestIdlePickSupersedesTheParkedGeneration(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_sup", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	release := busyTurn(t, app, rt, "c_sup")
+	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_sup", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "stale-model"}})
+	})
+	if err != nil || !parked {
+		t.Fatalf("busy pick = parked %v, %v", parked, err)
+	}
+	release()
+	waitIdle(t, app, "c_sup")
+
+	// Idle now: the explicit pick must land on the record immediately.
+	parked, err = app.Annotate(ctx, "c_sup", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parked {
+		t.Fatal("an idle pick is the room's value now — nothing may park it")
+	}
+	if info, err := app.deps.Convs.Info(ctx, "c_sup"); err != nil || info.ModelID != "swe-2-1" {
+		t.Fatalf("record model = %v, %v — the idle pick must apply at once", info, err)
+	}
+
+	// The next turn must run the explicit pick, not the parked generation —
+	// and the pending file must not survive to fail a later turn with a model
+	// the agent no longer offers.
+	if _, err := app.Send(ctx, "c_sup", "", "", "again", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	prompts := rt.Prompts()
+	if got := prompts[len(prompts)-1].Model; got != "swe-2-1" {
+		t.Fatalf("the next turn ran model %q, want the explicit idle pick swe-2-1 — the stale parked generation won", got)
+	}
+	if _, ok, _ := app.Pending(ctx, "c_sup"); ok {
+		t.Fatal("the superseded generation survived — a stale pick can still fold over a newer one later")
+	}
+}
+
+// Coverage is exact: an idle RUNTIME pick supersedes only the runtime fields.
+// A session option parked while the room was busy is not covered by it and
+// must stay parked — dropping it silently would kill the notice channel that
+// is the only way the owner ever hears about it.
+func TestIdleRuntimePickLeavesParkedOptionsAlone(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_cov", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	release := busyTurn(t, app, rt, "c_cov")
+	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.SetAgentOption(ctx, "c_cov", "mode", "ask")
+	})
+	if err != nil || !parked {
+		t.Fatalf("option pick = parked %v, %v", parked, err)
+	}
+	release()
+	waitIdle(t, app, "c_cov")
+
+	if _, err := app.Annotate(ctx, "c_cov", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	sel, ok, err := app.Pending(ctx, "c_cov")
+	if err != nil || !ok || sel.Options["mode"] != "ask" {
+		t.Fatalf("pending = %+v, %v, %v — the parked option is not the runtime pick's business and must survive it", sel, ok, err)
+	}
+	if sel.AgentModel == "swe-2-1" || sel.AgentModel != "" {
+		t.Fatalf("the runtime fields must be superseded, not re-parked: %+v", sel)
+	}
+}
+
 // A session option picked while a turn runs waits the same way, and the turn
 // after it starts the session on it. Two picks before that turn: the last wins.
 func TestPendingOptionWaitsForTheNextTurn(t *testing.T) {
@@ -455,9 +534,11 @@ func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the consuming turn never reached the agent")
 	}
-	// A new pick, taken while that turn runs: another generation, and visible.
+	// A new pick, taken while that turn runs: another generation, and visible. It
+	// is a session option — an agent room takes no effort, so an effort here is
+	// refused rather than parked.
 	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
-		return app.Annotate(ctx, "c_gen", Annotation{Effort: effortOf(enum.EffortMax)})
+		return app.SetAgentOption(ctx, "c_gen", "mode", "build")
 	})
 	if err != nil || !parked {
 		t.Fatalf("second park = %v, %v", parked, err)
@@ -466,7 +547,7 @@ func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("a pick parked during the turn is not visible: %v, %v", ok, err)
 	}
-	if sel.Effort == nil || sel.Effort.String() != "max" {
+	if sel.Options["mode"] != "build" {
 		t.Fatalf("pending = %+v, want the new generation", sel)
 	}
 	close(free)
@@ -488,7 +569,7 @@ func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
 	if err != nil || !still {
 		t.Fatalf("a newer pick was cleared by the older turn: %v, %v", still, err)
 	}
-	if after.Effort == nil || after.Effort.String() != "max" {
+	if after.Options["mode"] != "build" {
 		t.Fatalf("pending after the turn = %+v, want the newer generation", after)
 	}
 	// The surviving file merged the pick this turn took with the new one, so the
@@ -496,7 +577,7 @@ func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
 	if after.AgentModel != "swe-2-1" {
 		t.Fatalf("pending lost the applied pick it must re-apply: %+v", after)
 	}
-	// The next turn applies it, and only then does it go.
+	// The next turn applies both, and only then do they go.
 	if _, err := app.Send(ctx, "c_gen", "", "", "again", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -504,13 +585,13 @@ func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Effort != "max" || info.ModelID != "swe-2-1" {
-		t.Fatalf("record = effort %q model %q, want both picks the surviving file carried", info.Effort, info.ModelID)
+	if info.ModelID != "swe-2-1" {
+		t.Fatalf("record model = %q, want the surviving file's model", info.ModelID)
+	}
+	if mode, _ := info.AgentOptions.Value("mode"); mode != "build" {
+		t.Fatalf("record mode = %q, want the new generation applied", mode)
 	}
 	if _, ok, _ := app.Pending(ctx, "c_gen"); ok {
 		t.Fatal("the applied pick was not cleared")
 	}
 }
-
-// effortOf answers a pointer to one effort, for an annotation field.
-func effortOf(e enum.Effort) *enum.Effort { return &e }

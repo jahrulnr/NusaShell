@@ -210,6 +210,15 @@ room takes the same path to `job.Send`, then branches to `runAgentTurn`
 (`application/job/agent.go`) and the `AgentRuntime` port, implemented
 over ACP in `infrastructure/service/agent/`.
 
+The client surface advertised to agents is narrow and enforced, not just
+declared: `fs` reads are confined to the session's workspace folders and
+size-capped, `fs` writes are confined the same way and additionally routed
+through the owner's approval (a room with no answerable surface refuses
+the write), and `terminal/wait_for_exit` is capped at **15 minutes** —
+a timed-out wait kills the process tree and releases the terminal, so a
+child that never exits cannot hang the turn. Agents running longer
+commands are expected to poll `terminal/output` instead of waiting.
+
 ### 1. Delivery: input becomes a submission
 
 The WebUI sends a `turn.send` command over the WebSocket

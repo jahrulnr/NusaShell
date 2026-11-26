@@ -23,9 +23,16 @@ var keyPattern = regexp.MustCompile(`(?i)(api[-_]?key|access[-_]?token|auth[-_]?
 
 // valuePatterns mask secrets hiding in otherwise-innocent string fields —
 // token shapes, auth header values, PEM blocks.
-var valuePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)bearer\s+\S+`),                                           // Authorization: Bearer
-	regexp.MustCompile(`(?i)\bbasic\s+[A-Za-z0-9+/=]{8,}`),                           // Authorization: Basic <user:pass>
+// authHeaderPatterns mask Authorization-style headers. They stay out of
+// credentialShapes because they match legitimate placeholders — "Bearer $TOKEN"
+// in an example is documentation, not a secret.
+var authHeaderPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)bearer\s+\S+`),                 // Authorization: Bearer
+	regexp.MustCompile(`(?i)\bbasic\s+[A-Za-z0-9+/=]{8,}`), // Authorization: Basic <user:pass>
+}
+
+// credentialShapes mask secret value shapes wherever they appear.
+var credentialShapes = []*regexp.Regexp{
 	regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`),                              // AWS access key ids
 	regexp.MustCompile(`\bglpat-[A-Za-z0-9\-_]{20,}`),                                // GitLab personal access tokens
 	regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`),                                    // npm access tokens
@@ -40,6 +47,22 @@ var valuePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bya29\.[A-Za-z0-9_-]{10,}`),                                 // Google OAuth access tokens
 	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`), // JWTs
 	regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`),
+}
+
+var valuePatterns = append(authHeaderPatterns, credentialShapes...)
+
+// CredentialShaped reports whether s carries a credential-shaped value: a token
+// shape or a PEM block. The Authorization header patterns stay out on purpose:
+// bearer and basic match legitimate placeholders such as "Bearer $TOKEN" in
+// example text, so adding them here would refuse skills that merely document a
+// header — do not "complete" this set with them.
+func CredentialShaped(s string) bool {
+	for _, p := range credentialShapes {
+		if p.MatchString(s) {
+			return true
+		}
+	}
+	return false
 }
 
 // Value deep-scrubs a JSON-shaped value (map[string]any, []any, string,

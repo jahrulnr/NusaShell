@@ -15,7 +15,9 @@ import (
 	"syscall"
 
 	"github.com/goccy/go-yaml"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
 // skillFileCap bounds one SKILL.md — a skill is prompt prose, so a file
@@ -52,20 +54,32 @@ func readSkillFile(path string) ([]byte, error) {
 	return raw, nil
 }
 
-type Local struct{ home, builtin string }
+type Local struct{ home, nusashell, builtin string }
 
-func NewLocal(home, builtin string) drepo.Skills { return &Local{home: home, builtin: builtin} }
+// NewLocal discovers skills across the roots in precedence order: builtin,
+// nusashell — the learned skills, empty while the feature is unwired — global,
+// workspace. It also implements the writer port for the nusashell root: the
+// same type reads and writes the format so the two cannot drift apart.
+func NewLocal(home, nusashell, builtin string) *Local {
+	return &Local{home: home, nusashell: nusashell, builtin: builtin}
+}
 
 func (s *Local) List(ctx context.Context, workspace string) (drepo.SkillCatalog, error) {
 	catalog := drepo.SkillCatalog{Skills: []drepo.Skill{}}
 	byName := map[string]drepo.Skill{}
-	// Later roots replace earlier entries by declared name.
-	roots := []struct{ path, source string }{{s.builtin, "builtin"}}
+	// Later roots replace earlier entries by declared name. The sources are
+	// the enum values themselves: decide compares catalog rows against
+	// enum.SkillRoot, and a literal drifting from it would fail closed
+	// forever with no compile-time signal.
+	roots := []struct{ path, source string }{{s.builtin, string(enum.SkillRootBuiltin)}}
+	if s.nusashell != "" {
+		roots = append(roots, struct{ path, source string }{s.nusashell, string(enum.SkillRootNusashell)})
+	}
 	if s.home != "" {
-		roots = append(roots, struct{ path, source string }{filepath.Join(s.home, ".agents", "skills"), "global"})
+		roots = append(roots, struct{ path, source string }{filepath.Join(s.home, ".agents", "skills"), string(enum.SkillRootGlobal)})
 	}
 	if workspace != "" {
-		roots = append(roots, struct{ path, source string }{filepath.Join(workspace, ".agents", "skills"), "workspace"})
+		roots = append(roots, struct{ path, source string }{filepath.Join(workspace, ".agents", "skills"), string(enum.SkillRootWorkspace)})
 	}
 	for _, root := range roots {
 		if err := ctx.Err(); err != nil {
@@ -113,7 +127,7 @@ func (s *Local) List(ctx context.Context, workspace string) (drepo.SkillCatalog,
 				continue
 			}
 			seen[name] = true
-			byName[name] = drepo.Skill{Name: name, Description: description, Path: path, Source: root.source}
+			byName[name] = drepo.Skill{Name: name, Description: description, Path: path, Source: root.source, Digest: valueobject.SkillDigest(string(raw))}
 		}
 	}
 	for _, skill := range byName {

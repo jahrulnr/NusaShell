@@ -35,6 +35,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/project"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/provider"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/setting"
+	httpskill "github.com/jahrulnr/nusashell/infrastructure/delivery/http/skill"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/system"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/tool"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/update"
@@ -62,6 +63,9 @@ type Deps struct {
 	// Memories lets the owner review and edit memory; nil leaves the
 	// routes unregistered.
 	Memories httpmemory.Service
+	// Skills serves the Skills page: the joined catalog and the owner's
+	// level moves. Nil fields leave the routes unregistered.
+	Skills httpskill.Deps
 	// WebSearch edits the web tools' settings; nil leaves the routes
 	// unregistered.
 	WebSearch httpwebsearch.Service
@@ -174,6 +178,7 @@ func NewHandler(d Deps) *gin.Engine {
 	agent.Register(api, d.Agents)
 	project.Register(api, d.Projects)
 	httpmemory.Register(api, d.Memories)
+	httpskill.Register(api, d.Skills)
 	httpwebsearch.Register(api, d.WebSearch)
 	httpmedia.Register(api, d.Media)
 	channel.Register(api, d.Channels)

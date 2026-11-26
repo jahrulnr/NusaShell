@@ -161,7 +161,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	if err := reposkill.InstallBuiltins(builtinDir, toolskill.Builtins()); err != nil {
 		return nil, err
 	}
-	skillStore := reposkill.NewLocal(home, builtinDir)
+	skillStore := reposkill.NewLocal(home, "", builtinDir)
 	skills, err := toolskill.NewSkillsTool(skillStore)
 	if err != nil {
 		return nil, err

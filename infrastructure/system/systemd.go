@@ -5,6 +5,7 @@ package system
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -87,6 +88,16 @@ func (s systemd) Register(spec Spec) error {
 		return err
 	}
 	unitPath := filepath.Join(dir, s.unitName(spec.Name))
+	// An update rewrites the unit wholesale, and anything the owner added by
+	// hand — a memory cap, a sandboxing line — goes with it silently. Say what
+	// is about to be lost, and where it belongs: a drop-in survives every
+	// install, so the owner keeps the line without keeping a private edit.
+	if prev, err := os.ReadFile(unitPath); err == nil {
+		if lost := extraUnitLines(string(prev), text); len(lost) > 0 {
+			log.Printf("nusashell: %s carries lines this installer does not write and will remove:\n  %s\n  move them to %s/50-local.conf to keep them",
+				unitPath, strings.Join(lost, "\n  "), filepath.Join(dir, s.unitName(spec.Name)+".d"))
+		}
+	}
 	if err := writeFileAtomic(unitPath, []byte(text), 0o644); err != nil {
 		return err
 	}
@@ -424,4 +435,24 @@ func writeFileAtomic(path string, raw []byte, mode os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmpName, path)
+}
+
+// extraUnitLines answers the lines the installed unit carries and the rendered
+// one does not: the owner's own edits, which a rewrite would drop. Blank lines
+// and comments are theirs too, but they cost nothing when lost and would bury
+// the ones that matter — the directives are what this reports.
+func extraUnitLines(existing, rendered string) []string {
+	kept := map[string]bool{}
+	for _, line := range strings.Split(rendered, "\n") {
+		kept[strings.TrimSpace(line)] = true
+	}
+	var extra []string
+	for _, line := range strings.Split(existing, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || kept[trimmed] {
+			continue
+		}
+		extra = append(extra, trimmed)
+	}
+	return extra
 }

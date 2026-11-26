@@ -40,10 +40,15 @@ export function Button({ children, onClick, kind = 'default', class: cls = '', d
 // side is clearly better (lib/placement.js), and it is capped at the room on the
 // side it took, so a tall panel never runs off the screen. The side and the cap
 // are measured after every render while open, because the content and the
-// anchor move without the panel's props changing. The panel is the one scroll
-// owner: its parts do not scroll themselves, and what must stay reachable is
-// sticky.
-export function Popover({ open, onClose, children, class: cls = '', placement = 'top-start', label }) {
+// anchor move without the panel's props changing.
+// scroll names the scroll owner. "panel" — the default, for short menus — is
+// the panel itself: everything inside scrolls as one block. "list" is for a
+// panel with a fixed header or footer around a long list: the panel is a
+// column that does not scroll, and the caller's list area is the one scroll
+// owner (flex-1 min-h-0 overflow-y-auto), so the header and footer never
+// leave the frame.
+export function Popover({ open, onClose, children, class: cls = '', placement = 'top-start', label, scroll = 'panel' }) {
+  if (scroll !== 'panel' && scroll !== 'list') throw new Error(`scroll must be "panel" or "list", got ${JSON.stringify(scroll)}`);
   const ref = useRef();
   const [fit, setFit] = useState(null); // { side, room } beside the wrapper, null on a bottom sheet
   const [prefer, align] = placement.split('-');
@@ -90,7 +95,8 @@ export function Popover({ open, onClose, children, class: cls = '', placement = 
   return html`
     <div class="fixed inset-0 z-40 bg-black/40 sm:hidden" aria-hidden="true" onClick=${onClose}></div>
     <div ref=${ref} role="dialog" aria-label=${label} style=${fit ? { maxHeight: fit.room + 'px' } : undefined}
-      class=${cx('z-50 bg-raised border border-line rounded-xl shadow-pop text-[13px] overflow-auto',
+      class=${cx('z-50 bg-raised border border-line rounded-xl shadow-pop text-[13px]',
+        scroll === 'list' ? 'flex flex-col overflow-hidden' : 'overflow-auto',
         'fixed inset-x-2 bottom-2 max-h-[75dvh] sm:absolute sm:inset-x-auto sm:bottom-auto', pos, cls)}>
       ${children}
     </div>`;
@@ -243,7 +249,19 @@ export function ErrorBlock({ title = 'Something went wrong', message, onRetry, c
 
 export function Toasts() {
   const s = useStore();
-  return html`<div class="fixed z-[60] bottom-4 right-4 left-4 sm:left-auto flex flex-col gap-2 items-end pointer-events-none" aria-live="polite">
+  // Toasts hang from under the header, not over the composer: a toast there
+  // covered the very control whose request had failed.
+  // A transient notice must never cover a control the owner can press. No position
+  // guarantees that, because the layout differs on every page; the count does.
+  // So at most one toast is on screen: store.js toast replaces the one showing,
+  // and a second one stacked under the first covered a button on Settings at 390px.
+  // An action toast (Undo) is the one a notice never replaces: store.js holds the
+  // notice until the action is used or its time runs out.
+  // The nav drawer and a toast both sit at the top left, and a toast under the open
+  // drawer covers its links (Settings: all of it at 390px). So while the drawer is
+  // open nothing is on screen: store.js holds the toast that was shown, with the time
+  // it had left, and what arrives waits for the drawer to close.
+  return html`<div class="fixed z-[60] top-14 right-4 left-4 sm:left-auto flex flex-col gap-2 items-end pointer-events-none" aria-live="polite">
     ${s.toasts.map((t) => html`<div key=${t.id} role=${t.kind === 'error' ? 'alert' : 'status'}
       class=${cx('pointer-events-auto max-w-sm w-full sm:w-auto flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-[13px] shadow-pop bg-raised',
         t.kind === 'error' ? 'border-bad/40' : t.kind === 'warning' ? 'border-warn/40' : 'border-line')}>

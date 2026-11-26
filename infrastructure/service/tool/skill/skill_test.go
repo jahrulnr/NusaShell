@@ -75,7 +75,7 @@ func TestBuiltinCatalogAndReadThroughTools(t *testing.T) {
 	if err := reposkill.InstallBuiltins(builtin, Builtins()); err != nil {
 		t.Fatal(err)
 	}
-	store := reposkill.NewLocal(t.TempDir(), builtin)
+	store := reposkill.NewLocal(t.TempDir(), "", builtin)
 	catalogTool, err := NewSkillsTool(store)
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestReadSkillBindsWorkspaceAndValidatesInput(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("---\nname: local\ndescription: Local only\n---\nworkspace body"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	tool, _ := NewReadSkillTool(reposkill.NewLocal(home, ""))
+	tool, _ := NewReadSkillTool(reposkill.NewLocal(home, "", ""))
 	ctx := dservice.WithWorkspaceDir(t.Context(), workspace)
 	call, _ := entity.NewToolCall("read_1", "read_skill", `{"name":"local"}`, enum.TooltypeOrigin)
 	res, err := tool.Execute(ctx, call, nil)

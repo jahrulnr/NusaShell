@@ -65,7 +65,7 @@ func turnRoom(t *testing.T, origin string, reply entity.Message) *aggregate.Conv
 
 func TestObserveLogsOneLineInTheFixedOrder(t *testing.T) {
 	conv := turnRoom(t, "web", finalReply(t, "a3", "done"))
-	w, _ := TurnWindow(conv)
+	w, _ := TurnWindow(conv.Messages())
 	var buf bytes.Buffer
 	NewObserver(&loadOnly{conv: conv}, NewEvidence(), redact.String, logTo(&buf)).Observe("room", "send", webTurn, nil)
 	got := elapsedField.ReplaceAllString(strings.TrimSpace(buf.String()), "elapsed_ms=N")

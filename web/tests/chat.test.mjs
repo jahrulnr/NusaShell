@@ -3,7 +3,7 @@
 import { calls, mockApi, sleep, sockets, fireEvent } from './env.mjs';
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { emitCount, state } from '../lib/store.js';
+import { dismissToast, emitCount, state } from '../lib/store.js';
 import * as chat from '../lib/chat.js';
 import { queuedFor, queuedNote } from '../lib/queued.js';
 import { historyItems, liveHistory, liveSegments } from '../lib/turn.js';
@@ -463,12 +463,14 @@ test('a notice from the agent shows as a toast of its severity', async () => {
   opened(sentTurns().at(-1), 'c_n', 't7');
   await sleep(10);
   const notice = (seq, payload) => ws.serve({ type: 'turn.notice', conversationId: 'c_n', turnId: 't7', seq, payload });
+  // One notice is on screen at a time: each new one replaces the one showing.
+  const shown = () => state.toasts.map((t) => [t.kind, t.message]);
   notice(1, { severity: 'warning', title: 'Heads up', text: 'The agent is slow.' });
+  assert.deepEqual(shown(), [['warning', 'Heads up: The agent is slow.']]);
   notice(2, { severity: 'info', text: 'Compacting.' });
+  assert.deepEqual(shown(), [['info', 'Compacting.']], 'the newer notice replaces the one showing');
   notice(3, { severity: 'error', title: 'Broken', text: 'Something failed.' });
-  assert.deepEqual(state.toasts.map((t) => [t.kind, t.message]), [
-    ['warning', 'Heads up: The agent is slow.'], ['info', 'Compacting.'], ['error', 'Broken: Something failed.'],
-  ]);
+  assert.deepEqual(shown(), [['error', 'Broken: Something failed.']]);
 });
 
 test('a room with no agent report yet has no meter to show', async () => {
@@ -1175,8 +1177,10 @@ test('a side chat opens the new-thread composer on the origin runtime, project, 
   assert.equal(state.newProjectId, 'p_1');
   assert.deepEqual(home.sideOf, { id: 'c_side', title: 'Plan [v2]' });
   assert.equal(sentTurns().filter((c) => c.payload?.content?.includes('the bit')).length, 0, 'nothing runs until the owner sends');
-  // The replaced draft comes back with Undo.
-  state.toasts.at(-1).action.run();
+  // The replaced draft comes back with Undo. Its button takes the toast down first.
+  const undo = state.toasts.at(-1);
+  dismissToast(undo.id);
+  undo.action.run();
   assert.equal(home.draft, 'unsent');
   assert.deepEqual(home.quotes, []);
   assert.equal(home.sideOf, null);

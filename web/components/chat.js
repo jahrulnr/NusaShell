@@ -1,7 +1,7 @@
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, state, emit, toast } from '../lib/store.js';
 import { room, freshRoom, rename, removeRoom, runCommand, isBusy, openRoom, navigate, annotateRoom, watching } from '../lib/chat.js';
-import { useCommands, commandBusyLabel } from '../lib/commands.js';
+import { useCommands } from '../lib/commands.js';
 import { Icon, Logo } from './icons.js';
 import { Popover, IconButton, Dialog, Button, ErrorBlock, Spinner } from './ui.js';
 import { Transcript, RoomLine } from './transcript.js';
@@ -17,7 +17,7 @@ export function MenuButton() {
   return html`<${IconButton} icon="sidebar" label="Open sidebar" class="md:hidden" onClick=${() => { state.sidebarOpen = true; emit(); }} />`;
 }
 
-function Header({ room: r, browser, pane, setPane }) {
+export function Header({ room: r, browser, pane, setPane }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -61,7 +61,6 @@ function Header({ room: r, browser, pane, setPane }) {
         <${Icon} name="folder" size=${14} /><span class="truncate max-w-56">${ws.split('/').pop()}</span>
       </span>`}
     </div>
-    ${r.command && html`<span class="flex items-center gap-1.5 text-xs text-muted"><${Spinner} size=${12} /> ${commandBusyLabel(r.command.name)}</span>`}
     ${!editing && html`<${BrowserButton} browser=${browser} />
     <${PaneButtons} pane=${pane} setPane=${setPane} />
     <${LinksButton} room=${r} />`}
