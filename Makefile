@@ -53,6 +53,7 @@ check: artifacts fmt-check lint-go check-web
 	GOOS=darwin go build ./...
 
 fmt-check:
+	gofmt -w $$(go list -f '{{.Dir}}' ./... | grep -v /vendor/)
 	@files=$$(gofmt -l $$(go list -f '{{.Dir}}' ./... | grep -v /vendor/)); \
 	if [ -n "$$files" ]; then echo "$$files"; exit 1; fi
 

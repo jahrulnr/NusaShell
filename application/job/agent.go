@@ -226,7 +226,7 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 // followUpMessage answers the line a follow-up writes, nil when everything the
 // turn could not deliver already has one. Only inputs without a record join it —
 // a relayed prompt is never written twice.
-func followUpMessage(claimed, plain []steeringEntry) (*entity.Message, error) {
+func followUpMessage(_, plain []steeringEntry) (*entity.Message, error) {
 	if len(plain) == 0 {
 		return nil, nil
 	}

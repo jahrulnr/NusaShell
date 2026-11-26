@@ -99,7 +99,8 @@ func RenderCompletions(list []dservice.Completion) string {
 	for _, c := range list {
 		b.WriteString(fmt.Sprintf("- %s %s: %s", c.Source, c.ID, c.Status))
 		if detail := strings.TrimSpace(c.Detail); detail != "" {
-			b.WriteString(" — " + detail)
+			b.WriteString(" — ")
+			b.WriteString(detail)
 		}
 		b.WriteString("\n")
 	}

@@ -31,7 +31,7 @@ func (s *selectionSpy) Send(_ context.Context, conv *aggregate.Conversation, _ *
 }
 
 // send runs one user turn on room through the Send job.
-func send(t *testing.T, d Deps, spy *selectionSpy, opts SendOptions) error {
+func send(t *testing.T, d Deps, _ *selectionSpy, opts SendOptions) error {
 	t.Helper()
 	j := &Send{Deps: d, Ctx: t.Context(), Receipt: NewPersistenceReceipt(), ProviderID: "gw1", ModelID: "m1", Message: "hi", Opts: opts}
 	j.Result = make(chan error, 1)
