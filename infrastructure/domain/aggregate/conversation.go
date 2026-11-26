@@ -195,6 +195,24 @@ func (c *Conversation) CanManualCompact(keepTail int) bool {
 // session that gets this record's recap instead. A rewrite the repository
 // does on a sealed segment follows the same rule through ForgetAgentSession.
 func (c *Conversation) RewriteFrom(msgID, content string) error {
+	i, err := c.editTarget(msgID)
+	if err != nil {
+		return err
+	}
+	c.messages[i].SetContent(content)
+	dropped := c.messages[i+1:]
+	c.messages = c.messages[:i+1]
+	// Dead region still aliases the backing array — zero it or every
+	// edited-away message stays reachable for the room's lifetime.
+	clear(dropped)
+	c.ForgetAgentSession()
+	return nil
+}
+
+// editTarget finds the message a rewrite replaces: the user line with that id,
+// when the aggregate holds it and it is the owner's own words. RewriteFrom and
+// EditCapture both decide through it, so they cannot disagree.
+func (c *Conversation) editTarget(msgID string) (int, error) {
 	for i := range c.messages {
 		if c.messages[i].ID() != msgID {
 			continue
@@ -203,18 +221,24 @@ func (c *Conversation) RewriteFrom(msgID, content string) error {
 			// Synthetic user-role messages (compaction checkpoints) are
 			// not the user's words — editing one would rewrite a system
 			// artifact as if the user had said it.
-			return ErrNotUserMessage
+			return 0, ErrNotUserMessage
 		}
-		c.messages[i].SetContent(content)
-		dropped := c.messages[i+1:]
-		c.messages = c.messages[:i+1]
-		// Dead region still aliases the backing array — zero it or every
-		// edited-away message stays reachable for the room's lifetime.
-		clear(dropped)
-		c.ForgetAgentSession()
-		return nil
+		return i, nil
 	}
-	return ErrMessageNotFound
+	return 0, ErrMessageNotFound
+}
+
+// EditCapture reads what RewriteFrom would replace and drop: the target's
+// current text and a copy of every message after it. It changes nothing, and ok
+// is false wherever RewriteFrom would refuse. The copy is a shallow clone, which
+// is enough: RewriteFrom clears its own backing array, so the returned slice is
+// the only remaining reference to the dropped messages.
+func (c *Conversation) EditCapture(msgID string) (previous string, tail []entity.Message, ok bool) {
+	i, err := c.editTarget(msgID)
+	if err != nil {
+		return "", nil, false
+	}
+	return c.messages[i].Content(), slices.Clone(c.messages[i+1:]), true
 }
 
 // ClearHistory empties the room's dialogue while keeping its identity: the

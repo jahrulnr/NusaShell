@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	repository "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
@@ -107,6 +109,11 @@ type SendOptions struct {
 	// it. The job records it on the user message; the head is rendered from it
 	// at request time, never stored.
 	Relay *valueobject.Relay
+	// AcceptedRecord is the user line the accepting path already wrote for this
+	// prompt. The job uses it — appends it to its own view if needed, marks the
+	// receipt — instead of writing a second line for the same words. A record
+	// that is not in the store is a failure, never a reason to write another.
+	AcceptedRecord *entity.Message
 	// References are the selections the owner made in the message text.
 	References []valueobject.Reference
 	// Annotations are the marks the owner made on the live page; their
@@ -130,6 +137,9 @@ type SendOptions struct {
 // stops asking for tools or the step cap is hit. Ctx is the caller's —
 // a queued send abandons itself via it; Interrupt cancels the run.
 type Send struct {
+	// agentRoom is the runtime the turn ran on, read when the room loads: the
+	// rescue needs it after the turn, when the aggregate is out of scope.
+	agentRoom bool
 	Base
 	Deps    Deps
 	Ctx     context.Context
@@ -154,15 +164,35 @@ func (j *Send) mailbox() *SteeringInput {
 	return &j.steers
 }
 
+// rescueFailed says out loud that a line the room accepted will not be delivered
+// by this turn. The room, not the words: a log is not a transcript.
+func (j *Send) rescueFailed(step, msgID string, err error) {
+	if j.Deps.Log == nil {
+		return
+	}
+	j.Deps.Log.Warn("relay rescue failed", "conversation", j.ConvID(), "message", msgID, "step", step, "error", err)
+}
+
 // rescueSteers writes the line a relayed prompt would have got from the fold,
 // for every relayed input this turn did not consume. An owner's steer keeps the
 // established rule — the caller decides what an unfired steer becomes — because
 // only a relay carries a record the receiving room did not type.
 func (j *Send) rescueSteers() {
 	for _, e := range j.mailbox().drainPending() {
-		if e.input.Relay == nil || e.record != nil {
-			// No relay, or the room already wrote its line at accept: history is
-			// the persistence, and a second one is the bug.
+		if e.input.Relay == nil {
+			continue
+		}
+		if e.record != nil {
+			// The line exists. A provider turn reads it from history on its next
+			// model call; an agent session never reads that history, so the text
+			// is delivered to a following turn — carrying this very line, never a
+			// second one. One attempt: the follow-up job carries the record, so
+			// its own rescue stays out of the loop.
+			if j.agentRoom && j.Deps.FollowUp != nil && j.Opts.AcceptedRecord == nil {
+				if err := j.Deps.FollowUp(j.ConvID(), *e.record); err != nil {
+					j.rescueFailed("follow-up", e.record.ID(), err)
+				}
+			}
 			continue
 		}
 		msg, err := entity.NewUserMessage(e.input)
@@ -171,7 +201,9 @@ func (j *Send) rescueSteers() {
 		}
 		msg.SetUserType(enum.LLMUserTypeRelay)
 		msg.SetRelay(*e.input.Relay)
-		_, _ = j.Deps.Convs.AppendMessage(context.WithoutCancel(j.Ctx), j.ConvID(), msg)
+		if _, err := j.Deps.Convs.AppendMessage(context.WithoutCancel(j.Ctx), j.ConvID(), msg); err != nil {
+			j.rescueFailed("record", msg.ID(), err)
+		}
 	}
 }
 
@@ -291,6 +323,7 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 			}
 		}
 		agentRoom := conv.Runtime() == enum.RuntimeAgent
+		j.agentRoom = agentRoom
 		if agentRoom && conv.Environment() != enum.EnvironmentLocal {
 			return apperror.New(400, "agents run only in the local environment", nil)
 		}
@@ -355,26 +388,44 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		// File tools reach the project's other folders by absolute path.
 		ctx = dservice.WithExtraFolders(ctx, extra)
 
-		user, err := entity.NewUserMessage(valueobject.UserInput{
-			Text:        j.Message,
-			References:  j.Opts.References,
-			Attachments: j.Attachments,
-			Annotations: j.Opts.Annotations,
-			Recording:   j.Opts.Recording,
-		})
-		if err != nil {
-			return apperror.New(400, "invalid references", err)
+		var user entity.Message
+		if j.Opts.AcceptedRecord != nil {
+			// The accepting path wrote this line before it answered the sender.
+			// Using it is what makes a queued acceptance a promise the store
+			// already keeps — and it must be there: a record that is not stored
+			// is a broken acceptance, not a reason to write a second line.
+			record := *j.Opts.AcceptedRecord
+			if !storedMessage(ctx, d.Convs, convID, record) {
+				return apperror.New(500, "accepted relay record is not in the store",
+					fmt.Errorf("message %s", record.ID()))
+			}
+			user = record
+			j.Opts.Relay = nil
+		} else {
+			var err error
+			user, err = entity.NewUserMessage(valueobject.UserInput{
+				Text:        j.Message,
+				References:  j.Opts.References,
+				Attachments: j.Attachments,
+				Annotations: j.Opts.Annotations,
+				Recording:   j.Opts.Recording,
+			})
+			if err != nil {
+				return apperror.New(400, "invalid references", err)
+			}
 		}
 		// A prompt another thread handed over carries its own relay head; the
 		// owner cannot rewrite that room's words from here, so the provenance
 		// says so and the message stays non-editable in the target.
-		if j.Opts.SystemPayload {
-			user.SetUserType(enum.LLMUserTypeSystem)
-		}
-		if origin, ok := j.Opts.Origin.Normalized(); ok && origin.Kind == enum.TurnOriginConversation {
-			user.SetUserType(enum.LLMUserTypeRelay)
-			if j.Opts.Relay != nil {
-				user.SetRelay(*j.Opts.Relay)
+		if j.Opts.AcceptedRecord == nil {
+			if j.Opts.SystemPayload {
+				user.SetUserType(enum.LLMUserTypeSystem)
+			}
+			if origin, ok := j.Opts.Origin.Normalized(); ok && origin.Kind == enum.TurnOriginConversation {
+				user.SetUserType(enum.LLMUserTypeRelay)
+				if j.Opts.Relay != nil {
+					user.SetRelay(*j.Opts.Relay)
+				}
 			}
 		}
 		conv.Append(user)
@@ -414,6 +465,9 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 			return apperror.NewInternalError("send persistence receipt missing", nil)
 		}
 		if err := j.Receipt.appendUserMessage(func() (bool, error) {
+			if j.Opts.AcceptedRecord != nil {
+				return true, nil
+			}
 			if err := ctx.Err(); err != nil {
 				return false, apperror.New(408, "send canceled", err)
 			}
@@ -466,4 +520,19 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		return nil
 	}()
 	return err
+}
+
+// storedMessage reports whether the line an acceptance wrote is in the room's
+// history — read from the store, never assumed.
+func storedMessage(ctx context.Context, convs repository.Conversation, convID string, rec entity.Message) bool {
+	conv, err := convs.Load(ctx, convID)
+	if err != nil {
+		return false
+	}
+	for _, m := range conv.Messages() {
+		if m.ID() == rec.ID() {
+			return true
+		}
+	}
+	return false
 }

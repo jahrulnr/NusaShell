@@ -26,6 +26,7 @@ type Config struct {
 	Media         MediaConfig         `json:"media"`
 	Notifications NotificationsConfig `json:"notifications"`
 	Memory        MemoryConfig        `json:"memory"`
+	Skills        SkillsConfig        `json:"skills"`
 	WebSearch     WebSearchConfig     `json:"websearch"`
 	Browser       BrowserConfig       `json:"browser"`
 	Symbols       SymbolsConfig       `json:"symbols"`
@@ -46,6 +47,7 @@ func (c *Config) Normalize() {
 	c.Media.Normalize()
 	c.Notifications.Normalize()
 	c.Memory.Normalize()
+	c.Skills.Normalize()
 	c.WebSearch.Normalize()
 	c.Browser.Normalize()
 	c.Symbols.Normalize()
@@ -140,6 +142,9 @@ func validate(raw []byte, strict bool) (Config, error) {
 		return Config{}, apperror.NewInternalError("config load failed", err)
 	}
 	if err := fresh.Memory.validate(); err != nil {
+		return Config{}, apperror.NewInternalError("config load failed", err)
+	}
+	if err := fresh.Skills.validate(); err != nil {
 		return Config{}, apperror.NewInternalError("config load failed", err)
 	}
 	if err := fresh.WebSearch.validate(); err != nil {

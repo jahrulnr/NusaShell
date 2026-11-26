@@ -99,7 +99,7 @@ export function ProjectDialog({ project, onClose }) {
         </div>`}
         ${browsing
           ? html`<div class="rounded-lg border border-line bg-panel">
-              <${FolderBrowser} start=${folders[folders.length - 1] || ''} title="Add a folder" pickLabel="Add folder"
+              <${FolderBrowser} scroll="list" start=${folders[folders.length - 1] || ''} title="Add a folder" pickLabel="Add folder"
                 onPick=${(p) => { setFolders((fs) => (fs.includes(p) ? fs : [...fs, p])); setBrowsing(false); }} onCancel=${() => setBrowsing(false)} />
             </div>`
           : html`<div><${Button} onClick=${() => setBrowsing(true)}><${Icon} name="plus" size=${14} /> Add folder</${Button}></div>`}

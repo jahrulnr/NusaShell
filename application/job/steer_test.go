@@ -3,7 +3,9 @@ package job
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -535,5 +537,58 @@ func TestSteeringBeforeHookRunsBeforeDelivery(t *testing.T) {
 	defer mu.Unlock()
 	if len(order) != 2 || order[0] != "record" || order[1] != "delivery" {
 		t.Fatalf("order = %v, want the record before delivery", order)
+	}
+}
+
+// A rescue that cannot hand the line over says so once, naming the room and the
+// record — never the words.
+func TestRescueLogsAFailedFollowUp(t *testing.T) {
+	var buf strings.Builder
+	applied := errors.New("enqueue refused")
+	s := NewSteeringInput()
+	rec, err := entity.NewUserMessage(valueobject.UserInput{Text: "verdict from PA"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "verdict from PA", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, func() *entity.Message {
+		return &rec
+	}); err != nil {
+		t.Fatal(err)
+	}
+	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return applied }}, agentRoom: true}
+	j.Opts.Steering = s
+	j.Bind("c_log", nil)
+	j.rescueSteers()
+	out := buf.String()
+	if n := strings.Count(out, "relay rescue failed"); n != 1 {
+		t.Fatalf("a failed rescue logged %d entries, want one: %s", n, out)
+	}
+	if !strings.Contains(out, "c_log") || !strings.Contains(out, rec.ID()) || !strings.Contains(out, "enqueue refused") {
+		t.Fatalf("the entry does not name the room, the record and the error: %s", out)
+	}
+	if strings.Contains(out, "verdict from PA") {
+		t.Fatalf("the log carries another room's words: %s", out)
+	}
+}
+
+// A rescue that works logs nothing: this line is for trouble, not for noise.
+func TestRescueLogsNothingWhenItSucceeds(t *testing.T) {
+	var buf strings.Builder
+	s := NewSteeringInput()
+	rec, err := entity.NewUserMessage(valueobject.UserInput{Text: "arrived"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "arrived", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, func() *entity.Message {
+		return &rec
+	}); err != nil {
+		t.Fatal(err)
+	}
+	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return nil }}, agentRoom: true}
+	j.Opts.Steering = s
+	j.Bind("c_quiet", nil)
+	j.rescueSteers()
+	if buf.Len() != 0 {
+		t.Fatalf("a working rescue logged: %s", buf.String())
 	}
 }

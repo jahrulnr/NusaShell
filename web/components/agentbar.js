@@ -6,7 +6,7 @@ import { toast, useStore } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
 import { selection, isBusy, loadAgentOptions, sessionModeName, setSessionOption, sessionOptionValue, agentOptionMap, agentChipVisible } from '../lib/chat.js';
 import { Icon } from './icons.js';
-import { Popover, Select, Spinner, Toggle } from './ui.js';
+import { Popover, Select, Spinner, Toggle, usePopoverOpen } from './ui.js';
 
 // AgentOptions shows the session's mode and other options of an agent room.
 // The list is the room's own (lib/chat.js): this control reads it, the picker
@@ -15,11 +15,12 @@ import { Popover, Select, Spinner, Toggle } from './ui.js';
 export function AgentOptions({ room: r }) {
   const sel = selection(r);
   useStore(); // the room's list is mutated in place, then announced
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState('');
   const [rules, setRules] = useState([]);
   const busyTurn = isBusy(r);
   const opts = r.agentOptions;
+  const visible = !!r.id && !!sel.agentId && agentChipVisible(opts);
+  const [open, setOpen] = usePopoverOpen(visible);
   const load = async () => {
     if (!r.id || !sel.agentId) return;
     loadAgentOptions(r);
@@ -37,7 +38,7 @@ export function AgentOptions({ room: r }) {
   // transient empty the owner can refresh. It hides only when the agent's
   // definitive answer is an empty list — nothing a click could change.
   const empty = opts.status === 'ready' && !opts.list.length;
-  if (!r.id || !sel.agentId || !agentChipVisible(opts)) return null;
+  if (!visible) return null;
   const modeName = sessionModeName(r);
   const set = async (o, value) => {
     setBusy(o.id);

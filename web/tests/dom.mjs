@@ -49,6 +49,7 @@ class Node {
     return this.parentNode.childNodes[i - 1] || null;
   }
   get ownerDocument() { return doc; }
+  get parentElement() { return this.parentNode?.nodeType === 1 ? this.parentNode : null; }
   appendChild(n) { return this.insertBefore(n, null); }
   insertBefore(n, ref) {
     if (n.parentNode) n.parentNode.removeChild(n);

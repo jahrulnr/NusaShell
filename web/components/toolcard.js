@@ -4,6 +4,7 @@
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import hljs from '/vendor/highlight/highlight.min.mjs';
 import { toolSummary, toolRoom, closeStatus, toolEnding, formatDuration, toolClock } from '../lib/turn.js';
+import { knownRoom } from '../lib/chat.js';
 import { useFollow } from '../lib/follow.js';
 import { Icon } from './icons.js';
 import { cx, Spinner } from './ui.js';
@@ -88,7 +89,7 @@ export function ToolRow({ room, item, cwd }) {
   // runner's status line when the output carries one — a row's own room prop is
   // `room`, and this is what the call named.
   const answered = closeStatus(item.output);
-  const subject = toolRoom(item.name, item.input, answered ? answered.body : item.output || '');
+  const subject = toolRoom(item.name, item.input, answered ? answered.body : item.output || '', knownRoom);
   const { verb, detail } = subject || toolSummary(item.name, item.input);
   const shell = SHELL_TOOLS.has(item.name);
   const args = parseArgs(item.input);

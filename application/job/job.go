@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -50,12 +51,25 @@ type TurnGate interface {
 	ConsumePending(convID string, acceptedAt time.Time)
 }
 
+// EditEvidence hears one owner rewrite: the message it replaced, the text that
+// message held before, and the messages the rewrite drops. The tail is a copy
+// the receiver may keep.
+type EditEvidence interface {
+	RecordEdit(convID, msgID, previous string, tail []entity.Message)
+	DiscardEdit(convID, msgID string)
+}
+
 type Deps struct {
 	// TurnSurface journals a turn no socket admitted. Nil runs it blind.
 	TurnSurface TurnSurface
 	// Completions is the pending-completion store a wake reads and clears. Nil
 	// disables wakes; the records still land on a natural turn.
 	Completions Completions
+	// FollowUp hands a line the room already wrote to a following turn: the
+	// agent's session never reads our history, so a relayed prompt an agent
+	// turn could not take must be delivered again — using the line it already
+	// has, never a second one. Nil (the CLI) drops the follow-up.
+	FollowUp func(convID string, rec entity.Message) error
 	// Turns hears a room's turn begin and end. It is what answers "is a turn
 	// running here" — the worker's own "running" is a moment too long (it
 	// clears after the job returns, while the caller already has the result).
@@ -94,9 +108,15 @@ type Deps struct {
 	// OnDeleted runs after a room is deleted, for state other use cases
 	// keep about it (chat links). Nil means nothing else to clean.
 	OnDeleted func(convID string)
+	// Log reports a job's own trouble — a rescue that could not hand a line
+	// over, say. Nil stays quiet; nothing here logs message text.
+	Log *slog.Logger
 	// OnCompacted runs after a compaction is saved, with the messages it
 	// sealed. It must not block: the turn is waiting.
 	OnCompacted func(convID string, sealed []entity.Message)
+	// EditEvidence hears each owner rewrite. Nil — skills.improvement off —
+	// means Edit captures nothing; the mode is read at boot.
+	EditEvidence EditEvidence
 	// MCPServers are the tool servers an agent gets in a room; nil means
 	// none.
 	MCPServers func(convID string) []dservice.MCPServer

@@ -15,6 +15,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
@@ -116,8 +117,16 @@ func (a *App) title(ctx context.Context, convID string) string {
 // TurnFinished notifies when a turn started from the web ends, whatever
 // opened it — send, edit, or resume. Chat and automation turns report
 // through their own paths; a stopped turn is the owner's own doing.
-func (a *App) TurnFinished(convID, _ string, external bool, err error) {
+func (a *App) TurnFinished(convID, _ string, origin valueobject.TurnOrigin, external bool, err error) {
 	if external {
+		return
+	}
+	// A machine turn the owner never asked for stays silent: a wake the
+	// server raised so a room reads its completions — or an automation
+	// firing on its schedule — is not a reply, and notifying for it is the
+	// noise that makes an owner switch notifications off, taking the real
+	// ones with them.
+	if origin.Kind == enum.TurnOriginCompletion || origin.Kind == enum.TurnOriginAutomation {
 		return
 	}
 	if err == nil {

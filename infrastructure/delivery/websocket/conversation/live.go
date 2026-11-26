@@ -69,6 +69,9 @@ func (h *Hub) Open(convID, kind string, origin valueobject.TurnOrigin) (event.Tu
 	t := &turn{
 		id: tid.String(), kind: k, origin: origin, conversationID: convID,
 		subscribed: map[*conn]struct{}{}, startedAt: time.Now(), live: newLiveDoc(),
+		// The room's worker owns the execution: cancel and steer for this
+		// turn are forwarded there, never to the bookkeeping ctx below.
+		jobOwned: true,
 	}
 	// The job owns the turn's cancellation; the journal only borrows the
 	// server's context for its own bookkeeping, so there is never a second

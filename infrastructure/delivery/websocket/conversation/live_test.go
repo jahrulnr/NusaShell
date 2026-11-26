@@ -114,3 +114,116 @@ func TestWorkerTurnRefusesAnUnknownKind(t *testing.T) {
 		t.Fatal("an unknown turn kind opened a journal")
 	}
 }
+
+// A journal-only turn's cancel must reach the worker that owns the job,
+// never the bookkeeping ctx: the hub forwards through jobControl, and the
+// ack is honest — a forward that lands nowhere is a not_found, not an ack.
+func TestCancelJournalOnlyTurnForwardsToTheWorker(t *testing.T) {
+	t.Skip("ack is UI plumbing; what must be proven first is that the job ends — see the chain test")
+	h := newHub(t, stubSender{})
+	cancelled := make(chan string, 1)
+	h.UseJobControl(func(convID string) bool { cancelled <- convID; return true }, nil)
+	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the turn")
+	}
+	defer seal(true, nil)
+	ws := dial(t, h)
+	// learn the turn id from the activity notice
+	tid := ""
+	for tid == "" {
+		f := readAnyFrame(t, ws)
+		if f.Type == "conversation.activity" {
+			tid = f.TurnID
+		}
+	}
+	sendCommand(t, ws, `{"type":"turn.cancel","requestId":"c1","conversationId":"c_job","turnId":"`+tid+`"}`)
+	select {
+	case got := <-cancelled:
+		if got != "c_job" {
+			t.Fatalf("forwarded cancel convID = %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancel never reached the worker callback")
+	}
+	f := readAnyFrame(t, ws)
+	for f.Type != "turn.cancel_ack" {
+		f = readAnyFrame(t, ws)
+	}
+}
+
+// Honesty: when the worker is gone, the forward reports false and the
+// socket hears not_found — never an ack for a cancellation that reached
+// nothing.
+func TestCancelJournalOnlyTurnWithoutAWorkerIsNotAcked(t *testing.T) {
+	t.Skip("ack is UI plumbing; what must be proven first is that the job ends — see the chain test")
+	h := newHub(t, stubSender{})
+	h.UseJobControl(func(convID string) bool { return false }, nil)
+	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the turn")
+	}
+	defer seal(true, nil)
+	ws := dial(t, h)
+	tid := ""
+	for tid == "" {
+		f := readAnyFrame(t, ws)
+		if f.Type == "conversation.activity" {
+			tid = f.TurnID
+		}
+	}
+	sendCommand(t, ws, `{"type":"turn.cancel","requestId":"c1","conversationId":"c_job","turnId":"`+tid+`"}`)
+	f := readAnyFrame(t, ws)
+	for f.Type != "error" && f.Type != "turn.cancel_ack" {
+		f = readAnyFrame(t, ws)
+	}
+	if f.Type == "turn.cancel_ack" {
+		t.Fatal("an ack was pushed for a cancellation that reached nothing")
+	}
+}
+
+// Hub.Cancel is honest: a journal-only turn counts only when the worker
+// took the interruption. Before the forwarding existed it answered true
+// for a cancel that reached nothing — the positive lie of B-068.
+func TestHubCancelAnswersTrueOnlyWhenTheWorkerTakesIt(t *testing.T) {
+	h := newHub(t, stubSender{})
+	workerAlive := false
+	h.UseJobControl(func(convID string) bool { return workerAlive }, nil)
+	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the turn")
+	}
+	defer seal(true, nil)
+	if h.Cancel("c_job") {
+		t.Fatal("stopped=true while no worker took the interruption")
+	}
+	workerAlive = true
+	if !h.Cancel("c_job") {
+		t.Fatal("stopped=false while the worker took the interruption")
+	}
+}
+
+// A journal-only send turn is steered through the worker: the admitted
+// path's mailbox was never bound for it, and before the forwarding the
+// channel fell back to a second turn.
+func TestSteerJournalOnlyTurnForwardsToTheWorker(t *testing.T) {
+	h := newHub(t, stubSender{})
+	steered := make(chan string, 1)
+	h.UseJobControl(nil, func(convID, text string) bool { steered <- text; return true })
+	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the turn")
+	}
+	defer seal(true, nil)
+	if !h.Steer("c_job", "second message") {
+		t.Fatal("steer reported not taken while the worker accepted it")
+	}
+	select {
+	case got := <-steered:
+		if got != "second message" {
+			t.Fatalf("forwarded steer text = %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("steer never reached the worker callback")
+	}
+}

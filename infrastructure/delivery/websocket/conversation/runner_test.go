@@ -9,6 +9,7 @@ import (
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
@@ -30,7 +31,7 @@ func TestRunIsAWebVisibleTurn(t *testing.T) {
 	})
 	ws := dial(t, h)
 	finished := make(chan bool, 2)
-	h.OnFinished(func(_, _ string, external bool, _ error) { finished <- external })
+	h.OnFinished(func(_, _ string, _ valueobject.TurnOrigin, external bool, _ error) { finished <- external })
 
 	var seen []enum.TurnEventKind
 	done := make(chan error, 1)
@@ -110,7 +111,7 @@ func TestFinishedReportsTheTurnKind(t *testing.T) {
 	})
 	ws := dial(t, h)
 	kind := make(chan string, 1)
-	h.OnFinished(func(_, k string, _ bool, _ error) { kind <- k })
+	h.OnFinished(func(_, k string, _ valueobject.TurnOrigin, _ bool, _ error) { kind <- k })
 	sendCommand(t, ws, `{"type":"turn.edit","requestId":"e","conversationId":"c_1","payload":{"messageId":"m_1","content":"redo"}}`)
 	for f := readFrame(t, ws); f.Type != "turn.completed"; f = readFrame(t, ws) {
 		if f.Type == "error" || f.Type == "turn.failed" {

@@ -79,6 +79,7 @@ import (
 // come from admin.LoadBoot.
 type engine struct {
 	conversations *appconversation.ConversationApp
+	convs         drepo.Conversation
 	agents        *appagent.AgentApp
 	agentRuntime  dservice.AgentRuntime
 	projects      *appproject.ProjectApp
@@ -483,6 +484,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	terminals.OnExit(conversations.OnCompletion)
 	return &engine{
 		conversations: conversations,
+		convs:         convs,
 		projects:      appproject.New(projectRepo, workspaceStore, conversations),
 		projectRepo:   projectRepo,
 		agents:        appagent.New(agentRepo, agentRuntime, serviceagent.Detector{}, slog.Default()),

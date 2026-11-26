@@ -3,6 +3,7 @@ package appconversation
 import (
 	"context"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -38,6 +39,21 @@ func (app *ConversationApp) OnQueueChanged(fn func(convID string)) {
 func (app *ConversationApp) Enqueue(ctx context.Context, convID, providerID, modelID, text string, attachments []valueobject.Attachment, opts appjob.SendOptions) (int, error) {
 	if opts.Origin.Kind != enum.TurnOriginCompletion {
 		app.noteOwnerTurn(convID)
+	}
+	// The line is written before the sender is told the message waits: a queue
+	// that lives only in memory must never be the only copy of a prompt another
+	// room already handed over. The job uses this record instead of writing a
+	// second one when it runs.
+	if opts.Relay != nil && opts.AcceptedRecord == nil {
+		record := app.persistRelayLine(ctx, convID, valueobject.UserInput{
+			Text:        text,
+			Attachments: attachments,
+			Relay:       opts.Relay,
+		})
+		if record == nil {
+			return 0, apperror.New(500, "could not record the accepted message", nil)
+		}
+		opts.AcceptedRecord = record
 	}
 	// The accepted message outlives the caller's turn: a sender that ends its
 	// own turn must not cancel the message it just handed over.

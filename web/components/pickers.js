@@ -10,7 +10,7 @@ import { api } from '../lib/api.js';
 import { selection, setSelection, loadProviders, loadAgents, loadAgentModels, isBusy, loadAgentOptions, sessionOptionValue, setSessionOption, agentOptionMap } from '../lib/chat.js';
 import { Icon } from './icons.js';
 import { FolderBrowser } from './folders.js';
-import { cx, Popover, Spinner, ErrorBlock, Select, fmtTokens } from './ui.js';
+import { cx, Popover, Spinner, ErrorBlock, Select, fmtTokens, usePopoverOpen } from './ui.js';
 import { editProject } from './projects.js';
 
 const ALL_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -141,7 +141,7 @@ export function ModelPicker({ room }) {
         <input autofocus value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search models"
           class="flex-1 bg-transparent outline-none text-[13px]" />
       </div>
-      <div class=${cx('flex-1 min-h-[5.5rem] overflow-y-auto py-1', cur || sel.agentId ? 'max-h-[min(15rem,32dvh)]' : 'max-h-[min(20rem,40dvh)]')}>
+      <div class="py-1">
         ${loading && !groups.length && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} /> Loading providers…</div>`}
         ${provs.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Providers unavailable" message=${provs.error} onRetry=${loadProviders} /></div>`}
         ${agents.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Agents unavailable" message=${agents.error} onRetry=${loadAgents} /></div>`}
@@ -252,12 +252,12 @@ const base = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p : ''
 
 export function WorkspacePicker({ room }) {
   const s = useStore();
-  const [open, setOpen] = useState(false);
   const sel = selection(room);
   // A room in a project works in the project's folders; the chip names the
   // project and opens its editor instead of a folder browser.
   const projectId = room.id ? room.info?.projectId : s.newProjectId;
   const project = projectId && s.projects.items.find((p) => p.id === projectId);
+  const [open, setOpen] = usePopoverOpen(!project);
   if (project) {
     return html`<button type="button" onClick=${() => editProject(project)} title=${project.folders.join('\n')}
       class="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] text-muted hover:text-fg hover:bg-hover max-w-[40vw] sm:max-w-56">
@@ -271,7 +271,7 @@ export function WorkspacePicker({ room }) {
       <span class="truncate">${base(sel.workspace) || 'Workspace'}</span>
     </button>
     <${Popover} open=${open} onClose=${() => setOpen(false)} placement="top-start" label="Working directory" class="sm:w-[420px] flex flex-col">
-      ${open && html`<${FolderBrowser} start=${sel.workspace || ''} title="Working directory"
+      ${open && html`<${FolderBrowser} scroll="panel" start=${sel.workspace || ''} title="Working directory"
         onPick=${(path) => { setSelection(room, { workspace: path }); setOpen(false); }} onCancel=${() => setOpen(false)} />`}
     </${Popover}>
   </div>`;

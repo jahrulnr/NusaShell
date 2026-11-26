@@ -38,31 +38,39 @@ export function Button({ children, onClick, kind = 'default', class: cls = '', d
 // Closes on outside pointerdown and Escape. Beside its wrapper it opens on the
 // side `placement` asks for unless its content does not fit there and the other
 // side is clearly better (lib/placement.js), and it is capped at the room on the
-// side it took, so a tall panel never runs off the screen: its content is
-// meant to shrink or scroll (a flex column whose long part has min-h-0 and
-// overflow), not to push.
+// side it took, so a tall panel never runs off the screen. The side and the cap
+// are measured after every render while open, because the content and the
+// anchor move without the panel's props changing. The panel is the one scroll
+// owner: its parts do not scroll themselves, and what must stay reachable is
+// sticky.
 export function Popover({ open, onClose, children, class: cls = '', placement = 'top-start', label }) {
   const ref = useRef();
   const [fit, setFit] = useState(null); // { side, room } beside the wrapper, null on a bottom sheet
   const [prefer, align] = placement.split('-');
+  const measure = () => {
+    const anchor = ref.current?.parentElement;
+    if (!anchor || matchMedia('(max-width: 639px)').matches) { setFit(null); return; }
+    const r = anchor.getBoundingClientRect();
+    const above = r.top - 16, below = innerHeight - r.bottom - 16;
+    // The content's own height, read with the cap lifted for an instant (and
+    // put back exactly, so the framework's idea of the style stays true).
+    const el = ref.current;
+    const capped = el.style.maxHeight;
+    el.style.maxHeight = '';
+    const need = el.offsetHeight;
+    el.style.maxHeight = capped;
+    const side = chooseSide(prefer, above, below, need);
+    const room = Math.floor(Math.max(160, Math.min(side === 'top' ? above : below, innerHeight * 0.75)));
+    // The same side and room hand back the previous value, so a render that
+    // changes nothing does not render again.
+    setFit((f) => (f && f.side === side && f.room === room ? f : { side, room }));
+  };
+  // Divergence, not change, asks for the measure (the rule Select and
+  // selectionbar follow): it runs after every render while open, and closing
+  // forgets the old side and room.
+  useLayoutEffect(() => { if (open) measure(); else setFit(null); });
   useLayoutEffect(() => {
     if (!open) return;
-    const measure = () => {
-      const anchor = ref.current?.parentElement;
-      if (!anchor || matchMedia('(max-width: 639px)').matches) { setFit(null); return; }
-      const r = anchor.getBoundingClientRect();
-      const above = r.top - 16, below = innerHeight - r.bottom - 16;
-      // The content's own height, read with the cap lifted for an instant (and
-      // put back exactly, so the framework's idea of the style stays true).
-      const el = ref.current;
-      const capped = el.style.maxHeight;
-      el.style.maxHeight = '';
-      const need = el.offsetHeight;
-      el.style.maxHeight = capped;
-      const side = chooseSide(prefer, above, below, need);
-      setFit({ side, room: Math.floor(Math.max(160, Math.min(side === 'top' ? above : below, innerHeight * 0.75))) });
-    };
-    measure();
     addEventListener('resize', measure);
     return () => removeEventListener('resize', measure);
   }, [open, placement]);
@@ -86,6 +94,17 @@ export function Popover({ open, onClose, children, class: cls = '', placement = 
         'fixed inset-x-2 bottom-2 max-h-[75dvh] sm:absolute sm:inset-x-auto sm:bottom-auto', pos, cls)}>
       ${children}
     </div>`;
+}
+
+// usePopoverOpen is a popover's open flag, owned by the anchor that shows it: a
+// flag that outlives its anchor reopens the panel the next time the anchor
+// shows. Every anchor that can hide while open takes it. Adopted, not
+// deduplicated: the send options already reset their flag inline, while the
+// workspace picker and the linked chats had no reset and gain one here.
+export function usePopoverOpen(show) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => { if (!show) setOpen(false); }, [show]);
+  return [open && !!show, setOpen];
 }
 
 // A dialog is dismissed by Escape and its close button; backdrop also closes

@@ -55,3 +55,11 @@ func (app *ConversationApp) Edit(
 		return apperror.New(408, "edit canceled", ctx.Err())
 	}
 }
+
+// UseEditEvidence sets where an owner rewrite keeps the text it replaces for
+// skill observation. Unset, the edit job records nothing.
+func (app *ConversationApp) UseEditEvidence(ev appjob.EditEvidence) {
+	app.mu.Lock()
+	app.deps.EditEvidence = ev
+	app.mu.Unlock()
+}

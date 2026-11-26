@@ -17,6 +17,7 @@
 package appconversation
 
 import (
+	"log/slog"
 	"slices"
 	"time"
 
@@ -147,6 +148,14 @@ func New(
 	// The turn claim is the app's own: a job reports the room busy for exactly
 	// as long as its turn runs, which is what a pick has to respect.
 	app.deps.Turns = app
+	app.deps.Log = slog.Default()
+	// A line the room already wrote reaches a following turn through the same
+	// accept path: the job carries the record, so no second line is written.
+	app.deps.FollowUp = func(convID string, rec entity.Message) error {
+		_, err := app.Enqueue(context.Background(), convID, "", "", rec.Content(), rec.Attachments(),
+			appjob.SendOptions{Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginCompletion}, AcceptedRecord: &rec})
+		return err
+	}
 	app.deps.Completions = app
 	for _, opt := range opts {
 		opt(app)

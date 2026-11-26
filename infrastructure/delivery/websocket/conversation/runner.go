@@ -88,15 +88,25 @@ func (h *Hub) Run(ctx context.Context, convID, providerID, modelID, content stri
 }
 
 // Steer hands text to the room's running send turn, folded at its next
-// safe point. It reports false when no such turn runs.
+// safe point. It reports false when no such turn runs. A journal-only send
+// turn is steered through the worker that owns it — its steering mailbox
+// was never bound here, so writing to t.steering would reach nothing.
 func (h *Hub) Steer(convID, text string) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	jobOwned := false
 	for _, t := range h.turns {
-		if t.terminal || t.conversationID != convID || t.kind != turnSend || t.steering == nil {
+		if t.terminal || t.conversationID != convID || t.kind != turnSend {
+			continue
+		}
+		if t.jobOwned {
+			jobOwned = true
+			continue
+		}
+		if t.steering == nil {
 			continue
 		}
 		if len(t.steerRecords) >= maxSteerInputs {
+			h.mu.Unlock()
 			return false
 		}
 		inputID := "ext-" + strconv.FormatInt(externalSeq.Add(1), 10)
@@ -112,22 +122,48 @@ func (h *Hub) Steer(convID, text string) bool {
 		t.steerRecords = append(t.steerRecords, rec)
 		t.steerByInput[inputID] = rec
 		h.emitLocked(t, "turn.steer_ack", steerInputPayload{InputID: inputID}, false)
+		h.mu.Unlock()
 		return true
+	}
+	steerJob := h.jobControlSteer
+	h.mu.Unlock()
+	if jobOwned && steerJob != nil {
+		// Forward outside the lock: the callback reaches into the
+		// application, and the fold it feeds re-enters the hub through the
+		// turn's event stream.
+		return steerJob(convID, text)
 	}
 	return false
 }
 
-// Cancel stops every running turn of the room; false when none runs.
+// Cancel stops every running turn of the room; false when none runs. The
+// answer is honest rather than optimistic: true means a cancellation
+// actually reached the turn's owner — an admitted turn through its ctx, a
+// journal-only turn through the worker that runs its job. A journal-only
+// turn whose job is already gone does not count.
 func (h *Hub) Cancel(convID string) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	stopped := false
+	jobOwned := false
 	for _, t := range h.turns {
-		if !t.terminal && t.conversationID == convID {
-			// The room's /cancel comes from the owner.
-			t.turnCancel(dservice.ErrInterruptedByUser)
-			stopped = true
+		if t.terminal || t.conversationID != convID {
+			continue
 		}
+		if t.jobOwned {
+			// turnCtx has no consumer for this turn — canceling it would
+			// report a stop that reaches nothing. One forward per room: the
+			// worker runs one job at a time.
+			jobOwned = true
+			continue
+		}
+		// The room's /cancel comes from the owner.
+		t.turnCancel(dservice.ErrInterruptedByUser)
+		stopped = true
+	}
+	cancelJob := h.jobControlCancel
+	h.mu.Unlock()
+	if jobOwned && cancelJob != nil && cancelJob(convID) {
+		stopped = true
 	}
 	return stopped
 }
@@ -139,10 +175,11 @@ func (h *Hub) Busy(convID string) bool {
 }
 
 // OnFinished adds fn to run after every turn ends; kind is the command
-// that opened it — "send", "edit", or "resume" — and external says the
-// turn came through Run. Each call runs on its own goroutine. Register
-// listeners before turns start.
-func (h *Hub) OnFinished(fn func(convID, kind string, external bool, err error)) {
+// that opened it — "send", "edit", or "resume" — origin is where the turn
+// started (web, channel, automation, conversation, completion), and
+// external says the turn came through Run. Each call runs on its own
+// goroutine. Register listeners before turns start.
+func (h *Hub) OnFinished(fn func(convID, kind string, origin valueobject.TurnOrigin, external bool, err error)) {
 	h.mu.Lock()
 	h.finished = append(h.finished, fn)
 	h.mu.Unlock()

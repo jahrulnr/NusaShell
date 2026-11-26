@@ -9,7 +9,7 @@ import { submit, cancel, isBusy, roomBusy, retryCommand, dismissCommand, recallS
 import { api, errorText } from '../lib/api.js';
 import { ownNote } from '../lib/queued.js';
 import { Icon } from './icons.js';
-import { cx, Popover, Kbd, Spinner, Marker } from './ui.js';
+import { cx, Popover, Kbd, Spinner, Marker, usePopoverOpen } from './ui.js';
 import { ModelPicker, WorkspacePicker, ContextMeter } from './pickers.js';
 import { AgentOptions } from './agentbar.js';
 import { useReferenceChoices, ReferenceMenu } from './references.js';
@@ -200,10 +200,10 @@ export function Composer({ room, hero = false }) {
   const r = room;
   const ta = useRef();
   const [, bump] = useState(0);
-  const [menu, setMenu] = useState(false);
   const live = r.live && !r.live.terminal;
   const canSteer = live && r.live.kind === 'send';
   const steerTurnId = canSteer ? r.live.turnId : '';
+  const [menu, setMenu] = usePopoverOpen(canSteer);
   // What the composer answers to: a turn, or a command it started.
   const busy = roomBusy(r);
   const hasText = !!r.draft.trim();
@@ -296,7 +296,6 @@ export function Composer({ room, hero = false }) {
     r.dictate = false;
     if (canDictate()) voice.start();
   }, [r.dictate, r.key]);
-  useEffect(() => { if (!canSteer) setMenu(false); }, [canSteer]);
 
   // The draft delivers as steer (into the running turn), queue, or send —
   // one payload, its quotes written ahead of its text; the caller picks
@@ -485,7 +484,7 @@ export function Composer({ room, hero = false }) {
               canSend ? 'bg-fg text-bg border-l border-bg/20 hover:opacity-90' : 'bg-panel text-faint border border-line')}>
             <${Icon} name="chevronDown" size=${13} stroke=${2.25} />
           </button>`}
-          <${Popover} open=${canSteer && menu} onClose=${() => setMenu(false)} placement="top-end" label="Send options" class="sm:w-60 py-1">
+          <${Popover} open=${menu} onClose=${() => setMenu(false)} placement="top-end" label="Send options" class="sm:w-60 py-1">
             <button type="button" onClick=${() => { setMenu(false); deliver(steerTurnId); }} disabled=${!canSend}
               class="w-full flex items-center justify-between gap-3 px-3 h-9 hover:bg-hover disabled:opacity-50">
               <span>Steer now</span><${Kbd}>↵</${Kbd}>

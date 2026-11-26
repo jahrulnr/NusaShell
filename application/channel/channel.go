@@ -586,13 +586,22 @@ func (a *App) Unlink(ctx context.Context, convID, key string) error {
 // from a chat (the web) to the room's linked chats, when the room mirrors.
 // Edit and resume turns regenerate replies, not new answers — they are
 // not mirrored.
-func (a *App) TurnFinished(convID, kind string, external bool, err error) {
+func (a *App) TurnFinished(convID, kind string, origin valueobject.TurnOrigin, external bool, err error) {
 	if external {
 		return
 	}
 	ctx := context.Background()
 	a.syncMenus(ctx, convID)
 	if kind != "send" || err != nil {
+		return
+	}
+	// A completion turn answers a record the room already showed as a
+	// system message — mirroring it reports background work in the place
+	// the owner talks, uninvited. Automation is not filtered here: it is
+	// work the owner scheduled, and its results belong where he pointed
+	// them; if that ever gets noisy, the decision lives in automation,
+	// not in a turn-origin filter.
+	if origin.Kind == enum.TurnOriginCompletion {
 		return
 	}
 	info, ierr := a.rooms.Info(ctx, convID)

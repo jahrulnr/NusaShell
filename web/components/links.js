@@ -6,7 +6,7 @@ import { emit, toast } from '../lib/store.js';
 import { applyRoomInfo } from '../lib/chat.js';
 import { api, errorText } from '../lib/api.js';
 import { Icon } from './icons.js';
-import { cx, IconButton, Popover, Spinner, Toggle } from './ui.js';
+import { cx, IconButton, Popover, Spinner, Toggle, usePopoverOpen } from './ui.js';
 
 const DEFAULT_ROUTING = { replyToOrigin: true, mirrorFinal: false, notifyApprovals: true };
 
@@ -47,7 +47,7 @@ export function LabelChip({ room: r }) {
 }
 
 export function LinksButton({ room: r }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePopoverOpen(!!r.id);
   const [links, setLinks] = useState({ status: 'idle', list: [] });
   const load = async () => {
     setLinks((l) => ({ ...l, status: 'loading' }));

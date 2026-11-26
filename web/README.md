@@ -32,12 +32,15 @@ icon is the one asset with no cross-file contract, so it alone is
 bottom sheet on narrow ones. Beside its wrapper it opens on the side
 `placement` asks for unless its content does not fit there and the other side
 is clearly better (`lib/placement.js`), and it is capped at the room on the
-side it took (measured on open and on resize), so a tall panel never runs off
-the screen. Build one as a flex column whose long
-part has `min-h-*` and `overflow-y-auto` (it shrinks), and whose fixed parts
-are `shrink-0` (the search row and footer of the model picker are also
-`sticky`, so they stay reachable if the panel has to scroll). Put a group of
-labelled controls in a two-column grid with the label above a `dense` `Select`.
+side it took, measured after every render while open, so the cap follows the
+content and the anchor, and a tall panel never runs off the screen. The panel
+is the one scroll owner: its parts do not scroll themselves (no `overflow-y-auto`
+or `max-h` on a part), and what must stay reachable is `sticky` (the model
+picker's search row and footer). A popover whose anchor can hide while open
+takes its open flag from `usePopoverOpen(show)`, which closes it when the anchor
+hides. Put a group of labelled controls in a two-column grid with the label above
+a `dense` `Select`. `FolderBrowser` names its scroll owner: `scroll="panel"` in a
+popover, `scroll="list"` in a dialog body; there is no default.
 
 ## No native widgets
 

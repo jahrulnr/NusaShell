@@ -1,14 +1,19 @@
 // FolderBrowser: a directory-only browser over /api/fs/browse, used to
-// pick a room's working directory and a project's folders.
-import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
+// pick a room's working directory and a project's folders. Its caller names
+// the scroll owner: scroll="panel" inside a popover, where the host scrolls and
+// the header and footer stick; scroll="list" inside a dialog body, where the
+// list has a height cap and scrolls itself. There is no default.
+import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { api, errorText } from '../lib/api.js';
 import { Icon } from './icons.js';
 import { cx, Checkbox, Spinner, ErrorBlock } from './ui.js';
 
-export function FolderBrowser({ start = '', title = 'Folder', pickLabel = 'Use this folder', onPick, onCancel }) {
+export function FolderBrowser({ start = '', title = 'Folder', pickLabel = 'Use this folder', onPick, onCancel, scroll }) {
   const [dir, setDir] = useState({ status: 'idle' });
   const [showHidden, setShowHidden] = useState(false);
   const req = useRef(0);
+  const root = useRef();
+  const list = useRef();
   const browse = async (path) => {
     const n = ++req.current;
     setDir((d) => ({ ...d, status: 'loading' }));
@@ -20,9 +25,16 @@ export function FolderBrowser({ start = '', title = 'Folder', pickLabel = 'Use t
     }
   };
   useEffect(() => { browse(start); }, []);
+  // A new listing starts at its top. The owner is the list in list mode, and in
+  // panel mode the panel that hosts the browser, which is the browser's parent.
+  useLayoutEffect(() => {
+    const owner = scroll === 'panel' ? root.current?.parentElement : list.current;
+    if (owner) owner.scrollTop = 0;
+  }, [dir.path]);
+  if (scroll !== 'panel' && scroll !== 'list') throw new Error('FolderBrowser: scroll must be "panel" or "list"');
   const entries = (dir.entries || []).filter((e) => showHidden || !e.hidden);
-  return html`<div class="flex flex-col min-h-0">
-    <div class="px-3 pt-2.5 pb-2 border-b border-line flex flex-col gap-2">
+  return html`<div ref=${root} class="flex flex-col min-h-0">
+    <div class=${cx('px-3 pt-2.5 pb-2 border-b border-line flex flex-col gap-2', scroll === 'panel' && 'sticky top-0 z-10 bg-raised')}>
       <div class="flex items-center justify-between">
         <span class="text-faint text-xs">${title}</span>
         <${Checkbox} checked=${showHidden} onChange=${setShowHidden} class="text-xs text-faint">Hidden</${Checkbox}>
@@ -34,7 +46,7 @@ export function FolderBrowser({ start = '', title = 'Folder', pickLabel = 'Use t
         ${(dir.roots || []).map((r) => html`<button key=${r.path} type="button" onClick=${() => browse(r.path)} class="px-1.5 h-6 rounded text-xs text-muted hover:bg-hover">${r.name}</button>`)}
       </div>
     </div>
-    <div class="flex-1 min-h-0 max-h-[min(18rem,34dvh)] overflow-y-auto py-1">
+    <div ref=${list} class=${cx('py-1', scroll === 'list' && 'flex-1 min-h-0 max-h-[min(18rem,34dvh)] overflow-y-auto')}>
       ${dir.status === 'loading' && !dir.entries && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} /> Reading folder…</div>`}
       ${dir.status === 'error' && html`<div class="p-2"><${ErrorBlock} title=${dir.notFound ? 'Folder not found' : 'Cannot open folder'} message=${dir.error} onRetry=${() => browse(dir.notFound ? '' : dir.path || '')} /></div>`}
       ${dir.status !== 'error' && dir.entries && !entries.length && html`<div class="px-3 py-3 text-faint">No subfolders here.</div>`}
@@ -44,7 +56,7 @@ export function FolderBrowser({ start = '', title = 'Folder', pickLabel = 'Use t
       </button>`)}
       ${dir.truncated && html`<div class="px-3 py-2 text-xs text-faint">Showing the first 1000 folders.</div>`}
     </div>
-    <div class="flex items-center justify-end gap-2 px-3 py-2 border-t border-line">
+    <div class=${cx('flex items-center justify-end gap-2 px-3 py-2 border-t border-line', scroll === 'panel' && 'sticky bottom-0 z-10 bg-raised')}>
       <button type="button" onClick=${onCancel} class="h-8 px-3 rounded-lg text-muted hover:bg-hover">Cancel</button>
       <button type="button" disabled=${!dir.path || dir.status !== 'ready'} onClick=${() => onPick(dir.path)}
         class="h-8 px-3 rounded-lg bg-accent text-accent-fg font-medium disabled:opacity-50">${pickLabel}</button>

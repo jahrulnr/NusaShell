@@ -44,6 +44,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	repoappicon "github.com/jahrulnr/nusashell/infrastructure/repository/appicon"
 	repoapprovalrule "github.com/jahrulnr/nusashell/infrastructure/repository/approvalrule"
 	repoautomation "github.com/jahrulnr/nusashell/infrastructure/repository/automation"
@@ -252,7 +253,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 			}
 		}()
 	})
-	hub.OnFinished(func(convID, kind string, _ bool, err error) {
+	hub.OnFinished(func(convID, kind string, _ valueobject.TurnOrigin, _ bool, err error) {
 		if kind != "send" || err != nil {
 			return
 		}
@@ -264,6 +265,9 @@ func serve(args []string, svc system.Service) (serveErr error) {
 			}
 		}()
 	})
+	if edits := wireSkillObserve(b.Config().Skills.Improvement, hub.OnFinished, eng.convs, slog.Default()); edits != nil {
+		eng.conversations.UseEditEvidence(edits)
+	}
 	eng.conversations.OnDeleted(chats.ForgetRoom)
 	// A deleted thread takes its own memories with it; a deleted project's
 	// are archived, since deleting a project can be undone.
@@ -309,6 +313,18 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		_, _, live := hub.ActiveTurn(convID)
 		return live
 	})
+	// A journaled turn's execution belongs to the room's worker, so the hub
+	// reaches it through the application — one direction, never back. Cancel
+	// is honest: true only when a live worker took the interruption.
+	hub.UseJobControl(
+		func(convID string) bool {
+			return eng.conversations.Cancel(context.Background(), convID) == nil
+		},
+		func(convID, text string) bool {
+			taken, err := eng.conversations.SteerInput(context.Background(), convID, valueobject.UserInput{Text: text})
+			return err == nil && taken
+		},
+	)
 	// Threads work with each other and drive a browser through two
 	// built-in MCP servers. The model runtime reaches them over an
 	// in-process connection; agents start this binary as a relay that

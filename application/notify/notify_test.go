@@ -75,9 +75,32 @@ func approvalEvent(t *testing.T) event.TurnEvent {
 	return event.NewApprovalEvent(req)
 }
 
+// A machine turn the owner never asked for stays silent: a wake raised so
+// a room reads its completions, or an automation firing on schedule, is not
+// a reply. Removing the origin filter turns this test red — the noise is
+// exactly what makes an owner disable notifications entirely.
+func TestMachineTurnsStaySilent(t *testing.T) {
+	app, s := setup(t, true)
+	app.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginCompletion}, false, nil)
+	app.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginAutomation, Name: "nightly"}, false, nil)
+	if got := waitFor(t, s, 1); len(got) != 0 {
+		t.Fatalf("machine turns must not notify: %+v", got)
+	}
+}
+
+// A relay turn — one thread answering another — still notifies: the owner
+// did not type it, but it is a reply in his rooms, not machine housekeeping.
+func TestConversationTurnStillNotifies(t *testing.T) {
+	app, s := setup(t, true)
+	app.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}, false, nil)
+	if got := waitFor(t, s, 1); len(got) != 1 {
+		t.Fatalf("a relay turn's reply should notify: %+v", got)
+	}
+}
+
 func TestWebTurnEndNotifiesWithRoomTitle(t *testing.T) {
 	app, s := setup(t, true)
-	app.TurnFinished("c_1", "send", false, nil)
+	app.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, nil)
 	got := waitFor(t, s, 1)
 	if len(got) != 1 || got[0].Title != "Reply ready" || got[0].Body != "Refactor the hub" {
 		t.Fatalf("got %+v", got)
@@ -90,9 +113,9 @@ func TestWebTurnEndNotifiesWithRoomTitle(t *testing.T) {
 func TestExternalAndCancelledTurnsStaySilent(t *testing.T) {
 	app, s := setup(t, true)
 	// Chat and automation turns report through their own paths.
-	app.TurnFinished("c_1", "send", true, nil)
+	app.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, true, nil)
 	// The owner's own stop is no news.
-	app.TurnFinished("c_1", "send", false, apperror.New(408, "turn canceled", nil))
+	app.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, apperror.New(408, "turn canceled", nil))
 	if got := waitFor(t, s, 1); len(got) != 0 {
 		t.Fatalf("external or cancelled turns must not notify: %+v", got)
 	}
@@ -100,7 +123,7 @@ func TestExternalAndCancelledTurnsStaySilent(t *testing.T) {
 
 func TestFailedTurnIsNormalUrgencyError(t *testing.T) {
 	app, s := setup(t, true)
-	app.TurnFinished("c_1", "edit", false, apperror.New(502, "upstream is down", nil))
+	app.TurnFinished("c_1", "edit", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, apperror.New(502, "upstream is down", nil))
 	got := waitFor(t, s, 1)
 	if len(got) != 1 || got[0].Title != "Turn failed" {
 		t.Fatalf("got %+v", got)
@@ -149,15 +172,15 @@ func TestAutomationOutcomes(t *testing.T) {
 func TestMutedDisabledAndUnavailableSendNothing(t *testing.T) {
 	// The owner's switch off.
 	app, s := setup(t, false)
-	app.TurnFinished("c_1", "send", false, nil)
+	app.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, nil)
 	// Muted for shutdown.
 	app2, _ := setup(t, true)
 	app2.Mute()
-	app2.TurnFinished("c_1", "send", false, nil)
+	app2.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, nil)
 	// No usable backend.
 	app3, s3 := setup(t, true)
 	s3.avail = false
-	app3.TurnFinished("c_1", "send", false, nil)
+	app3.TurnFinished("c_1", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, nil)
 	if got := waitFor(t, s, 1); len(got) != 0 {
 		t.Fatalf("disabled must be silent: %+v", got)
 	}

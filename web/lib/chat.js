@@ -4,7 +4,7 @@
 import { state, emit, toast, dismissToast, askConfirm } from './store.js';
 import { api, errorText, ApiError } from './api.js';
 import { TurnSocket, newRequestId } from './socket.js';
-import { newTurn, applyFrame, snapshotSegments, isPrompt } from './turn.js';
+import { newTurn, applyFrame, snapshotSegments, isPrompt, roomSubjects, shortHandle } from './turn.js';
 import { forgetQueued, resetQueued, setQueued, queuedFor, queuedNote } from './queued.js';
 import { referencesForSend, referencesToDraft, liveReferences } from './references.js';
 import { parseCommand, isNativeCommand, catalogRow, loadCommands } from './commands.js';
@@ -81,8 +81,31 @@ function blankRoom(key, id) {
   };
 }
 
+// seenRooms is every room id this tab has met this session. It only grows: a
+// room deleted later keeps its id, so a handle changes only when a new id collides
+// with it. It is filled from the lists, the rooms opened, and the tool calls of
+// the history and the live turn as they arrive. Nothing is fetched for it, and
+// nothing is kept past the session.
+const seenRooms = new Set();
+const noteRooms = (ids) => { for (const id of ids) if (id) seenRooms.add(id); };
+const noteCall = (c) => { if (c) noteRooms(roomSubjects(c.name, c.input, c.output).filter((s) => s.whole).map((s) => s.id)); };
+const noteMessages = (messages) => { for (const m of messages || []) for (const c of m.toolCalls || []) noteCall(c); };
+// noteFrame registers a tool's rooms as its frames land, so a live turn names its
+// rooms before any history read does.
+const noteFrame = (r, f) => { if (f.type?.startsWith('turn.tool_')) noteCall(r.live.segments.findLast((x) => x.kind === 'tool' && x.callId === f.payload?.callId)); };
+
+// knownRoom is what this tab knows of one room id: its label and title from a
+// loaded room (the open room, the recent list, a project's list), read in place,
+// and its handle among every id it has met (turn.js shortHandle).
+export function knownRoom(id) {
+  const loaded = [state.rooms[id]?.info, state.convs.items.find((c) => c.id === id)];
+  for (const list of Object.values(state.projectThreads)) loaded.push(list.find((c) => c.id === id));
+  const t = loaded.find((x) => x && (x.label || x.title)) || {};
+  return { label: t.label || '', title: t.title || '', handle: shortHandle(id, seenRooms) };
+}
+
 export function room(key) {
-  if (!state.rooms[key]) state.rooms[key] = blankRoom(key, key === FRESH ? null : key);
+  if (!state.rooms[key]) { state.rooms[key] = blankRoom(key, key === FRESH ? null : key); if (key !== FRESH) noteRooms([key]); }
   return state.rooms[key];
 }
 export const freshRoom = () => room(FRESH);
@@ -270,6 +293,7 @@ export async function loadConversations(more = false) {
     // Every row carries the room's queue depth: seeding from the rows is what
     // brings a lost count back without waiting for the next drain frame.
     for (const it of page.data) setQueued(it.id, it.waiting ?? 0);
+    noteRooms(page.data.map((x) => x.id));
     const items = more ? [...c.items, ...page.data.filter((x) => !c.items.some((y) => y.id === x.id))] : page.data;
     // A refresh that came back short saw the whole list, and a thread it does
     // not list is gone (deleted from here or elsewhere). Only a full page may
@@ -340,6 +364,7 @@ export async function loadProjectThreads(pid) {
       page = await api.conversations(0, PROJECT_THREADS, pid);
       if (writes === seen || attempt === 1) break;
     }
+    noteRooms(page.data.map((x) => x.id));
     const cur = state.projectThreads[pid] || [];
     const same = page.data.length === cur.length && page.data.every((x, i) => sameRecords(x, cur[i]));
     if (!same) state.projectThreads = { ...state.projectThreads, [pid]: page.data };
@@ -525,6 +550,7 @@ export async function loadHistory(r, { force = false } = {}) {
       try {
         const page = await api.messages(r.id, -HISTORY_PAGE, HISTORY_PAGE);
         r.messages = page.messages;
+        noteMessages(page.messages);
         Object.assign(r.hist, { status: 'ready', error: null, start: page.effectiveStart, total: page.total, more: page.effectiveStart > 0 });
         r.histAt = Date.now();
         r.histStale = false;
@@ -550,6 +576,7 @@ export async function loadEarlier(r) {
     const page = await api.messages(r.id, start, r.hist.start - start);
     const known = new Set(r.messages.map((m) => m.id));
     r.messages = [...page.messages.filter((m) => !known.has(m.id)), ...r.messages];
+    noteMessages(page.messages);
     r.hist.start = page.effectiveStart;
     r.hist.more = page.effectiveStart > 0;
   } catch (err) {
@@ -1182,6 +1209,7 @@ async function readNewestPage(r) {
   const fresh = new Map(page.messages.map((m) => [m.id, m]));
   const known = new Set(r.messages.map((m) => m.id));
   r.messages = [...r.messages.map((m) => fresh.get(m.id) || m), ...page.messages.filter((m) => !known.has(m.id))];
+  noteMessages(page.messages);
   r.hist.total = page.total;
   r.histAt = Date.now();
   r.histStale = false;
@@ -1357,6 +1385,7 @@ function onFrame(f) {
   }
   const compacting = r.live.phase?.phase === 'compacting';
   if (!applyFrame(r.live, f)) return;
+  noteFrame(r, f);
   // A fold just ended: the history is smaller than any size reported before
   // it, so the meter asks the server rather than keep showing the old one.
   if (compacting && r.live?.phase?.phase !== 'compacting') fetchContext(r, { force: true });
@@ -1394,7 +1423,7 @@ function onOpened(f) {
     // A watcher replays the opening frame of a turn another command or
     // channel started — adopt the server's clock for its timer.
     const r = state.rooms[f.conversationId];
-    if (r?.live && !r.live.terminal && r.live.turnId === f.turnId) { applyFrame(r.live, f); emit(); }
+    if (r?.live && !r.live.terminal && r.live.turnId === f.turnId) { applyFrame(r.live, f); noteFrame(r, f); emit(); }
     return;
   }
   let r = room(req.key);
@@ -1403,6 +1432,7 @@ function onOpened(f) {
     // minted keeps what a failed first send must hand back to the home view.
     const moved = { ...r, key: f.conversationId, id: f.conversationId, info: null, infoStatus: 'loading', minted: { projectId: state.newProjectId } };
     state.rooms[f.conversationId] = moved;
+    noteRooms([f.conversationId]);
     state.rooms[FRESH] = blankRoom(FRESH, null);
     req.key = f.conversationId;
     r = moved;

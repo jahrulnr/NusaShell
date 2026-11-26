@@ -75,6 +75,13 @@ func fixture(t *testing.T, handler http.HandlerFunc) (*ConversationApp, *aggrega
 // room-handle tests need a store whose room list answers from a stale view.
 func fixtureWith(t *testing.T, handler http.HandlerFunc, wrap func(drepo.Conversation) drepo.Conversation) (*ConversationApp, *aggregate.Provider) {
 	t.Helper()
+	return fixtureAt(t, t.TempDir(), handler, wrap)
+}
+
+// fixtureAt is fixture over a data directory the caller owns: a test can open a
+// second app on the same tree, which is what a restart means here.
+func fixtureAt(t *testing.T, dir string, handler http.HandlerFunc, wrap func(drepo.Conversation) drepo.Conversation) (*ConversationApp, *aggregate.Provider) {
+	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
@@ -96,7 +103,7 @@ func fixtureWith(t *testing.T, handler http.HandlerFunc, wrap func(drepo.Convers
 	if err := providers.Save(t.Context(), &prov); err != nil {
 		t.Fatal(err)
 	}
-	var convs drepo.Conversation = repoconversation.NewConversationRepository(t.TempDir())
+	var convs drepo.Conversation = repoconversation.NewConversationRepository(dir)
 	if wrap != nil {
 		convs = wrap(convs)
 	}

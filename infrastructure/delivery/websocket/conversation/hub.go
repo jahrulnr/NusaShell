@@ -180,6 +180,11 @@ type turn struct {
 	// event sink, and where the job's result goes once the turn ends.
 	observe event.TurnEventHandler
 	done    chan runResult
+	// jobOwned marks a turn the hub only journals: execution belongs to the
+	// room's worker, so turnCtx has no consumer and the steering mailbox was
+	// never bound here. Cancel and steer for it are forwarded to the worker
+	// through jobControl*, never to turnCancel.
+	jobOwned bool
 }
 
 // Hub owns the process-scoped conversation protocol: every admitted
@@ -211,9 +216,20 @@ type Hub struct {
 	// queueDepth reads how many messages wait in a room, so a queued notice
 	// names the count at emit time rather than a number kept beside the queue.
 	queueDepth func(convID string) int
+	// jobControlCancel/jobControlSteer reach the room worker that owns a
+	// journal-only turn's execution — the hub only journaled that turn, so
+	// canceling its bookkeeping context or writing to a steering mailbox it
+	// never had would touch nothing. The direction is one-way, hub→app, set
+	// once at wiring: the app never calls back into the hub through these,
+	// and a future need for the reverse direction means the design is wrong,
+	// not that the field pair is incomplete. Nil (the CLI's composition or a
+	// test) leaves journal-only turns uncancelable and unsteerable through
+	// the hub — the same blind run they had before, never a crash.
+	jobControlCancel func(convID string) bool
+	jobControlSteer  func(convID, text string) bool
 	// finished run after every turn ends (see OnFinished); events see
 	// every turn event (see OnEvent).
-	finished []func(convID, kind string, external bool, err error)
+	finished []func(convID, kind string, origin valueobject.TurnOrigin, external bool, err error)
 	events   []func(convID string, ev event.TurnEvent)
 }
 
@@ -237,6 +253,18 @@ func NewHub(ctx context.Context, sender Sender) *Hub {
 // UseUploads sets how a send's uploads become attachments; without it a
 // send naming uploads is rejected.
 func (h *Hub) UseUploads(u Uploads) { h.uploads = u }
+
+// UseJobControl wires the one-way bridge to the room workers that own
+// journal-only turns: cancel answers true only when a live worker took the
+// interruption, and steer answers true only when the running job accepted
+// the input. Set once at composition time — see the field comment for the
+// direction rule.
+func (h *Hub) UseJobControl(cancel func(convID string) bool, steer func(convID, text string) bool) {
+	h.mu.Lock()
+	h.jobControlCancel = cancel
+	h.jobControlSteer = steer
+	h.mu.Unlock()
+}
 
 // UsePlanEvents sets the registry update_plan resolves the room's live
 // turn through; without it plan events drop while the call still records.
@@ -653,13 +681,12 @@ func (h *Hub) runTurn(t *turn) {
 	}
 
 	// The hub's own accounting happens before the seal: the caller that admitted
-	// this turn is waiting on its result, and the finished hooks name it.
+	// this turn is waiting on its result. The finished hooks fire inside the
+	// seal — the one point both paths close through — never here, or an
+	// admitted turn would answer two calls.
 	h.mu.Lock()
 	if t.done != nil {
 		t.done <- runResult{receipt: receipt, err: err}
-	}
-	for _, fn := range h.finished {
-		go fn(t.conversationID, t.kind.String(), t.done != nil, err)
 	}
 	h.mu.Unlock()
 	h.sealTurn(t, persisted, err)
@@ -744,6 +771,13 @@ func (h *Hub) sealTurn(t *turn, persisted bool, err error) {
 	// seals — every socket learns the room went idle.
 	h.broadcastLocked(activityFrame(t, strings.TrimPrefix(typ, "turn.")))
 	h.finishLocked(t)
+	// The finished hooks fire here and nowhere else: both paths — a turn the
+	// hub admitted and a turn a room job ran — seal through this one point,
+	// and the terminal guard above makes a duplicate seal a no-op, so every
+	// turn answers exactly one call with the error it actually ended with.
+	for _, fn := range h.finished {
+		go fn(t.conversationID, t.kind.String(), t.origin, t.done != nil, err)
+	}
 }
 
 // turnCancelCommand acks-and-cancels one exact active turn: the ack goes
@@ -768,6 +802,21 @@ func (h *Hub) turnCancelCommand(c *conn, cmd command) {
 	if !found || t.terminal || t.conversationID != convID {
 		h.mu.Unlock()
 		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	if t.jobOwned && h.jobControlCancel != nil {
+		// The hub only journals this turn: its turnCtx has no consumer, so
+		// turnCancel would cancel bookkeeping and call it a stop. The worker
+		// owns the execution — forward outside the lock, because the callback
+		// reaches into the application and the job's exit re-enters the hub
+		// through the journal's seal.
+		cancelJob := h.jobControlCancel
+		h.mu.Unlock()
+		if !cancelJob(convID) {
+			c.push(errorFrame(cmd.RequestID, "not_found", "the turn's job already ended"))
+			return
+		}
+		c.push(cancelAckFrame(cmd.RequestID, convID, t.id))
 		return
 	}
 	c.push(cancelAckFrame(cmd.RequestID, convID, t.id))

@@ -29,6 +29,7 @@ nav = [
     { "Architecture" = "architecture.md" },
     { "Domain model" = "domain-model.md" },
     { "Persistence" = "persistence.md" },
+    { "Skill improvement" = "skills.md" },
     { "Extending NusaShell" = "extending.md" },
     { "WebSocket API" = "api/websocket.md" },
   ] },

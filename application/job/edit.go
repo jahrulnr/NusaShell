@@ -66,6 +66,7 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 	d := j.Deps
 	convID := j.ConvID()
 	applied := false
+	recorded := false
 	var consumedAt time.Time
 	// The room is claimed for the whole turn, like every other turn job: a pick
 	// taken now waits for the next one, and a surface reads the room as working.
@@ -95,6 +96,15 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 		// remember it to remove once the agent has a new one.
 		prevAgent, prevSession := conv.AgentID(), conv.AgentSession()
 		sealed := false
+		// The evidence is read before the rewrite drops the tail and handed
+		// over before the rewrite runs: RewriteFrom applies the same refusals
+		// as EditCapture, so a recorded edit always applies.
+		if d.EditEvidence != nil {
+			if previous, tail, ok := conv.EditCapture(j.MsgID); ok {
+				d.EditEvidence.RecordEdit(convID, j.MsgID, previous, tail)
+				recorded = true
+			}
+		}
 		switch err := conv.RewriteFrom(j.MsgID, j.Content); {
 		case errors.Is(err, aggregate.ErrNotUserMessage):
 			return apperror.New(400, "only user messages are editable", err)
@@ -200,5 +210,8 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 		rememberSelection(conv, j.Opts)
 		return d.Convs.Save(ctx, conv)
 	}()
+	if err != nil && recorded {
+		d.EditEvidence.DiscardEdit(convID, j.MsgID)
+	}
 	return err
 }

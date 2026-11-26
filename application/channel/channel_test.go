@@ -391,14 +391,14 @@ func TestRoutingApprovalPingAndMirror(t *testing.T) {
 	info := rooms.infos[convID]
 	info.Routing = &valueobject.Routing{ReplyToOrigin: true, MirrorFinal: true}
 	rooms.infos[convID] = info
-	app.TurnFinished(convID, "send", false, nil)
+	app.TurnFinished(convID, "send", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, nil)
 	if got := ch.take(); len(got) != 2 {
 		t.Fatalf("mirror sent = %q", got)
 	}
 	// An edit or resume regenerates a reply — it is not a new answer and
 	// does not mirror to the linked chats.
-	app.TurnFinished(convID, "edit", false, nil)
-	app.TurnFinished(convID, "resume", false, nil)
+	app.TurnFinished(convID, "edit", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, nil)
+	app.TurnFinished(convID, "resume", valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, false, nil)
 	if got := ch.take(); len(got) != 0 {
 		t.Fatalf("an edit turn must not mirror: %q", got)
 	}
@@ -812,5 +812,37 @@ func TestChatRoleEffortReachesTheTurn(t *testing.T) {
 	app.process(context.Background(), msg("42", "1", "hello"))
 	if len(runner.calls) != 1 || runner.calls[0].effort != enum.EffortMax {
 		t.Fatalf("runs = %+v", runner.calls)
+	}
+}
+
+// A completion turn's answer reacts to a record the room already showed as
+// a system message — mirroring it would report background work in the place
+// the owner talks. Automation is not filtered: the owner scheduled it and
+// pointed its results here. Removing the completion filter turns the first
+// assertion red.
+func TestMirrorFinalFiltersCompletionOnly(t *testing.T) {
+	app, ch, runner, rooms, _ := setup(t)
+	ctx := context.Background()
+	app.process(ctx, msg("42", "1", "start the room"))
+	_ = ch.take()
+	convID := runner.calls[0].convID
+	info := rooms.infos[convID]
+	info.Routing = &valueobject.Routing{MirrorFinal: true}
+	rooms.infos[convID] = info
+
+	// A wake the server raised so the room reads its completions: silent.
+	app.TurnFinished(convID, "send", valueobject.TurnOrigin{Kind: enum.TurnOriginCompletion}, false, nil)
+	if got := ch.take(); len(got) != 0 {
+		t.Fatalf("a completion turn must not mirror: %q", got)
+	}
+	// A relay turn is a reply in the owner's rooms: it mirrors.
+	app.TurnFinished(convID, "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation}, false, nil)
+	if got := ch.take(); len(got) != 1 {
+		t.Fatalf("a relay turn should mirror once: %q", got)
+	}
+	// Automation is work the owner scheduled — it must keep mirroring.
+	app.TurnFinished(convID, "send", valueobject.TurnOrigin{Kind: enum.TurnOriginAutomation, Name: "nightly"}, false, nil)
+	if got := ch.take(); len(got) != 1 {
+		t.Fatalf("an automation turn must keep mirroring: %q", got)
 	}
 }

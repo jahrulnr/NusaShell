@@ -15,6 +15,8 @@ import { html, render } from '/vendor/preact/htm-preact.mjs';
 import { state } from '../lib/store.js';
 import * as chat from '../lib/chat.js';
 import { ModelPicker } from '../components/pickers.js';
+import { AgentOptions } from '../components/agentbar.js';
+import { inLayout } from './viewport.mjs';
 
 let ws;
 const OPTS = [];
@@ -34,7 +36,7 @@ beforeEach(() => {
   chat.navigate('#/');
 });
 
-test('a model pick inside the panel keeps the panel, its scroll, its focus, and every control', async () => {
+const modelPickKeepsPanel = async () => {
   mockApi({
     // the answer comes late on purpose: with an instant mock the loading
     // states collapse into one render and a reset leaves no observable trace —
@@ -70,6 +72,10 @@ test('a model pick inside the panel keeps the panel, its scroll, its focus, and 
   await sleep(120);
   const dialog = doc.querySelector('[role="dialog"]');
   assert.ok(dialog, 'the panel is open');
+  // one scroll owner: the panel. The model list does not scroll itself.
+  const owners = [dialog, ...dialog.querySelectorAll('*')].filter((n) => /(^| )overflow-(y-)?auto( |$)/.test(n.className || ''));
+  assert.equal(owners.length, 1);
+  assert.equal(owners[0], dialog);
 
   // focus inside the panel, scroll it, then act inside it
   const input = dialog.querySelector('input');
@@ -96,4 +102,47 @@ test('a model pick inside the panel keeps the panel, its scroll, its focus, and 
   const structural = removals.filter((t) => t !== 'text' && t !== 'SVG');
   assert.equal(structural.length, 0, `no structure was removed, but the observer saw: ${removals.slice(0, 6).join(', ')}`);
   render(null, host);
-});
+};
+
+// An anchor that hides while its panel is open takes the panel with it, and the
+// panel does not come back open when the anchor shows again.
+const agentChipFlow = async () => {
+  const MODE = { id: 'thinking', name: 'Thinking', type: 'boolean', current: 'false' };
+  let answer = { data: [MODE] };
+  mockApi({
+    'GET /api/conversations/c_chip/agent-options': () => [200, answer],
+    'GET /api/conversations/c_chip/messages': { messages: [], effectiveStart: 0, total: 0 },
+    'GET /api/conversations/c_chip': { id: 'c_chip', title: 'Room', workspace: '', agentId: 'devin', modelId: 'adaptive' },
+    'GET /api/approval-rules': { data: [] },
+    'GET /api/context': { estimate: 0, total: 0 },
+  });
+  chat.navigate('#/c/c_chip');
+  await sleep(50);
+  const r = state.rooms.c_chip;
+  const host = doc.createElement('div');
+  doc.body.appendChild(host);
+  render(html`<${AgentOptions} room=${r} />`, host);
+  const chip = () => host.querySelector('button[aria-expanded]');
+  const panel = () => doc.querySelector('[role="dialog"]');
+  await chat.loadAgentOptions(r, { force: true });
+  await sleep(20);
+  chip().click();
+  await sleep(20);
+  assert.ok(panel(), 'the chip opens its panel');
+  answer = { data: [], status: 'ready' };
+  await chat.loadAgentOptions(r, { force: true });
+  await sleep(20);
+  assert.equal(chip(), null, 'a definitive empty hides the chip');
+  assert.equal(panel(), null, 'the panel goes with its chip');
+  answer = { data: [MODE] };
+  await chat.loadAgentOptions(r, { force: true });
+  await sleep(20);
+  assert.ok(chip(), 'the chip shows again');
+  assert.equal(panel(), null, 'and the panel does not reopen by itself');
+  render(null, host);
+};
+
+for (const layout of ['sheet', 'desktop']) {
+  test(`a model pick inside the panel keeps the panel, its scroll, its focus, and every control (${layout})`, () => inLayout(layout, modelPickKeepsPanel));
+  test(`a panel whose chip hides closes with it, and does not reopen when the chip returns (${layout})`, () => inLayout(layout, agentChipFlow));
+}
