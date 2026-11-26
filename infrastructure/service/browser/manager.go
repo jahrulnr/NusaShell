@@ -330,18 +330,6 @@ func (m *Manager) Shutdown() {
 	}
 }
 
-// Preheat warms the default profile's browser so a thread's first
-// browser call does not pay the cold start inside its own deadline.
-// It launches in the background under the server context and logs the
-// outcome through launch.
-func (m *Manager) Preheat(ctx context.Context) {
-	go func() {
-		ctx, cancel := context.WithTimeout(ctx, launchWait)
-		defer cancel()
-		_, _ = m.launch(ctx, DefaultProfile)
-	}()
-}
-
 // launch returns the profile's running browser, starting it when it is
 // not up. The warm path never touches launchMu — only an actual launch
 // is serialized, and it bounds itself by the caller's deadline capped at

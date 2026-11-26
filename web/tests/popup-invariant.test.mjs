@@ -1,11 +1,16 @@
-// The popup-class invariant, with the model picker as its reproducer: an
-// action inside a panel must not cost the panel itself — same node, same
-// scroll, focus still inside, and no structural removal observed anywhere
-// in it. The removal observer is what gives this teeth: before the B-062
-// fix, picking a model reset the room's session options and the section's
-// content was destroyed and rebuilt across the network round-trip — the
-// mutation proof for this test is exactly that revert, and it goes red
-// naming the destroyed DIVs.
+// The popup-class invariant, with the model picker and the agent chip as
+// reproducers. An action inside a panel must not cost the panel itself: same
+// node, same scroll, focus still inside, one scroll owner, and no structural
+// removal observed anywhere in it. A panel whose anchor hides closes with it and
+// does not come back open by itself. The removal observer is what gives this
+// teeth: before the B-062 fix, picking a model reset the room's session options
+// and the section's content was destroyed and rebuilt across the network
+// round-trip — the mutation proof for this test is exactly that revert, and it
+// goes red naming the destroyed DIVs.
+//
+// Every wait is bounded and every case cleans up in a finally, so a broken
+// contract fails by its assertion, naming what broke, and never leaves the next
+// case a mounted panel to trip over.
 import { mockApi, sleep, sockets } from './env.mjs';
 import { installDOM, doc, MutationObserver } from './dom.mjs';
 installDOM();
@@ -36,6 +41,17 @@ beforeEach(() => {
   chat.navigate('#/');
 });
 
+// until waits for a change the app makes on its own. Past its deadline it fails
+// with the contract it was waiting for: a missing change is an assertion, not a
+// test that runs out of time.
+const until = async (ok, message, ms = 1000) => {
+  const end = Date.now() + ms;
+  while (!ok()) {
+    if (Date.now() > end) assert.fail(message);
+    await sleep(10);
+  }
+};
+
 const modelPickKeepsPanel = async () => {
   mockApi({
     // the answer comes late on purpose: with an instant mock the loading
@@ -61,47 +77,53 @@ const modelPickKeepsPanel = async () => {
   const r = state.rooms.c_inv;
   const host = doc.createElement('div');
   doc.body.appendChild(host);
-  render(html`<${ModelPicker} room=${r} />`, host);
-  await Promise.all([chat.loadAgents(), chat.loadProviders()]);
-  await sleep(20);
+  let mo = null;
+  try {
+    render(html`<${ModelPicker} room=${r} />`, host);
+    await Promise.all([chat.loadAgents(), chat.loadProviders()]);
+    await sleep(20);
 
-  // open the panel
-  const btn = host.querySelector('button[aria-haspopup="dialog"]');
-  assert.ok(btn, 'the picker button rendered');
-  btn.click();
-  await sleep(120);
-  const dialog = doc.querySelector('[role="dialog"]');
-  assert.ok(dialog, 'the panel is open');
-  // one scroll owner: the panel. The model list does not scroll itself.
-  const owners = [dialog, ...dialog.querySelectorAll('*')].filter((n) => /(^| )overflow-(y-)?auto( |$)/.test(n.className || ''));
-  assert.equal(owners.length, 1);
-  assert.equal(owners[0], dialog);
+    // open the panel
+    const btn = host.querySelector('button[aria-haspopup="dialog"]');
+    assert.ok(btn, 'the picker button rendered');
+    btn.click();
+    await sleep(120);
+    const dialog = doc.querySelector('[role="dialog"]');
+    assert.ok(dialog, 'the panel is open');
+    // one scroll owner: the panel. The model list does not scroll itself.
+    const owners = [dialog, ...dialog.querySelectorAll('*')].filter((n) => /(^| )overflow-(y-)?auto( |$)/.test(n.className || ''));
+    assert.equal(owners.length, 1, `one scroll owner, but ${owners.length} scroll inside the panel`);
+    assert.equal(owners[0], dialog, 'the scroll owner is the panel, not the model list');
 
-  // focus inside the panel, scroll it, then act inside it
-  const input = dialog.querySelector('input');
-  if (input) input.focus();
-  dialog.scrollTop = 37;
-  const removals = [];
-  const mo = new MutationObserver((recs) => {
-    for (const rec of recs) for (const n of rec.removedNodes) removals.push(n.tagName || 'text');
-  });
-  mo.observe(dialog, { childList: true, subtree: true, attributes: true });
-  const rows = dialog.querySelectorAll('button.w-full');
-  const target = rows.find((b) => b.textContent.trim().startsWith('SWE-2')) || rows[1];
-  assert.ok(target, 'a model row to pick');
-  target.click();
-  await sleep(80);
-  mo.disconnect();
+    // focus inside the panel, scroll it, then act inside it
+    const input = dialog.querySelector('input');
+    if (input) input.focus();
+    dialog.scrollTop = 37;
+    const removals = [];
+    mo = new MutationObserver((recs) => {
+      for (const rec of recs) for (const n of rec.removedNodes) removals.push(n.tagName || 'text');
+    });
+    mo.observe(dialog, { childList: true, subtree: true, attributes: true });
+    const rows = dialog.querySelectorAll('button.w-full');
+    const target = rows.find((b) => b.textContent.trim().startsWith('SWE-2')) || rows[1];
+    assert.ok(target, 'a model row to pick');
+    target.click();
+    await sleep(80);
+    mo.disconnect();
 
-  assert.equal(doc.contains(dialog), true, 'the panel never left the document');
-  assert.equal(doc.querySelector('[role="dialog"]'), dialog, 'same node, not a remount');
-  assert.equal(dialog.scrollTop, 37, 'scroll did not jump');
-  assert.equal(dialog.contains(doc.activeElement), true, 'focus is still inside the panel');
-  // structural removals are the violation; a swapped SVG is the row's
-  // checkmark moving to the pick — content, not the panel rebuilding
-  const structural = removals.filter((t) => t !== 'text' && t !== 'SVG');
-  assert.equal(structural.length, 0, `no structure was removed, but the observer saw: ${removals.slice(0, 6).join(', ')}`);
-  render(null, host);
+    assert.equal(doc.contains(dialog), true, 'the panel never left the document');
+    assert.equal(doc.querySelector('[role="dialog"]'), dialog, 'same node, not a remount');
+    assert.equal(dialog.scrollTop, 37, 'scroll did not jump');
+    assert.equal(dialog.contains(doc.activeElement), true, 'focus is still inside the panel');
+    // structural removals are the violation; a swapped SVG is the row's
+    // checkmark moving to the pick — content, not the panel rebuilding
+    const structural = removals.filter((t) => t !== 'text' && t !== 'SVG');
+    assert.equal(structural.length, 0, `no structure was removed, but the observer saw: ${removals.slice(0, 6).join(', ')}`);
+  } finally {
+    mo?.disconnect();
+    render(null, host);
+    host.remove();
+  }
 };
 
 // An anchor that hides while its panel is open takes the panel with it, and the
@@ -121,25 +143,26 @@ const agentChipFlow = async () => {
   const r = state.rooms.c_chip;
   const host = doc.createElement('div');
   doc.body.appendChild(host);
-  render(html`<${AgentOptions} room=${r} />`, host);
   const chip = () => host.querySelector('button[aria-expanded]');
   const panel = () => doc.querySelector('[role="dialog"]');
-  await chat.loadAgentOptions(r, { force: true });
-  await sleep(20);
-  chip().click();
-  await sleep(20);
-  assert.ok(panel(), 'the chip opens its panel');
-  answer = { data: [], status: 'ready' };
-  await chat.loadAgentOptions(r, { force: true });
-  await sleep(20);
-  assert.equal(chip(), null, 'a definitive empty hides the chip');
-  assert.equal(panel(), null, 'the panel goes with its chip');
-  answer = { data: [MODE] };
-  await chat.loadAgentOptions(r, { force: true });
-  await sleep(20);
-  assert.ok(chip(), 'the chip shows again');
-  assert.equal(panel(), null, 'and the panel does not reopen by itself');
-  render(null, host);
+  try {
+    render(html`<${AgentOptions} room=${r} />`, host);
+    await chat.loadAgentOptions(r, { force: true });
+    await until(() => chip(), 'the chip shows while the agent offers an option');
+    chip().click();
+    await until(() => panel(), 'the chip opens its panel');
+    answer = { data: [], status: 'ready' };
+    await chat.loadAgentOptions(r, { force: true });
+    await until(() => chip() === null, 'a definitive empty answer hides the chip');
+    assert.equal(panel(), null, 'the panel goes with its chip');
+    answer = { data: [MODE] };
+    await chat.loadAgentOptions(r, { force: true });
+    await until(() => chip(), 'the chip shows again once the agent offers an option');
+    assert.equal(panel(), null, 'and the panel does not reopen by itself');
+  } finally {
+    render(null, host);
+    host.remove();
+  }
 };
 
 for (const layout of ['sheet', 'desktop']) {

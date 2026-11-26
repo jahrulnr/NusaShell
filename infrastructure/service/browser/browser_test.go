@@ -285,3 +285,27 @@ func TestTypeSecret(t *testing.T) {
 		t.Fatal("a secret longer than maxlength must be refused")
 	}
 }
+
+// Building the manager — what serve does at boot — starts nothing. A browser
+// waits for the first tool call that needs it; an idle instance holds no Chrome
+// process at all.
+func TestConstructionStartsNoBrowser(t *testing.T) {
+	if _, _, err := resolveExec("", ""); err != nil {
+		t.Skip("no Chrome or Chromium on this host")
+	}
+	m := New(Options{ProfileDir: t.TempDir()})
+	defer m.Shutdown()
+	// Long enough for a launch that a boot-time warm would have started: a cold
+	// Chrome takes a few hundred milliseconds, so a short window would pass even
+	// with the regression in place.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		running := len(m.browsers)
+		m.mu.Unlock()
+		if running != 0 {
+			t.Fatalf("boot started %d browser(s), want none until a tool needs one", running)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

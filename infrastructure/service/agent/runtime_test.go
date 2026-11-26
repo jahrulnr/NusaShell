@@ -1288,8 +1288,8 @@ func TestClientCapsAdvertiseOnlyBooleanConfigOptions(t *testing.T) {
 		t.Fatalf("terminal = %s, want unadvertised", caps["terminal"])
 	}
 	var fs, auth map[string]bool
-	if err := json.Unmarshal(caps["fs"], &fs); err != nil || fs["readTextFile"] || fs["writeTextFile"] {
-		t.Fatalf("fs = %s, want both readers off", caps["fs"])
+	if err := json.Unmarshal(caps["fs"], &fs); err != nil || !fs["readTextFile"] || fs["writeTextFile"] {
+		t.Fatalf("fs = %s, want read on and write off", caps["fs"])
 	}
 	if err := json.Unmarshal(caps["auth"], &auth); err != nil || auth["terminal"] {
 		t.Fatalf("auth = %s, want terminal off", caps["auth"])

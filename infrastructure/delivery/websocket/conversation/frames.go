@@ -257,6 +257,11 @@ type activityPayload struct {
 	// matches its own pending bubble by it. A queue or machine turn carries an
 	// empty one, so no tab can claim it.
 	RequestID string `json:"requestId"`
+	// StartedAt is the server's admission wall-clock in unix milliseconds —
+	// the same value turn.opened carries, so a tab that adopts the turn
+	// from this notice (before or without a watch replay) times the work
+	// from when it actually started, never from when the tab noticed.
+	StartedAt int64 `json:"startedAt"`
 }
 
 // activityFrame projects a turn's open/terminal edge into the
@@ -274,6 +279,7 @@ func activityFrame(t *turn, state string) serverFrame {
 			Kind:      t.kind.String(),
 			Origin:    t.origin.Kind.String(),
 			RequestID: t.requestID,
+			StartedAt: t.startedAt.UnixMilli(),
 		},
 	}
 }

@@ -347,11 +347,12 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	if offer := browserMgr.InstallOffer(); offer.Missing {
 		slog.Warn("no Chrome or Chromium found; threads cannot use a browser until one is installed",
 			"hint", "Settings → Tools, or `nusashell browser install`")
-	} else {
-		// A cold Chrome start can eat a first tool call's whole deadline;
-		// warming it here makes the first browser_navigate hit a live one.
-		browserMgr.Preheat(ctx)
 	}
+	// Chrome starts on the first browser tool call, never at boot. A measured
+	// idle instance used to hold 148 MiB cgroup / 113 MiB PSS across 13 Chrome
+	// processes for a browser nobody opened; the cold start it bought is
+	// 208 ms–1.95 s, paid once, by the thread that asked. On a machine that has
+	// already lost a session to memory pressure that trade is not close.
 	stopBrowser := sync.OnceFunc(func() { browserMgr.Shutdown() })
 	defer stopBrowser()
 	// [[env:NAME]] in typed text resolves against the thread's agent's

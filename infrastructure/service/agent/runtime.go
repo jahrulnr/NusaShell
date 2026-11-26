@@ -256,6 +256,11 @@ func (r *Runtime) ensureProc(ctx context.Context, a *aggregate.Agent) (*proc, er
 	// picker we already serve. This is the one piece of
 	// DefaultClientCapabilities this surface adopts; fs/terminal stay off.
 	caps.Meta = json.RawMessage(`{"parameterizedModelPicker":true}`)
+	// fs read is advertised: the handler is confined to the session's
+	// workspace folders and size-capped, so an agent reading through us is
+	// never a wider read than the tools already grant. Write stays off —
+	// it moves file writes into our hands and waits for an approval path.
+	caps.FS.ReadTextFile = true
 	client, err := acp.Start(ctx, acp.ClientConfig{
 		Command:      a.Command(),
 		Args:         a.Args(),
