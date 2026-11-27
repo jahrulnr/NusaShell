@@ -58,14 +58,15 @@ func (h *Hub) Run(ctx context.Context, convID, providerID, modelID, content stri
 		h.mu.Unlock()
 		return "", appconversation.SendResult{}, err
 	}
-	opts.Steering = appjob.NewSteeringInput()
 	t := &turn{
 		id: tid.String(), kind: turnSend, conversationID: convID,
 		requestID:  "ext-" + strconv.FormatInt(externalSeq.Add(1), 10),
 		providerID: providerID, modelID: modelID, content: content, attachments: attachments, opts: opts,
-		steering: opts.Steering, steerByInput: map[string]*steerRecord{},
 		subscribed: map[*conn]struct{}{}, observe: observe, done: make(chan runResult, 1),
 	}
+	// The worker owns the turn's mailbox; naming the turn is all the hub does,
+	// so a steer that names it reaches this job queued or running.
+	t.opts.LiveTurn = t.id
 	h.admitSeq++
 	t.admitted = h.admitSeq
 	t.turnCtx, t.turnCancel = context.WithCancelCause(h.ctx)
@@ -88,54 +89,29 @@ func (h *Hub) Run(ctx context.Context, convID, providerID, modelID, content stri
 	return convID, res.receipt, res.err
 }
 
-// Steer hands text to the room's running send turn, folded at its next
-// safe point. It reports false when no such turn runs. A journal-only send
-// turn is steered through the worker that owns it — its steering mailbox
-// was never bound here, so writing to t.steering would reach nothing.
+// Steer hands text to the room's running send turn, folded at its next safe
+// point. It reports false when no such turn runs. The input goes to the worker
+// that owns the turn — the hub keeps no mailbox — and a server caller does not
+// choose between steering and queueing: the running turn's position decides,
+// and text it never reaches becomes the next turn.
 func (h *Hub) Steer(convID, text string) bool {
 	h.mu.Lock()
-	jobOwned := false
+	live := false
 	for _, t := range h.turns {
-		if t.terminal || t.conversationID != convID || t.kind != turnSend {
-			continue
+		if !t.terminal && t.conversationID == convID && t.kind == turnSend {
+			live = true
+			break
 		}
-		if t.jobOwned {
-			jobOwned = true
-			continue
-		}
-		if t.steering == nil {
-			continue
-		}
-		if len(t.steerRecords) >= maxSteerInputs {
-			h.mu.Unlock()
-			return false
-		}
-		inputID := "ext-" + strconv.FormatInt(externalSeq.Add(1), 10)
-		rec := &steerRecord{
-			inputID: inputID,
-			content: text,
-			payload: messageInputPayload{Content: text},
-			// The input remembers the id it was submitted under, so the user
-			// message the fold writes names the same submission the live
-			// bubble does.
-			receipt: t.steering.Submit(valueobject.UserInput{Text: text, InputID: inputID}),
-		}
-		t.steerRecords = append(t.steerRecords, rec)
-		t.steerByInput[inputID] = rec
-		h.emitLocked(t, "turn.steer_ack", steerInputPayload{InputID: inputID}, false)
-		h.mu.Unlock()
-		return true
 	}
 	steerJob := h.jobControlSteer
 	h.mu.Unlock()
-	if jobOwned && steerJob != nil {
-		// Forward outside the lock: the callback reaches into the
-		// application, and the fold it feeds re-enters the hub through the
-		// turn's event stream.
-		receipt, ok := steerJob(convID, valueobject.UserInput{Text: text})
-		return ok && receipt != nil
+	if !live || steerJob == nil {
+		return false
 	}
-	return false
+	// Forward outside the lock: the callback reaches into the application, and
+	// the fold it feeds re-enters the hub through the turn's event stream.
+	receipt, ok := steerJob(convID, "", valueobject.UserInput{Text: text})
+	return ok && receipt != nil
 }
 
 // Cancel stops every running turn of the room; false when none runs. The

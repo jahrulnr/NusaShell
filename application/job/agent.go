@@ -164,6 +164,12 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 						recordID := ""
 						if in.record != nil {
 							recordID = in.record.ID()
+						} else {
+							// The mailbox names the fold for an input with no line
+							// of its own: the id it was submitted under is what the
+							// wire's turn.steer frame carries, so the live bubble
+							// and the folded segment keep one id.
+							recordID = in.input.InputID
 						}
 						if !d.AgentRuntime.Steer(live, convID, in.input, recordID, settle) {
 							steers.requeue(entries[i:])
@@ -283,7 +289,7 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 				emit(event.NewRecordedSteerEvent(in.input.Text, in.record.ID(), in.input.Attachments...))
 				continue
 			}
-			emit(event.NewSteerEvent(in.input.Text, in.input.Attachments...))
+			emit(steerEvent(in))
 		}
 		// The prompt carries every text: the relayed ones live in their own
 		// records, and a join of plain inputs is the line written above. With

@@ -930,7 +930,14 @@ export function setSelection(r, patch) {
     // The room keeps what the picker shows (its model, effort, and
     // upstream pin), so a turn started anywhere runs it and a reload shows
     // it. A change to the effort alone leaves the model binding alone.
-    persistSelection(r, s, patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined);
+    const saved = persistSelection(r, s, patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined);
+    // The slash catalog is the room's binding. Read it after that bind
+    // lands, so the menu is the list the server answers for the new
+    // runtime and not the one from before the switch. Effort and the
+    // upstream pin do not change which commands the room offers.
+    if (r.id && (patch.runtime !== undefined || patch.agentId !== undefined || patch.providerId !== undefined || patch.modelId !== undefined)) {
+      void saved.then(() => loadCommands(r, { force: true }));
+    }
   }
   emit();
 }
@@ -1727,7 +1734,12 @@ function onFrame(f) {
     toast(text, f.payload.severity === 'warning' ? 'warning' : f.payload.severity === 'error' ? 'error' : 'info', 7000);
   }
   if (f.type === 'turn.context') {
-    r.ctx = { estimate: 0, ...r.ctx, total: f.payload.size, live: f.payload.used, cost: f.payload.cost || null };
+    // The frame is the agent's used, size, and cost. It does not count the
+    // server's estimate: a zero written in for that gap would read as a
+    // measurement on a provider room. A count already on the room stays,
+    // including a zero the context endpoint counted.
+    const prev = r.ctx && typeof r.ctx === 'object' ? r.ctx : {};
+    r.ctx = { ...prev, total: f.payload.size, live: f.payload.used, cost: f.payload.cost || null };
   }
   if (!r.live || r.live.turnId !== f.turnId) { emit(); return; }
   // A turn this tab did not open holds its prompt only in history: the

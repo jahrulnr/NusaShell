@@ -110,6 +110,11 @@ type SendOptions struct {
 	// it. The job records it on the user message; the head is rendered from it
 	// at request time, never stored.
 	Relay *valueobject.Relay
+	// LiveTurn names the transport's live turn for this send — a websocket
+	// turnId — when one exists. The app binds the turn's mailbox to it, so a
+	// steer naming that exact turn reaches this job whether it is queued or
+	// already running. "" means no transport turn: the running job decides.
+	LiveTurn string
 	// AcceptedRecord is the user line the accepting path already wrote for this
 	// prompt. The job uses it — appends it to its own view if needed, marks the
 	// receipt — instead of writing a second line for the same words. A record
@@ -182,12 +187,20 @@ func (j *Send) rescueFailed(step, msgID string, err error) {
 
 // rescueSteers delivers what acceptance already recorded but this turn did not
 // consume. It never writes provenance: acceptance owns the one relay line. An
-// owner's steer keeps the established rule — the caller decides what an unfired
-// steer becomes — because only a relay carries a record the receiving room did
-// not type.
+// owner's steer is not the caller's to decide either — the same rule covers
+// both, and the text the turn never reached becomes the next turn.
 func (j *Send) rescueSteers() {
-	for _, e := range j.mailbox().drainPending() {
+	for _, e := range j.mailbox().detachPending() {
 		if e.input.Relay == nil {
+			// Waiting text whose turn answered without it is the next turn —
+			// never a draft, never a silent drop. A composition without the
+			// hook (the CLI's) has no queue to hand it to.
+			if j.Deps.NextTurn == nil {
+				continue
+			}
+			if err := j.Deps.NextTurn(j.ConvID(), e.input, j.Opts.Origin); err != nil {
+				j.rescueFailed("next turn", e.input.InputID, err)
+			}
 			continue
 		}
 		if e.record != nil {

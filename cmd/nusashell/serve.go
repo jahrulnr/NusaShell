@@ -330,11 +330,11 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		func(convID string) bool {
 			return eng.conversations.Cancel(context.Background(), convID) == nil
 		},
-		func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
-			return eng.conversations.AcceptSteer(context.Background(), convID, in)
+		func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+			return eng.conversations.AcceptSteer(context.Background(), convID, turnID, in)
 		},
-		func(convID, inputID string) bool {
-			return eng.conversations.RecallInput(convID, inputID)
+		func(convID, turnID, inputID string) bool {
+			return eng.conversations.RecallInput(convID, turnID, inputID)
 		},
 	)
 	// Threads work with each other and drive a browser through two

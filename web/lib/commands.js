@@ -94,30 +94,45 @@ export function useCommands(r) {
 }
 
 // CATALOG_TTL keeps a room change from re-reading a catalog that was just
-// read; an explicit refresh (a turn's start or end) defeats it.
+// read; an explicit refresh (a turn's start or end, or a new binding)
+// defeats it.
 const CATALOG_TTL = 5_000;
 
 // loadCommands reads the room's command catalog — the native commands plus the
 // agent's own, with this room's availability. A turn starting or ending
-// changes that availability, and so does a command that rewrites history, so
-// those refresh it; opening a room reads it once.
+// changes that availability, and so does a command that rewrites history, and
+// so does binding the room to another runtime. Those refresh it; opening a
+// room reads it once. A refresh that arrives while a read is already in
+// flight asks for one more, so the answer from before the bind is not the
+// last one the menu keeps.
 export async function loadCommands(r, { force = false } = {}) {
-  if (r.catalogFlight) return r.catalogFlight;
+  if (r.catalogFlight) {
+    if (force) r.catalogAgain = true;
+    return r.catalogFlight;
+  }
   if (!force && r.catalogAt && Date.now() - r.catalogAt < CATALOG_TTL) return;
   const flight = (async () => {
-    r.catalog = { ...r.catalog, status: r.catalog.items.length ? 'refreshing' : 'loading' };
-    emit();
-    try {
-      const res = await api.commands({ conversationId: r.id });
-      r.catalog = { status: 'ready', items: Array.isArray(res?.data) ? res.data : [], error: null };
-    } catch (err) {
-      // A catalog the server could not answer leaves the last one in place;
-      // the menu says so, and a command typed anyway is settled by the server.
-      r.catalog = { status: 'error', items: r.catalog.items, error: errorText(err) };
-    }
-    r.catalogAt = Date.now();
-    emit();
+    do {
+      r.catalogAgain = false;
+      r.catalog = { ...r.catalog, status: r.catalog.items.length ? 'refreshing' : 'loading' };
+      emit();
+      try {
+        const res = await api.commands({ conversationId: r.id });
+        r.catalog = { status: 'ready', items: Array.isArray(res?.data) ? res.data : [], error: null };
+      } catch (err) {
+        // A catalog the server could not answer leaves the last one in place;
+        // the menu says so, and a command typed anyway is settled by the server.
+        r.catalog = { status: 'error', items: r.catalog.items, error: errorText(err) };
+      }
+      r.catalogAt = Date.now();
+      emit();
+    } while (r.catalogAgain);
   })();
   r.catalogFlight = flight;
   try { await flight; } finally { if (r.catalogFlight === flight) r.catalogFlight = null; }
+  // The follow-up was asked after this read had already finished its loop.
+  if (r.catalogAgain) {
+    r.catalogAgain = false;
+    await loadCommands(r, { force: true });
+  }
 }

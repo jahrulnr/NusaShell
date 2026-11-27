@@ -182,8 +182,8 @@ following never leave the server on any endpoint or frame:
   resync snapshot carry `steerable` as `true` or `false`, and `false` is
   written, never omitted. Absent means unknown: the client queues the
   draft and does not call `turn.steer`. A submission the server does not
-  accept is queued by the client, once; an accepted steer the turn never
-  consumes returns to the draft and does not become a queued send.
+  accept is queued by the client, once. An accepted steer the turn never
+  consumes becomes the next turn. Draft return is only an explicit recall.
   Frames and error codes are normative in [`websocket.md`](./websocket.md).
 - **Attachment references, not bytes.** Message and tool-output
   attachments project `mediaType`, `modality`, `uri`, and optional
@@ -654,7 +654,7 @@ On a send turn, `turn.failed` carries `userMessagePersisted` (A17, B-113): wheth
 
 `promptedAt` is the unix millisecond stamp when the prompt is written. `lastUpdateAt` is the stamp of the last agent update. Neither is copied from `startedAt`. The agent's duration is `lastUpdateAt - promptedAt`. Both stamps ride the active snapshot on `turn.resync_required`, and the terminals `turn.completed` and `turn.failed`. Omitted when absent. Never written as `0` or `null`. A late attach reads them from that snapshot.
 
-`clock` is `preparing`, `waiting`, or `working`. It is on `turn.opened` (`preparing`), on the active snapshot, and on a journaled `turn.phase` with `phase: "clock"` at each change. `preparing` runs from admission until `promptedAt`, including the room queue, cold start, `session/load`, and resume. The screen does not say the agent is working in that stretch. A discarded load replay stays `preparing`: not a blank gap, and not `working`. After `promptedAt`, silence is `waiting`. It is not invented progress. `working` starts only when an agent update is in progress, and it ends when that update ends. `clock: working` while `promptedAt` is absent is wrong. This clock is for agent turns. Provider turns keep the sentences they already use.
+`clock` is `preparing`, `waiting`, or `working`. It is on `turn.opened` (`preparing`), on the active snapshot, and on a journaled `turn.phase` with `phase: "clock"` at each change. `preparing` runs from admission until `promptedAt`, including the room queue, cold start, `session/load`, and resume. The screen does not say the agent is working in that stretch. A discarded load replay stays `preparing`: not a blank gap, and not `working`. After `promptedAt` and before the first agent activity, silence is `waiting`. It is not invented progress. After that first activity, `working` stays until the turn ends. A `state_update` does not drive this clock. `clock: working` while `promptedAt` is absent is wrong. This clock is for agent turns. Provider turns keep the sentences they already use.
 
 There is no ping and no heartbeat. A mid-turn liveness signal is only what the protocol already requires: a permission or elicitation request, and the answer to `session/cancel`.
 

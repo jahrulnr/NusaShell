@@ -171,14 +171,6 @@ type turn struct {
 	// the job's real persistence receipt.
 	overflowed bool
 
-	// steering is the send turn's exact-turn mailbox — bound through
-	// opts into the job, so submissions land on this turn even while it
-	// is still queued on the room worker. steerRecords is the bounded
-	// submission list (order = submission), steerByInput the requestId
-	// index for dedup and recall. Only turnSend carries these.
-	steering     *appjob.SteeringInput
-	steerRecords []*steerRecord
-	steerByInput map[string]*steerRecord
 	// outcome records the emitted terminal verdict so a late
 	// resync_required can replay the stored outcome instead of a bare
 	// frame.
@@ -236,8 +228,8 @@ type Hub struct {
 	// request id, and returns the mailbox receipt the journal shares with
 	// the job. Recall withdraws that same id.
 	jobControlCancel func(convID string) bool
-	jobControlSteer  func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool)
-	jobControlRecall func(convID, inputID string) bool
+	jobControlSteer  func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool)
+	jobControlRecall func(convID, turnID, inputID string) bool
 	// jobControlMu serializes a journal-only steer or recall with its
 	// forward. The forward runs without h.mu — the worker it reaches can
 	// re-enter the hub through the turn's event stream.
@@ -273,12 +265,12 @@ func NewHub(ctx context.Context, sender Sender) *Hub {
 // send naming uploads is rejected.
 func (h *Hub) UseUploads(u Uploads) { h.uploads = u }
 
-// UseJobControl wires the one-way bridge to the room workers that own
-// journal-only turns: cancel answers true only when a live worker took the
-// interruption, and steer answers true only when the running job accepted
-// the input. Set once at composition time — see the field comment for the
-// direction rule.
-func (h *Hub) UseJobControl(cancel func(convID string) bool, steer func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool), recall func(convID, inputID string) bool) {
+// UseJobControl wires the one-way bridge to the room workers that own every
+// live turn: cancel answers true only when a live worker took the interruption,
+// and steer answers true only when the job named by turnID — or, with no id,
+// the running one — accepted the input. Set once at composition time — see the
+// field comment for the direction rule.
+func (h *Hub) UseJobControl(cancel func(convID string) bool, steer func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool), recall func(convID, turnID, inputID string) bool) {
 	h.mu.Lock()
 	h.jobControlCancel = cancel
 	h.jobControlSteer = steer
@@ -286,18 +278,15 @@ func (h *Hub) UseJobControl(cancel func(convID string) bool, steer func(convID s
 	h.mu.Unlock()
 }
 
-// steerableLocked reports whether this live turn accepts turn.steer.
-// A socket-admitted send has its own mailbox. A journal-only send does
-// only when the worker forward is wired. Anything else — edit, resume,
-// a finished turn — is a declared no. Callers hold h.mu.
+// steerableLocked reports whether this live turn accepts turn.steer. It is a
+// property of the turn, not of where its input lives: every send turn is owned
+// by the room worker, so the forward being wired is the whole answer. Anything
+// else — edit, resume, a finished turn — is a declared no. Callers hold h.mu.
 func (h *Hub) steerableLocked(t *turn) bool {
 	if t == nil || t.terminal || t.kind != turnSend {
 		return false
 	}
-	if t.jobOwned {
-		return h.jobControlSteer != nil
-	}
-	return t.steering != nil
+	return h.jobControlSteer != nil
 }
 
 // UseAgentRoom tells admission which stored rooms run an agent, so
@@ -491,13 +480,8 @@ func (h *Hub) turnSend(c *conn, cmd command) {
 	opts.References = in.References
 	opts.Annotations = in.Annotations
 	opts.Recording = in.Recording
-	// Every admitted send owns an exact-turn mailbox: turn.steer
-	// submissions land on this turn whether the job is running or still
-	// queued on the room worker — never on whatever ran before.
-	opts.Steering = appjob.NewSteeringInput()
 	h.admitAndRun(c, cmd.RequestID, convID, turn{
 		kind: turnSend, providerID: payload.ProviderID, modelID: payload.ModelID, content: in.Text, attachments: in.Attachments, opts: opts,
-		steering: opts.Steering, steerByInput: map[string]*steerRecord{},
 	})
 }
 
@@ -689,6 +673,10 @@ func (h *Hub) admitAndRun(c *conn, requestID, convID string, job turn) {
 	t.id = tid.String()
 	t.conversationID = convID
 	t.requestID = requestID
+	// The worker owns the turn's mailbox; the hub only names the turn. The
+	// id rides the send so a steer that names it reaches this job whether it
+	// is queued or already running.
+	t.opts.LiveTurn = t.id
 	h.admitSeq++
 	t.admitted = h.admitSeq
 	t.subscribed = map[*conn]struct{}{c: {}}

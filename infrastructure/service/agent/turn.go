@@ -64,10 +64,10 @@ type turnSink struct {
 	media     int
 	// droppedUnknown logs one contentless or unbound update per id, not once per pulse.
 	droppedUnknown map[string]bool
-	// clock is preparing until markPrompted, then waiting except while an
-	// update is being applied. promptedAt and lastUpdateAt are unix
-	// milliseconds; zero means that stamp has not been written.
-	clock        string
+	// clock is preparing until markPrompted, waiting until the first agent
+	// update, and working from then on while the turn is open (D-27).
+	// promptedAt and lastUpdateAt are unix milliseconds; zero means that
+	// stamp has not been written.
 	promptedAt   int64
 	lastUpdateAt int64
 }
@@ -175,7 +175,9 @@ func (t *turnSink) release(input valueobject.UserInput, recordID string, accepte
 }
 
 // markPrompted stamps the prompt write and moves the clock to waiting.
-// An update before this stays preparing and does not count as work.
+// An update before this stays preparing and does not count as work; the
+// prompt is the last moment waiting is honest, before the agent has said
+// anything.
 func (t *turnSink) markPrompted(at int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -183,13 +185,18 @@ func (t *turnSink) markPrompted(at int64) {
 		at = time.Now().UnixMilli()
 	}
 	t.promptedAt = at
-	t.clock = "waiting"
 	t.emit(event.NewClockEvent("waiting", t.promptedAt, 0))
 }
 
+// agentUpdateKind reports whether a session update is agent activity the
+// clock shows. The first five are the v1 names; agent_message, agent_thought,
+// and plan_update are what ACP v2 calls the same activity — whole-message
+// upserts beside the chunk names, and the tagged plan update that replaces
+// plan. v2 drops tool_call: its first tool_call_update creates the call.
 func agentUpdateKind(kind string) bool {
 	switch kind {
-	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan":
+	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan",
+		"agent_message", "agent_thought", "plan_update":
 		return true
 	default:
 		return false
@@ -197,37 +204,22 @@ func agentUpdateKind(kind string) bool {
 }
 
 // noteWorkingLocked stamps the update. Callers hold t.mu. A clock of
-// working before the prompt write is not emitted.
+// working before the prompt write is not emitted. Once an update has
+// stamped working, the open turn stays there: silence afterwards is not
+// waiting (D-27).
 func (t *turnSink) noteWorkingLocked() {
 	if t.promptedAt == 0 {
 		return
 	}
 	t.lastUpdateAt = time.Now().UnixMilli()
-	t.clock = "working"
 	t.emit(event.NewClockEvent("working", t.promptedAt, t.lastUpdateAt))
-}
-
-// noteQuietLocked ends the update. Silence after it is waiting.
-// Callers hold t.mu.
-func (t *turnSink) noteQuietLocked() {
-	if t.promptedAt == 0 || t.clock != "working" {
-		return
-	}
-	t.clock = "waiting"
-	t.emit(event.NewClockEvent("waiting", t.promptedAt, t.lastUpdateAt))
 }
 
 // apply folds one session update into the turn. Callers hold t.mu.
 func (t *turnSink) apply(u acp.SessionUpdate) {
-	working := agentUpdateKind(u.SessionUpdate)
-	if working {
+	if agentUpdateKind(u.SessionUpdate) {
 		t.noteWorkingLocked()
 	}
-	defer func() {
-		if working {
-			t.noteQuietLocked()
-		}
-	}()
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		var block acp.ContentBlock

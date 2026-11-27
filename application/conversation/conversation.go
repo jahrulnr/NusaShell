@@ -72,6 +72,10 @@ type ConversationApp struct {
 	// releases it. A pick parked after the consumption has another acceptedAt
 	// and stays visible.
 	consumed map[string]time.Time
+	// steering maps a live turn id to the mailbox its send bound: the app owns
+	// the mailbox, and a transport that names a turn reaches it here instead of
+	// keeping one of its own. Cleared when the send returns.
+	steering map[string]map[string]*appjob.SteeringInput
 
 	uploads    drepo.Uploads
 	picks      drepo.Picks
@@ -141,6 +145,7 @@ func New(
 		workers:      map[string]*worker.Worker{},
 		turning:      map[string]int{},
 		consumed:     map[string]time.Time{},
+		steering:     map[string]map[string]*appjob.SteeringInput{},
 		wakeQueued:   map[string]bool{},
 		machineTurns: map[string]int{},
 		stopGrace:    10 * time.Second,
@@ -157,6 +162,9 @@ func New(
 		return err
 	}
 	app.deps.Completions = app
+	// Waiting text its turn never reached becomes the next turn through the
+	// same accept path — one waiting room, and the caller decides nothing.
+	app.deps.NextTurn = app.NextTurn
 	for _, opt := range opts {
 		opt(app)
 	}

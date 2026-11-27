@@ -129,6 +129,76 @@ func TestRunTurnFoldsSteerAfterToolResult(t *testing.T) {
 	}
 }
 
+// A steer the turn never reaches — it arrived while the last model call
+// was in flight, after that step claimed — is not a draft and not a
+// silent drop: it becomes the next turn. The rule is the mailbox's, not
+// the caller's, so it holds for a web steer and a relay alike.
+func TestUnconsumedSteerBecomesTheNextTurn(t *testing.T) {
+	box := NewSteeringInput()
+	svc := &lateSteerSvc{box: box}
+	d := hydrationDeps(t, svc)
+	conv := seedRoom(t, d.Convs, "room", "go")
+	conv.SetProviderID("gw1")
+	conv.SetModelID("m1")
+	if err := d.Convs.Save(t.Context(), conv); err != nil {
+		t.Fatal(err)
+	}
+	next := make(chan valueobject.UserInput, 1)
+	d.NextTurn = func(convID string, in valueobject.UserInput, _ valueobject.TurnOrigin) error {
+		if convID != "room" {
+			t.Errorf("next turn conv = %q", convID)
+		}
+		next <- in
+		return nil
+	}
+	job := &Send{
+		Deps: d, Ctx: t.Context(), Receipt: NewPersistenceReceipt(),
+		Message: "go", Opts: SendOptions{Steering: box},
+	}
+	job.Bind("room", nil)
+	if err := job.Execute(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case in := <-next:
+		if in.Text != "also this" || in.InputID != "st-late" {
+			t.Fatalf("next turn = %+v, want the unconsumed input with its id", in)
+		}
+	default:
+		t.Fatal("the unconsumed steer was dropped instead of becoming the next turn")
+	}
+	// It was never folded into this turn's history: the next turn is where it
+	// lands, with the id it was submitted under.
+	stored, err := d.Convs.Load(t.Context(), "room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range stored.Messages() {
+		if m.Content() == "also this" {
+			t.Fatal("the unconsumed steer was folded into the turn that never claimed it")
+		}
+	}
+}
+
+// lateSteerSvc submits one input while its model call runs — after that
+// step's claim, so the turn cannot fold it.
+type lateSteerSvc struct {
+	box  *SteeringInput
+	done atomic.Bool
+}
+
+func (s *lateSteerSvc) Send(_ context.Context, conv *aggregate.Conversation, _ *aggregate.Provider, _ entity.Model, _ event.TurnEventHandler) error {
+	if s.box != nil && s.done.CompareAndSwap(false, true) {
+		s.box.Submit(valueobject.UserInput{Text: "also this", InputID: "st-late"})
+	}
+	m, _ := entity.NewMessage(enum.RoleAssistant, "done")
+	m.SetFinishReason(enum.FinishReasonStop)
+	conv.Append(m)
+	return nil
+}
+
+// message contents plus the system prompt — used to prove what sat in
+// history at call time.
 // captureSvc records the tail the provider call saw — the last two
 // message contents plus the system prompt — used to prove what sat in
 // history at call time.

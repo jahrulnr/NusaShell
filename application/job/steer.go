@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
@@ -108,6 +109,11 @@ type SteeringInput struct {
 // NewSteeringInput creates an empty mailbox.
 func NewSteeringInput() *SteeringInput { return &SteeringInput{} }
 
+// Available reports whether one more input fits the mailbox right now. It is a
+// preflight for accept paths that must not write before a refusal; SubmitBefore
+// still enforces the same cap atomically.
+func (s *SteeringInput) Available(limit int) bool { return s.available(limit) }
+
 // available reports whether one more input fits the mailbox right now. It is a
 // preflight for accept paths that must not write before a refusal; SubmitBefore
 // still enforces the same cap atomically.
@@ -147,18 +153,14 @@ func (s *SteeringInput) SubmitBefore(input valueobject.UserInput, limit int, rec
 	return r, nil
 }
 
-// drainPending detaches the inputs no turn consumed — read at the end of a turn
-// so the caller can persist what would otherwise be lost.
-func (s *SteeringInput) drainPending() []steeringEntry {
+// detachPending takes the inputs no turn consumed out of the mailbox without
+// recalling them: they are not a caller's draft any more, they are the next
+// turn's to fold.
+func (s *SteeringInput) detachPending() []steeringEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := s.pending
 	s.pending = nil
-	for _, e := range out {
-		if e.receipt != nil {
-			e.receipt.markRecalled()
-		}
-	}
 	return out
 }
 
@@ -265,6 +267,22 @@ func (s *SteeringInput) popLast() (string, bool) {
 		last.receipt.markRecalled()
 	}
 	return last.input.Text, true
+}
+
+// steerEvent is the fold frame for one claimed input: the line acceptance
+// already wrote names it, else the id the input was submitted under (a web
+// turn.steer's requestId, which its user message carries as inputId). A CLI
+// push has neither, and the frame keeps its empty id. The mailbox owns the
+// input, so it is the one place that can name the fold — nothing downstream
+// has to guess it back from the text.
+func steerEvent(e steeringEntry) event.TurnEvent {
+	if e.record != nil {
+		return event.NewRecordedSteerEvent(e.input.Text, e.record.ID(), e.input.Attachments...)
+	}
+	if e.input.InputID != "" {
+		return event.NewRecordedSteerEvent(e.input.Text, e.input.InputID, e.input.Attachments...)
+	}
+	return event.NewSteerEvent(e.input.Text, e.input.Attachments...)
 }
 
 // claim detaches every pending entry oldest-first, flipping each receipt

@@ -29,6 +29,13 @@ func TestRunIsAWebVisibleTurn(t *testing.T) {
 			return appconversation.SendResult{ConversationID: id, UserMessagePersisted: true}, nil
 		},
 	})
+	// The worker owns the input; the hub only forwards it. This records what
+	// the forward carried, which is the whole contract a caller sees.
+	var steered []string
+	h.UseJobControl(nil, func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+		steered = append(steered, in.Text)
+		return &appjob.SteeringReceipt{}, true
+	}, nil)
 	ws := dial(t, h)
 	finished := make(chan bool, 2)
 	h.OnFinished(func(_, _ string, _ valueobject.TurnOrigin, external bool, _ error) { finished <- external })
@@ -48,18 +55,8 @@ func TestRunIsAWebVisibleTurn(t *testing.T) {
 	if !h.Steer("c_ext", "also this") {
 		t.Fatal("a running external turn must take steering")
 	}
-	h.mu.Lock()
-	var got []string
-	for _, tr := range h.turns {
-		if tr.conversationID == "c_ext" && !tr.terminal {
-			for _, rec := range tr.steerRecords {
-				got = append(got, rec.content)
-			}
-		}
-	}
-	h.mu.Unlock()
-	if len(got) != 1 || got[0] != "also this" {
-		t.Fatalf("steering = %q", got)
+	if len(steered) != 1 || steered[0] != "also this" {
+		t.Fatalf("steering = %q", steered)
 	}
 	close(release)
 	if err := <-done; err != nil {

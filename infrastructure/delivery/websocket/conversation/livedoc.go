@@ -1,6 +1,10 @@
 package wsconversation
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	appjob "github.com/jahrulnr/nusashell/application/job"
+)
 
 // liveDocMaxBytes bounds the text a turn's snapshot document holds. A
 // gapped turn.watch gets the document inside one resync_required frame,
@@ -34,12 +38,73 @@ type livePart struct {
 	Keys map[string]string `json:"keys,omitempty"`
 }
 
+// steerInput is one steering submission this turn accepted: the id the client
+// knows, the last state the server reported for it, and a fingerprint of the
+// input so a retried requestId can be told from a reused one. The text never
+// lives here — the browser owns its own words.
+type steerInput struct {
+	InputID     string
+	State       string
+	fingerprint uint64
+}
+
+// acceptSteer records a submission as pending — false when the id is already
+// known (the caller answers the retry from that entry) or the bound is spent.
+func (d *liveDoc) acceptSteer(inputID string, fingerprint uint64) (*steerInput, bool) {
+	if prev, ok := d.steerInput(inputID); ok {
+		return prev, false
+	}
+	if len(d.steers) >= maxSteerInputs {
+		return nil, false
+	}
+	s := &steerInput{InputID: inputID, State: string(appjob.SteeringPending), fingerprint: fingerprint}
+	d.steers = append(d.steers, s)
+	return s, true
+}
+
+// steerInput finds the submission under an id.
+func (d *liveDoc) steerInput(inputID string) (*steerInput, bool) {
+	if inputID == "" {
+		return nil, false
+	}
+	for _, s := range d.steers {
+		if s.InputID == inputID {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
+// steerState moves a known submission to a later state; an id this turn never
+// accepted is ignored — the server does not invent a submission it did not take.
+func (d *liveDoc) steerState(inputID, state string) {
+	if s, ok := d.steerInput(inputID); ok {
+		s.State = state
+	}
+}
+
+// steerSnapshot is the bounded receipt state list the terminal and resync
+// frames carry, in submission order.
+func (d *liveDoc) steerSnapshot() []steerStatePayload {
+	if len(d.steers) == 0 {
+		return nil
+	}
+	out := make([]steerStatePayload, 0, len(d.steers))
+	for _, s := range d.steers {
+		out = append(out, steerStatePayload{InputID: s.InputID, State: s.State})
+	}
+	return out
+}
+
 // liveDoc is a turn's compact live record: ordered parts plus the
 // indexes that fan-in events need (tool chunks by callId, card
 // resolutions by request id). It accumulates under h.mu beside the
 // journal; where the journal drops whole frames, the doc merges their
 // content, so the same bound covers far more history.
 type liveDoc struct {
+	// steers is every submission this turn accepted, in submission order,
+	// bounded by maxSteerInputs: the receipt snapshot without the text.
+	steers       []*steerInput
 	parts        []*livePart
 	tools        map[string]*livePart
 	approvals    map[string]*livePart

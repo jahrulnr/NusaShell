@@ -452,6 +452,24 @@ test('an agent room shows what its agent reports about its own context', async (
   assert.equal(r.ctx.live, 62_000);
 });
 
+test('a turn.context frame does not plant an estimate of zero', async () => {
+  serveThread('c_z', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { runtime: 'harness', providerId: 'p', modelId: 'm' } }, {
+    'GET /api/context': { estimate: 0, total: 200_000 },
+  });
+  chat.navigate('#/c/c_z');
+  await sleep(40);
+  const r = state.rooms.c_z;
+  assert.equal(r.ctx.estimate, 0, 'the endpoint counted zero');
+  r.ctx = { estimate: 0, total: 200_000 };
+  ws.serve({ type: 'turn.context', conversationId: 'c_z', turnId: 't9', seq: 1, payload: { size: 200_000, used: 10 } });
+  assert.equal(r.ctx.estimate, 0, 'a counted zero stays');
+  r.ctx = null;
+  ws.serve({ type: 'turn.context', conversationId: 'c_z', turnId: 't9', seq: 2, payload: { size: 200_000, used: 0 } });
+  assert.equal(Object.hasOwn(r.ctx, 'estimate'), false);
+  assert.equal(r.ctx.total, 200_000);
+  assert.equal(r.ctx.live, 0);
+});
+
 test('a notice from the agent shows as a toast of its severity', async () => {
   serveThread('c_n', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { runtime: 'agent', agentId: 'claude', modelId: 'opus' } }, {
     'GET /api/context': { estimate: 0, total: 0 },

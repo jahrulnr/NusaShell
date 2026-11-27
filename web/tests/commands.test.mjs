@@ -551,3 +551,97 @@ test('editing the draft during the wait drops the held command', async () => {
   assert.equal(sentTurns().length, 0);
   assert.equal(r.draft, 'changed my mind');
 });
+
+// The menu is the server's catalog for the binding the room has now. A
+// switch reads that catalog after the bind. Reading it earlier, or not
+// reading it, leaves the previous list — agent commands such as
+// computer-use on a harness room.
+const boundRoom = (id, phase, modelId) => ({
+  id, title: 'Thread', runtime: phase,
+  agentId: phase === 'agent' ? 'fake' : '',
+  providerId: phase === 'harness' ? 'local' : '',
+  modelId: phase === 'harness' ? modelId : '',
+  workspace: '',
+});
+
+test('a runtime, agent, or model change reads the catalog after the bind', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  let phase = 'agent';
+  let modelId = '';
+  let patching = false;
+  let readsDuringPatch = 0;
+  const r = await openThread('c_1', {
+    'GET /api/conversations/c_1': boundRoom('c_1', 'agent', ''),
+    'PATCH /api/conversations/c_1': async (call) => {
+      patching = true;
+      await gate;
+      patching = false;
+      phase = call.body.agentId ? 'agent' : 'harness';
+      modelId = call.body.modelId || '';
+      return boundRoom('c_1', phase, modelId);
+    },
+    'GET /api/commands': () => {
+      if (patching) readsDuringPatch += 1;
+      if (phase === 'agent') return catalog(native('clear'), native('fork'), agent('computer-use'));
+      if (modelId === 'm2') return catalog(native('compact'), native('clear'), native('fork'), native('rewind'));
+      return catalog(native('compact'), native('clear'), native('fork'));
+    },
+  });
+  assert.deepEqual(commandChoices(r).map((c) => c.name), ['clear', 'fork', 'computer-use']);
+  const before = catalogReads().length;
+  chat.setSelection(r, { runtime: 'harness', agentId: '', providerId: 'local', modelId: 'm1', effort: 'default', upstream: '' });
+  await sleep(20);
+  assert.equal(catalogReads().length, before, 'the catalog is not read before the bind');
+  assert.equal(commandChoices(r).some((c) => c.name === 'computer-use'), true);
+  release();
+  await sleep(40);
+  assert.equal(readsDuringPatch, 0, 'the catalog read waits until the bind has answered');
+  assert.deepEqual(commandChoices(r).map((c) => c.name), ['compact', 'clear', 'fork']);
+  assert.equal(commandChoices(r).some((c) => c.name === 'computer-use'), false, 'agent commands leave a harness room');
+
+  const afterHarness = catalogReads().length;
+  chat.setSelection(r, { runtime: 'agent', agentId: 'fake', providerId: '', modelId: '', effort: 'default', upstream: '' });
+  await sleep(40);
+  assert.ok(catalogReads().length > afterHarness, 'an agent change forces a catalog read');
+  assert.deepEqual(commandChoices(r).map((c) => [c.name, c.native]), [
+    ['clear', true], ['fork', true], ['computer-use', false],
+  ]);
+
+  chat.setSelection(r, { runtime: 'harness', agentId: '', providerId: 'local', modelId: 'm1', effort: 'default', upstream: '' });
+  await sleep(40);
+  const beforeModel = catalogReads().length;
+  chat.setSelection(r, { runtime: 'harness', providerId: 'local', modelId: 'm2', effort: 'default', upstream: '' });
+  await sleep(40);
+  assert.ok(catalogReads().length > beforeModel, 'a model change that rebinds forces a catalog read');
+  assert.deepEqual(commandChoices(r).map((c) => c.name), ['compact', 'clear', 'fork', 'rewind']);
+});
+
+test('a bind that lands while the catalog is still loading keeps the later list', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  let phase = 'agent';
+  let reads = 0;
+  const r = await openThread('c_1', {
+    'GET /api/conversations/c_1': boundRoom('c_1', 'agent', ''),
+    'PATCH /api/conversations/c_1': (call) => {
+      phase = call.body.agentId ? 'agent' : 'harness';
+      return boundRoom('c_1', phase, call.body.modelId || '');
+    },
+    'GET /api/commands': async () => {
+      const snap = phase;
+      reads += 1;
+      if (reads === 1) await gate;
+      return snap === 'agent'
+        ? catalog(native('clear'), native('fork'), agent('computer-use'))
+        : catalog(native('compact'), native('clear'), native('fork'));
+    },
+  });
+  assert.equal(r.catalog.items.some((c) => c.name === 'computer-use'), false, 'the first read has not answered yet');
+  chat.setSelection(r, { runtime: 'harness', agentId: '', providerId: 'local', modelId: 'm1', effort: 'default', upstream: '' });
+  await sleep(20);
+  release();
+  await sleep(50);
+  assert.ok(reads >= 2, 'the read that started before the bind is not the last one');
+  assert.deepEqual(commandChoices(r).map((c) => c.name), ['compact', 'clear', 'fork']);
+});

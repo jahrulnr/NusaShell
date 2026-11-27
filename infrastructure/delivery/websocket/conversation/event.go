@@ -141,27 +141,14 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 	case enum.TurnEventSteer:
 		// A folded steering line is user input landing mid-turn —
 		// subscribers see it in position rather than on a history
-		// re-read after the terminal. The fold claims one submitted
-		// record: only a persisted, not-yet-projected receipt carrying
-		// exactly this text matches — a same-text CLI line never adopts
-		// a web receipt that has not consumed, and each record projects
-		// once so identical consecutive inputs keep their own segment.
+		// re-read after the terminal. The mailbox that folded it names the
+		// submission, so the frame carries the id the client already knows:
+		// the relay line's own id, or the turn.steer requestId the message
+		// was written under.
 		t.inReasoning = false
-		inputID := ""
-		for _, rec := range t.steerRecords {
-			if rec.projected || rec.receipt.State() != appjob.SteeringPersisted || rec.content != ev.Delta() {
-				continue
-			}
-			rec.projected = true
-			inputID = rec.inputID
-			break
-		}
-		// A relayed prompt was already persisted at accept with an id of its
-		// own, and the accept line carries it — the fold frame must name the
-		// same id or the watcher renders the message twice. An owner steer
-		// has no record and keeps the receipt correlation above.
-		if recordID := ev.SteerRecordID(); recordID != "" {
-			inputID = recordID
+		inputID := ev.SteerRecordID()
+		if inputID != "" {
+			t.live.steerState(inputID, string(appjob.SteeringPersisted))
 		}
 		chunks := splitDelta(ev.Delta(), outboundChunkBytes)
 		if len(chunks) == 0 {

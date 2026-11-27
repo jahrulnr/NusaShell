@@ -212,7 +212,7 @@ func TestHubCancelAnswersTrueOnlyWhenTheWorkerTakesIt(t *testing.T) {
 func TestSteerJournalOnlyTurnForwardsToTheWorker(t *testing.T) {
 	h := newHub(t, stubSender{})
 	steered := make(chan string, 1)
-	h.UseJobControl(nil, func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+	h.UseJobControl(nil, func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
 		steered <- in.Text
 		return &appjob.SteeringReceipt{}, true
 	}, nil)
@@ -261,7 +261,7 @@ func TestJobOwnedSteerCommandReachesTheWorkerAndRecallNamesThatInput(t *testing.
 	var got []valueobject.UserInput
 	h := newHub(t, stubSender{})
 	h.UseJobControl(nil,
-		func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+		func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
 			if convID != "c_job" {
 				t.Errorf("steer conv = %q", convID)
 				return nil, false
@@ -274,7 +274,7 @@ func TestJobOwnedSteerCommandReachesTheWorkerAndRecallNamesThatInput(t *testing.
 			}
 			return receipt, true
 		},
-		func(convID, inputID string) bool {
+		func(convID, turnID, inputID string) bool {
 			if convID != "c_job" {
 				return false
 			}
@@ -319,10 +319,10 @@ func TestJobOwnedSteerCommandReachesTheWorkerAndRecallNamesThatInput(t *testing.
 func TestRefusedJobSteerStoresNothing(t *testing.T) {
 	calls := 0
 	h := newHub(t, stubSender{})
-	h.UseJobControl(nil, func(string, valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+	h.UseJobControl(nil, func(string, string, valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
 		calls++
 		return nil, false
-	}, func(string, string) bool {
+	}, func(string, string, string) bool {
 		t.Fatal("recall ran for a steer the worker refused")
 		return false
 	})
@@ -361,7 +361,7 @@ func TestLiveTurnWritesSteerableEvenWhenFalse(t *testing.T) {
 		}
 		return appconversation.SendResult{ConversationID: id, UserMessagePersisted: true}, nil
 	}})
-	h.UseJobControl(nil, func(string, valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+	h.UseJobControl(nil, func(string, string, valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
 		return &appjob.SteeringReceipt{}, true
 	}, nil)
 	ws := dial(t, h)

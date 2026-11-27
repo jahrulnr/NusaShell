@@ -174,7 +174,7 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 					return err
 				}
 				if onEvent != nil {
-					onEvent(event.NewSteerEvent(input.input.Text, input.input.Attachments...))
+					onEvent(steerEvent(input))
 				}
 			}
 		}

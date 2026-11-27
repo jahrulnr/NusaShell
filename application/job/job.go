@@ -70,6 +70,12 @@ type Deps struct {
 	// turn could not take must be delivered again — using the line it already
 	// has, never a second one. Nil (the CLI) drops the follow-up.
 	FollowUp func(convID string, rec entity.Message) error
+	// NextTurn hands text a turn accepted but never reached to the room's
+	// queue: an input still waiting when the final answer lands is the next
+	// turn, not a draft the caller has to decide about. origin is the turn's
+	// own, so the next turn reads in the room the same way. Nil (the CLI) has
+	// no queue behind it and drops it.
+	NextTurn func(convID string, in valueobject.UserInput, origin valueobject.TurnOrigin) error
 	// Turns hears a room's turn begin and end. It is what answers "is a turn
 	// running here" — the worker's own "running" is a moment too long (it
 	// clears after the job returns, while the caller already has the result).

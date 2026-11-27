@@ -57,6 +57,29 @@ func readUntilTurn(t *testing.T, ws *websocket.Conn, want, turnID string) frame 
 	}
 }
 
+// steerBox gives a scripted sender's hub the worker side of steering: the hub
+// forwards and the mailbox takes it. That forward is the only path a steer has
+// now, so a test that steers without one is only testing the refusal.
+func steerBox(h *Hub) *appjob.SteeringInput {
+	box := appjob.NewSteeringInput()
+	h.UseJobControl(nil,
+		func(_ string, _ string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+			return box.Submit(in), true
+		},
+		func(_ string, _ string, inputID string) bool { return box.RecallID(inputID) })
+	return box
+}
+
+// appSteer wires the hub to a real app's worker bridge — the serve.go shape,
+// so the receipts the journal reports are the ones the fold claims.
+func appSteer(h *Hub, app *appconversation.ConversationApp) {
+	h.UseJobControl(nil,
+		func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+			return app.AcceptSteer(context.Background(), convID, turnID, in)
+		},
+		func(convID, turnID, inputID string) bool { return app.RecallInput(convID, turnID, inputID) })
+}
+
 // gatedTool blocks in Execute until released — the deterministic window
 // in which steering commands act on a live turn. entered closes once.
 type gatedTool struct {
@@ -165,6 +188,7 @@ func gatedApp(t *testing.T, svc *scriptSvc, tools map[string]*gatedTool) *appcon
 func TestSteerCommandValidation(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	ws := dial(t, h)
 
 	longID := strings.Repeat("r", maxControlRequestIDBytes+1)
@@ -234,6 +258,7 @@ func TestSteerCommandValidation(t *testing.T) {
 func TestSteerAckDedupAndCapacity(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	ws := dial(t, h)
 
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
@@ -307,6 +332,7 @@ func TestSteerAckDedupAndCapacity(t *testing.T) {
 func TestSteerRecallPendingAndDedup(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	ws := dial(t, h)
 
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
@@ -353,6 +379,7 @@ func TestSteerRecallPendingAndDedup(t *testing.T) {
 func TestSteerRecalledInputDoesNotReAck(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	ws := dial(t, h)
 
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
@@ -396,6 +423,7 @@ func TestSteerFrameWithoutConsumedReceipt(t *testing.T) {
 			}
 		}
 	}})
+	steerBox(h)
 	ws := dial(t, h)
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
 	f := readUntil(t, ws, "turn.opened")
@@ -430,6 +458,7 @@ func TestSteerFrameWithoutConsumedReceipt(t *testing.T) {
 func TestResyncCarriesOutcomeAndSnapshot(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	ws := dial(t, h)
 
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
@@ -469,6 +498,7 @@ func TestSteerExactTurnLifecycle(t *testing.T) {
 	svc := &scriptSvc{toolFor: map[int32]string{1: "gate1", 2: "gate2"}, seen: map[int32]string{}, prev: map[int32]string{}}
 	app := gatedApp(t, svc, map[string]*gatedTool{"gate1": gate1, "gate2": gate2})
 	h := newHub(t, app)
+	appSteer(h, app)
 	ws := dial(t, h)
 
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"run it"}}`)
@@ -540,6 +570,7 @@ func TestSteerTargetsQueuedTurn(t *testing.T) {
 	svc := &scriptSvc{toolFor: map[int32]string{1: "gate"}, seen: map[int32]string{}}
 	app := gatedApp(t, svc, map[string]*gatedTool{"gate": gate})
 	h := newHub(t, app)
+	appSteer(h, app)
 	ws := dial(t, h)
 
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"sA","conversationId":"room","payload":{"content":"first turn"}}`)
@@ -597,12 +628,41 @@ func TestSteerTargetsQueuedTurn(t *testing.T) {
 	}
 }
 
+// One owner: a live send turn takes steering only through the worker that owns
+// it. With no forward wired the hub refuses — it has no mailbox of its own to
+// fall back to — and turn.opened says so. A second lane growing back (a local
+// mailbox, a direct append) would accept this steer and fail here.
+func TestHubHasNoSecondSteerLane(t *testing.T) {
+	b := newBlockedTurn()
+	h := newHub(t, stubSender{fn: b.send})
+	ws := dial(t, h)
+	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
+	f := readUntil(t, ws, "turn.opened")
+	convID, turnID := f.ConversationID, f.TurnID
+	if !strings.Contains(string(f.Payload), `"steerable":false`) {
+		t.Fatalf("opened %s — steerable must follow the one lane, not the turn kind", f.Payload)
+	}
+	<-b.started
+	sendCommand(t, ws, fmt.Sprintf(`{"type":"turn.steer","requestId":"st-1","conversationId":%q,"turnId":%q,"payload":{"content":"into the void"}}`, convID, turnID))
+	if f = readFrame(t, ws); f.Type != "error" || f.Code != "invalid_argument" || !strings.Contains(f.Message, "does not take steering") {
+		t.Fatalf("steer with no worker behind it = %+v, want the refusal — a second path accepted it", f)
+	}
+	close(b.release)
+	if f = readUntil(t, ws, "turn.completed"); len(string(f.Payload)) > 0 {
+		var term terminalPayload
+		if json.Unmarshal(f.Payload, &term) == nil && len(term.Steering) != 0 {
+			t.Fatalf("terminal snapshot %+v — the refused steer was recorded", term.Steering)
+		}
+	}
+}
+
 // The journaled steer_ack is the watcher-visible record; the issuing
 // socket also gets an answer — an unsequenced reply — so acceptance is
 // never indistinguishable from loss on a socket that never watched.
 func TestSteerAckReachesUnattachedIssuer(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	ws := dial(t, h)
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
 	f := readUntil(t, ws, "turn.opened")
@@ -649,6 +709,7 @@ func TestSteerAckReachesUnattachedIssuer(t *testing.T) {
 func TestSteerReAcksDoNotJournal(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	ws := dial(t, h)
 	sendCommand(t, ws, `{"type":"turn.send","requestId":"s1","conversationId":"room","payload":{"content":"x"}}`)
 	f := readUntil(t, ws, "turn.opened")
@@ -698,6 +759,7 @@ func TestSteerReAcksDoNotJournal(t *testing.T) {
 func TestSteerRichPayload(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	h.UseUploads(stubUploads{})
 	ws := dial(t, h)
 
@@ -748,6 +810,7 @@ func TestSteerRichPayload(t *testing.T) {
 func TestSteerRejectsRecording(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	uploads := &spyUploads{}
 	h.UseUploads(uploads)
 	ws := dial(t, h)
@@ -772,6 +835,7 @@ func TestSteerRejectsRecording(t *testing.T) {
 func TestSendResolvesRecording(t *testing.T) {
 	b := newBlockedTurn()
 	h := newHub(t, stubSender{fn: b.send})
+	steerBox(h)
 	uploads := &spyUploads{ref: &valueobject.RecordingRef{ID: "rec_9", Status: "completed", Summary: "s"}}
 	h.UseUploads(uploads)
 	ws := dial(t, h)

@@ -2,23 +2,12 @@ package wsconversation
 
 import (
 	"encoding/json"
+	"hash/fnv"
 	"strings"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
-
-// steerRecord is one bounded submitted-input record a send turn keeps
-// for ack dedup, fold correlation, and terminal snapshots. The receipt's
-// state is the single source of truth; projected flips once the fold's
-// turn.steer chunk crossed, so one persisted input renders once.
-type steerRecord struct {
-	inputID   string // the turn.steer command's requestId
-	content   string
-	payload   messageInputPayload
-	receipt   *appjob.SteeringReceipt
-	projected bool
-}
 
 // turnOutcome records the emitted terminal verdict so a late
 // turn.resync_required can replay the stored outcome instead of a bare
@@ -55,22 +44,28 @@ func steerRecalledFrame(requestID, convID, turnID, inputID string) serverFrame {
 	}
 }
 
-// steeringSnapshotLocked reads each record's atomic receipt state in
-// submission order — the bounded snapshot terminal and resync frames
-// carry. Callers hold h.mu; receipts transition under the mailbox lock
-// or the turn loop, never into the hub.
+// steerFingerprint is what a retried requestId is compared against: the same
+// complete input re-acks, a different one is refused. The hub does not keep
+// the input — the mailbox that holds it does.
+func steerFingerprint(p messageInputPayload) uint64 {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return 0
+	}
+	h := fnv.New64a()
+	h.Write(raw)
+	return h.Sum64()
+}
+
+// steeringSnapshotLocked reads the turn's accepted submissions in order — the
+// bounded snapshot terminal and resync frames carry. It is a projection of
+// what this turn reported (ack, fold, recall), not a mailbox: the inputs live
+// with the worker that folds them. Callers hold h.mu.
 func (t *turn) steeringSnapshotLocked() []steerStatePayload {
-	if len(t.steerRecords) == 0 {
+	if t.live == nil {
 		return nil
 	}
-	out := make([]steerStatePayload, 0, len(t.steerRecords))
-	for _, rec := range t.steerRecords {
-		out = append(out, steerStatePayload{
-			InputID: rec.inputID,
-			State:   string(rec.receipt.State()),
-		})
-	}
-	return out
+	return t.live.steerSnapshot()
 }
 
 // resyncForLocked builds the resync_required body for a found turn:
@@ -137,10 +132,13 @@ func boundSnapshot(p *resyncPayload) {
 	}
 }
 
-// turnSteer submits one input into an exact send turn's mailbox. The
-// command's requestId becomes the input's inputId — deduped per turn —
-// and the ack is the journaled turn.steer_ack: accepted is never
-// consumed; the receipt's state decides that when the fold lands.
+// turnSteer submits one input into the exact send turn's mailbox. The
+// command's requestId becomes the input's inputId. The hub keeps no mailbox:
+// the input goes to the worker that owns the turn — by the turn id, so it
+// lands on this turn whether it is queued or already running — and the ack
+// journals that acceptance. The turn's own state decides the rest: claimed
+// before the next model call folds it, and text still waiting when the turn
+// answers becomes the next turn.
 func (h *Hub) turnSteer(c *conn, cmd command) {
 	if cmd.AfterSeq != nil {
 		c.push(errorFrame(cmd.RequestID, "invalid_argument", "turn.steer accepts no afterSeq"))
@@ -178,72 +176,134 @@ func (h *Hub) turnSteer(c *conn, cmd command) {
 		c.push(errorFrame(cmd.RequestID, "invalid_argument", "turn.steer requires text or attachments"))
 		return
 	}
+	fingerprint := steerFingerprint(payload)
 	h.mu.Lock()
-	t, found := h.turns[cmd.TurnID]
-	if !found || t.terminal || t.conversationID != convID {
+	t, refusal, done := h.steerTargetLocked(convID, cmd.TurnID)
+	if done {
 		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		c.push(refusal)
 		return
 	}
-	if t.kind != turnSend {
+	if prev, dup := t.live.steerInput(cmd.RequestID); dup {
 		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
+		h.answerSteerDup(c, cmd, convID, t.id, prev, fingerprint)
 		return
 	}
-	if t.jobOwned {
+	if len(t.live.steers) >= maxSteerInputs {
 		h.mu.Unlock()
-		h.forwardOwnedSteer(c, cmd, convID, payload, in)
-		return
-	}
-	defer h.mu.Unlock()
-	if t.steering == nil {
-		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
-		return
-	}
-	if prev, dup := t.steerByInput[cmd.RequestID]; dup {
-		if !prev.payload.equal(payload) {
-			c.push(errorFrame(cmd.RequestID, "invalid_argument", "steering requestId reused with different input"))
-			return
-		}
-		// A recalled input is dead. Re-acking it tells the client the
-		// withdrawn text is still pending.
-		if prev.receipt != nil && prev.receipt.State() == appjob.SteeringRecalled {
-			c.push(errorFrame(cmd.RequestID, "gone", "steering input was recalled"))
-			return
-		}
-		// Idempotent re-ack — the verdict is already journaled; the
-		// retry is a reply, not new turn state. Re-journaling each one
-		// would let a retrying client burn the bounded journal and force
-		// honest watchers into resync.
-		c.push(steerAckFrame(cmd.RequestID, convID, t.id, prev.inputID))
-		return
-	}
-	if len(t.steerRecords) >= maxSteerInputs {
 		c.push(errorFrame(cmd.RequestID, "queue_full", "turn steering submission bound reached"))
 		return
 	}
+	// Reserve the id before the forward so a concurrent retry cannot
+	// submit the same input twice; the entry is dropped if the worker
+	// refuses it.
+	entry, _ := t.live.acceptSteer(cmd.RequestID, fingerprint)
+	turnID := t.id
+	steerJob := h.jobControlSteer
+	h.mu.Unlock()
+
 	// The input remembers which request submitted it: the user message the
 	// fold writes carries the id, so a reloaded history and the journal's live
 	// bubble name the same submission.
 	in.InputID = cmd.RequestID
-	receipt := t.steering.Submit(in)
-	rec := &steerRecord{inputID: cmd.RequestID, content: in.Text, payload: payload, receipt: receipt}
-	t.steerRecords = append(t.steerRecords, rec)
-	t.steerByInput[cmd.RequestID] = rec
-	h.emitLocked(t, "turn.steer_ack", steerInputPayload{InputID: rec.inputID}, false)
+	receipt, accepted := steerJob(convID, turnID, in)
+
+	h.mu.Lock()
+	t, found := h.turns[turnID]
+	gone := !found || t.terminal || t.conversationID != convID
+	h.mu.Unlock()
+
+	if gone {
+		if accepted {
+			if recall := h.jobControlRecall; recall != nil {
+				recall(convID, turnID, cmd.RequestID)
+			}
+		}
+		if entry != nil {
+			h.forgetSteer(turnID, cmd.RequestID)
+		}
+		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	if !accepted || receipt == nil {
+		h.forgetSteer(turnID, cmd.RequestID)
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
+		return
+	}
+	h.mu.Lock()
+	if t = h.turns[turnID]; t == nil || t.terminal {
+		h.mu.Unlock()
+		if recall := h.jobControlRecall; recall != nil {
+			recall(convID, turnID, cmd.RequestID)
+		}
+		h.forgetSteer(turnID, cmd.RequestID)
+		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	h.emitLocked(t, "turn.steer_ack", steerInputPayload{InputID: cmd.RequestID}, false)
 	// The journaled ack reaches subscribers only — an issuer that never
 	// watched the turn would hear silence for an accepted submission.
 	// Answer it directly; a subscribed issuer already has the sequenced
 	// copy.
 	if _, subscribed := t.subscribed[c]; !subscribed {
-		c.push(steerAckFrame(cmd.RequestID, convID, t.id, rec.inputID))
+		c.push(steerAckFrame(cmd.RequestID, convID, turnID, cmd.RequestID))
 	}
+	h.mu.Unlock()
+}
+
+// steerTargetLocked resolves the turn a steering command names: a live send
+// turn of this room that the worker can still reach. Callers hold h.mu.
+func (h *Hub) steerTargetLocked(convID, turnID string) (*turn, serverFrame, bool) {
+	t, found := h.turns[turnID]
+	if !found || t.terminal || t.conversationID != convID {
+		return nil, errorFrame("", "not_found", "no live turn with that id"), true
+	}
+	if t.kind != turnSend || h.jobControlSteer == nil {
+		return nil, errorFrame("", "invalid_argument", "that turn does not take steering"), true
+	}
+	return t, serverFrame{}, false
+}
+
+// forgetSteer drops a reservation the worker never took, so the id is free
+// again and the snapshot does not claim a submission that never happened.
+func (h *Hub) forgetSteer(turnID, inputID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	t := h.turns[turnID]
+	if t == nil || t.live == nil {
+		return
+	}
+	for i, s := range t.live.steers {
+		if s.InputID == inputID {
+			t.live.steers = append(t.live.steers[:i], t.live.steers[i+1:]...)
+			return
+		}
+	}
+}
+
+// answerSteerDup answers a retried submission from what the turn already
+// accepted: the same input re-acks without a second submission, a different
+// input under the same id is refused, and a recalled input is gone.
+func (h *Hub) answerSteerDup(c *conn, cmd command, convID, turnID string, prev *steerInput, fingerprint uint64) {
+	if prev.fingerprint != fingerprint {
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "steering requestId reused with different input"))
+		return
+	}
+	if prev.State == string(appjob.SteeringRecalled) {
+		c.push(errorFrame(cmd.RequestID, "gone", "steering input was recalled"))
+		return
+	}
+	// Idempotent re-ack — the verdict is already journaled; the retry is a
+	// reply, not new turn state. Re-journaling each one would let a retrying
+	// client burn the bounded journal and force honest watchers into resync.
+	c.push(steerAckFrame(cmd.RequestID, convID, turnID, prev.InputID))
 }
 
 // turnSteerRecall withdraws one exact submitted input while it is still
 // pending — claimed or persisted input answers not_found and is never
 // restored, while a withdrawn input re-emits the journaled
-// turn.steer_recalled so a lost ack reconciles idempotently.
+// turn.steer_recalled so a lost ack reconciles idempotently. The worker owns
+// the input; the hub only journals the answer.
 func (h *Hub) turnSteerRecall(c *conn, cmd command) {
 	if cmd.AfterSeq != nil {
 		c.push(errorFrame(cmd.RequestID, "invalid_argument", "turn.steer_recall accepts no afterSeq"))
@@ -267,168 +327,11 @@ func (h *Hub) turnSteerRecall(c *conn, cmd command) {
 		return
 	}
 	h.mu.Lock()
-	t, found := h.turns[cmd.TurnID]
-	if !found || t.terminal || t.conversationID != convID {
+	t, refusal, done := h.steerTargetLocked(convID, cmd.TurnID)
+	if done {
 		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
-		return
-	}
-	if t.kind != turnSend {
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
-		return
-	}
-	if t.jobOwned {
-		h.mu.Unlock()
-		h.recallOwnedSteer(c, cmd, convID, payload.InputID)
-		return
-	}
-	defer h.mu.Unlock()
-	if t.steering == nil {
-		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
-		return
-	}
-	rec, found := t.steerByInput[payload.InputID]
-	if !found {
-		c.push(errorFrame(cmd.RequestID, "not_found", "no steering input with that id"))
-		return
-	}
-	switch {
-	case t.steering.Recall(rec.receipt):
-		h.emitLocked(t, "turn.steer_recalled", steerInputPayload{InputID: rec.inputID}, false)
-		if _, subscribed := t.subscribed[c]; !subscribed {
-			c.push(steerRecalledFrame(cmd.RequestID, convID, t.id, rec.inputID))
-		}
-	case rec.receipt.State() == appjob.SteeringRecalled:
-		// Withdrawn already — dedupe the success idempotently: the
-		// recall journals once; retries answer the issuer only.
-		c.push(steerRecalledFrame(cmd.RequestID, convID, t.id, rec.inputID))
-	default:
-		// Claimed or persisted — consumed input is never restored.
-		c.push(errorFrame(cmd.RequestID, "not_found", "steering input already consumed"))
-	}
-}
-
-// forwardOwnedSteer journals a steer on a worker-owned send by handing the
-// full input to the same job-control forward Hub.Steer uses. The receipt
-// comes back from that forward: it is the job's mailbox receipt, so a later
-// claim or persist is visible on the snapshot without a second record.
-func (h *Hub) forwardOwnedSteer(c *conn, cmd command, convID string, payload messageInputPayload, in valueobject.UserInput) {
-	h.jobControlMu.Lock()
-	defer h.jobControlMu.Unlock()
-
-	h.mu.Lock()
-	t, found := h.turns[cmd.TurnID]
-	if !found || t.terminal || t.conversationID != convID || !t.jobOwned || t.kind != turnSend {
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
-		return
-	}
-	if t.steerByInput == nil {
-		t.steerByInput = map[string]*steerRecord{}
-	}
-	if prev, dup := t.steerByInput[cmd.RequestID]; dup {
-		h.answerOwnedSteerDup(c, cmd, convID, t, prev, payload)
-		h.mu.Unlock()
-		return
-	}
-	if len(t.steerRecords) >= maxSteerInputs {
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "queue_full", "turn steering submission bound reached"))
-		return
-	}
-	steerJob := h.jobControlSteer
-	if steerJob == nil {
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
-		return
-	}
-	in.InputID = cmd.RequestID
-	h.mu.Unlock()
-
-	receipt, ok := steerJob(convID, in)
-
-	h.mu.Lock()
-	t, found = h.turns[cmd.TurnID]
-	gone := !found || t.terminal || t.conversationID != convID
-	recall := h.jobControlRecall
-	h.mu.Unlock()
-	if gone {
-		if ok && receipt != nil && recall != nil {
-			recall(convID, in.InputID)
-		}
-		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
-		return
-	}
-	if !ok || receipt == nil {
-		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
-		return
-	}
-	h.mu.Lock()
-	t = h.turns[cmd.TurnID]
-	if t == nil || t.terminal || t.conversationID != convID {
-		h.mu.Unlock()
-		if recall != nil {
-			recall(convID, in.InputID)
-		}
-		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
-		return
-	}
-	if t.steerByInput == nil {
-		t.steerByInput = map[string]*steerRecord{}
-	}
-	rec := &steerRecord{inputID: cmd.RequestID, content: in.Text, payload: payload, receipt: receipt}
-	t.steerRecords = append(t.steerRecords, rec)
-	t.steerByInput[cmd.RequestID] = rec
-	h.emitLocked(t, "turn.steer_ack", steerInputPayload{InputID: rec.inputID}, false)
-	if _, subscribed := t.subscribed[c]; !subscribed {
-		c.push(steerAckFrame(cmd.RequestID, convID, t.id, rec.inputID))
-	}
-	h.mu.Unlock()
-}
-
-func (h *Hub) answerOwnedSteerDup(c *conn, cmd command, convID string, t *turn, prev *steerRecord, payload messageInputPayload) {
-	if !prev.payload.equal(payload) {
-		c.push(errorFrame(cmd.RequestID, "invalid_argument", "steering requestId reused with different input"))
-		return
-	}
-	if prev.receipt != nil && prev.receipt.State() == appjob.SteeringRecalled {
-		c.push(errorFrame(cmd.RequestID, "gone", "steering input was recalled"))
-		return
-	}
-	c.push(steerAckFrame(cmd.RequestID, convID, t.id, prev.inputID))
-}
-
-// recallOwnedSteer withdraws one worker-held input by the id the steer
-// carried. The newest input is not a substitute: a different id stays pending.
-func (h *Hub) recallOwnedSteer(c *conn, cmd command, convID, inputID string) {
-	h.jobControlMu.Lock()
-	defer h.jobControlMu.Unlock()
-
-	h.mu.Lock()
-	t, found := h.turns[cmd.TurnID]
-	if !found || t.terminal || t.conversationID != convID || !t.jobOwned || t.kind != turnSend {
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
-		return
-	}
-	rec, ok := t.steerByInput[inputID]
-	if !ok || rec == nil || rec.receipt == nil {
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "not_found", "no steering input with that id"))
-		return
-	}
-	switch rec.receipt.State() {
-	case appjob.SteeringRecalled:
-		turnID := t.id
-		kept := rec.inputID
-		h.mu.Unlock()
-		c.push(steerRecalledFrame(cmd.RequestID, convID, turnID, kept))
-		return
-	case appjob.SteeringPending:
-	default:
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "not_found", "steering input already consumed"))
+		refusal.RequestID = cmd.RequestID
+		c.push(refusal)
 		return
 	}
 	recall := h.jobControlRecall
@@ -437,26 +340,38 @@ func (h *Hub) recallOwnedSteer(c *conn, cmd command, convID, inputID string) {
 		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
 		return
 	}
+	if prev, known := t.live.steerInput(payload.InputID); known && prev.State == string(appjob.SteeringRecalled) {
+		h.mu.Unlock()
+		// Withdrawn already — dedupe the success idempotently: the recall
+		// journals once; retries answer the issuer only.
+		c.push(steerRecalledFrame(cmd.RequestID, convID, cmd.TurnID, payload.InputID))
+		return
+	} else if !known {
+		h.mu.Unlock()
+		// This turn never accepted that id: nothing to withdraw, and the
+		// worker is not asked about an input the journal never saw.
+		c.push(errorFrame(cmd.RequestID, "not_found", "no steering input with that id"))
+		return
+	}
+	turnID := t.id
 	h.mu.Unlock()
 
-	recall(convID, inputID)
+	if !recall(convID, turnID, payload.InputID) {
+		c.push(errorFrame(cmd.RequestID, "not_found", "steering input already consumed"))
+		return
+	}
 
 	h.mu.Lock()
-	t, found = h.turns[cmd.TurnID]
+	t, found := h.turns[turnID]
 	if !found || t.terminal || t.conversationID != convID {
 		h.mu.Unlock()
 		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
 		return
 	}
-	rec = t.steerByInput[inputID]
-	if rec == nil || rec.receipt == nil || rec.receipt.State() != appjob.SteeringRecalled {
-		h.mu.Unlock()
-		c.push(errorFrame(cmd.RequestID, "not_found", "steering input already consumed"))
-		return
-	}
-	h.emitLocked(t, "turn.steer_recalled", steerInputPayload{InputID: rec.inputID}, false)
+	t.live.steerState(payload.InputID, string(appjob.SteeringRecalled))
+	h.emitLocked(t, "turn.steer_recalled", steerInputPayload{InputID: payload.InputID}, false)
 	if _, subscribed := t.subscribed[c]; !subscribed {
-		c.push(steerRecalledFrame(cmd.RequestID, convID, t.id, rec.inputID))
+		c.push(steerRecalledFrame(cmd.RequestID, convID, turnID, payload.InputID))
 	}
 	h.mu.Unlock()
 }

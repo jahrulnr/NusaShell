@@ -78,6 +78,14 @@ func (app *ConversationApp) Send(
 	}
 	res := make(chan error, 1)
 	receipt := appjob.NewPersistenceReceipt()
+	// The app owns the turn's mailbox. It exists before the job is posted, so a
+	// steer naming this turn lands on it while the job is still queued, and the
+	// job reads the same mailbox once it runs. The transport only names the
+	// turn — it keeps no mailbox of its own.
+	if opts.Steering == nil {
+		opts.Steering = appjob.NewSteeringInput()
+	}
+	defer app.bindSteering(convID, opts.LiveTurn, opts.Steering)()
 	j := &appjob.Send{
 		Ctx:     ctx,
 		Receipt: receipt,

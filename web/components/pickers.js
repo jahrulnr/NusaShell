@@ -5,7 +5,7 @@
 // (modes such as plan/build/bypass, and their own config). The product mode
 // hides the runtime it leaves out.
 import { html, useEffect, useMemo, useRef, useState } from '/vendor/preact/htm-preact.mjs';
-import { useStore } from '../lib/store.js';
+import { state, useStore } from '../lib/store.js';
 import { api } from '../lib/api.js';
 import { selection, setSelection, loadProviders, loadAgents, loadAgentModels, isBusy, loadAgentOptions, sessionOptionValue, setSessionOption, agentOptionMap } from '../lib/chat.js';
 import { Icon } from './icons.js';
@@ -344,20 +344,59 @@ function fmtCost({ amount, currency }) {
   } catch { return `${amount} ${currency}`; }
 }
 
-export function ContextMeter({ room }) {
+const finite = (n) => (typeof n === 'number' && Number.isFinite(n) ? n : null);
+
+// meterAgent is the name already on the client, or the room's agent id.
+// A model id is not a stand-in for it.
+function meterAgent(room) {
+  const id = room.info?.agentId || selection(room).agentId || '';
+  const named = id && state.agents.items.find((a) => a.id === id)?.name;
+  return (named && String(named).trim()) || id;
+}
+
+function costClause(cost) {
+  if (!cost || typeof cost.amount !== 'number' || !Number.isFinite(cost.amount)) return '';
+  if (typeof cost.currency !== 'string' || !cost.currency.trim()) return '';
+  return ` · session cost ${fmtCost(cost)}`;
+}
+
+// contextRing is the one footer ring. A missing figure is not a zero: an
+// agent room with no report is a hollow ring, and a provider room with no
+// window is nothing. The percent is used/size, rounded, and not capped.
+// The count is the agent's live report, or the server's estimate for a
+// provider model. A missing estimate is not a zero, and a turn's own
+// usage is not the session figure.
+export function contextRing(room) {
+  const agent = selection(room).runtime === 'agent';
   const c = room.ctx;
-  if (!c || !c.total) return null;
-  const used = c.live ?? c.estimate ?? 0;
-  const pct = Math.min(100, Math.round((used / c.total) * 100));
+  const total = finite(c?.total) > 0 ? c.total : null;
+  const used = agent ? finite(c?.live) : finite(c?.estimate);
+  const who = meterAgent(room);
+  if (total == null || used == null) {
+    if (!agent) return null;
+    return { hollow: true, text: `Context not reported by ${who}. Nothing has arrived from it yet.` };
+  }
+  const pct = Math.round((used / total) * 100);
+  const qualifier = pct > 100 ? 'over' : agent ? 'live' : 'estimated';
+  let text = `${pct}% (${fmtTokens(used)} / ${fmtTokens(total)}) context used · ${qualifier}`;
+  text += costClause(c.cost);
+  if (agent) text += ` · Quota not reported by ${who}`;
+  return { hollow: false, pct, text };
+}
+
+export function ContextMeter({ room }) {
+  useStore();
+  const view = contextRing(room);
+  if (!view) return null;
   const r = 7, len = 2 * Math.PI * r;
+  const pct = view.hollow ? 0 : view.pct;
   const color = pct >= 90 ? 'var(--bad)' : pct >= 70 ? 'var(--warn)' : 'var(--accent)';
-  const text = `${pct}% (${fmtTokens(used)} / ${fmtTokens(c.total)}) context used${c.live != null ? ' · live' : ' · estimated'}${c.cost ? ' · ' + fmtCost(c.cost) : ''}`;
-  return html`<span class="group relative inline-flex items-center justify-center size-8" tabindex="0" aria-label=${text}>
+  return html`<span class="group relative inline-flex items-center justify-center size-8" tabindex="0" role="img" aria-label=${view.text}>
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
       <circle cx="9" cy="9" r=${r} fill="none" stroke="var(--line)" stroke-width="2.5" />
-      <circle cx="9" cy="9" r=${r} fill="none" stroke=${color} stroke-width="2.5" stroke-linecap="round"
-        stroke-dasharray=${`${(pct / 100) * len} ${len}`} transform="rotate(-90 9 9)" />
+      ${!view.hollow && pct > 0 && html`<circle cx="9" cy="9" r=${r} fill="none" stroke=${color} stroke-width="2.5" stroke-linecap="round"
+        stroke-dasharray=${`${(pct / 100) * len} ${len}`} transform="rotate(-90 9 9)" />`}
     </svg>
-    <span role="tooltip" class="pointer-events-none absolute bottom-full right-0 mb-2 whitespace-nowrap rounded-lg border border-line bg-raised px-2.5 py-1.5 text-xs shadow-pop opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity">${text}</span>
+    <span role="tooltip" class="pointer-events-none absolute bottom-full right-0 mb-2 w-64 whitespace-normal text-left rounded-lg border border-line bg-raised px-2.5 py-1.5 text-xs shadow-pop opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity">${view.text}</span>
   </span>`;
 }

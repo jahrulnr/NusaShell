@@ -342,10 +342,9 @@ Common envelope fields:
 - **Bounded:** at most 32 steering submissions per turn lifetime — past
   the cap the command is rejected before acceptance with
   `error`/`queue_full`; nothing is silently truncated.
-- An unconsumed input (`pending` or `claimed` when the turn ends) is
-  never delivered to a later turn as steering. The WebUI returns its
-  complete input to the draft rather than adding it to the send queue.
-  The submission was accepted, so it does not become a queued send.
+- An unconsumed input is `pending` and becomes the next turn. The
+  client does not restore it to the draft. Draft return is only an
+  explicit recall of that inputId.
 - A submission the server never accepted is queued by the client as
   one ordinary send, with no toast. That covers `not_found` (the turn
   was already gone), `invalid_argument` `"that turn does not take
@@ -367,10 +366,10 @@ Common envelope fields:
 }
 ```
 
-- Withdraws the input `inputId` **only while it is still pending** —
-  not yet claimed at a safe point. Success emits the journaled
-  `turn.steer_recalled`; the client owns the full input again.
-- A claimed or persisted input answers `error`/`not_found`
+- Withdraws the input `inputId` **only while it is still pending**.
+  Success emits the journaled `turn.steer_recalled`; the client owns
+  the full input again.
+- A persisted input answers `error`/`not_found`
   (`"steering input already consumed"`) — consumed input is never
   restored by recall.
 - Re-recalling an already-recalled input answers with an unsequenced
@@ -439,11 +438,11 @@ adopts it. `startedAt` is admission only. The clock is `clock`,
 [contract.md § Agent honesty](./contract.md#agent-honesty).
 It also carries `steerable`, the server's steering
 capability declaration for this exact turn: `true` when the turn takes
-`turn.steer` — whichever fold path then applies, the hub's own mailbox
-or forwarding to the worker that owns the job — and `false` when it
-never will (an edit, a compact, a resume). A client never derives the
-capability from the turn's kind: `kind` says what the turn is doing,
-`steerable` says what the server accepts. The server writes `true` or
+`turn.steer` — one path, forward to the worker that owns the job —
+and `false` when it never will (an edit, a compact, a resume).
+A client never derives the capability from the turn's kind: `kind`
+says what the turn is doing, `steerable` says what the server accepts.
+The server writes `true` or
 `false` and never omits the field: a missing field is what a peer that
 predates it looks like. Where the field is absent the capability is
 unknown, and unknown takes the lossless default — the client queues
@@ -536,14 +535,14 @@ text, `dropped` counts the bytes so recovery is stated honestly rather
 than faked complete.
 
 The same receipt state means different things by `turn` verdict. In an
-`"active"` snapshot, `pending` and `claimed` inputs are **still owned
-by the server** — the turn may yet fold them, so the client keeps the
-receipt and must not restore the input yet. Only in a terminal context (a
-`completed`/`failed` verdict or a terminal frame's own `steering`
-array) do `pending`/`claimed` act as the fallback signal "the turn
-ended without committing this input — the client can restore the whole
-input to the draft". An input absent from an active snapshot is
-*unknown*; its receipt stays open for a later frame to resolve.
+`"active"` snapshot, a `pending` input is **still owned by the server**
+— the turn may yet fold it, so the client keeps the receipt and must
+not restore the input. In a terminal context (a `completed`/`failed`
+verdict or a terminal frame's own `steering` array), a `pending` input
+becomes the next turn. The client does not restore it to the draft.
+Draft return is only an explicit recall. An input absent from an
+active snapshot is *unknown*; its receipt stays open for a later frame
+to resolve.
 
 ```json
 {
@@ -1022,11 +1021,11 @@ only the job's return ends the turn.
   omitted when absent (Agent honesty). Provider turns omit them.
 - `steering` — on send turns, the bounded terminal receipt snapshot:
   every input submitted to this turn's mailbox with its final state —
-  `persisted` (folded and committed), `claimed` (drained but never
-  committed), `pending` (never drained), or `recalled`. Content never
-  re-crosses — the client owns the text it submitted; the snapshot only
-  says what happened to it. An unconsumed input is never silently
-  delivered to a later turn.
+  `persisted` (folded and committed), `pending` (unconsumed), or
+  `recalled`. Content never re-crosses — the client owns the text it
+  submitted; the snapshot only says what happened to it. An unconsumed
+  input is `pending` and becomes the next turn; the snapshot records
+  `pending` and does not carry the text again.
 - `resyncRequired` — **always `true`** on an accepted turn's terminal
   frame. Live frames never carry persisted message ids, tool results, or
   rewritten history, so a client MUST re-read `GET
@@ -1084,8 +1083,9 @@ allocation gets `error`, not this frame — there is no turn to fail.)
 - `clock`, `promptedAt`, `lastUpdateAt` — agent turns only; stamps
   omitted when absent (Agent honesty).
 - `steering` — on send turns, the same terminal receipt snapshot as
-  `turn.completed`: a `claimed` or `pending` state here means the input
-  never committed — the text is the client's to restore or requeue.
+  `turn.completed`: a `pending` input is unconsumed and becomes the
+  next turn. The client does not restore it to the draft. Draft return
+  is only an explicit recall.
 - `resyncRequired` — always `true`, same as `turn.completed`: re-read
   persisted state over HTTP after every terminal frame.
 
@@ -1178,7 +1178,7 @@ and `turn.steer` text chunks of at most 32 KiB.
   *unknown* — the client surfaces it and lets the user decide; it never
   auto-resends.
 - **Recall racing the safe point.** A `turn.steer_recall` landing after
-  the input was claimed answers `not_found` — the input is already on
+  the fold took the input answers `not_found` — the input is already on
   its way into history and the fold's `turn.steer` chunk arrives like
   any other stream frame.
 - **Shutdown.** A graceful shutdown ends live turns `turn.failed` `503`

@@ -145,7 +145,9 @@ func TestPromptFailureCarriesAClass(t *testing.T) {
 }
 
 // An update before the prompt write does not move the clock, and working
-// never appears while promptedAt is absent.
+// never appears while promptedAt is absent. After the prompt the clock is
+// waiting until the first activity, and working from then on: the silence
+// after an update is not waiting, and no update ends the clock (D-27).
 func TestClockStaysPreparingUntilThePromptIsWritten(t *testing.T) {
 	var clocks []event.TurnEvent
 	sink := newTurnSink(context.Background(), func(ev event.TurnEvent) {
@@ -163,14 +165,17 @@ func TestClockStaysPreparingUntilThePromptIsWritten(t *testing.T) {
 		t.Fatalf("after prompt = clock %q prompted %d updated %d", clocks[0].Clock(), clocks[0].PromptedAt(), clocks[0].LastUpdateAt())
 	}
 	sink.update(usageUpdate(t, `{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`))
-	if len(clocks) != 3 {
-		t.Fatalf("clocks after an update = %d, want waiting, working, waiting", len(clocks))
+	if len(clocks) != 2 {
+		t.Fatalf("clocks after an update = %d, want waiting then working", len(clocks))
 	}
 	if clocks[1].Clock() != "working" || clocks[1].PromptedAt() == 0 || clocks[1].LastUpdateAt() == 0 {
 		t.Fatalf("working = clock %q prompted %d updated %d", clocks[1].Clock(), clocks[1].PromptedAt(), clocks[1].LastUpdateAt())
 	}
-	if clocks[2].Clock() != "waiting" || clocks[2].PromptedAt() != clocks[1].PromptedAt() || clocks[2].LastUpdateAt() != clocks[1].LastUpdateAt() {
-		t.Fatalf("silence = clock %q prompted %d updated %d", clocks[2].Clock(), clocks[2].PromptedAt(), clocks[2].LastUpdateAt())
+	// A report that is not activity, arriving after the agent has spoken,
+	// says nothing about the clock — and neither is waiting.
+	sink.update(usageUpdate(t, `{"sessionUpdate":"usage_update","used":20,"size":100}`))
+	if len(clocks) != 2 || clocks[len(clocks)-1].Clock() != "working" {
+		t.Fatalf("last clock = %q (frames %d), want the working one", clocks[len(clocks)-1].Clock(), len(clocks))
 	}
 	if clocks[1].PromptedAt() == clocks[1].LastUpdateAt() && clocks[1].LastUpdateAt() == 1_700_000_000_000 {
 		t.Fatal("lastUpdateAt was copied from promptedAt")

@@ -450,3 +450,73 @@ func toolCallEvents(events []event.TurnEvent, id string) []event.TurnEvent {
 	}
 	return out
 }
+
+// D-27: every agent activity leaves the clock on working when apply
+// returns, and no update ends the clock. The table is the v1 names plus the
+// v2 names ACP gives the same activity: agent_message and agent_thought for
+// the whole-message upserts beside the chunk names, plan_update for plan. A
+// report that is not activity moves nothing.
+func TestEveryAgentActivityLeavesTheClockWorking(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		activity bool
+	}{
+		{"agent_message_chunk v1", `{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`, true},
+		{"agent_thought_chunk v1", `{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"thinking"}}`, true},
+		{"tool_call v1", `{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Read file","kind":"read"}`, true},
+		{"tool_call_update v1", `{"sessionUpdate":"tool_call_update","toolCallId":"call-1","title":"Read file","status":"completed"}`, true},
+		{"plan v1", `{"sessionUpdate":"plan","entries":[{"content":"Step 1","priority":"high","status":"pending"}]}`, true},
+		{"agent_message v2", `{"sessionUpdate":"agent_message","messageId":"m1","content":[{"type":"text","text":"whole"}]}`, true},
+		{"agent_thought v2", `{"sessionUpdate":"agent_thought","messageId":"m2","content":[{"type":"text","text":"whole"}]}`, true},
+		{"plan_update v2", `{"sessionUpdate":"plan_update","plan":{"type":"items","planId":"plan-1","entries":[{"content":"Step 1","priority":"high","status":"pending"}]}}`, true},
+		{"usage_update is not activity", `{"sessionUpdate":"usage_update","used":10,"size":100}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var clocks []event.TurnEvent
+			sink := newTurnSink(context.Background(), func(ev event.TurnEvent) {
+				if ev.Kind() == enum.TurnEventClock {
+					clocks = append(clocks, ev)
+				}
+			}, nil)
+			sink.markPrompted(1_700_000_000_000)
+			sink.update(usageUpdate(t, tc.body))
+			if !tc.activity {
+				if len(clocks) != 1 || clocks[0].Clock() != "waiting" {
+					t.Fatalf("clocks = %d, want only the waiting frame", len(clocks))
+				}
+				return
+			}
+			if len(clocks) < 2 {
+				t.Fatalf("clock frames = %d, want the waiting one and a working one", len(clocks))
+			}
+			last := clocks[len(clocks)-1]
+			if last.Clock() != "working" {
+				t.Fatalf("last clock = %q, want working", last.Clock())
+			}
+			if last.PromptedAt() != 1_700_000_000_000 || last.LastUpdateAt() == 0 {
+				t.Fatalf("working = prompted %d updated %d", last.PromptedAt(), last.LastUpdateAt())
+			}
+		})
+	}
+}
+
+// The true end of the turn writes no clock: the last activity's working frame
+// stands and the terminal frame ends the live turn.
+func TestTurnEndLeavesTheClockWhereTheLastActivityPutIt(t *testing.T) {
+	var clocks []event.TurnEvent
+	sink := newTurnSink(context.Background(), func(ev event.TurnEvent) {
+		if ev.Kind() == enum.TurnEventClock {
+			clocks = append(clocks, ev)
+		}
+	}, nil)
+	sink.markPrompted(1_700_000_000_000)
+	sink.update(usageUpdate(t, `{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"thinking"}}`))
+	if _, err := sink.finish(acp.PromptResult{StopReason: "end_turn"}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(clocks) != 2 || clocks[len(clocks)-1].Clock() != "working" {
+		t.Fatalf("clocks after the turn ended = %d, last %q; want waiting then working", len(clocks), clocks[len(clocks)-1].Clock())
+	}
+}
