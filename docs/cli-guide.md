@@ -380,7 +380,8 @@ The config file holds tunables — never credentials — under these sections:
 | `storage.dir` | string | `"./data"` | the data directory above |
 | `log.max_lines` | int | `2000` | rotate `active.jsonl` past this many records |
 | `log.max_files` | int | `9` | cap on compressed archives (10 files including active); oldest are pruned |
-| `skills.improvement` | `"off"`/`"observe"` | `"off"` | log one `skill_observe` line per eligible finished turn; read at startup, so a change needs a restart. See [Skill improvement](skills.md) |
+| `skills.improvement` | `"off"`/`"observe"`/`"suggest"` | `"off"` | `off` registers nothing. `observe` logs one `skill_observe` line per eligible finished turn that shows a signal, and writes no skill file. `suggest` lets the loop propose skill changes; the owner accepts or dismisses each proposal over HTTP, and the Skills page has no controls for that yet. Read at startup, so a change needs a restart. See [Skill improvement](skills.md) |
+| `skills.catalog_max_bytes` | int | `32768` | the skill catalog's byte budget; read at startup and used only in `suggest`. A draft or an accept that would take the catalog over it is refused. Must be positive |
 | `websearch.enabled` | `"on"`/`"off"` | `"on"` | offer `web_search` and `web_fetch` to models; read live |
 | `websearch.backend` | string | `"auto"` | who serves searches: `auto` (the thread's provider when it has web search, else the metasearch), `searchwire` (always the metasearch), `provider` (the provider in `websearch.provider`) |
 | `websearch.provider` / `websearch.model` | string | `""` | the provider for `backend: provider`, and the model it searches through (OpenCode needs one) |

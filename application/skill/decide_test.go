@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,9 @@ type decideWorld struct {
 	catalog    []repository.Skill
 	calls      []string
 	commitFail bool
+	// elsewhere names a skill that is live only in some other workspace
+	// folder, so the focus catalog does not carry it.
+	elsewhere map[string]string
 }
 
 func decideDoc() repository.SkillDocument {
@@ -61,16 +65,47 @@ func (d decideProposals) Get(ctx context.Context, id string) (*aggregate.SkillPr
 		Op: p.Op(), Kind: p.Kind(), Tool: p.Tool(),
 		Name: p.Name(), Description: p.Description(), Body: p.Body(),
 		Evidence: p.Evidence(), EvidenceKind: p.EvidenceKind(), Reason: p.Reason(),
+		EvidenceAt: p.EvidenceAt(),
 		TargetName: p.TargetName(), TargetDigest: p.TargetDigest(), TargetLevel: p.TargetLevel(),
 	}
 	q, err := aggregate.NewSkillProposal(p.ID(), in, p.CreatedAt())
 	if err != nil {
 		return nil, err
 	}
-	if err := q.SetStored(p.Status(), p.AcceptedPath(), p.AcceptedLevel(), p.DismissReason(), p.CreatedAt(), p.DecidedAt()); err != nil {
+	if err := q.SetStored(p.Status(), p.AcceptedPath(), p.AcceptedLevel(), p.DismissReason(), p.CreatedAt(), p.DecidedAt(), p.DecidedOpen()); err != nil {
 		return nil, err
 	}
 	return q, nil
+}
+
+// Declined mirrors the store's read: the owner's dismissals of proposals that
+// were open when they closed, newest first, within the window. A retirement is
+// not a refusal.
+func (d decideProposals) Declined(ctx context.Context, since time.Time, limit int) ([]*aggregate.SkillProposal, error) {
+	var out []*aggregate.SkillProposal
+	for _, p := range d.w.proposals {
+		if p.Status() != enum.SkillProposalDismissed || !p.DecidedOpen() || p.DecidedAt().Before(since) {
+			continue
+		}
+		if strings.HasPrefix(p.DismissReason(), aggregate.SupersededReasonPrefix) {
+			continue
+		}
+		q, err := d.Get(ctx, p.ID())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].DecidedAt().Equal(out[j].DecidedAt()) {
+			return out[i].DecidedAt().After(out[j].DecidedAt())
+		}
+		return out[i].ID() > out[j].ID()
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 func (d decideProposals) Pending(ctx context.Context) ([]*aggregate.SkillProposal, error) {
 	var out []*aggregate.SkillProposal
@@ -98,7 +133,10 @@ func (d decideProposals) Seen(ctx context.Context, name string, op enum.SkillPro
 			return true, nil
 		}
 		superseded := strings.HasPrefix(p.DismissReason(), aggregate.SupersededReasonPrefix)
-		if p.Op() == op && !p.DecidedAt().Before(since) && !superseded {
+		// The store holds a name for a decision of its op when the proposal was
+		// accepted, or dismissed while it was open. A stale dismissal holds nothing.
+		holds := p.Status() == enum.SkillProposalAccepted || p.DecidedOpen()
+		if p.Op() == op && !p.DecidedAt().Before(since) && !superseded && holds {
 			return true, nil
 		}
 	}
@@ -189,14 +227,101 @@ func (d decideWriter) Write(ctx context.Context, root enum.SkillRoot, doc reposi
 	d.w.files[key] = rendered
 	return written, nil
 }
-func (d decideWriter) Archive(ctx context.Context, root enum.SkillRoot, name string) error {
+func (d decideWriter) Digest(doc repository.SkillDocument) (string, error) {
+	return skillDigestString(decideRender(doc)), nil
+}
+
+// Archive moves the file out only while it still holds the digest the caller
+// read, as the real writer does, and it records the move in the call order.
+func (d decideWriter) Archive(ctx context.Context, root enum.SkillRoot, name, expectDigest string) error {
+	key := string(root) + "/" + name
+	cur, ok := d.w.files[key]
+	if !ok {
+		return apperror.NewNotFoundError("the skill "+name, nil)
+	}
+	if skillDigestString(cur) != expectDigest {
+		return apperror.New(409, "the skill "+name+" changed since it was read", nil)
+	}
+	d.w.writeOrder("archive")
+	delete(d.w.files, key)
 	return nil
 }
 
 type decideCatalog struct{ w *decideWorld }
 
+// List is the catalog the fake writer's files belong to. A nusashell file is a
+// live skill with the digest it holds, as on disk. It replaces an authored
+// nusashell entry of its name and a builtin one, and a global or workspace
+// skill of its name hides it, as the roots override one another.
 func (d decideCatalog) List(ctx context.Context, workspace string) (repository.SkillCatalog, error) {
-	return repository.SkillCatalog{Skills: d.w.catalog}, nil
+	var names []string
+	onFile := map[string]bool{}
+	for key := range d.w.files {
+		if name, ok := strings.CutPrefix(key, "nusashell/"); ok {
+			names = append(names, name)
+			onFile[name] = true
+		}
+	}
+	sort.Strings(names)
+	higher := map[string]bool{}
+	for _, s := range d.w.catalog {
+		if s.Source == "global" || s.Source == "workspace" {
+			higher[s.Name] = true
+		}
+	}
+	var skills []repository.Skill
+	for _, s := range d.w.catalog {
+		if onFile[s.Name] && (s.Source == "nusashell" || s.Source == "builtin") {
+			continue
+		}
+		skills = append(skills, s)
+	}
+	for _, name := range names {
+		if higher[name] {
+			continue
+		}
+		content := d.w.files["nusashell/"+name]
+		skills = append(skills, repository.Skill{
+			Name: name, Description: decideDescription(content), Source: "nusashell",
+			Path: "nusashell/" + name + "/SKILL.md", Digest: skillDigestString(content),
+		})
+	}
+	return repository.SkillCatalog{Skills: skills}, nil
+}
+
+// decideDescription reads the description back out of a fake rendered skill,
+// which is its second line.
+func decideDescription(content string) string {
+	lines := strings.SplitN(content, "\n", 3)
+	if len(lines) < 2 {
+		return ""
+	}
+	return lines[1]
+}
+func (d decideCatalog) ListAcross(ctx context.Context, focus string, others []string) (repository.SkillCatalog, map[string]string, error) {
+	cat, err := d.List(ctx, focus)
+	if err != nil {
+		return cat, nil, err
+	}
+	// Taken holds every holder, as the real read does: a holder outside
+	// nusashell is preferred, and an authored entry the effective list no
+	// longer shows (a builtin under a learned file) still counts.
+	taken := map[string]string{}
+	hold := func(name, root string) {
+		if cur, ok := taken[name]; !ok || (cur == "nusashell" && root != "nusashell") {
+			taken[name] = root
+		}
+	}
+	for _, s := range cat.Skills {
+		hold(s.Name, s.Source)
+	}
+	for _, s := range d.w.catalog {
+		hold(s.Name, s.Source)
+	}
+	for name, root := range d.w.elsewhere {
+		hold(name, root)
+	}
+	return cat, taken, nil
 }
 func (d decideCatalog) Read(ctx context.Context, workspace, name string) (repository.Skill, string, error) {
 	return repository.Skill{}, "", nil
@@ -339,6 +464,26 @@ func TestDecideOverBudget(t *testing.T) {
 	}
 }
 
+// The refusal names how far over the budget the catalog would be, with the
+// thousands separator the owner reads in a sentence.
+func TestDecideOverBudgetNamesTheOverage(t *testing.T) {
+	w, deps := decideSetup()
+	const otherDesc = 1500
+	w.catalog = append(w.catalog, repository.Skill{Name: "other", Description: strings.Repeat("d", otherDesc), Source: "builtin"})
+	p := decideProposal(t, enum.SkillProposalCreate)
+	w.proposals[p.ID()] = p
+	total := len(p.Name()) + len(p.Description()) + len("other") + otherDesc
+	deps.Budget = total - 1234
+	err := Decide(context.Background(), deps, decideInput(p.ID(), "accept"))
+	const want = "the catalog would be over its byte budget by 1,234 bytes; make room before accepting"
+	if apperror.As(err).StatusCode() != 409 || err.Error() != want {
+		t.Errorf("over budget: %v; want a 409 saying %q", err, want)
+	}
+	if len(w.files) != 0 {
+		t.Error("an over-budget accept wrote a file")
+	}
+}
+
 func TestDecidePatchChangedTarget(t *testing.T) {
 	w, deps := decideSetup()
 	ws, patchedRow := decidePatchWorld(t, w)
@@ -450,22 +595,29 @@ func TestDecideCommitFailureAndSecondAcceptFinishes(t *testing.T) {
 	if w.rows["nusashell/release-notes"] == nil {
 		t.Error("the second accept did not finish the row")
 	}
+	if got := w.proposals[p.ID()].Status(); got != enum.SkillProposalAccepted {
+		t.Errorf("the second accept did not decide the proposal: %s", got)
+	}
 }
 
 func TestDecidePatchWithMovedTargetIsChanged(t *testing.T) {
 	// the target the patch was read against is not in the live nusashell
 	// catalog any more — deleted, or shadowed by an outer root
 	for _, tc := range []struct {
-		name    string
-		catalog []repository.Skill
+		name       string
+		catalog    []repository.Skill
+		removeFile bool
 	}{
-		{"deleted", nil},
-		{"shadowed by workspace", []repository.Skill{{Name: "release-notes", Description: "x", Source: "workspace"}}},
+		{"deleted", nil, true},
+		{"shadowed by workspace", []repository.Skill{{Name: "release-notes", Description: "x", Source: "workspace"}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w, deps := decideSetup()
 			decidePatchWorld(t, w)
 			w.catalog = tc.catalog
+			if tc.removeFile {
+				delete(w.files, "nusashell/release-notes")
+			}
 			err := Decide(context.Background(), deps, decideInput("sprop_test", "accept"))
 			if apperror.As(err).StatusCode() != 409 {
 				t.Errorf("target moved: %v; want 409", err)
@@ -526,6 +678,25 @@ func TestDecideCreateWhoseNameIsLiveInAnotherRootIsRefused(t *testing.T) {
 	}
 }
 
+// A name that is live only in another workspace folder is not in this
+// workspace's catalog, and accept still refuses the create with that root.
+func TestDecideCreateWhoseNameIsLiveOnlyInAnotherWorkspaceIsRefused(t *testing.T) {
+	w, deps := decideSetup()
+	p := decideProposal(t, enum.SkillProposalCreate)
+	w.proposals[p.ID()] = p
+	w.elsewhere = map[string]string{"release-notes": "workspace"}
+	err := Decide(context.Background(), deps, decideInput(p.ID(), "accept"))
+	if err == nil || apperror.As(err).StatusCode() != 409 || !strings.Contains(err.Error(), "workspace") {
+		t.Errorf("a create over another workspace's name: %v; want 409 naming the workspace root", err)
+	}
+	if len(w.files) != 0 || len(w.calls) != 0 {
+		t.Errorf("a refused name was written or committed: files %v, calls %v", w.files, w.calls)
+	}
+	if got := w.proposals[p.ID()]; got.Status() != enum.SkillProposalPending {
+		t.Errorf("the refused proposal is %s, want pending", got.Status())
+	}
+}
+
 func TestDecideZeroTimeRefusedBeforeTheWrite(t *testing.T) {
 	w, deps := decideSetup()
 	p := decideProposal(t, enum.SkillProposalCreate)
@@ -538,5 +709,303 @@ func TestDecideZeroTimeRefusedBeforeTheWrite(t *testing.T) {
 	}
 	if len(w.files) != 0 {
 		t.Error("a write happened ahead of input validation")
+	}
+}
+
+// decideLeftover makes the state a failed accept leaves: the file is written,
+// no ownership row claims it, and the proposal is still pending.
+func decideLeftover(t *testing.T) (*decideWorld, DecideDeps, *aggregate.SkillProposal) {
+	t.Helper()
+	w, deps := decideSetup()
+	p := decideProposal(t, enum.SkillProposalCreate)
+	w.proposals[p.ID()] = p
+	deps.Decisions.(decideDecisions).w.commitFail = true
+	if apperror.As(Decide(context.Background(), deps, decideInput(p.ID(), "accept"))).StatusCode() != 500 {
+		t.Fatal("the first accept must fail at the commit")
+	}
+	if _, ok := w.files["nusashell/release-notes"]; !ok || w.rows["nusashell/release-notes"] != nil {
+		t.Fatalf("a failed accept must leave the file and no row: files %v, rows %v", w.files, w.rows)
+	}
+	return w, deps, p
+}
+
+// Closing the loop's own leftover archives it: a live nusashell skill with no
+// row is worse than an unaccepted proposal, and nothing else would remove it.
+func TestDecideDismissArchivesTheLoopsOwnLeftover(t *testing.T) {
+	w, deps, p := decideLeftover(t)
+	in := decideInput(p.ID(), "dismiss")
+	in.Reason = "the skill is too narrow"
+	if err := Decide(context.Background(), deps, in); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	if _, ok := w.files["nusashell/release-notes"]; ok {
+		t.Error("the leftover survived the dismissal as a live skill with no row")
+	}
+	if n := len(w.calls); n < 2 || w.calls[n-2] != "archive" || w.calls[n-1] != "commit" {
+		t.Errorf("the archive must come before the commit: %v", w.calls)
+	}
+	stored := w.proposals[p.ID()]
+	if stored.Status() != enum.SkillProposalDismissed {
+		t.Errorf("not dismissed: %s", stored.Status())
+	}
+	if !stored.DecidedOpen() {
+		t.Error("a leftover is open until the owner closes it, so the dismissal should record it open")
+	}
+}
+
+// A file the owner edited since the failed accept is not the loop's: the
+// dismissal must leave it alone and record the proposal as stale.
+func TestDecideDismissKeepsAFileTheOwnerEdited(t *testing.T) {
+	w, deps, p := decideLeftover(t)
+	const edit = "the owner's own edit of the same name"
+	w.files["nusashell/release-notes"] = edit
+	in := decideInput(p.ID(), "dismiss")
+	in.Reason = "the skill is too narrow"
+	if err := Decide(context.Background(), deps, in); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	if w.files["nusashell/release-notes"] != edit {
+		t.Errorf("the owner's edit was changed: %q", w.files["nusashell/release-notes"])
+	}
+	for _, call := range w.calls {
+		if call == "archive" {
+			t.Errorf("a dismissal archived a file the loop did not write: %v", w.calls)
+		}
+	}
+	if w.proposals[p.ID()].DecidedOpen() {
+		t.Error("a stale dismissal recorded as open would hold the name for nothing")
+	}
+}
+
+// Accept applies the same rule: an edited file of the name is a collision, so
+// the accept is refused with the nusashell root named and nothing is written.
+func TestDecideAcceptRefusesAnEditedLeftover(t *testing.T) {
+	w, deps, p := decideLeftover(t)
+	w.files["nusashell/release-notes"] = "the owner's own edit of the same name"
+	calls := len(w.calls)
+	err := Decide(context.Background(), deps, decideInput(p.ID(), "accept"))
+	if apperror.As(err).StatusCode() != 409 || !strings.Contains(err.Error(), "nusashell") {
+		t.Errorf("an accept over an edited file: %v; want a 409 naming the nusashell root", err)
+	}
+	if len(w.calls) != calls {
+		t.Errorf("the refused accept reached the writer: %v", w.calls)
+	}
+}
+
+// The leftover's bytes are the incoming skill's, counted once: a budget that
+// fits exactly one copy must let the retry finish.
+func TestDecideCountsTheLoopsOwnLeftoverOnce(t *testing.T) {
+	_, deps, p := decideLeftover(t)
+	deps.Budget = len(p.Name()) + len(p.Description())
+	if err := Decide(context.Background(), deps, decideInput(p.ID(), "accept")); err != nil {
+		t.Fatalf("the retry counted the leftover twice: %v", err)
+	}
+}
+
+// A patch whose commit failed has its new bytes on disk under the old row. Those
+// bytes are not the file the patch read, so the proposal no longer applies: a
+// second accept is refused before the writer runs, and the proposal stays
+// pending for the owner to dismiss.
+func TestDecidePatchCommitFailureLeavesAStaleProposal(t *testing.T) {
+	w, deps := decideSetup()
+	decidePatchWorld(t, w)
+	p := w.proposals["sprop_test"]
+	w.commitFail = true
+	const failed = "the loop wrote the skill file, but the decision was not recorded; this proposal no longer applies to that file, so dismiss it and set the skill's level on the Skills page"
+	if err := Decide(context.Background(), deps, decideInput(p.ID(), "accept")); err == nil || err.Error() != failed || apperror.As(err).StatusCode() != 500 {
+		t.Fatalf("the first patch accept: %v; want a 500 saying %q", err, failed)
+	}
+	calls := len(w.calls)
+	const refused = "the loop wrote this skill's file, but the decision was not recorded; this proposal no longer applies"
+	err := Decide(context.Background(), deps, decideInput(p.ID(), "accept"))
+	if apperror.As(err).StatusCode() != 409 || err.Error() != refused {
+		t.Errorf("the second accept: %v; want a 409 saying %q", err, refused)
+	}
+	if len(w.calls) != calls {
+		t.Errorf("the refused accept reached the writer: %v", w.calls)
+	}
+	if got := w.proposals[p.ID()].Status(); got != enum.SkillProposalPending {
+		t.Errorf("the refused accept changed the proposal: %s", got)
+	}
+}
+
+// Dismissing a patch's leftover keeps the bytes. They are the body the owner
+// approved, but the row keeps the old digest, so the loop has no authority over
+// them: the skill reads as the owner's, and the queue marks the proposal stale
+// with its cause. Nothing archives the file, because the patch never created it.
+func TestDecidePatchLeftoverDismissKeepsTheBytes(t *testing.T) {
+	w, deps := decideSetup()
+	decidePatchWorld(t, w)
+	p := w.proposals["sprop_test"]
+	w.commitFail = true
+	if apperror.As(Decide(context.Background(), deps, decideInput(p.ID(), "accept"))).StatusCode() != 500 {
+		t.Fatal("the first patch accept must fail at the commit")
+	}
+	leftover := w.files["nusashell/release-notes"]
+	list := ListDeps{Catalog: deps.Catalog, Ownership: deps.Ownership, Proposals: deps.Proposals, Writer: deps.Writer}
+	items, err := ListPending(context.Background(), list, "")
+	const cause = "the loop wrote this skill's file, but the decision was not recorded"
+	if err != nil || len(items) != 1 || items[0].Open || items[0].StaleCause != cause {
+		t.Fatalf("the queue must show the leftover stale with its cause: %+v, %v", items, err)
+	}
+	in := decideInput(p.ID(), "dismiss")
+	in.Reason = "the new steps are not what the owner asked for"
+	if err := Decide(context.Background(), deps, in); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	if w.files["nusashell/release-notes"] != leftover {
+		t.Error("the dismissal changed the bytes the patch wrote")
+	}
+	for _, call := range w.calls {
+		if call == "archive" {
+			t.Errorf("a patch leftover was archived: %v", w.calls)
+		}
+	}
+	row := w.rows["nusashell/release-notes"]
+	if row == nil || row.Digest() != p.TargetDigest() {
+		t.Fatalf("the row moved on a dismissal: %+v", row)
+	}
+	if level := aggregate.SkillStandingOf(row, skillDigestString(leftover)).Level; level != enum.SkillLevelUser {
+		t.Errorf("the row still gives the loop %s over bytes it does not describe", level)
+	}
+	if w.proposals[p.ID()].DecidedOpen() {
+		t.Error("a stale dismissal recorded as open would hold the name for nothing")
+	}
+}
+
+// The stale cause names the loop's write only for its own failed commit: the file
+// holds the bytes the patch would write, and the row still describes the file the
+// patch read. A row that already records those bytes means the decision was
+// recorded, and a file moved to other bytes is not the loop's write. Neither gets
+// the loop's name, so the owner is not told a write was theirs or the loop's.
+func TestPatchStaleCauseNamesTheLoopOnlyForItsOwnFailedCommit(t *testing.T) {
+	w, deps := decideSetup()
+	target, _ := decidePatchWorld(t, w)
+	p := w.proposals["sprop_test"]
+	w.commitFail = true
+	if apperror.As(Decide(context.Background(), deps, decideInput(p.ID(), "accept"))).StatusCode() != 500 {
+		t.Fatal("the first patch accept must fail at the commit")
+	}
+	leftover := w.files["nusashell/release-notes"]
+	list := ListDeps{Catalog: deps.Catalog, Ownership: deps.Ownership, Proposals: deps.Proposals, Writer: deps.Writer}
+	cause := func(t *testing.T) string {
+		t.Helper()
+		items, err := ListPending(context.Background(), list, "")
+		if err != nil || len(items) != 1 || items[0].Open {
+			t.Fatalf("the queue must show one stale proposal: %+v, %v", items, err)
+		}
+		return items[0].StaleCause
+	}
+	const loopWrote = "the loop wrote this skill's file, but the decision was not recorded"
+	const changed = "the skill's file changed since this proposal read it"
+	if got := cause(t); got != loopWrote {
+		t.Errorf("the leftover's cause %q, want %q", got, loopWrote)
+	}
+
+	// The row now describes the bytes on disk: the decision was recorded for them.
+	recorded, err := aggregate.NewSkillOwnership(enum.SkillRootNusashell, "release-notes", enum.SkillLevelAgent, skillDigestString(leftover))
+	if err != nil {
+		t.Fatalf("row: %v", err)
+	}
+	w.rows["nusashell/release-notes"] = recorded
+	if got := cause(t); got != changed {
+		t.Errorf("a recorded decision's cause %q, want %q", got, changed)
+	}
+
+	// The row is back on the file the patch read, and the file holds other bytes.
+	read, err := aggregate.NewSkillOwnership(enum.SkillRootNusashell, "release-notes", enum.SkillLevelAgent, target)
+	if err != nil {
+		t.Fatalf("row: %v", err)
+	}
+	w.rows["nusashell/release-notes"] = read
+	w.files["nusashell/release-notes"] = "a file the loop did not write"
+	if got := cause(t); got != changed {
+		t.Errorf("a file moved to other bytes: cause %q, want %q", got, changed)
+	}
+}
+
+// A pass that retires a patch's leftover closes it through the same release as a
+// dismissal. Only a create's leftover is archived, so the bytes stay.
+func TestReleaseOwnFileKeepsAPatchLeftover(t *testing.T) {
+	w, deps := decideSetup()
+	decidePatchWorld(t, w)
+	p := w.proposals["sprop_test"]
+	w.commitFail = true
+	if apperror.As(Decide(context.Background(), deps, decideInput(p.ID(), "accept"))).StatusCode() != 500 {
+		t.Fatal("the first patch accept must fail at the commit")
+	}
+	st, err := learnedNow(context.Background(), deps.Catalog, deps.Folders, deps.Ownership, deps.Writer, "", []*aggregate.SkillProposal{p})
+	if err != nil || !st.own[p.ID()] {
+		t.Fatalf("the leftover must be the loop's own before release: own %v, %v", st.own[p.ID()], err)
+	}
+	if err := releaseOwnFile(context.Background(), deps.Writer, st, p); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if _, ok := w.files["nusashell/release-notes"]; !ok {
+		t.Error("a patch's leftover was removed from the root")
+	}
+	for _, call := range w.calls {
+		if call == "archive" {
+			t.Errorf("a patch leftover was archived: %v", w.calls)
+		}
+	}
+}
+
+// An owner who moved the target to Only you has changed the level, not the
+// file: the refusal names that move, not an edit the row failed to follow.
+func TestDecidePatchTheOwnerMovedToOnlyYouSaysSo(t *testing.T) {
+	w, deps := decideSetup()
+	digest, _ := decidePatchWorld(t, w)
+	row, err := aggregate.NewSkillOwnership(enum.SkillRootNusashell, "release-notes", enum.SkillLevelUser, digest)
+	if err != nil {
+		t.Fatalf("row: %v", err)
+	}
+	w.rows["nusashell/release-notes"] = row
+	err = Decide(context.Background(), deps, decideInput("sprop_test", "accept"))
+	const want = "the owner moved it to Only you since it was proposed; this proposal no longer applies"
+	if apperror.As(err).StatusCode() != 409 || err.Error() != want {
+		t.Errorf("accept after the owner's move: %v; want a 409 saying %q", err, want)
+	}
+	if len(w.calls) != 0 {
+		t.Errorf("the refusal must come before the write: %v", w.calls)
+	}
+}
+
+// The queue reads the leftover by the same rule accept applies: open while it
+// is the loop's own, and stale with its cause once the owner has edited it.
+func TestQueueReadsTheLeftoverByTheAcceptRule(t *testing.T) {
+	w, deps, _ := decideLeftover(t)
+	list := ListDeps{Catalog: deps.Catalog, Ownership: deps.Ownership, Proposals: deps.Proposals, Writer: deps.Writer}
+	items, err := ListPending(context.Background(), list, "")
+	if err != nil || len(items) != 1 || !items[0].Open || items[0].StaleCause != "" {
+		t.Fatalf("the leftover must be open in the queue: %+v, %v", items, err)
+	}
+	w.files["nusashell/release-notes"] = "the owner's own edit of the same name"
+	items, err = ListPending(context.Background(), list, "")
+	const cause = "the name is live in the nusashell root since it was proposed"
+	if err != nil || len(items) != 1 || items[0].Open || items[0].StaleCause != cause {
+		t.Errorf("the edited leftover must be stale with its cause: %+v, %v", items, err)
+	}
+}
+
+// Retiring a stale create closes it like a dismissal, so it archives the
+// loop's own leftover too; otherwise the pass would leave the same orphan.
+func TestRetiredCreateArchivesTheLoopsOwnLeftover(t *testing.T) {
+	w, deps, p := decideLeftover(t)
+	w.elsewhere = map[string]string{"release-notes": "workspace"}
+	cand := CandidateDeps{
+		Catalog: deps.Catalog, Proposals: deps.Proposals, Ownership: deps.Ownership,
+		Decisions: deps.Decisions, Writer: deps.Writer,
+	}
+	id, err := retireSuperseded(context.Background(), cand, "", "release-notes", validateTurnAt.AddDate(0, 0, 1))
+	if err != nil || id != p.ID() {
+		t.Fatalf("retire: id %q, err %v", id, err)
+	}
+	if _, ok := w.files["nusashell/release-notes"]; ok {
+		t.Error("the retired create left its own leftover behind")
+	}
+	stored := w.proposals[p.ID()]
+	if stored.Status() != enum.SkillProposalDismissed || !strings.HasPrefix(stored.DismissReason(), aggregate.SupersededReasonPrefix) {
+		t.Errorf("not retired with a superseded reason: %s %q", stored.Status(), stored.DismissReason())
 	}
 }

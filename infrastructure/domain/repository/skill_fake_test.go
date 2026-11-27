@@ -43,14 +43,14 @@ func copySkillProposal(p *aggregate.SkillProposal) (*aggregate.SkillProposal, er
 	in := aggregate.SkillProposalInput{
 		Op: p.Op(), Kind: p.Kind(), Tool: p.Tool(),
 		Name: p.Name(), Description: p.Description(), Body: p.Body(),
-		Evidence: p.Evidence(), EvidenceKind: p.EvidenceKind(), Reason: p.Reason(),
+		Evidence: p.Evidence(), EvidenceKind: p.EvidenceKind(), EvidenceAt: p.EvidenceAt(), Reason: p.Reason(),
 		TargetName: p.TargetName(), TargetDigest: p.TargetDigest(), TargetLevel: p.TargetLevel(),
 	}
 	q, err := aggregate.NewSkillProposal(p.ID(), in, p.CreatedAt())
 	if err != nil {
 		return nil, err
 	}
-	if err := q.SetStored(p.Status(), p.AcceptedPath(), p.AcceptedLevel(), p.DismissReason(), p.CreatedAt(), p.DecidedAt()); err != nil {
+	if err := q.SetStored(p.Status(), p.AcceptedPath(), p.AcceptedLevel(), p.DismissReason(), p.CreatedAt(), p.DecidedAt(), p.DecidedOpen()); err != nil {
 		return nil, err
 	}
 	return q, nil
@@ -237,7 +237,11 @@ func (f *skillWriter) Write(_ context.Context, root enum.SkillRoot, doc SkillDoc
 	return written, nil
 }
 
-func (f *skillWriter) Archive(_ context.Context, root enum.SkillRoot, name string) error {
+func (f *skillWriter) Digest(doc SkillDocument) (string, error) {
+	return valueobject.SkillDigest(renderSkillDoc(doc)), nil
+}
+
+func (f *skillWriter) Archive(_ context.Context, root enum.SkillRoot, name, expectDigest string) error {
 	if err := learnedSkillRoot(root); err != nil {
 		return err
 	}
@@ -245,6 +249,9 @@ func (f *skillWriter) Archive(_ context.Context, root enum.SkillRoot, name strin
 	cur, ok := f.db.files[key]
 	if !ok {
 		return apperror.NewNotFoundError("the skill "+key, nil)
+	}
+	if valueobject.SkillDigest(cur) != expectDigest {
+		return apperror.New(apperror.StatusConflict, "the skill "+key+" changed since it was read", nil)
 	}
 	delete(f.db.files, key)
 	f.db.archived[key] = cur
@@ -331,7 +338,7 @@ func TestProposalStoreAddGetPending(t *testing.T) {
 	if got.Name() != "release-notes" || got.Status() != enum.SkillProposalPending {
 		t.Errorf("got %s/%s, want a pending release-notes", got.Name(), got.Status())
 	}
-	if err := got.Dismiss("not a skill", skillNow()); err != nil {
+	if err := got.Dismiss("not a skill", skillNow(), true); err != nil {
 		t.Fatalf("dismiss fixture: %v", err)
 	}
 	if err := decisions.Commit(ctx, got, nil); err != nil {
@@ -515,7 +522,7 @@ func TestCommitRefusesADecisionMadeMeanwhile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if err := first.Dismiss("not a skill", skillNow()); err != nil {
+	if err := first.Dismiss("not a skill", skillNow(), true); err != nil {
 		t.Fatalf("dismiss fixture: %v", err)
 	}
 	if err := decisions.Commit(ctx, first, nil); err != nil {
@@ -558,7 +565,7 @@ func TestCommitNeedsARowExactlyWhenTheProposalIsAccepted(t *testing.T) {
 	if err := proposals.Add(ctx, dismissed); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if err := dismissed.Dismiss("not a skill", skillNow()); err != nil {
+	if err := dismissed.Dismiss("not a skill", skillNow(), true); err != nil {
 		t.Fatalf("dismiss fixture: %v", err)
 	}
 	if err := decisions.Commit(ctx, dismissed, learnedRow(t, "other-notes", "dw")); skillStatus(err) != 400 {
@@ -584,7 +591,7 @@ func TestCommitDismissalStoresNoRow(t *testing.T) {
 	if err := proposals.Add(ctx, p); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if err := p.Dismiss("not a skill", skillNow()); err != nil {
+	if err := p.Dismiss("not a skill", skillNow(), true); err != nil {
 		t.Fatalf("dismiss fixture: %v", err)
 	}
 	if err := decisions.Commit(ctx, p, nil); err != nil {
@@ -722,13 +729,20 @@ func TestSkillWriterReplaceIsACompareAndSwap(t *testing.T) {
 func TestSkillWriterArchive(t *testing.T) {
 	_, _, _, writer := newSkillFakes()
 	ctx := context.Background()
-	if err := writer.Archive(ctx, enum.SkillRootNusashell, "missing"); skillStatus(err) != 404 {
+	if err := writer.Archive(ctx, enum.SkillRootNusashell, "missing", "x"); skillStatus(err) != 404 {
 		t.Errorf("archiving a missing skill: %v; want a 404", err)
 	}
-	if _, err := writer.Write(ctx, enum.SkillRootNusashell, skillDoc(), ""); err != nil {
+	written, err := writer.Write(ctx, enum.SkillRootNusashell, skillDoc(), "")
+	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if err := writer.Archive(ctx, enum.SkillRootNusashell, "release-notes"); err != nil {
+	if digest, err := writer.Digest(skillDoc()); err != nil || digest != written.Digest {
+		t.Errorf("Digest %q (%v) is not the digest Write recorded %q", digest, err, written.Digest)
+	}
+	if err := writer.Archive(ctx, enum.SkillRootNusashell, "release-notes", "not-the-digest"); skillStatus(err) != 409 {
+		t.Errorf("archiving against a digest the file does not hold: %v; want a 409", err)
+	}
+	if err := writer.Archive(ctx, enum.SkillRootNusashell, "release-notes", written.Digest); err != nil {
 		t.Errorf("archiving an existing skill was refused: %v", err)
 	}
 }
@@ -739,7 +753,7 @@ func TestSkillWriterRefusesAnyRootButNusashell(t *testing.T) {
 	if _, err := writer.Write(ctx, enum.SkillRootGlobal, skillDoc(), ""); skillStatus(err) != 400 {
 		t.Errorf("a write into the global root: %v; want a 400", err)
 	}
-	if err := writer.Archive(ctx, enum.SkillRootGlobal, "release-notes"); skillStatus(err) != 400 {
+	if err := writer.Archive(ctx, enum.SkillRootGlobal, "release-notes", "x"); skillStatus(err) != 400 {
 		t.Errorf("an archive in the global root: %v; want a 400", err)
 	}
 }

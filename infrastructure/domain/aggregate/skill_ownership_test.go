@@ -124,7 +124,7 @@ func TestApplySkillOwnershipNeedsAnAcceptedProposal(t *testing.T) {
 		t.Error("a pending proposal wrote a row")
 	}
 	dismissed := ownershipProposal(t, "p2", ownershipCreateIn())
-	if err := dismissed.Dismiss("not a skill", ownershipNow()); err != nil {
+	if err := dismissed.Dismiss("not a skill", ownershipNow(), true); err != nil {
 		t.Fatalf("dismiss fixture: %v", err)
 	}
 	if _, err := ApplySkillOwnership(nil, dismissed, "dw"); err == nil {

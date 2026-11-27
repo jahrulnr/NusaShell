@@ -25,8 +25,16 @@ const (
 	earlierOwnerLines = 3
 	// candidateCooldown is how long a decided proposal's name is not proposed
 	// again. It mirrors the repeat window: inside a month, the owner's
-	// decision still speaks. A retirement the pass wrote is not a decision.
+	// decision still speaks. A retirement the pass wrote, and a close of a
+	// proposal that had already gone stale, are not refusals and hold nothing.
+	// The same window bounds the refusals the prompt shows.
 	candidateCooldown = 30 * 24 * time.Hour
+	// maxDeclined bounds the refusals the prompt shows, newest first. A sixth
+	// refusal pushes the oldest out of the block.
+	maxDeclined = 5
+	// declinedClip bounds one refusal's reason in the prompt. It is the owner's
+	// own text, so the model reads its gist, not a paragraph of it.
+	declinedClip = 200
 	// digestCapBytes bounds the turn digest — the conversation content the
 	// owner pays the utility model to read. Assistant and tool text is never
 	// admissible evidence, so paying for all of it would be waste, not cost.
@@ -52,6 +60,12 @@ type CandidateDeps struct {
 	Generate  Generator
 	Budget    int
 	Log       *slog.Logger
+	// Folders lists the other workspace folders a learned name must be free
+	// in. Nil means this workspace is the only one.
+	Folders SkillFolders
+	// Writer renders a pending create's document, so the pass can tell the
+	// loop's own leftover from a collision. Nil means no file is read that way.
+	Writer drepo.SkillWriter
 }
 
 // CandidateInput is one finished turn the gate judged worth a pass. Messages
@@ -133,9 +147,11 @@ func Candidate(ctx context.Context, deps CandidateDeps, in CandidateInput) Candi
 	if err != nil {
 		return outcome(CandidateUnavailable, "err", err.Error())
 	}
-	// The validator judges the catalog and the ownership rows as the pass began.
-	// The model call in between can be long, and movedSince reads both again
-	// before anything is stored.
+	// The model sees this workspace's effective catalog. Whether a proposal is
+	// still acceptable is read again, across every workspace folder, just
+	// before anything is stored: a name written into the nusashell root is
+	// visible from all of them. The validator judges this snapshot. The model
+	// call in between can be long, and movedSince reads the world again.
 	rows, err := deps.Ownership.List(ctx)
 	if err != nil {
 		return outcome(CandidateUnavailable, "err", err.Error())
@@ -154,7 +170,11 @@ func Candidate(ctx context.Context, deps CandidateDeps, in CandidateInput) Candi
 
 	earlier := earlierOwners(in.Messages, w)
 	turn, shown, calls := candidateDigest(w, earlier, in.Rewrote)
-	user := candidatePrompt(turn, shown, pending, catalog.Skills, deps.Budget)
+	declined, err := deps.Proposals.Declined(ctx, in.Now.Add(-candidateCooldown), maxDeclined)
+	if err != nil {
+		return outcome(CandidateUnavailable, "err", err.Error())
+	}
+	user := candidatePrompt(turn, shown, pending, declined, catalog.Skills, deps.Budget)
 	raw, err := deps.Generate(ctx, in.ConvID, prompt.SystemPrompt("skill-candidate"), user)
 	if err != nil {
 		return outcome(CandidateUnavailable, "err", err.Error())
@@ -246,19 +266,17 @@ func retireSuperseded(ctx context.Context, deps CandidateDeps, workspace, name s
 	if held == nil {
 		return "", nil
 	}
-	catalog, err := deps.Catalog.List(ctx, workspace)
+	st, err := learnedNow(ctx, deps.Catalog, deps.Folders, deps.Ownership, deps.Writer, workspace, []*aggregate.SkillProposal{held})
 	if err != nil {
 		return "", err
 	}
-	rows, err := deps.Ownership.List(ctx)
-	if err != nil {
-		return "", err
-	}
-	st := newLearnedState(catalog.Skills, rows)
 	if st.open(held) {
 		return "", nil
 	}
 	if err := held.Supersede(st.supersedeCause(held), now); err != nil {
+		return "", err
+	}
+	if err := releaseOwnFile(ctx, deps.Writer, st, held); err != nil {
 		return "", err
 	}
 	if err := deps.Decisions.Commit(ctx, held, nil); err != nil {
@@ -272,10 +290,10 @@ func retireSuperseded(ctx context.Context, deps CandidateDeps, workspace, name s
 // between can be long. A proposal whose target has moved is one accept would
 // refuse, so it is not stored. The reason names the move; "" means nothing
 // moved. A create moves when its name is taken on disk or claimed by a row; a
-// patch moves when its file is gone, its digest changed, or its row no longer
-// describes the file at agent level (SkillProposal.Changes).
+// patch moves when the target no longer reads as a skill, its digest changed, or
+// its row no longer describes the file at agent level (SkillProposal.Changes).
 func movedSince(ctx context.Context, deps CandidateDeps, workspace string, p *aggregate.SkillProposal) (string, error) {
-	catalog, err := deps.Catalog.List(ctx, workspace)
+	catalog, taken, err := catalogView(ctx, deps.Catalog, deps.Folders, workspace)
 	if err != nil {
 		return "", err
 	}
@@ -283,12 +301,10 @@ func movedSince(ctx context.Context, deps CandidateDeps, workspace string, p *ag
 	if err != nil {
 		return "", err
 	}
-	st := newLearnedState(catalog.Skills, rows)
+	st := newLearnedState(catalog.Skills, rows, taken)
 	if p.Op() == enum.SkillProposalCreate {
-		for _, s := range catalog.Skills {
-			if s.Name == p.Name() {
-				return "the name was taken while the model answered", nil
-			}
+		if root, ok := st.taken[p.Name()]; ok {
+			return "the name is live in the " + root + " root while the model answered", nil
 		}
 		if st.rows[p.Name()] != nil {
 			return "the name was claimed while the model answered", nil
@@ -298,7 +314,7 @@ func movedSince(ctx context.Context, deps CandidateDeps, workspace string, p *ag
 	digest, live := st.onDisk[p.TargetName()]
 	switch {
 	case !live:
-		return "the target's file is gone while the model answered", nil
+		return "the target no longer reads as a skill while the model answered", nil
 	case digest != p.TargetDigest():
 		return "the target changed while the model answered", nil
 	case p.Changes(st.rows[p.TargetName()]):
@@ -492,8 +508,9 @@ func candidateDigest(w Window, earlier []entity.Message, rewrote bool) (string, 
 }
 
 // candidatePrompt renders the pass's input: the turn, the surviving earlier
-// owner lines, and the clipped catalog with its byte accounting.
-func candidatePrompt(turn string, shown []entity.Message, pending []*aggregate.SkillProposal, catalog []drepo.Skill, budget int) string {
+// owner lines, the clipped catalog with its byte accounting, the proposals
+// pending now, and the owner's recent refusals with their reasons.
+func candidatePrompt(turn string, shown []entity.Message, pending, declined []*aggregate.SkillProposal, catalog []drepo.Skill, budget int) string {
 	var b strings.Builder
 	if len(shown) > 0 {
 		b.WriteString("<earlier_owner_lines>\n")
@@ -513,7 +530,13 @@ func candidatePrompt(turn string, shown []entity.Message, pending []*aggregate.S
 	for _, p := range pending {
 		fmt.Fprintf(&b, "%s (%s) — %s\n", p.Name(), p.Op(), clip(p.Description(), catalogDescClip))
 	}
-	b.WriteString("</pending_proposals>\n")
+	b.WriteString("</pending_proposals>\n\n<declined>\n")
+	fmt.Fprintf(&b, "the owner's refusals from the last %d days, newest first, at most %d; a reason is the owner's decision, not evidence\n",
+		int(candidateCooldown.Hours()/24), maxDeclined)
+	for _, p := range declined {
+		fmt.Fprintf(&b, "%s (%s) — %s\n", p.Name(), p.Op(), clip(p.DismissReason(), declinedClip))
+	}
+	b.WriteString("</declined>\n")
 	return b.String()
 }
 
@@ -521,7 +544,7 @@ func candidatePrompt(turn string, shown []entity.Message, pending []*aggregate.S
 // what the digest shows: this turn's owner lines and calls, the earlier owner
 // lines, and whether the owner rewrote this turn.
 func candidateFacts(w Window, earlier []entity.Message, calls []entity.ToolCall, rewrote bool) Facts {
-	f := Facts{Rewrite: rewrote}
+	f := Facts{Rewrite: rewrote, TurnAt: w.AnchorAt}
 	seen := map[string]bool{}
 	// The opening owner line is not in Msgs — the window starts after it —
 	// and it is the line most citations rest on.
@@ -575,24 +598,55 @@ func candidateLive(ctx context.Context, deps CandidateDeps, catalog []drepo.Skil
 // learnedState is what the open rule reads about learned skills: the digest of
 // each nusashell skill's file on disk, each one's ownership row, and the root
 // of every skill name in any root. Only nusashell is the loop's to write, so
-// only its entries are in onDisk and rows; a create's name must be free in
-// every root.
+// only its entries are in onDisk and rows. A create's name must be free in
+// every root, except that the loop's own leftover in nusashell is not a
+// collision (see own).
 type learnedState struct {
 	onDisk map[string]string
 	rows   map[string]*aggregate.SkillOwnership
 	taken  map[string]string
+	// elsewhere names every skill held outside the nusashell root: the focus
+	// catalog's other roots and the other workspace folders. A create whose name
+	// is here is refused, whatever the nusashell root holds.
+	elsewhere map[string]string
+	// own holds the ids of the proposals whose nusashell file is the loop's own
+	// leftover from a failed commit: the file holds the document the proposal
+	// would write, and no row records that document. A create's name has no row;
+	// a patch's row still describes the file the patch read. Closing a create
+	// archives its leftover. A patch's stays, and its stale cause says the loop
+	// wrote it.
+	own map[string]bool
 }
 
 // newLearnedState takes the catalog and ownership reads the page and the gate
-// already hold.
-func newLearnedState(skills []drepo.Skill, rows []*aggregate.SkillOwnership) learnedState {
-	st := learnedState{onDisk: map[string]string{}, rows: map[string]*aggregate.SkillOwnership{}, taken: map[string]string{}}
+// already hold. own is empty until withOwnDocs reads the documents.
+func newLearnedState(skills []drepo.Skill, rows []*aggregate.SkillOwnership, also map[string]string) learnedState {
+	st := learnedState{
+		onDisk:    map[string]string{},
+		rows:      map[string]*aggregate.SkillOwnership{},
+		taken:     map[string]string{},
+		elsewhere: map[string]string{},
+		own:       map[string]bool{},
+	}
 	for _, s := range skills {
 		if _, ok := st.taken[s.Name]; !ok {
 			st.taken[s.Name] = s.Source
 		}
 		if s.Source == string(enum.SkillRootNusashell) {
 			st.onDisk[s.Name] = s.Digest
+		} else if _, ok := st.elsewhere[s.Name]; !ok {
+			st.elsewhere[s.Name] = s.Source
+		}
+	}
+	// also is the catalog port's taken: every name and the root that holds it,
+	// a holder outside nusashell preferred over a learned one. Any holder outside
+	// nusashell makes the name elsewhere, whatever nusashell holds under it.
+	for name, root := range also {
+		if cur, ok := st.taken[name]; !ok || (cur == string(enum.SkillRootNusashell) && root != string(enum.SkillRootNusashell)) {
+			st.taken[name] = root
+		}
+		if _, ok := st.elsewhere[name]; !ok && root != string(enum.SkillRootNusashell) {
+			st.elsewhere[name] = root
 		}
 	}
 	for _, r := range rows {
@@ -608,54 +662,106 @@ func newLearnedState(skills []drepo.Skill, rows []*aggregate.SkillOwnership) lea
 // needs its target to be a live learned skill whose file still holds the digest
 // the patch was read against, and whose row still describes that file at agent
 // level (SkillProposal.Changes); a create needs its name free in every root and
-// no ownership row. Budget is left out: it is the owner's to make room for, not a
-// fact about the proposal. A proposal that is not open is not deleted or hidden.
-// It stays pending and labelled stale on its skill's row, and only stops holding
-// the queue.
+// no ownership row, or else the loop's own leftover in nusashell. Budget is left
+// out: it is the owner's to make room for, not a fact about the proposal. A
+// proposal that is not open is not deleted or hidden. It stays pending and
+// labelled stale on its skill's row, and only stops holding the queue.
 func (st learnedState) open(p *aggregate.SkillProposal) bool {
 	if p.Op() == enum.SkillProposalPatch {
 		digest, live := st.onDisk[p.TargetName()]
 		return live && digest == p.TargetDigest() && !p.Changes(st.rows[p.TargetName()])
 	}
-	_, taken := st.taken[p.Name()]
-	return !taken && st.rows[p.Name()] == nil
+	if _, held := st.elsewhere[p.Name()]; held || st.rows[p.Name()] != nil {
+		return false
+	}
+	if _, onDisk := st.onDisk[p.Name()]; onDisk {
+		return st.own[p.ID()]
+	}
+	return true
+}
+
+// withOwnDocs marks the pending proposals whose nusashell file is the loop's own
+// leftover (see own). A create needs no row for its name. A patch needs the row
+// it was read against still describing that file, and the file moved to other
+// bytes: a row that already holds those bytes is a decision that was recorded,
+// so nothing is left to attribute. The writer renders the document, so this is
+// the same byte comparison Write makes. A nil writer marks nothing.
+func (st learnedState) withOwnDocs(writer drepo.SkillWriter, pending []*aggregate.SkillProposal) (learnedState, error) {
+	if writer == nil {
+		return st, nil
+	}
+	for _, p := range pending {
+		name := p.Name()
+		if p.Op() == enum.SkillProposalPatch {
+			name = p.TargetName()
+		}
+		onDisk, ok := st.onDisk[name]
+		if !ok {
+			continue
+		}
+		if p.Op() == enum.SkillProposalCreate {
+			if st.rows[name] != nil {
+				continue
+			}
+		} else if row := st.rows[name]; row == nil || row.Digest() != p.TargetDigest() || onDisk == p.TargetDigest() {
+			continue
+		}
+		digest, err := writer.Digest(drepo.SkillDocument{Name: p.Name(), Description: p.Description(), Body: p.Body()})
+		if err != nil {
+			return st, err
+		}
+		st.own[p.ID()] = digest == onDisk
+	}
+	return st, nil
 }
 
 // supersedeCause names the state that makes a proposal open reports as not open,
-// in the owner's terms: the root that holds the name, a file that is gone, a
-// digest that moved, or a row that no longer describes the file. A retired
-// proposal is dismissed with this cause, so it states the fact, not the kind of
-// change.
+// in the owner's terms: the root that holds the name, a target that no longer
+// reads as a skill, a file that differs from the one the patch read, the owner's
+// move of the target to Only you, or a row that no longer describes the file. A
+// retired proposal is dismissed with this cause, so it states the fact, not the
+// kind of change. movedSince reads the same states at the reread, in its own
+// words, because the reread happens while the model answers.
 func (st learnedState) supersedeCause(p *aggregate.SkillProposal) string {
 	if p.Op() == enum.SkillProposalCreate {
-		if root, taken := st.taken[p.Name()]; taken {
+		if root, held := st.elsewhere[p.Name()]; held {
 			return "the name is live in the " + root + " root since it was proposed"
 		}
-		return "the name is still owned by the loop, but its file is gone since it was proposed"
+		if _, onDisk := st.onDisk[p.Name()]; onDisk && !st.own[p.ID()] {
+			return "the name is live in the " + string(enum.SkillRootNusashell) + " root since it was proposed"
+		}
+		return "the name is still owned by the loop, but its file no longer reads as a skill since it was proposed"
 	}
 	digest, live := st.onDisk[p.TargetName()]
 	switch {
 	case !live:
-		return "the target is gone since it was proposed"
+		return "the target no longer reads as a skill since it was proposed"
 	case digest != p.TargetDigest():
-		return "the target's digest changed since it was proposed"
-	default:
-		return "the target's ownership row no longer describes it since it was proposed"
+		// The loop's own failed commit is named as the loop's write, so the owner
+		// is not left to think they edited it. Any other change to the file gets
+		// the neutral sentence.
+		if st.own[p.ID()] {
+			return "the loop wrote this skill's file, but the decision was not recorded"
+		}
+		return "the skill's file changed since this proposal read it"
 	}
+	// The file is still the one the patch was read against. A row that holds
+	// that digest and sits at user level is the owner's own move to Only you:
+	// the row describes the file correctly, only the level changed. A row whose
+	// digest differs describes an older file, and that is the text below.
+	if row := st.rows[p.TargetName()]; row != nil && row.Digest() == p.TargetDigest() && row.Level() != enum.SkillLevelAgent {
+		return "the owner moved it to Only you since it was proposed"
+	}
+	return "the target's ownership row no longer describes it since it was proposed"
 }
 
 // openProposals counts the pending proposals the owner can still accept — the
 // queue gate's count, read by the one rule the page labels by.
 func openProposals(ctx context.Context, deps CandidateDeps, workspace string, pending []*aggregate.SkillProposal) (int, error) {
-	catalog, err := deps.Catalog.List(ctx, workspace)
+	st, err := learnedNow(ctx, deps.Catalog, deps.Folders, deps.Ownership, deps.Writer, workspace, pending)
 	if err != nil {
 		return 0, err
 	}
-	rows, err := deps.Ownership.List(ctx)
-	if err != nil {
-		return 0, err
-	}
-	st := newLearnedState(catalog.Skills, rows)
 	open := 0
 	for _, p := range pending {
 		if st.open(p) {

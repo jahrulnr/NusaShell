@@ -499,18 +499,19 @@ backpressure the tool, and chunks are never persisted.
 
 Skill discovery uses the injected `repository.Skills` port. The local repository
 reads immediate child directories (including symlinked directories) containing
-`SKILL.md` under `<workspace>/.agents/skills/`, `~/.agents/skills/`, and
-`<storage.dir>/builtin-skills/`. YAML frontmatter requires nonempty `name` and
-`description`; optional metadata and multiline YAML descriptions are supported.
-The effective catalog is sorted by declared name, with workspace > global >
-builtin precedence. Duplicate names within one root select the first directory
-in lexical order and report a diagnostic. Missing roots are empty; malformed
-skills and unreadable roots are reported as diagnostics without dropping valid
-entries. `read_skill` returns the original source and its absolute directory;
-supporting resources are read or executed from that directory as needed.
-ACP agents do not get the `skills`/`read_skill` tool catalog: their session
-instructions name the installed builtin-skills directory, and they read those
-`SKILL.md` files with their own file tools.
+`SKILL.md` under `<workspace>/.agents/skills/`, `~/.agents/skills/`,
+`<storage.dir>/builtin-skills/`, and, only in `suggest`, `<storage.dir>/skills/`
+(the learned skills, which an accepted proposal writes). YAML frontmatter
+requires nonempty `name` and `description`; optional metadata and multiline YAML
+descriptions are supported. The effective catalog is sorted by declared name,
+with workspace > global > learned > builtin precedence. Duplicate names within
+one root select the first directory in lexical order and report a diagnostic.
+Missing roots are empty; malformed skills and unreadable roots are reported as
+diagnostics without dropping valid entries. `read_skill` returns the original
+source and its absolute directory; supporting resources are read or executed
+from that directory as needed. ACP agents do not get the `skills`/`read_skill`
+tool catalog: their session instructions name the installed builtin-skills
+directory, and they read those `SKILL.md` files with their own file tools.
 
 Composition embeds and atomically installs `skill-creator`, `tool-creator`,
 `nusashell`, and `coding-workflow` into the application-owned builtin root.

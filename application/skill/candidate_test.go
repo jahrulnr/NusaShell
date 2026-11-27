@@ -251,7 +251,7 @@ func TestCandidateCooldownSkipsADecidedName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.Dismiss("the tests already run in ci", validateTurnAt.Add(-time.Hour)); err != nil {
+	if err := old.Dismiss("the tests already run in ci", validateTurnAt.Add(-time.Hour), true); err != nil {
 		t.Fatal(err)
 	}
 	w.proposals[old.ID()] = old
@@ -282,6 +282,27 @@ func TestCandidateSkipsAFullQueue(t *testing.T) {
 }
 
 // sqlFreeProposal is a pending proposal of a unique name, for queue fixtures.
+// The refusals block names each refusal with its op and the owner's reason,
+// clipped to 200 runes. The header says a reason is the owner's decision, not
+// evidence, so the model reads a refusal as a refusal and never as a fact.
+func TestCandidatePromptShowsEachRefusalWithItsOwnerReason(t *testing.T) {
+	p := sqlFreeProposal(t, "sprop_refused")
+	if err := p.Dismiss(strings.Repeat("é", 250), validateTurnAt.Add(time.Hour), true); err != nil {
+		t.Fatal(err)
+	}
+	prompt := candidatePrompt("the turn", nil, nil, []*aggregate.SkillProposal{p}, nil, 4096)
+	if line := p.Name() + " (create) — " + strings.Repeat("é", 200) + "\n"; !strings.Contains(prompt, line) {
+		t.Errorf("the refusal is not in the prompt clipped to 200 runes:\n%s", prompt)
+	}
+	if strings.Contains(prompt, strings.Repeat("é", 201)) {
+		t.Error("the reason ran past 200 runes")
+	}
+	const header = "the owner's refusals from the last 30 days, newest first, at most 5; a reason is the owner's decision, not evidence"
+	if !strings.Contains(prompt, header) {
+		t.Errorf("the block does not say what a refusal is:\n%s", prompt)
+	}
+}
+
 func sqlFreeProposal(t *testing.T, id string) *aggregate.SkillProposal {
 	t.Helper()
 	p, err := aggregate.NewSkillProposal(id, aggregate.SkillProposalInput{

@@ -125,7 +125,7 @@ func TestSQLProposalsRoundTrip(t *testing.T) {
 		t.Errorf("duplicate add: %v; want 409", err)
 	}
 	decided := sqlProposal(t, "sprop_dc", "other-skill")
-	if err := decided.Dismiss("too narrow", sqlNow); err != nil {
+	if err := decided.Dismiss("too narrow", sqlNow, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := props.Add(ctx, decided); sqlStatus(err) != 400 {
@@ -148,10 +148,10 @@ func TestSQLProposalsPendingAndSeen(t *testing.T) {
 	if err := props.Add(ctx, dismissed); err != nil {
 		t.Fatal(err)
 	}
-	if err := dismissed.Dismiss("too narrow", sqlNow.Add(time.Hour)); err != nil {
+	if err := dismissed.Dismiss("too narrow", sqlNow.Add(time.Hour), true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE skill_proposals SET status = 'dismissed', dismiss_reason = 'too narrow', decided_at = ? WHERE id = ?`,
+	if _, err := db.ExecContext(ctx, `UPDATE skill_proposals SET status = 'dismissed', dismiss_reason = 'too narrow', decided_at = ?, decided_open = 1 WHERE id = ?`,
 		ms(sqlNow.Add(time.Hour)), dismissed.ID()); err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +174,81 @@ func TestSQLProposalsPendingAndSeen(t *testing.T) {
 	}
 	if seen, _ := props.Seen(ctx, "never-proposed", enum.SkillProposalCreate, sqlNow); seen {
 		t.Error("a name never proposed was seen")
+	}
+}
+
+// The prompt's refusals are the owner's dismissals that were still open when
+// decided, inside the thirty-day window, newest first, at most the limit. A
+// retirement, a stale close, a pending proposal, and an older decision are not
+// refusals, so none of them reach the prompt.
+func TestSQLDeclinedIsTheWindowOfOwnerRefusals(t *testing.T) {
+	db := openSQL(t)
+	props, decisions := NewProposals(db), NewDecisions(db)
+	ctx := context.Background()
+	add := func(id, name string) *aggregate.SkillProposal {
+		t.Helper()
+		p := sqlProposal(t, id, name)
+		if err := props.Add(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	refuse := func(id, name string, at time.Time, open bool, reason string) {
+		t.Helper()
+		p := add(id, name)
+		if err := p.Dismiss(reason, at, open); err != nil {
+			t.Fatal(err)
+		}
+		if err := decisions.Commit(ctx, p, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const window = 30 * 24 * time.Hour
+	refuse("sprop_new", "new-refusal", sqlNow, true, "too narrow")
+	refuse("sprop_w1", "window-1", sqlNow.Add(-1*time.Hour), true, "a refusal")
+	refuse("sprop_w2", "window-2", sqlNow.Add(-2*time.Hour), true, "a refusal")
+	refuse("sprop_w3", "window-3", sqlNow.Add(-3*time.Hour), true, "a refusal")
+	refuse("sprop_w4", "window-4", sqlNow.Add(-4*time.Hour), true, "a refusal")
+	refuse("sprop_w5", "window-5", sqlNow.Add(-5*time.Hour), true, "a refusal")
+	refuse("sprop_w6", "window-6", sqlNow.Add(-6*time.Hour), true, "the oldest in the window")
+	refuse("sprop_old", "old-refusal", sqlNow.Add(-window-time.Hour), true, "too old")
+	refuse("sprop_stale", "stale-close", sqlNow, false, "closed after it went stale")
+	retired := add("sprop_retired", "retired-name")
+	if err := retired.Supersede("the name is live in the nusashell root since it was proposed", sqlNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := decisions.Commit(ctx, retired, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Supersede always records a closed decision, so the prefix clause is what
+	// keeps a retirement out of the prompt on its own. Setting the flag by hand
+	// shows the clause does the excluding, not the flag.
+	if _, err := db.ExecContext(ctx, `UPDATE skill_proposals SET decided_open = 1 WHERE id = ?`, retired.ID()); err != nil {
+		t.Fatal(err)
+	}
+	add("sprop_pending", "pending-name")
+	ids := func(list []*aggregate.SkillProposal) string {
+		out := make([]string, len(list))
+		for i, p := range list {
+			out[i] = p.ID()
+		}
+		return strings.Join(out, ",")
+	}
+	all, err := props.Declined(ctx, sqlNow.Add(-window), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const inWindow = "sprop_new,sprop_w1,sprop_w2,sprop_w3,sprop_w4,sprop_w5,sprop_w6"
+	if got := ids(all); got != inWindow {
+		t.Errorf("refusals in the window = %s, want %s", got, inWindow)
+	}
+	five, err := props.Declined(ctx, sqlNow.Add(-window), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const newestFive = "sprop_new,sprop_w1,sprop_w2,sprop_w3,sprop_w4"
+	if got := ids(five); got != newestFive {
+		t.Errorf("refusals at the limit of five = %s, want the newest five %s", got, newestFive)
 	}
 }
 
@@ -202,7 +277,7 @@ func TestSQLSupersededHoldsNothing(t *testing.T) {
 	if err := props.Add(ctx, owned); err != nil {
 		t.Fatal(err)
 	}
-	if err := owned.Dismiss("too narrow", sqlNow.Add(time.Hour)); err != nil {
+	if err := owned.Dismiss("too narrow", sqlNow.Add(time.Hour), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := decisions.Commit(ctx, owned, nil); err != nil {
@@ -403,7 +478,7 @@ func TestSQLCommitTransactional(t *testing.T) {
 	}
 	// a missing proposal is a 404
 	ghost := sqlProposal(t, "sprop_ghost", "ghost-skill")
-	if err := ghost.Dismiss("x", sqlNow); err != nil {
+	if err := ghost.Dismiss("x", sqlNow, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := decisions.Commit(ctx, ghost, nil); sqlStatus(err) != 404 {
@@ -532,7 +607,7 @@ func TestSQLCommitDismissalAndValidation(t *testing.T) {
 	if err := decisions.Commit(ctx, p, row); sqlStatus(err) != 400 {
 		t.Errorf("committing a pending proposal: %v; want 400", err)
 	}
-	if err := p.Dismiss("too narrow", sqlNow); err != nil {
+	if err := p.Dismiss("too narrow", sqlNow, true); err != nil {
 		t.Fatal(err)
 	}
 	// a dismissal carries no row

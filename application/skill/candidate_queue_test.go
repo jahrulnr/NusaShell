@@ -194,7 +194,7 @@ func TestAStaleProposalOfTheNameIsRetiredForTheNewOne(t *testing.T) {
 	}
 	// The fake store hands out copies, so the stored row is read back from the map.
 	got := w.proposals[stale.ID()]
-	want := aggregate.SupersededReasonPrefix + "the target's digest changed since it was proposed"
+	want := aggregate.SupersededReasonPrefix + "the skill's file changed since this proposal read it"
 	if got.Status() != enum.SkillProposalDismissed || got.DismissReason() != want {
 		t.Errorf("stale proposal is %s with reason %q, want dismissed with %q", got.Status(), got.DismissReason(), want)
 	}
@@ -287,7 +287,7 @@ func TestTheRetirementReadsTheSkillAsItStandsNow(t *testing.T) {
 		t.Errorf("%d pending proposals of the name after a moved target, want none", n)
 	}
 	got := w.proposals[held.ID()]
-	want := aggregate.SupersededReasonPrefix + "the target's digest changed since it was proposed"
+	want := aggregate.SupersededReasonPrefix + "the skill's file changed since this proposal read it"
 	if got.Status() != enum.SkillProposalDismissed || got.DismissReason() != want {
 		t.Errorf("the proposal open when the pass began is %s with reason %q, want dismissed with %q", got.Status(), got.DismissReason(), want)
 	}
@@ -393,12 +393,19 @@ func TestACreateNameMovedWhileTheModelAnswersIsNotStored(t *testing.T) {
 	}{
 		{
 			name: "taken on disk",
-			why:  "the name was taken while the model answered",
+			why:  "the name is live in the nusashell root while the model answered",
 			claim: func(t *testing.T, w *decideWorld) {
 				w.catalog = append(w.catalog, repository.Skill{
 					Name: "pre-commit-tests", Description: "Use when committing code", Source: "nusashell",
 					Path: "/n/pre-commit-tests/SKILL.md", Digest: "d1",
 				})
+			},
+		},
+		{
+			name: "taken in another workspace",
+			why:  "the name is live in the workspace root while the model answered",
+			claim: func(t *testing.T, w *decideWorld) {
+				w.elsewhere = map[string]string{"pre-commit-tests": "workspace"}
 			},
 		},
 		{
@@ -441,29 +448,35 @@ func TestACreateNameMovedWhileTheModelAnswersIsNotStored(t *testing.T) {
 // hold for it, and the page labels it stale.
 func TestACreateWhoseNameIsLiveInAnotherRootIsNotOpen(t *testing.T) {
 	p := listProposal(t, "fresh-idea", "release-notes")
-	if !newLearnedState(nil, nil).open(p) {
+	if !newLearnedState(nil, nil, nil).open(p) {
 		t.Fatal("a create whose name is free in every root must be open")
 	}
 	taken := []repository.Skill{{
 		Name: "release-notes", Description: "Use when writing release notes", Source: "builtin",
 		Path: "/b/release-notes/SKILL.md", Digest: "bd1",
 	}}
-	if newLearnedState(taken, nil).open(p) {
+	if newLearnedState(taken, nil, nil).open(p) {
 		t.Error("a create over a builtin's name is open: the queue would hold for it and the page would not label it stale")
+	}
+	if newLearnedState(nil, nil, map[string]string{"release-notes": "workspace"}).open(p) {
+		t.Error("a create whose name is live only in another workspace is open: accept would refuse it")
 	}
 }
 
 // The reason a retired proposal is dismissed with names the state the owner would
-// find: the root that holds the name, a file that is gone, a digest that moved, or
-// a row that no longer describes the file.
+// find: the root that holds the name, a target that no longer reads as a skill,
+// a digest that moved, or a row that no longer describes the file.
 func TestTheSupersedeCauseNamesTheState(t *testing.T) {
-	row := func(name, digest string) *aggregate.SkillOwnership {
+	rowAt := func(name, digest string, level enum.SkillLevel) *aggregate.SkillOwnership {
 		t.Helper()
-		o, err := aggregate.NewSkillOwnership(enum.SkillRootNusashell, name, enum.SkillLevelAgent, digest)
+		o, err := aggregate.NewSkillOwnership(enum.SkillRootNusashell, name, level, digest)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return o
+	}
+	row := func(name, digest string) *aggregate.SkillOwnership {
+		return rowAt(name, digest, enum.SkillLevelAgent)
 	}
 	learned := func(name, digest string) repository.Skill {
 		return repository.Skill{Name: name, Description: "Use when " + name, Source: "nusashell", Path: "/n/" + name + "/SKILL.md", Digest: digest}
@@ -485,20 +498,20 @@ func TestTheSupersedeCauseNamesTheState(t *testing.T) {
 			name: "a create whose name only its row still claims",
 			rows: []*aggregate.SkillOwnership{row("release-notes", "rd1")},
 			p:    listProposal(t, "c-row", "release-notes"),
-			want: "the name is still owned by the loop, but its file is gone since it was proposed",
+			want: "the name is still owned by the loop, but its file no longer reads as a skill since it was proposed",
 		},
 		{
 			name: "a patch whose target file is gone",
 			rows: []*aggregate.SkillOwnership{row("pre-commit-tests", "rd1")},
 			p:    patchProposal(t, "p-gone", "pre-commit-tests", "rd1"),
-			want: "the target is gone since it was proposed",
+			want: "the target no longer reads as a skill since it was proposed",
 		},
 		{
 			name:   "a patch whose target digest moved",
 			skills: []repository.Skill{learned("pre-commit-tests", "rd2")},
 			rows:   []*aggregate.SkillOwnership{row("pre-commit-tests", "rd1")},
 			p:      patchProposal(t, "p-moved", "pre-commit-tests", "rd1"),
-			want:   "the target's digest changed since it was proposed",
+			want:   "the skill's file changed since this proposal read it",
 		},
 		{
 			name:   "a patch whose row no longer describes the file",
@@ -507,9 +520,28 @@ func TestTheSupersedeCauseNamesTheState(t *testing.T) {
 			p:      patchProposal(t, "p-row", "pre-commit-tests", "rd1"),
 			want:   "the target's ownership row no longer describes it since it was proposed",
 		},
+		{
+			// The owner moved the target to Only you. The row still holds the file's
+			// digest, so the row is right and the owner's move is the cause; the
+			// cause must not blame the file.
+			name:   "a patch whose target the owner moved to Only you, file unchanged",
+			skills: []repository.Skill{learned("pre-commit-tests", "rd1")},
+			rows:   []*aggregate.SkillOwnership{rowAt("pre-commit-tests", "rd1", enum.SkillLevelUser)},
+			p:      patchProposal(t, "p-only-you", "pre-commit-tests", "rd1"),
+			want:   "the owner moved it to Only you since it was proposed",
+		},
+		{
+			// Both facts hold: the owner moved it to Only you, and the row describes
+			// an older file. The row's description is the one that names the state.
+			name:   "a patch moved to Only you whose row also describes an older file",
+			skills: []repository.Skill{learned("pre-commit-tests", "rd1")},
+			rows:   []*aggregate.SkillOwnership{rowAt("pre-commit-tests", "rd0", enum.SkillLevelUser)},
+			p:      patchProposal(t, "p-both", "pre-commit-tests", "rd1"),
+			want:   "the target's ownership row no longer describes it since it was proposed",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			st := newLearnedState(tc.skills, tc.rows)
+			st := newLearnedState(tc.skills, tc.rows, nil)
 			if st.open(tc.p) {
 				t.Fatal("the proposal is open; the case needs one that is not")
 			}

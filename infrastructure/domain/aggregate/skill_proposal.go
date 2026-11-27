@@ -37,10 +37,19 @@ type SkillProposal struct {
 	dismissReason string
 	createdAt     time.Time
 	decidedAt     time.Time
+	// evidenceAt is when the cited evidence happened, for the owner to read beside
+	// it; zero when the turn carried no time.
+	evidenceAt time.Time
+	// decidedOpen records whether the proposal was still open when it was
+	// dismissed. Closing one that had already gone stale only clears it from the
+	// queue, so such a dismissal holds no name and no refusal. Read for a
+	// dismissal only.
+	decidedOpen bool
 }
 
 // SkillProposalInput is what a skill proposal says it would do. TargetLevel is the
 // level of the target as the caller read it; only an agent-level skill may be patched.
+// EvidenceAt is when the evidence happened; zero when the turn carries no time.
 type SkillProposalInput struct {
 	Op                enum.SkillProposalOp
 	Kind              enum.SkillKind
@@ -48,6 +57,7 @@ type SkillProposalInput struct {
 	Name, Description string
 	Body, Evidence    string
 	EvidenceKind      enum.SkillEvidenceKind
+	EvidenceAt        time.Time
 	Reason            string
 	TargetName        string
 	TargetDigest      string
@@ -83,13 +93,14 @@ func NewSkillProposal(id string, in SkillProposalInput, now time.Time) (*SkillPr
 		}
 		return nil, errors.New(strings.Join(msgs, "; "))
 	}
-	return &SkillProposal{id: vo.String(), op: op, kind: kind, name: in.Name, description: in.Description, body: in.Body, evidence: in.Evidence, evidenceKind: evidenceKind, tool: in.Tool, reason: in.Reason, targetName: in.TargetName, targetDigest: in.TargetDigest, targetLevel: in.TargetLevel, status: enum.SkillProposalPending, createdAt: now}, nil
+	return &SkillProposal{id: vo.String(), op: op, kind: kind, name: in.Name, description: in.Description, body: in.Body, evidence: in.Evidence, evidenceKind: evidenceKind, evidenceAt: in.EvidenceAt, tool: in.Tool, reason: in.Reason, targetName: in.TargetName, targetDigest: in.TargetDigest, targetLevel: in.TargetLevel, status: enum.SkillProposalPending, createdAt: now}, nil
 }
 
 // SetStored restores a proposal from storage. Each status carries only its own
 // decision: an accepted proposal keeps the path and level it was written to, a
-// dismissed one keeps its reason, and a pending one keeps neither.
-func (p *SkillProposal) SetStored(status enum.SkillProposalStatus, acceptedPath string, acceptedLevel enum.SkillLevel, dismissReason string, createdAt, decidedAt time.Time) error {
+// dismissed one keeps its reason, and a pending one keeps neither. decidedOpen
+// is restored as stored; only a dismissal's value means anything.
+func (p *SkillProposal) SetStored(status enum.SkillProposalStatus, acceptedPath string, acceptedLevel enum.SkillLevel, dismissReason string, createdAt, decidedAt time.Time, decidedOpen bool) error {
 	acceptedPath, dismissReason = strings.TrimSpace(acceptedPath), strings.TrimSpace(dismissReason)
 	if createdAt.IsZero() {
 		return errors.New("a stored proposal carries when it was created")
@@ -120,7 +131,7 @@ func (p *SkillProposal) SetStored(status enum.SkillProposalStatus, acceptedPath 
 		return fmt.Errorf("skill proposal status %q is not one of pending, accepted, dismissed", status)
 	}
 	p.status, p.acceptedPath, p.acceptedLevel, p.dismissReason = status, acceptedPath, acceptedLevel, dismissReason
-	p.createdAt, p.decidedAt = createdAt, decidedAt
+	p.createdAt, p.decidedAt, p.decidedOpen = createdAt, decidedAt, decidedOpen
 	return nil
 }
 
@@ -157,14 +168,17 @@ const SupersededReasonPrefix = "superseded: "
 
 // Dismiss records that the owner turned the proposal down, and why. The reason
 // may not open with SupersededReasonPrefix, the prefix the pass writes itself.
-func (p *SkillProposal) Dismiss(reason string, now time.Time) error {
+// open says whether the proposal was still one the owner could accept when it
+// was closed. Closing one that had already gone stale clears it from the queue;
+// it is not a refusal of the procedure, so it holds no name and no refusal.
+func (p *SkillProposal) Dismiss(reason string, now time.Time, open bool) error {
 	if p.status != enum.SkillProposalPending {
 		return ErrSkillProposalDecided
 	}
 	if strings.HasPrefix(strings.TrimSpace(reason), SupersededReasonPrefix) {
 		return errors.New(`a dismissal may not open with "superseded:", the reason the pass writes for the proposals it retires`)
 	}
-	return p.dismiss(reason, now)
+	return p.dismiss(reason, now, open)
 }
 
 // Supersede retires a pending proposal the pass has proved the owner can no
@@ -176,10 +190,11 @@ func (p *SkillProposal) Supersede(cause string, now time.Time) error {
 	if cause == "" {
 		return errors.New("a superseded proposal says what changed")
 	}
-	return p.dismiss(SupersededReasonPrefix+cause, now)
+	// A retirement is only ever of a proposal that is no longer open.
+	return p.dismiss(SupersededReasonPrefix+cause, now, false)
 }
 
-func (p *SkillProposal) dismiss(reason string, now time.Time) error {
+func (p *SkillProposal) dismiss(reason string, now time.Time, open bool) error {
 	if p.status != enum.SkillProposalPending {
 		return ErrSkillProposalDecided
 	}
@@ -190,7 +205,7 @@ func (p *SkillProposal) dismiss(reason string, now time.Time) error {
 	if now.IsZero() {
 		return errors.New("a decision carries when it was made")
 	}
-	p.status, p.dismissReason, p.decidedAt = enum.SkillProposalDismissed, reason, now
+	p.status, p.dismissReason, p.decidedAt, p.decidedOpen = enum.SkillProposalDismissed, reason, now, open
 	return nil
 }
 
@@ -226,3 +241,5 @@ func (p *SkillProposal) AcceptedLevel() enum.SkillLevel       { return p.accepte
 func (p *SkillProposal) DismissReason() string                { return p.dismissReason }
 func (p *SkillProposal) CreatedAt() time.Time                 { return p.createdAt }
 func (p *SkillProposal) DecidedAt() time.Time                 { return p.decidedAt }
+func (p *SkillProposal) DecidedOpen() bool                    { return p.decidedOpen }
+func (p *SkillProposal) EvidenceAt() time.Time                { return p.evidenceAt }

@@ -64,6 +64,20 @@ func TestComposeInstallsAndRegistersSkills(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(cfg.Storage.Dir, "skills")); !os.IsNotExist(err) {
+		t.Fatalf("off created the learned skill root: %v", err)
+	}
+	if eng.skillBudget != 0 {
+		t.Fatalf("off read the catalog budget: %d", eng.skillBudget)
+	}
+	off := eng.skillSurface("off", "/srv/root")
+	if off.Hook != nil || off.Edits != nil || off.Page.Catalog != nil || off.Page.Ownership != nil || off.Page.Proposals != nil || off.Page.Decisions != nil || off.Page.Writer != nil || off.Page.Budget != 0 {
+		t.Fatalf("off surface = %+v, want nothing registered", off)
+	}
+	observed := eng.skillSurface("observe", "/srv/root")
+	if observed.Hook != nil || observed.Edits != nil || observed.Page.Catalog != nil {
+		t.Fatalf("observe surface = %+v, want nothing from the suggest path", observed)
+	}
 	launcher := "python3"
 	if runtime.GOOS == "windows" {
 		launcher += ".cmd"

@@ -5,6 +5,7 @@ The input has four parts:
 - `<earlier_owner_lines>`: up to three owner lines from earlier in the thread, with their ids and dates, so you can judge whether a request repeats.
 - `<skill_index>`: the skills the library already holds, one line each — name, root, description. A skill in any root already covers its class.
 - `<pending_proposals>`: proposals already waiting for the owner. Never propose what is already pending.
+- `<declined>`: the owner's refusals from the last thirty days, newest first, at most five, each with its reason. A reason is the owner's decision, not evidence: never cite it, and never propose a name listed there for the same op.
 
 Propose at most one skill, and only when the evidence is in this turn:
 

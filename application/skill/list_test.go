@@ -18,11 +18,31 @@ type fixedCatalog struct {
 	skills      []repository.Skill
 	diagnostics []string
 	calls       int
+	// elsewhere names a skill live only in some other workspace folder.
+	elsewhere map[string]string
 }
 
 func (f *fixedCatalog) List(ctx context.Context, workspace string) (repository.SkillCatalog, error) {
 	f.calls++
 	return repository.SkillCatalog{Skills: f.skills, Diagnostics: f.diagnostics}, nil
+}
+func (f *fixedCatalog) ListAcross(ctx context.Context, focus string, others []string) (repository.SkillCatalog, map[string]string, error) {
+	cat, err := f.List(ctx, focus)
+	if err != nil {
+		return cat, nil, err
+	}
+	taken := map[string]string{}
+	for _, s := range cat.Skills {
+		if _, ok := taken[s.Name]; !ok {
+			taken[s.Name] = s.Source
+		}
+	}
+	for name, root := range f.elsewhere {
+		if _, ok := taken[name]; !ok {
+			taken[name] = root
+		}
+	}
+	return cat, taken, nil
 }
 func (f *fixedCatalog) Read(ctx context.Context, workspace, name string) (repository.Skill, string, error) {
 	return repository.Skill{}, "", nil
@@ -61,6 +81,9 @@ func (c *countedProposals) Pending(ctx context.Context) ([]*aggregate.SkillPropo
 }
 func (c *countedProposals) Seen(ctx context.Context, name string, op enum.SkillProposalOp, since time.Time) (bool, error) {
 	return decideProposals{c.w}.Seen(ctx, name, op, since)
+}
+func (c *countedProposals) Declined(ctx context.Context, since time.Time, limit int) ([]*aggregate.SkillProposal, error) {
+	return decideProposals{c.w}.Declined(ctx, since, limit)
 }
 
 func listSetup() (*decideWorld, *fixedCatalog, *countedOwnership, *countedProposals, ListDeps) {
@@ -150,7 +173,7 @@ func TestListJoinsLevelAndPendingInOnePass(t *testing.T) {
 	}
 }
 
-// An ownership row whose file is gone is no page row: the owner could not act on
+// An ownership row whose file no longer reads as a skill is no page row: the owner could not act on
 // it there, so the page says in a diagnostic that the loop still holds the name.
 // A row planted on a name a builtin carries is not one; the builtin is the skill.
 func TestAnOrphanRowIsADiagnosticNotARow(t *testing.T) {
@@ -170,7 +193,7 @@ func TestAnOrphanRowIsADiagnosticNotARow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	want := `the name "ghost-skill" is still owned by the loop, but its file is gone`
+	want := `the name "ghost-skill" is still owned by the loop, but its file no longer reads as a skill`
 	if len(page.Diagnostics) != 1 || page.Diagnostics[0] != want {
 		t.Errorf("diagnostics = %q, want exactly %q", page.Diagnostics, want)
 	}
@@ -228,5 +251,81 @@ func TestPageLabelsAStaleProposalAndKeepsItListed(t *testing.T) {
 	}
 	if open != 2 {
 		t.Fatalf("open = %d, want 2: the stale patch must not count as one the owner can accept", open)
+	}
+}
+
+// A create whose name is live only in another workspace is not a row of this
+// page — that folder's skill is not the skill here — and it is stale, because
+// accept would refuse it.
+func TestListLabelsACreateTakenOnlyInAnotherWorkspace(t *testing.T) {
+	w, catalog, _, _, deps := listSetup()
+	catalog.skills = []repository.Skill{{
+		Name: "coding-workflow", Description: "Use when changing code", Source: "builtin",
+		Path: "/b/coding-workflow/SKILL.md", Digest: "bd1",
+	}}
+	catalog.elsewhere = map[string]string{"release-notes": "workspace"}
+	w.proposals["p"] = listProposal(t, "p", "release-notes")
+
+	page, err := List(context.Background(), deps, "/ws")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if page.Pending != 1 || page.PendingStale != 1 {
+		t.Fatalf("pending %d, stale %d; want 1 and 1", page.Pending, page.PendingStale)
+	}
+	if len(page.Rows) != 1 || page.Rows[0].Name != "coding-workflow" {
+		t.Fatalf("rows = %+v, want only this workspace's catalog", page.Rows)
+	}
+	if len(page.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %q, want none: the name is live in another workspace", page.Diagnostics)
+	}
+}
+
+// An ownership row whose file is gone is not an orphan when another workspace
+// folder still has a skill of that name. The file here is not the skill.
+func TestANameLiveInAnotherWorkspaceIsNotAnOrphan(t *testing.T) {
+	w, catalog, _, _, deps := listSetup()
+	catalog.elsewhere = map[string]string{"release-notes": "workspace"}
+	row, err := aggregate.NewSkillOwnership(enum.SkillRootNusashell, "release-notes", enum.SkillLevelAgent, "rd1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.rows["nusashell/release-notes"] = row
+	page, err := List(context.Background(), deps, "/ws")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %q, want none", page.Diagnostics)
+	}
+}
+
+// The queue and the page read one open function. A name that is free is
+// acceptable. A name live in this catalog, or only in another workspace, is
+// not, and the row still comes back so the owner can dismiss it.
+func TestListPendingUsesTheOpenRule(t *testing.T) {
+	w, catalog, _, _, deps := listSetup()
+	catalog.skills = []repository.Skill{{
+		Name: "release-notes", Description: "Use when writing release notes", Source: "nusashell",
+		Path: "/n/release-notes/SKILL.md", Digest: "rd1",
+	}}
+	catalog.elsewhere = map[string]string{"other-room": "workspace"}
+	w.proposals["sprop_open"] = listProposal(t, "sprop_open", "fresh-idea")
+	w.proposals["sprop_here"] = listProposal(t, "sprop_here", "release-notes")
+	w.proposals["sprop_else"] = listProposal(t, "sprop_else", "other-room")
+
+	got, err := ListPending(context.Background(), deps, "/ws")
+	if err != nil {
+		t.Fatalf("pending: %v", err)
+	}
+	open := map[string]bool{}
+	for _, p := range got {
+		open[p.ID] = p.Open
+		if p.Op != "create" || p.Kind != "method" || p.Name == "" {
+			t.Errorf("proposal %+v lost its op, kind, or name", p)
+		}
+	}
+	if len(open) != 3 || !open["sprop_open"] || open["sprop_here"] || open["sprop_else"] {
+		t.Fatalf("open = %v, want fresh-idea acceptable and the two taken names not", open)
 	}
 }

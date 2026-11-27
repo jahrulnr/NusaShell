@@ -122,11 +122,23 @@ func (s *Local) Write(ctx context.Context, root enum.SkillRoot, doc drepo.SkillD
 	return written, nil
 }
 
+// Digest is the digest a document renders to: the value Write records for it,
+// and the one a catalog read of the same file reports. It writes nothing.
+func (s *Local) Digest(doc drepo.SkillDocument) (string, error) {
+	rendered, err := renderSkill(doc)
+	if err != nil {
+		return "", err
+	}
+	return valueobject.SkillDigest(rendered), nil
+}
+
 // Archive moves a skill's directory under .archive/ inside the same root,
 // where List cannot see it: the .archive directory itself holds no SKILL.md,
 // so discovery skips it. The archived directory keeps a timestamp suffix so
-// one name can be archived more than once without losing either copy.
-func (s *Local) Archive(ctx context.Context, root enum.SkillRoot, name string) error {
+// one name can be archived more than once without losing either copy. The
+// move is guarded by the digest the caller read: a file edited since is a 409
+// and stays where it is, so an archive never takes bytes nobody decided on.
+func (s *Local) Archive(ctx context.Context, root enum.SkillRoot, name, expectDigest string) error {
 	if root != enum.SkillRootNusashell {
 		return apperror.New(400, "learned skills live in the nusashell root, not "+string(root), nil)
 	}
@@ -136,15 +148,22 @@ func (s *Local) Archive(ctx context.Context, root enum.SkillRoot, name string) e
 	if !writeNameClass.MatchString(name) {
 		return apperror.New(400, "the skill's name is not a class-level filesystem name", nil)
 	}
+	if expectDigest == "" {
+		return apperror.New(400, "an archive names the digest of the file it archives", nil)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	dir := filepath.Join(s.nusashell, name)
-	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+	current, err := readSkillFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
 		if os.IsNotExist(err) {
 			return apperror.NewNotFoundError("the skill "+name, nil)
 		}
 		return err
+	}
+	if valueobject.SkillDigest(string(current)) != expectDigest {
+		return apperror.New(409, "the skill "+name+" changed since it was read, so nothing was archived", nil)
 	}
 	archive := filepath.Join(s.nusashell, ".archive")
 	if err := os.MkdirAll(archive, 0755); err != nil {

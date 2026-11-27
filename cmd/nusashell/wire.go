@@ -106,6 +106,14 @@ type engine struct {
 	agentRepo drepo.Agent
 	// skills is the skill catalog reference search offers.
 	skills drepo.Skills
+	// skillBudget is the catalog byte budget, copied from
+	// skills.catalog_max_bytes only when the mode is suggest. Off and
+	// observe leave it zero and never read the setting.
+	skillBudget int
+	// skillWriter is the learned-skill write port an accept goes through. It
+	// is set only when the mode is suggest: compose refuses suggest when the
+	// catalog cannot write, so suggest never serves a queue it cannot decide.
+	skillWriter drepo.SkillWriter
 	// uploads and picks keep what the owner attaches to a message: files,
 	// and marks made on a thread's live page.
 	uploads drepo.Uploads
@@ -161,7 +169,17 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 	if err := reposkill.InstallBuiltins(builtinDir, toolskill.Builtins()); err != nil {
 		return nil, err
 	}
-	skillStore := reposkill.NewLocal(home, "", builtinDir)
+	nusaRoot, err := learnedSkillRoot(cfg.Skills.Improvement, dir)
+	if err != nil {
+		return nil, err
+	}
+	skillStore := reposkill.NewLocal(home, nusaRoot, builtinDir)
+	// suggest accepts through this writer, so a catalog that cannot write
+	// refuses the mode here, before the database opens.
+	skillWriter, err := learnedWriter(cfg.Skills.Improvement, skillStore)
+	if err != nil {
+		return nil, err
+	}
 	skills, err := toolskill.NewSkillsTool(skillStore)
 	if err != nil {
 		return nil, err
@@ -479,6 +497,12 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		appconversation.WithProjects(projectRepo),
 		appconversation.WithUploads(uploads, picks))
 	conversations.UseMediaDescriptions(descriptions)
+	// Suggest is the only mode that reads the catalog budget. Off and
+	// observe leave it zero, so their process never consults the setting.
+	skillBudget := 0
+	if cfg.Skills.Improvement == "suggest" {
+		skillBudget = cfg.Skills.CatalogMaxBytes
+	}
 	// A session the agent opted in to report ends here: its exit becomes a record
 	// the room reads, and — while idle and under the cap — a turn that reads it.
 	terminals.OnExit(conversations.OnCompletion)
@@ -501,6 +525,8 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		planEvents:    planEvents,
 		agentRepo:     agentRepo,
 		skills:        skillStore,
+		skillBudget:   skillBudget,
+		skillWriter:   skillWriter,
 		memory:        memory,
 		webSearch:     webSearch,
 		media:         mediaModels,

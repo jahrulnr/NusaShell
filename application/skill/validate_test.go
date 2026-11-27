@@ -50,6 +50,43 @@ func validateMessage(r Result, rule Rule) string {
 	return ""
 }
 
+// A citation's evidence time is the time of what it names: the owner's line it
+// quotes, the latest turn a repeat cites, the turn a rewrite happened in, or the
+// model call it names. A quote that matches no line has no time, and an injected
+// call is never evidence, so it has none either.
+func TestCitedAtIsTheTimeOfWhatItNames(t *testing.T) {
+	at := func(h int) time.Time { return time.Date(2026, 11, 26, h, 0, 0, 0, time.UTC) }
+	f := Facts{
+		OwnerLines: []OwnerLine{
+			{Turn: "msg_a", At: at(9), Text: "start from the idea. then share it"},
+			{Turn: "msg_b", At: at(11), Text: "write the same notes as last time"},
+		},
+		TurnAt: at(12),
+	}
+	if got := citedAt(Citation{Quote: "start from the idea"}, enum.SkillEvidenceQuote, f); !got.Equal(at(9)) {
+		t.Errorf("quote: %v, want the line it quotes at %v", got, at(9))
+	}
+	if got := citedAt(Citation{Turns: []string{"msg_a", "msg_b"}}, enum.SkillEvidenceRepeat, f); !got.Equal(at(11)) {
+		t.Errorf("repeat: %v, want the latest cited turn at %v", got, at(11))
+	}
+	if got := citedAt(Citation{}, enum.SkillEvidenceRewrite, f); !got.Equal(at(12)) {
+		t.Errorf("rewrite: %v, want the turn at %v", got, at(12))
+	}
+	call := validateCall(t, "call_1", "ok", false)
+	fc := f
+	fc.Calls = []entity.ToolCall{call}
+	if got := citedAt(Citation{Call: "call_1"}, enum.SkillEvidenceCall, fc); got.IsZero() || !got.Equal(call.CallAt()) {
+		t.Errorf("call: %v, want the call's own time %v", got, call.CallAt())
+	}
+	fc.Calls = []entity.ToolCall{validateInjected(t, "call_2", "x")}
+	if got := citedAt(Citation{Call: "call_2"}, enum.SkillEvidenceCall, fc); !got.IsZero() {
+		t.Errorf("an injected call supplied a time: %v", got)
+	}
+	if got := citedAt(Citation{Quote: "words the owner never said"}, enum.SkillEvidenceQuote, f); !got.IsZero() {
+		t.Errorf("a quote with no line supplied a time: %v", got)
+	}
+}
+
 func validateCall(t *testing.T, id, output string, failed bool) entity.ToolCall {
 	t.Helper()
 	tc, err := entity.NewToolCall(id, "fetch_page", `{"url":"https://example.com"}`, enum.TooltypeOrigin)
@@ -649,7 +686,7 @@ func TestACreateOverAnOrphanRowIsRefused(t *testing.T) {
 	if !validateReported(r)[RuleOrphanRow] {
 		t.Fatalf("a create over an orphan row was admitted: %+v", r.Violations)
 	}
-	if m := validateMessage(r, RuleOrphanRow); !strings.Contains(m, "still owned by the loop") || !strings.Contains(m, "file is gone") {
+	if m := validateMessage(r, RuleOrphanRow); !strings.Contains(m, "still owned by the loop") || !strings.Contains(m, "no longer reads as a skill") {
 		t.Errorf("the orphan message %q does not state the real state", m)
 	}
 }

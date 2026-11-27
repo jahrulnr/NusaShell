@@ -152,14 +152,59 @@ func TestWriteRefusesBadInput(t *testing.T) {
 	}
 }
 
+func TestDigestIsTheDigestWriteRecordsAndListReports(t *testing.T) {
+	root := t.TempDir()
+	store := NewLocal("", root, "")
+	ctx := context.Background()
+	written, err := store.Write(ctx, enum.SkillRootNusashell, writeTestDoc(), "")
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	digest, err := store.Digest(writeTestDoc())
+	if err != nil || digest != written.Digest {
+		t.Errorf("Digest %q (%v) differs from the digest Write recorded %q", digest, err, written.Digest)
+	}
+	catalog, err := store.List(ctx, "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(catalog.Skills) != 1 || catalog.Skills[0].Digest != written.Digest {
+		t.Errorf("the catalog reports %+v; want the written digest %q", catalog.Skills, written.Digest)
+	}
+}
+
+func TestArchiveRefusesAFileEditedSinceItWasRead(t *testing.T) {
+	root := t.TempDir()
+	store := NewLocal("", root, "")
+	ctx := context.Background()
+	written, err := store.Write(ctx, enum.SkillRootNusashell, writeTestDoc(), "")
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	path := filepath.Join(root, "release-notes", "SKILL.md")
+	if err := os.WriteFile(path, []byte("an owner's own edit\n"), 0644); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if writeStatus(store.Archive(ctx, enum.SkillRootNusashell, "release-notes", written.Digest)) != 409 {
+		t.Error("an archive of an edited file was not refused with a 409")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("the edited file moved: %v", err)
+	}
+	if writeStatus(store.Archive(ctx, enum.SkillRootNusashell, "release-notes", "")) != 400 {
+		t.Error("an archive that names no digest was not refused with a 400")
+	}
+}
+
 func TestArchiveHidesTheSkillFromList(t *testing.T) {
 	root := t.TempDir()
 	store := NewLocal("", root, "")
 	ctx := context.Background()
-	if _, err := store.Write(ctx, enum.SkillRootNusashell, writeTestDoc(), ""); err != nil {
+	written, err := store.Write(ctx, enum.SkillRootNusashell, writeTestDoc(), "")
+	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if err := store.Archive(ctx, enum.SkillRootNusashell, "release-notes"); err != nil {
+	if err := store.Archive(ctx, enum.SkillRootNusashell, "release-notes", written.Digest); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 	catalog, err := store.List(ctx, "")
@@ -173,14 +218,15 @@ func TestArchiveHidesTheSkillFromList(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("the archive does not hold the skill: %+v", entries)
 	}
-	if writeStatus(store.Archive(ctx, enum.SkillRootNusashell, "release-notes")) != 404 {
+	if writeStatus(store.Archive(ctx, enum.SkillRootNusashell, "release-notes", written.Digest)) != 404 {
 		t.Error("archiving a missing skill did not report 404")
 	}
 	// archiving twice keeps both copies
-	if _, err := store.Write(ctx, enum.SkillRootNusashell, writeTestDoc(), ""); err != nil {
+	written, err = store.Write(ctx, enum.SkillRootNusashell, writeTestDoc(), "")
+	if err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
-	if err := store.Archive(ctx, enum.SkillRootNusashell, "release-notes"); err != nil {
+	if err := store.Archive(ctx, enum.SkillRootNusashell, "release-notes", written.Digest); err != nil {
 		t.Fatalf("second archive: %v", err)
 	}
 	entries, _ = os.ReadDir(filepath.Join(root, ".archive"))

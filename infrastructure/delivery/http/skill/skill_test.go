@@ -40,6 +40,13 @@ func writeSkillFile(t *testing.T, root, name, description, body string) string {
 	return content
 }
 
+// oneWorkspace is the explicit answer a test gives when it means a single
+// workspace: no other folder holds a skill. Register refuses a nil source, so
+// the answer is written out instead of left out.
+type oneWorkspace struct{}
+
+func (oneWorkspace) Folders(context.Context) ([]string, error) { return nil, nil }
+
 func skillsRouter(t *testing.T, home, nusashell, builtin string) (*gin.Engine, *sql.DB) {
 	t.Helper()
 	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "n.db"), migration.Files)
@@ -48,10 +55,15 @@ func skillsRouter(t *testing.T, home, nusashell, builtin string) (*gin.Engine, *
 	}
 	t.Cleanup(func() { db.Close() })
 	r := gin.New()
+	catalog := reposkill.NewLocal(home, nusashell, builtin)
 	Register(r.Group("/api"), Deps{
-		Catalog:   reposkill.NewLocal(home, nusashell, builtin),
+		Catalog:   catalog,
 		Ownership: reposkill.NewOwnership(db),
 		Proposals: reposkill.NewProposals(db),
+		Decisions: reposkill.NewDecisions(db),
+		Writer:    catalog,
+		Budget:    32768,
+		Folders:   oneWorkspace{},
 	})
 	return r, db
 }
@@ -311,5 +323,43 @@ func TestRegisterNeedsEveryPort(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/skills", nil))
 	if w.Code != 404 {
 		t.Errorf("a half-wired Deps answered %d; want no route", w.Code)
+	}
+	// Every port but the folder source: the page would judge names by one
+	// workspace without saying so, so it registers nothing either.
+	r = gin.New()
+	Register(r.Group("/api"), Deps{
+		Catalog:   reposkill.NewLocal(t.TempDir(), t.TempDir(), t.TempDir()),
+		Ownership: reposkill.NewOwnership(db),
+		Proposals: reposkill.NewProposals(db),
+	})
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/skills", nil))
+	if w.Code != 404 {
+		t.Errorf("a Deps without its folder source answered %d; want no route", w.Code)
+	}
+	// Decisions and Writer are what an accept writes through. Without either
+	// neither the page nor the queue is mounted.
+	catalog := reposkill.NewLocal(t.TempDir(), t.TempDir(), t.TempDir())
+	whole := Deps{
+		Catalog:   catalog,
+		Ownership: reposkill.NewOwnership(db),
+		Proposals: reposkill.NewProposals(db),
+		Decisions: reposkill.NewDecisions(db),
+		Writer:    catalog,
+		Folders:   oneWorkspace{},
+	}
+	noDecisions, noWriter := whole, whole
+	noDecisions.Decisions = nil
+	noWriter.Writer = nil
+	for name, d := range map[string]Deps{"decisions": noDecisions, "writer": noWriter} {
+		r := gin.New()
+		Register(r.Group("/api"), d)
+		for _, path := range []string{"/api/skills", "/api/skill-proposals"} {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+			if w.Code != 404 {
+				t.Errorf("a Deps without %s answered %d on %s; want no route", name, w.Code, path)
+			}
+		}
 	}
 }

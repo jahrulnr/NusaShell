@@ -24,6 +24,10 @@ import (
 // past a megabyte is misconfigured, not documentation.
 const skillFileCap = 1 << 20
 
+// readSkillDir lists one skill root. Tests replace it to count how many
+// times each root is read; production leaves it as os.ReadDir.
+var readSkillDir = os.ReadDir
+
 // readSkillFile reads one SKILL.md through a non-blocking open: a FIFO or
 // device parked at the path cannot stall discovery the way os.ReadFile
 // would, and the regular-file check plus size cap keep a stray special or
@@ -65,12 +69,47 @@ func NewLocal(home, nusashell, builtin string) *Local {
 }
 
 func (s *Local) List(ctx context.Context, workspace string) (drepo.SkillCatalog, error) {
+	catalog, _, err := s.ListAcross(ctx, workspace, nil)
+	return catalog, err
+}
+
+// ListAcross reads builtin, nusashell, and global once, then focus, then
+// each other workspace folder once. Stacking List per workspace would read
+// the fixed roots again for every folder.
+func (s *Local) ListAcross(ctx context.Context, focus string, others []string) (drepo.SkillCatalog, map[string]string, error) {
 	catalog := drepo.SkillCatalog{Skills: []drepo.Skill{}}
 	byName := map[string]drepo.Skill{}
+	taken := map[string]string{}
 	// Later roots replace earlier entries by declared name. The sources are
 	// the enum values themselves: decide compares catalog rows against
 	// enum.SkillRoot, and a literal drifting from it would fail closed
 	// forever with no compile-time signal.
+	apply := func(path, source string, intoCatalog bool) error {
+		found, diags, err := scanSkillRoot(ctx, path, source)
+		catalog.Diagnostics = append(catalog.Diagnostics, diags...)
+		for _, skill := range found {
+			if intoCatalog {
+				byName[skill.Name] = skill
+			}
+			// taken prefers a holder outside nusashell. The loop writes only
+			// nusashell, so a name another root holds is a collision whatever
+			// nusashell holds under it; the catalog's own precedence (a learned
+			// skill over a builtin one) must not hide that holder from taken.
+			cur, held := taken[skill.Name]
+			switch {
+			case !held:
+				taken[skill.Name] = source
+			case source == string(enum.SkillRootNusashell):
+				// a learned file never displaces a holder outside nusashell
+			case cur == string(enum.SkillRootNusashell):
+				taken[skill.Name] = source
+			case intoCatalog:
+				// later fixed roots replace earlier ones, as byName does
+				taken[skill.Name] = source
+			}
+		}
+		return err
+	}
 	roots := []struct{ path, source string }{{s.builtin, string(enum.SkillRootBuiltin)}}
 	if s.nusashell != "" {
 		roots = append(roots, struct{ path, source string }{s.nusashell, string(enum.SkillRootNusashell)})
@@ -78,63 +117,108 @@ func (s *Local) List(ctx context.Context, workspace string) (drepo.SkillCatalog,
 	if s.home != "" {
 		roots = append(roots, struct{ path, source string }{filepath.Join(s.home, ".agents", "skills"), string(enum.SkillRootGlobal)})
 	}
-	if workspace != "" {
-		roots = append(roots, struct{ path, source string }{filepath.Join(workspace, ".agents", "skills"), string(enum.SkillRootWorkspace)})
-	}
 	for _, root := range roots {
-		if err := ctx.Err(); err != nil {
-			return catalog, err
+		if err := apply(root.path, root.source, true); err != nil {
+			return catalog, nil, err
 		}
-		if root.path == "" {
+	}
+	focus = cleanWorkspace(focus)
+	if focus != "" {
+		if err := apply(filepath.Join(focus, ".agents", "skills"), string(enum.SkillRootWorkspace), true); err != nil {
+			return catalog, nil, err
+		}
+	}
+	seen := map[string]bool{}
+	if focus != "" {
+		seen[focus] = true
+	}
+	rest := make([]string, 0, len(others))
+	for _, other := range others {
+		other = cleanWorkspace(other)
+		if other == "" || seen[other] {
 			continue
 		}
-		abs, err := filepath.Abs(root.path)
-		if err != nil {
-			return catalog, err
-		}
-		dirs, err := os.ReadDir(abs)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			catalog.Diagnostics = append(catalog.Diagnostics, fmt.Sprintf("%s: %v", abs, err))
-			continue
-		}
-		seen := map[string]bool{}
-		for _, dir := range dirs {
-			if err := ctx.Err(); err != nil {
-				return catalog, err
-			}
-			if !dir.IsDir() && dir.Type()&os.ModeSymlink == 0 {
-				continue
-			}
-			path := filepath.Join(abs, dir.Name(), "SKILL.md")
-			raw, err := readSkillFile(path)
-			if os.IsNotExist(err) {
-				continue
-			}
-			if err != nil {
-				catalog.Diagnostics = append(catalog.Diagnostics, fmt.Sprintf("%s: %v", path, err))
-				continue
-			}
-			name, description, err := frontmatter(raw)
-			if err != nil {
-				catalog.Diagnostics = append(catalog.Diagnostics, fmt.Sprintf("%s: %v", path, err))
-				continue
-			}
-			if seen[name] {
-				catalog.Diagnostics = append(catalog.Diagnostics, fmt.Sprintf("%s: duplicate skill name %q in %s", path, name, abs))
-				continue
-			}
-			seen[name] = true
-			byName[name] = drepo.Skill{Name: name, Description: description, Path: path, Source: root.source, Digest: valueobject.SkillDigest(string(raw))}
+		seen[other] = true
+		rest = append(rest, other)
+	}
+	sort.Strings(rest)
+	for _, other := range rest {
+		if err := apply(filepath.Join(other, ".agents", "skills"), string(enum.SkillRootWorkspace), false); err != nil {
+			return catalog, nil, err
 		}
 	}
 	for _, skill := range byName {
 		catalog.Skills = append(catalog.Skills, skill)
 	}
 	sort.Slice(catalog.Skills, func(i, j int) bool { return catalog.Skills[i].Name < catalog.Skills[j].Name })
-	return catalog, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return catalog, nil, err
+	}
+	return catalog, taken, nil
+}
+
+func cleanWorkspace(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Clean(dir)
+}
+
+// scanSkillRoot reads one root directory. An empty path is not a root. A
+// missing directory is an empty root. A context cancellation returns the
+// skills already accepted so the caller can hand back a partial catalog
+// with the error, which is what List did before the read was shared.
+func scanSkillRoot(ctx context.Context, path, source string) ([]drepo.Skill, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if path == "" {
+		return nil, nil, nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	dirs, err := readSkillDir(abs)
+	if os.IsNotExist(err) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, []string{fmt.Sprintf("%s: %v", abs, err)}, nil
+	}
+	var skills []drepo.Skill
+	var diags []string
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		if err := ctx.Err(); err != nil {
+			return skills, diags, err
+		}
+		if !dir.IsDir() && dir.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		skillPath := filepath.Join(abs, dir.Name(), "SKILL.md")
+		raw, err := readSkillFile(skillPath)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			diags = append(diags, fmt.Sprintf("%s: %v", skillPath, err))
+			continue
+		}
+		name, description, err := frontmatter(raw)
+		if err != nil {
+			diags = append(diags, fmt.Sprintf("%s: %v", skillPath, err))
+			continue
+		}
+		if seen[name] {
+			diags = append(diags, fmt.Sprintf("%s: duplicate skill name %q in %s", skillPath, name, abs))
+			continue
+		}
+		seen[name] = true
+		skills = append(skills, drepo.Skill{Name: name, Description: description, Path: skillPath, Source: source, Digest: valueobject.SkillDigest(string(raw))})
+	}
+	return skills, diags, nil
 }
 
 // frontmatter parses YAML rather than guessing at colon-separated lines, so

@@ -79,6 +79,31 @@ func TestMoveLevelRegrantsAHandEditedSkill(t *testing.T) {
 	}
 }
 
+// The way back after a failed patch commit. The bytes the patch wrote stay, the
+// row keeps the old digest, and the owner hands the skill to the loop on the
+// page with the digest it shows. The re-grant records those bytes, so the loop
+// gets authority the owner gave on the page, not from the failed accept.
+func TestMoveLevelHandsBackTheBytesAFailedPatchLeft(t *testing.T) {
+	w, deps := decideSetup()
+	decidePatchWorld(t, w)
+	w.commitFail = true
+	if apperror.As(Decide(context.Background(), deps, decideInput("sprop_test", "accept"))).StatusCode() != 500 {
+		t.Fatal("the first patch accept must fail at the commit")
+	}
+	disk := skillDigestString(w.files["nusashell/release-notes"])
+	moveDeps := MoveDeps{Catalog: deps.Catalog, Ownership: deps.Ownership}
+	if err := MoveLevel(context.Background(), moveDeps, moveIn("release-notes", "agent", disk)); err != nil {
+		t.Fatalf("hand back: %v", err)
+	}
+	row := storedRow(t, w, "release-notes")
+	if row.Level() != enum.SkillLevelAgent || row.Digest() != disk {
+		t.Errorf("the hand-back = %s/%q, want agent at the bytes on disk", row.Level(), row.Digest())
+	}
+	if level := aggregate.SkillStandingOf(row, disk).Level; level != enum.SkillLevelAgent {
+		t.Errorf("the page reads %s after the hand-back", level)
+	}
+}
+
 func TestMoveLevelRefusesAStalePageInBothDirections(t *testing.T) {
 	for _, level := range []string{"user", "agent"} {
 		w, deps := moveSetup()

@@ -14,6 +14,7 @@ import { Agents } from './agents.js';
 import { Channels } from './channels.js';
 import { Automations } from './automations.js';
 import { Memory } from './memory.js';
+import { Skills } from './skills.js';
 import { WebSearch } from './websearch.js';
 import { McpServers, BrowserSetup, BrowserLogins } from './mcp.js';
 import { Models } from './models.js';
@@ -32,6 +33,7 @@ export const SECTION_GROUPS = [
     { id: 'tools', label: 'Tools', icon: 'tool', desc: 'Browser, MCP servers, catalog' },
     { id: 'web', label: 'Web search', icon: 'globe', desc: 'Sources, keys, limits' },
     { id: 'memory', label: 'Memory', icon: 'layers', desc: 'What threads remember' },
+    { id: 'skills', label: 'Skills', icon: 'file', desc: 'Who may change each skill' },
   ] },
   { label: 'Reach', items: [
     { id: 'channels', label: 'Channels', icon: 'message', desc: 'WhatsApp, Telegram' },
@@ -89,6 +91,7 @@ export function SettingsView() {
         ${section === 'channels' && html`<${Channels} />`}
         ${section === 'automations' && html`<${Automations} arg=${s.route.arg} />`}
         ${section === 'memory' && html`<${Memory} />`}
+        ${section === 'skills' && html`<${Skills} />`}
         ${section === 'web' && html`<${WebSearch} />`}
         ${section === 'general' && html`<${General} />`}
         ${section === 'tools' && html`<${Tools} />`}

@@ -71,9 +71,9 @@ func (r *Decisions) Commit(ctx context.Context, p *aggregate.SkillProposal, row 
 		return apperror.New(409, "this skill proposal was already decided", nil)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE skill_proposals
-		SET status = ?, accepted_path = ?, accepted_level = ?, dismiss_reason = ?, decided_at = ?
+		SET status = ?, accepted_path = ?, accepted_level = ?, dismiss_reason = ?, decided_at = ?, decided_open = ?
 		WHERE id = ?`,
-		string(p.Status()), p.AcceptedPath(), string(p.AcceptedLevel()), p.DismissReason(), ms(p.DecidedAt()), p.ID()); err != nil {
+		string(p.Status()), p.AcceptedPath(), string(p.AcceptedLevel()), p.DismissReason(), ms(p.DecidedAt()), boolInt(p.DecidedOpen()), p.ID()); err != nil {
 		return err
 	}
 

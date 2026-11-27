@@ -122,7 +122,7 @@ func TestSkillProposalRestoresAStoredDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.SetStored(enum.SkillProposalAccepted, "/learned/release-notes/SKILL.md", enum.SkillLevelUser, "", skillTestNow, skillTestNow); err != nil {
+	if err := p.SetStored(enum.SkillProposalAccepted, "/learned/release-notes/SKILL.md", enum.SkillLevelUser, "", skillTestNow, skillTestNow, false); err != nil {
 		t.Fatal(err)
 	}
 	if p.Status() != enum.SkillProposalAccepted || p.AcceptedPath() != "/learned/release-notes/SKILL.md" || p.AcceptedLevel() != enum.SkillLevelUser {
@@ -132,13 +132,13 @@ func TestSkillProposalRestoresAStoredDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetStored(enum.SkillProposalDismissed, "", "", "", skillTestNow, skillTestNow); err == nil {
+	if err := d.SetStored(enum.SkillProposalDismissed, "", "", "", skillTestNow, skillTestNow, false); err == nil {
 		t.Error("a dismissed proposal with no reason was restored")
 	}
-	if err := d.SetStored(enum.SkillProposalAccepted, "", enum.SkillLevelAgent, "", skillTestNow, skillTestNow); err == nil {
+	if err := d.SetStored(enum.SkillProposalAccepted, "", enum.SkillLevelAgent, "", skillTestNow, skillTestNow, false); err == nil {
 		t.Error("an accepted proposal with no path was restored")
 	}
-	if err := d.SetStored("failed", "", "", "", skillTestNow, skillTestNow); err == nil {
+	if err := d.SetStored("failed", "", "", "", skillTestNow, skillTestNow, false); err == nil {
 		t.Error("a status outside pending, accepted, dismissed was restored")
 	}
 }
@@ -150,10 +150,10 @@ func TestSkillProposalStoredPatchStaysAtAgentLevel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.SetStored(enum.SkillProposalAccepted, "/learned/release-notes/SKILL.md", enum.SkillLevelUser, "", skillTestNow, skillTestNow); err == nil {
+	if err := p.SetStored(enum.SkillProposalAccepted, "/learned/release-notes/SKILL.md", enum.SkillLevelUser, "", skillTestNow, skillTestNow, false); err == nil {
 		t.Error("a patch hydrated at the owner's level was restored")
 	}
-	if err := p.SetStored(enum.SkillProposalAccepted, "/learned/release-notes/SKILL.md", enum.SkillLevelAgent, "", skillTestNow, skillTestNow); err != nil {
+	if err := p.SetStored(enum.SkillProposalAccepted, "/learned/release-notes/SKILL.md", enum.SkillLevelAgent, "", skillTestNow, skillTestNow, false); err != nil {
 		t.Errorf("a patch hydrated at agent level refused: %v", err)
 	}
 }
@@ -164,7 +164,7 @@ func TestSkillProposalRefusesAnInconsistentStoredDecision(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return p.SetStored(status, path, level, reason, created, decided)
+		return p.SetStored(status, path, level, reason, created, decided, false)
 	}
 	for _, c := range []struct {
 		name string
@@ -199,15 +199,15 @@ func TestSkillProposalDecidesOnce(t *testing.T) {
 	if err := p.Accept("/learned/other/SKILL.md", enum.SkillLevelUser, skillTestNow); err == nil {
 		t.Error("a second accept was recorded")
 	}
-	if err := p.Dismiss("duplicate", skillTestNow); err == nil {
+	if err := p.Dismiss("duplicate", skillTestNow, true); err == nil {
 		t.Error("a dismissal after an accept was recorded")
 	}
 
 	q, _ := NewSkillProposal("sprop_8", skillCreateIn(), skillTestNow)
-	if err := q.Dismiss("   ", skillTestNow); err == nil {
+	if err := q.Dismiss("   ", skillTestNow, true); err == nil {
 		t.Error("a dismissal without a reason was recorded")
 	}
-	if err := q.Dismiss("duplicate of release-notes", skillTestNow); err != nil {
+	if err := q.Dismiss("duplicate of release-notes", skillTestNow, true); err != nil {
 		t.Fatal(err)
 	}
 	if q.Status() != enum.SkillProposalDismissed || q.DismissReason() != "duplicate of release-notes" {
@@ -226,13 +226,13 @@ func TestSkillProposalDismissalMayNotOpenWithTheSupersededReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Dismiss("superseded: the owner says so", skillTestNow); err == nil {
+	if err := p.Dismiss("superseded: the owner says so", skillTestNow, true); err == nil {
 		t.Fatal("an owner's dismissal took the reason the pass writes")
 	}
 	if p.Status() != enum.SkillProposalPending {
 		t.Fatalf("a refused dismissal left the proposal %v", p.Status())
 	}
-	if err := p.Dismiss("the tests already run in ci", skillTestNow); err != nil {
+	if err := p.Dismiss("the tests already run in ci", skillTestNow, true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -323,10 +323,68 @@ func TestSkillProposalDecisionNeedsATime(t *testing.T) {
 	if err := p.Accept("/root/skills/release-notes/SKILL.md", enum.SkillLevelAgent, time.Time{}); err == nil {
 		t.Error("an accept with no time was recorded")
 	}
-	if err := p.Dismiss("not a skill", time.Time{}); err == nil {
+	if err := p.Dismiss("not a skill", time.Time{}, true); err == nil {
 		t.Error("a dismissal with no time was recorded")
 	}
 	if _, err := NewSkillProposal("p2", skillCreateIn(), time.Time{}); err == nil {
 		t.Error("a proposal with no creation time was built")
+	}
+}
+
+// A dismissal records whether the proposal was still open when the owner closed
+// it. A stale close and a retirement record that it was not, and the fact is
+// restored as stored: it decides whether the closed row holds a name.
+func TestSkillProposalRecordsWhetherItWasOpenWhenClosed(t *testing.T) {
+	open, _ := NewSkillProposal("sprop_o1", skillCreateIn(), skillTestNow)
+	if err := open.Dismiss("too narrow", skillTestNow, true); err != nil {
+		t.Fatal(err)
+	}
+	if !open.DecidedOpen() {
+		t.Error("a dismissal of an open proposal did not record that it was open")
+	}
+
+	stale, _ := NewSkillProposal("sprop_o2", skillCreateIn(), skillTestNow)
+	if err := stale.Dismiss("too narrow", skillTestNow, false); err != nil {
+		t.Fatal(err)
+	}
+	if stale.DecidedOpen() {
+		t.Error("a close of a stale proposal recorded that it was open")
+	}
+
+	retired, _ := NewSkillProposal("sprop_o3", skillCreateIn(), skillTestNow)
+	if err := retired.Supersede("the name is live in the workspace root since it was proposed", skillTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if retired.DecidedOpen() {
+		t.Error("a retirement recorded that it was open")
+	}
+
+	restored, _ := NewSkillProposal("sprop_o4", skillCreateIn(), skillTestNow)
+	if err := restored.SetStored(enum.SkillProposalDismissed, "", "", "too narrow", skillTestNow, skillTestNow, true); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.DecidedOpen() {
+		t.Error("a stored open dismissal was restored as closed")
+	}
+}
+
+// The evidence date is the time the cited evidence happened, carried from the
+// input; a proposal built without one carries none.
+func TestSkillProposalCarriesWhenItsEvidenceHappened(t *testing.T) {
+	in := skillCreateIn()
+	in.EvidenceAt = skillTestNow.Add(-72 * time.Hour)
+	p, err := NewSkillProposal("sprop_e1", in, skillTestNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.EvidenceAt().Equal(in.EvidenceAt) {
+		t.Errorf("evidence time %v, want %v", p.EvidenceAt(), in.EvidenceAt)
+	}
+	bare, err := NewSkillProposal("sprop_e2", skillCreateIn(), skillTestNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bare.EvidenceAt().IsZero() {
+		t.Errorf("a proposal with no evidence time reports %v", bare.EvidenceAt())
 	}
 }

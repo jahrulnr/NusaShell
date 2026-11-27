@@ -117,6 +117,8 @@ tags:
     description: A thread's browser - live view, annotations, saved logins, recordings, and installing one.
   - name: workspace
     description: Files, references, and uploads inside a thread's folders.
+  - name: skills
+    description: The Skills page, the level each learned skill answers to, and the proposals waiting on the owner.
 
 # Every operation needs an owner session unless it says `security: []`,
 # but only when `server.auth` requires a login at all (see the security
@@ -3288,6 +3290,142 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
 
+  /api/skills:
+    get:
+      operationId: listSkills
+      tags: [skills]
+      summary: The Skills page
+      description: |
+        Every live catalog row, joined with who may change it and what waits on
+        the owner. `level` is the row's level while the row describes the file on
+        disk, and `user` otherwise. `changed` says the file was edited outside the
+        loop since its row was written. `digest` is the whole file on disk: a level
+        move sends it back unchanged. Reading writes nothing. The page is not
+        paged, because the catalog is bounded by the byte budget the loop enforces.
+        Both skill paths are mounted only when the server wires every skill port;
+        a build without them answers `404`.
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string }
+          description: The workspace folder whose skill root the page joins. Empty means no workspace root.
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkillPage" }
+        "500": { $ref: "#/components/responses/Internal" }
+  /api/skills/{name}/level:
+    post:
+      operationId: moveSkillLevel
+      tags: [skills]
+      summary: Move a learned skill to the owner or to the loop
+      description: |
+        The owner's decision about who a learned skill answers to. `agent` hands
+        the skill to the loop (`Loop may propose`); `user` takes it back. The body
+        carries the digest the page showed, and the move counts only while the file
+        on disk still holds that digest: a file that moved since the page loaded
+        answers `409`, and so does a row another decision moved meanwhile. A move
+        to `agent` grants the loop authority over the bytes the owner saw, so a
+        hand-edited skill can be handed back. A builtin or an owner file answers
+        `400`; a skill that is no longer live, or has no ownership row, answers
+        `404`. The skill file is never written.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+          description: The learned skill's name.
+        - name: workspace
+          in: query
+          schema: { type: string }
+          description: The workspace folder whose skill root the move reads. Empty means no workspace root.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SkillMoveBody" }
+      responses:
+        "204": { description: The level moved. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/Internal" }
+  /api/skill-proposals:
+    get:
+      operationId: listSkillProposals
+      tags: [skills]
+      summary: The proposals waiting on the owner
+      description: |
+        Every pending proposal. `open` says whether the owner can still accept it,
+        by the rule accept applies before it writes. A proposal that is not open
+        stays in the list with `staleCause`, the one sentence that says why, until
+        the owner dismisses it. Reading writes nothing.
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string }
+          description: The workspace folder whose skill root the queue reads. Empty means no workspace root.
+      responses:
+        "200":
+          description: The pending proposals.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkillProposalPage" }
+        "500": { $ref: "#/components/responses/Internal" }
+  /api/skill-proposals/{id}/decide:
+    post:
+      operationId: decideSkillProposal
+      tags: [skills]
+      summary: Accept or dismiss a proposal
+      description: |
+        `accept` writes the skill file, then records the decision and the ownership
+        row in one transaction. A create writes the file under the nusashell root.
+        A patch rewrites its target and keeps the agent level, so `level` must be
+        empty or `agent`.
+
+        `dismiss` records the decision with the owner's `reason`, which is required
+        and may not open with `superseded:`. A dismissal that closes a create whose
+        file is the loop's own leftover archives that file first; a patch's bytes
+        stay where they are.
+
+        A proposal that was already decided answers `409`. So does one the owner can
+        no longer accept: that answer names the state it found, and the proposal
+        stays pending until the owner dismisses it. An accept that would take the
+        catalog over its byte budget answers `409` with the overage.
+
+        When the file is written but the decision cannot be recorded, the answer is
+        `500` and the failure is logged; a row that refuses the decision after the
+        write answers `409` and is logged too. A create's leftover is the loop's
+        own, so accepting again finishes it. For a patch, the loop wrote the skill
+        file, but the decision was not recorded, and the proposal no longer applies
+        to that file: the owner dismisses it and sets the skill's level on the
+        Skills page. Dismissing leaves the file in place.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The proposal's id.
+        - name: workspace
+          in: query
+          schema: { type: string }
+          description: The workspace folder whose catalog the decision is read against. Empty means no workspace root.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SkillDecideBody" }
+      responses:
+        "204": { description: The proposal was accepted or dismissed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/Internal" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -3344,6 +3482,134 @@ components:
       description: Place the call in this folder, before any thread exists.
 
   schemas:
+    SkillRow:
+      type: object
+      required: [name, description, source, path, digest, level, tracked, changed, pending, pendingStale]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+          enum: [builtin, nusashell, global, workspace]
+          description: The root that holds the skill.
+        path:
+          type: string
+        digest:
+          type: string
+          description: The whole file on disk. A level move sends it back unchanged.
+        level:
+          type: string
+          enum: [user, agent]
+          description: Who may change the skill now.
+        tracked:
+          type: boolean
+          description: An ownership row exists for the skill.
+        changed:
+          type: boolean
+          description: The file was edited outside the loop since its row was written, so the level is the owner's.
+        pending:
+          type: integer
+          description: Proposals waiting on the owner for this skill.
+        pendingStale:
+          type: integer
+          description: Those the owner can no longer accept.
+    SkillPage:
+      type: object
+      required: [data, diagnostics, pending, pendingStale]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/SkillRow" }
+        diagnostics:
+          type: array
+          items: { type: string }
+          description: The catalog's own diagnostics, then one line for each ownership row whose file no longer reads as a skill.
+        pending:
+          type: integer
+          description: Every proposal waiting on the owner.
+        pendingStale:
+          type: integer
+          description: Those the owner can no longer accept.
+    SkillMoveBody:
+      type: object
+      required: [level, digest]
+      properties:
+        level:
+          type: string
+          enum: [user, agent]
+        digest:
+          type: string
+          description: The file digest the page showed.
+    SkillProposalEvidence:
+      type: object
+      required: [kind, quote, date]
+      properties:
+        kind:
+          type: string
+          enum: [quote, repeat, call, rewrite]
+        quote:
+          type: string
+          description: The text the proposal cites as its evidence.
+        date:
+          type: [string, "null"]
+          format: date-time
+          description: When the evidence happened. Null when the turn carried no time.
+    SkillProposal:
+      type: object
+      required: [id, op, kind, name, description, target, tool, reason, evidence, createdAt, open, staleCause]
+      properties:
+        id:
+          type: string
+        op:
+          type: string
+          enum: [create, patch]
+        kind:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        target:
+          type: string
+          description: The skill a patch changes. Empty for a create.
+        tool:
+          type: string
+        reason:
+          type: string
+        evidence:
+          $ref: "#/components/schemas/SkillProposalEvidence"
+        createdAt:
+          type: string
+          format: date-time
+        open:
+          type: boolean
+          description: Whether the owner can still accept the proposal.
+        staleCause:
+          type: string
+          description: One sentence saying why the owner can no longer accept it. Empty while open.
+    SkillProposalPage:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/SkillProposal" }
+    SkillDecideBody:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [accept, dismiss]
+        level:
+          type: string
+          enum: [user, agent]
+          description: Accept only. Empty means agent, and a patch accepts at agent only.
+        reason:
+          type: string
+          description: Dismiss only. Required and not blank; it may not open with `superseded:`, the prefix the loop writes for the proposals it retires.
     Health:
       type: object
       required: [status]

@@ -31,6 +31,17 @@ type SkillCatalog struct {
 // Missing roots are empty; malformed entries remain diagnostics.
 type Skills interface {
 	List(ctx context.Context, workspace string) (SkillCatalog, error)
+	// ListAcross reads the fixed roots — builtin, nusashell, global — once,
+	// then each workspace root once. The catalog is the effective one for
+	// focus: later fixed roots replace earlier ones, and only focus's own
+	// workspace root is applied on top. Taken names every declared name and a
+	// root that holds it; where nusashell and another root both hold a name,
+	// taken names the other root, since nusashell is the one root the loop may
+	// replace. A name live only in one of the other workspace
+	// folders is taken as workspace and does not enter the focus catalog, so
+	// a page for focus still shows focus's own skills. focus is always read,
+	// even when others already contains it, and it is read once.
+	ListAcross(ctx context.Context, focus string, others []string) (SkillCatalog, map[string]string, error)
 	Read(ctx context.Context, workspace, name string) (Skill, string, error)
 }
 
@@ -45,10 +56,16 @@ type SkillProposals interface {
 	Get(ctx context.Context, id string) (*aggregate.SkillProposal, error)
 	Pending(ctx context.Context) ([]*aggregate.SkillProposal, error)
 	// Seen answers the candidate's cooldown: a pending proposal of this name holds
-	// it whatever its op, and a proposal of this op the owner decided since the
-	// cutoff holds it too, so the pass does not ask the owner twice about the same
-	// skill. A retirement the pass wrote is not a decision and holds nothing.
+	// it whatever its op, a proposal of this op the owner accepted since the cutoff
+	// holds it too, and so does one the owner dismissed while it was still open, so
+	// the pass does not ask the owner twice about the same skill. A retirement the
+	// pass wrote, and a dismissal of a proposal that had already gone stale, hold
+	// nothing.
 	Seen(ctx context.Context, name string, op enum.SkillProposalOp, since time.Time) (bool, error)
+	// Declined lists the owner's refusals the candidate prompt shows: dismissals of
+	// proposals that were still open, decided since the cutoff, newest first, at
+	// most limit. A retirement and a stale close are not refusals, as in Seen.
+	Declined(ctx context.Context, since time.Time, limit int) ([]*aggregate.SkillProposal, error)
 }
 
 // SkillDecisions is the one write that decides a proposal. Commit stores the
@@ -107,8 +124,15 @@ type SkillWritten struct {
 // Either way, a file that already holds exactly the rendered bytes is a
 // successful no-op rather than a conflict: it is what a retry of an accept whose
 // commit failed finds, and the retry is how that row gets finished. A refused
-// write is a 409; archiving a missing skill is a 404.
+// write is a 409; archiving a missing skill is a 404, and archiving one that no
+// longer holds the digest the caller read is a 409 that moves nothing.
 type SkillWriter interface {
 	Write(ctx context.Context, root enum.SkillRoot, doc SkillDocument, expectDigest string) (SkillWritten, error)
-	Archive(ctx context.Context, root enum.SkillRoot, name string) error
+	// Digest is the digest the document renders to: the value Write records for
+	// it, and the one a catalog read of the same file reports. It writes nothing,
+	// so the application can tell whether a file on disk is this document.
+	Digest(doc SkillDocument) (string, error)
+	// Archive moves the skill out of the root only while its file still holds
+	// expectDigest.
+	Archive(ctx context.Context, root enum.SkillRoot, name, expectDigest string) error
 }

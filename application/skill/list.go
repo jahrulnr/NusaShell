@@ -4,19 +4,26 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 )
 
-// ListDeps are the three reads the Skills page joins. Each port is called once
-// for the whole page — the join lives in memory, and a tree of two hundred
-// skills is still three reads, never one per row.
+// ListDeps are the reads the Skills page joins. The catalog, the ownership
+// rows, and the pending proposals are each read once — the join lives in
+// memory. Folders, when set, is read once beside them so a name live in
+// another workspace is stale here too. The catalog read covers every
+// workspace root without repeating the fixed roots.
 type ListDeps struct {
 	Catalog   repository.Skills
 	Ownership repository.SkillOwnership
 	Proposals repository.SkillProposals
+	Folders   SkillFolders
+	// Writer renders a pending create's document, so a leftover of the loop's
+	// own write reads as open. Nil means no file is read that way.
+	Writer repository.SkillWriter
 }
 
 // SkillRow is one line of the Skills page.
@@ -50,7 +57,7 @@ type SkillRow struct {
 
 // SkillPage is the whole page: every live catalog row joined with its level
 // and pending counts, sorted by name, plus the catalog's own diagnostics, one
-// for each ownership row whose file is gone, and the total of proposals waiting
+// for each ownership row whose file no longer reads as a skill, and the total of proposals waiting
 // on the owner, whatever skill they name, and how many of those are stale.
 type SkillPage struct {
 	Rows         []SkillRow
@@ -62,7 +69,7 @@ type SkillPage struct {
 // List joins the page. A failed read fails the page: a half-joined list would
 // show levels or counts the owner would act on as if they were true.
 func List(ctx context.Context, deps ListDeps, workspace string) (SkillPage, error) {
-	catalog, err := deps.Catalog.List(ctx, workspace)
+	catalog, taken, err := catalogView(ctx, deps.Catalog, deps.Folders, workspace)
 	if err != nil {
 		return SkillPage{}, err
 	}
@@ -70,8 +77,11 @@ func List(ctx context.Context, deps ListDeps, workspace string) (SkillPage, erro
 	if err != nil {
 		return SkillPage{}, err
 	}
-	state := newLearnedState(catalog.Skills, rows)
 	pending, err := deps.Proposals.Pending(ctx)
+	if err != nil {
+		return SkillPage{}, err
+	}
+	state, err := newLearnedState(catalog.Skills, rows, taken).withOwnDocs(deps.Writer, pending)
 	if err != nil {
 		return SkillPage{}, err
 	}
@@ -108,26 +118,104 @@ func List(ctx context.Context, deps ListDeps, workspace string) (SkillPage, erro
 			PendingStale: staleCounts[s.Name],
 		})
 	}
-	// A row whose file is gone is listed nowhere else, and the owner could not
-	// see that the loop still holds the name. Only a name no skill carries
-	// counts: a builtin, global or workspace file of the same name is the live
+	// A row whose file no longer reads as a skill is listed nowhere else, and
+	// the owner could not see that the loop still holds the name. Only a name
+	// no skill carries counts: a builtin, global, or workspace file of the
+	// same name, including one in another workspace folder, is the live
 	// skill, and the validator refuses that name either way.
-	carried := make(map[string]bool, len(catalog.Skills))
-	for _, s := range catalog.Skills {
-		carried[s.Name] = true
-	}
 	var orphans []string
 	for _, name := range learnedNames(rows) {
-		if !carried[name] {
+		if _, carried := taken[name]; !carried {
 			orphans = append(orphans, name)
 		}
 	}
 	sort.Strings(orphans)
 	for _, name := range orphans {
-		page.Diagnostics = append(page.Diagnostics, fmt.Sprintf("the name %q is still owned by the loop, but its file is gone", name))
+		page.Diagnostics = append(page.Diagnostics, fmt.Sprintf("the name %q is still owned by the loop, but its file no longer reads as a skill", name))
 	}
 	// The catalog port does not promise an order; the page and its tests get
 	// one anyway.
 	sort.Slice(page.Rows, func(i, j int) bool { return page.Rows[i].Name < page.Rows[j].Name })
 	return page, nil
+}
+
+// PendingProposal is one proposal still waiting on the owner. Open is
+// learnedState.open, the same function the page's stale count uses, so the
+// queue and the page cannot disagree about what the owner can still accept.
+type PendingProposal struct {
+	ID          string
+	Op          string
+	Kind        string
+	Name        string
+	Description string
+	Target      string
+	Tool        string
+	Reason      string
+	// EvidenceKind and Evidence are what the proposal rests on, by kind: the
+	// owner's words, a call's id, two turns' ids, or the owner's rewrite.
+	EvidenceKind string
+	Evidence     string
+	// EvidenceAt is when that evidence happened; zero when the turn carried no time.
+	EvidenceAt time.Time
+	CreatedAt  time.Time
+	Open       bool
+	// StaleCause is why the proposal is not open, in the owner's terms: the same
+	// sentence the store keeps when the pass retires one. Empty while open.
+	StaleCause string
+}
+
+// learnedNow reads the catalog and the ownership rows once and joins them the way
+// the page and the queue do, so a decision is judged by the rule the owner sees.
+// pending is the proposals the caller is judging; each create among them is
+// checked for the loop's own leftover.
+func learnedNow(ctx context.Context, skills repository.Skills, folders SkillFolders, owners repository.SkillOwnership, writer repository.SkillWriter, workspace string, pending []*aggregate.SkillProposal) (learnedState, error) {
+	catalog, taken, err := catalogView(ctx, skills, folders, workspace)
+	if err != nil {
+		return learnedState{}, err
+	}
+	rows, err := owners.List(ctx)
+	if err != nil {
+		return learnedState{}, err
+	}
+	return newLearnedState(catalog.Skills, rows, taken).withOwnDocs(writer, pending)
+}
+
+// ListPending returns the pending proposals in the store's order. Open is
+// false when accept would refuse the proposal because of the files or the
+// rows. The catalog budget is left out: it is the owner's to make room for,
+// not a fact about the proposal.
+func ListPending(ctx context.Context, deps ListDeps, workspace string) ([]PendingProposal, error) {
+	pending, err := deps.Proposals.Pending(ctx)
+	if err != nil {
+		return nil, err
+	}
+	state, err := learnedNow(ctx, deps.Catalog, deps.Folders, deps.Ownership, deps.Writer, workspace, pending)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PendingProposal, 0, len(pending))
+	for _, p := range pending {
+		open := state.open(p)
+		var cause string
+		if !open {
+			cause = state.supersedeCause(p)
+		}
+		out = append(out, PendingProposal{
+			ID:           p.ID(),
+			Op:           string(p.Op()),
+			Kind:         string(p.Kind()),
+			Name:         p.Name(),
+			Description:  p.Description(),
+			Target:       p.TargetName(),
+			Tool:         p.Tool(),
+			Reason:       p.Reason(),
+			EvidenceKind: string(p.EvidenceKind()),
+			Evidence:     p.Evidence(),
+			EvidenceAt:   p.EvidenceAt(),
+			CreatedAt:    p.CreatedAt(),
+			Open:         open,
+			StaleCause:   cause,
+		})
+	}
+	return out, nil
 }

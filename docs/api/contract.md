@@ -313,6 +313,10 @@ Full schemas, typed errors, and examples live in
 | `POST /api/update/check` | Forces a fresh release lookup and answers the same picture. |
 | `POST /api/update/install` | Starts the in-app install of the latest release as one background job: download, verify against `SHA256SUMS`, stage beside the binary, replace it, restart. Answers `202` with the first progress state. Only one install runs at a time; refusals are `409` (see the error model). |
 | `GET /api/update/install` | Progress of the current or most recent install: `{ state, phase, version, bytesDone, bytesTotal, restart, error }`. `state` is `idle`, `running`, `succeeded`, or `failed`; `succeeded` means the restart is queued, and the new version answers once it is up. |
+| `GET /api/skills?workspace=` | The Skills page — `{ data: [row…], diagnostics, pending, pendingStale }`. Each row carries `level` (who may change the skill now: `user` unless the row describes the file on disk), `changed`, and `digest`, the whole file to send back on a move. Reading writes nothing. |
+| `POST /api/skills/{name}/level?workspace=` | Body `{level, digest}`: the owner hands a learned skill to the loop (`agent`) or takes it back (`user`); `digest` is the file the page showed. `204`; `400` for a builtin or an owner file; `404` when the skill is no longer live or has no ownership row; `409` when the file or the row moved since. The skill file is never written. |
+| `GET /api/skill-proposals?workspace=` | Pending proposals — `{ data: [proposal…] }`, each with `open` and `staleCause` (empty while open). Reading writes nothing. |
+| `POST /api/skill-proposals/{id}/decide?workspace=` | Body `{action, level?, reason?}`: `accept` writes the skill file and records the decision; `dismiss` records it with the owner's `reason`. `204`; `409` when the proposal was already decided, no longer applies, or the catalog would be over its byte budget; `500` when the file was written but the decision was not recorded. |
 | `GET /api/ws` | WebSocket upgrade — `101`; frames defined in [`websocket.md`](./websocket.md). |
 
 There is intentionally **no `POST /api/conversations`** and **no

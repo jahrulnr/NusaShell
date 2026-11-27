@@ -81,6 +81,9 @@ type Facts struct {
 	OwnerLines []OwnerLine
 	Calls      []entity.ToolCall
 	Rewrite    bool
+	// TurnAt is when the turn's anchor line was written. A rewrite is of that
+	// turn, so it carries the turn's time.
+	TurnAt time.Time
 }
 
 // OwnerLine is one message the owner wrote in this thread. Turn is the
@@ -180,7 +183,7 @@ func Validate(c Check) Result {
 		}
 		// accept refuses a create over a row that is still there, file or not.
 		if !taken && slices.Contains(c.Owned, d.Name) {
-			report(RuleOrphanRow, "the name %q is still owned by the loop, but its file is gone; accept refuses a create over a row that is still there", d.Name)
+			report(RuleOrphanRow, "the name %q is still owned by the loop, but its file no longer reads as a skill; accept refuses a create over a row that is still there", d.Name)
 		}
 	}
 	mine := contentWords(d.Description)
@@ -210,7 +213,7 @@ func Validate(c Check) Result {
 	case total > c.Budget:
 		report(RuleBudget, "the catalog would hold %d bytes; the budget is %d", total, c.Budget)
 	}
-	shape := aggregate.SkillProposalInput{Kind: kind, Tool: d.Cite.Tool, Name: d.Name, Description: d.Description, Body: d.Body, Reason: d.Reason, EvidenceKind: proven, TargetName: d.Target}
+	shape := aggregate.SkillProposalInput{Kind: kind, Tool: d.Cite.Tool, Name: d.Name, Description: d.Description, Body: d.Body, Reason: d.Reason, EvidenceKind: proven, EvidenceAt: citedAt(d.Cite, proven, c.Facts), TargetName: d.Target}
 	if opOK {
 		shape.Op = op
 	}
@@ -266,19 +269,11 @@ func proveEvidence(cite Citation, f Facts) (enum.SkillEvidenceKind, string) {
 	}
 	switch kind {
 	case enum.SkillEvidenceQuote:
-		quote := aggregate.SkillWords(cite.Quote)
-		if len(quote) == 0 {
+		if len(aggregate.SkillWords(cite.Quote)) == 0 {
 			return "", "the citation quotes no words"
 		}
-		for _, l := range f.OwnerLines {
-			for _, sentence := range sentenceEnd.Split(l.Text, -1) {
-				line := aggregate.SkillWords(sentence)
-				for i := 0; i+len(quote) <= len(line); i++ {
-					if slices.Equal(line[i:i+len(quote)], quote) {
-						return kind, ""
-					}
-				}
-			}
+		if _, ok := quoteLine(cite.Quote, f.OwnerLines); ok {
+			return kind, ""
 		}
 		return "", "the quoted words are not an owner line of this thread"
 	case enum.SkillEvidenceRewrite:
@@ -337,6 +332,58 @@ func proveEvidence(cite Citation, f Facts) (enum.SkillEvidenceKind, string) {
 		return "", "the cited call is not one of this turn's model calls"
 	}
 	return "", fmt.Sprintf("the evidence kind %q cannot be proven", kind)
+}
+
+// quoteLine returns the owner line the quoted words appear in: one run of words
+// inside a sentence of that line, as proveEvidence checks it.
+func quoteLine(cite string, lines []OwnerLine) (OwnerLine, bool) {
+	quote := aggregate.SkillWords(cite)
+	if len(quote) == 0 {
+		return OwnerLine{}, false
+	}
+	for _, l := range lines {
+		for _, sentence := range sentenceEnd.Split(l.Text, -1) {
+			line := aggregate.SkillWords(sentence)
+			for i := 0; i+len(quote) <= len(line); i++ {
+				if slices.Equal(line[i:i+len(quote)], quote) {
+					return l, true
+				}
+			}
+		}
+	}
+	return OwnerLine{}, false
+}
+
+// citedAt is when the proven evidence happened, so the owner reads it with its
+// date: the owner line a quote matched, the later of a repeat's two occasions,
+// the turn a rewrite belongs to, or the call itself. Zero when the facts carry no
+// time for it.
+func citedAt(cite Citation, kind enum.SkillEvidenceKind, f Facts) time.Time {
+	switch kind {
+	case enum.SkillEvidenceQuote:
+		if l, ok := quoteLine(cite.Quote, f.OwnerLines); ok {
+			return l.At
+		}
+	case enum.SkillEvidenceRepeat:
+		var latest time.Time
+		for _, turn := range cite.Turns {
+			for _, l := range f.OwnerLines {
+				if l.Turn == turn && l.At.After(latest) {
+					latest = l.At
+				}
+			}
+		}
+		return latest
+	case enum.SkillEvidenceRewrite:
+		return f.TurnAt
+	case enum.SkillEvidenceCall:
+		for _, tc := range f.Calls {
+			if modelCall(tc) && tc.ID() == cite.Call {
+				return tc.CallAt()
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // contentWords are the words that tell two descriptions apart.

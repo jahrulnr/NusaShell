@@ -795,6 +795,9 @@ type noSkillCatalog struct{}
 func (noSkillCatalog) List(context.Context, string) (drepo.SkillCatalog, error) {
 	return drepo.SkillCatalog{Skills: []drepo.Skill{}}, nil
 }
+func (noSkillCatalog) ListAcross(context.Context, string, []string) (drepo.SkillCatalog, map[string]string, error) {
+	return drepo.SkillCatalog{Skills: []drepo.Skill{}}, map[string]string{}, nil
+}
 func (noSkillCatalog) Read(context.Context, string, string) (drepo.Skill, string, error) {
 	return drepo.Skill{}, "", apperror.New(404, "no such skill", nil)
 }
@@ -817,16 +820,80 @@ func (noSkillProposals) Pending(context.Context) ([]*aggregate.SkillProposal, er
 func (noSkillProposals) Seen(context.Context, string, enum.SkillProposalOp, time.Time) (bool, error) {
 	return false, nil
 }
+func (noSkillProposals) Declined(context.Context, time.Time, int) ([]*aggregate.SkillProposal, error) {
+	return nil, nil
+}
+
+// noSkillDecisions and noSkillWriter are the write ports Register requires: an
+// accept writes through them, so without either the feature registers nothing.
+type noSkillDecisions struct{}
+
+func (noSkillDecisions) Commit(context.Context, *aggregate.SkillProposal, *aggregate.SkillOwnership) error {
+	return nil
+}
+
+type noSkillWriter struct{}
+
+func (noSkillWriter) Write(context.Context, enum.SkillRoot, drepo.SkillDocument, string) (drepo.SkillWritten, error) {
+	return drepo.SkillWritten{}, nil
+}
+func (noSkillWriter) Digest(drepo.SkillDocument) (string, error) { return "", nil }
+func (noSkillWriter) Archive(context.Context, enum.SkillRoot, string, string) error {
+	return nil
+}
+
+// oneWorkspace is the explicit single-workspace answer: no other folder holds
+// a skill. Register refuses a nil source, so a test writes the answer out.
+type oneWorkspace struct{}
+
+func (oneWorkspace) Folders(context.Context) ([]string, error) { return nil, nil }
 
 func TestSkillsRoutesRegisterThroughTheConstructor(t *testing.T) {
-	h := newTestHandler(t, Deps{Skills: httpskill.Deps{
+	full := httpskill.Deps{
 		Catalog:   noSkillCatalog{},
 		Ownership: noSkillOwnership{},
 		Proposals: noSkillProposals{},
-	}})
+		Decisions: noSkillDecisions{},
+		Writer:    noSkillWriter{},
+		Folders:   oneWorkspace{},
+	}
+	h := newTestHandler(t, Deps{Skills: full})
 	rec := do(t, h, "GET", "/api/skills", "", "")
 	if rec.Code != 200 {
 		t.Fatalf("with the ports wired the page answered %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(t, h, "GET", "/api/skill-proposals", "", "")
+	if rec.Code != 200 {
+		t.Fatalf("with the ports wired the queue answered %d: %s", rec.Code, rec.Body)
+	}
+	// The decision route is mounted: an unknown proposal is the handler's own
+	// 404, not the router's.
+	rec = doBody(t, h, "POST", "/api/skill-proposals/sprop_missing/decide", "application/json", `{"action":"dismiss","reason":"x"}`)
+	if rec.Code != 404 || !strings.Contains(rec.Body.String(), "no such skill proposal") {
+		t.Fatalf("decide on a missing proposal answered %d: %s", rec.Code, rec.Body)
+	}
+	// The queue used to sit under /skills, and that path is gone for good.
+	rec = do(t, h, "GET", "/api/skills/proposals", "", "")
+	if rec.Code != 404 {
+		t.Fatalf("the old queue path answered %d, want no route: %s", rec.Code, rec.Body)
+	}
+	// Register is all or nothing: a port that is missing leaves the whole
+	// surface unmounted, the page included, so no page judges or decides
+	// with a half of the feature.
+	noDecisions := full
+	noDecisions.Decisions = nil
+	noWriter := full
+	noWriter.Writer = nil
+	noFolders := full
+	noFolders.Folders = nil
+	for name, partial := range map[string]httpskill.Deps{"decisions": noDecisions, "writer": noWriter, "folders": noFolders} {
+		h := newTestHandler(t, Deps{Skills: partial})
+		if rec := do(t, h, "GET", "/api/skills", "", ""); rec.Code != 404 {
+			t.Fatalf("without %s the page answered %d, want no route: %s", name, rec.Code, rec.Body)
+		}
+		if rec := do(t, h, "GET", "/api/skill-proposals", "", ""); rec.Code != 404 {
+			t.Fatalf("without %s the queue answered %d, want no route: %s", name, rec.Code, rec.Body)
+		}
 	}
 	// Without the ports no route answers at all — a hand-built handler
 	// keeps working and the feature stays invisible.

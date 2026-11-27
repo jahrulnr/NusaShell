@@ -268,6 +268,15 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	if edits := wireSkillObserve(b.Config().Skills.Improvement, hub.OnFinished, eng.convs, slog.Default()); edits != nil {
 		eng.conversations.UseEditEvidence(edits)
 	}
+	// suggest is the only mode that mounts the page and the candidate pass.
+	// off and observe get the zero surface, so this process stays as it was.
+	learned := eng.skillSurface(b.Config().Skills.Improvement, home)
+	if learned.Hook != nil {
+		hub.OnFinished(learned.Hook)
+	}
+	if learned.Edits != nil {
+		eng.conversations.UseEditEvidence(learned.Edits)
+	}
 	eng.conversations.OnDeleted(chats.ForgetRoom)
 	// A deleted thread takes its own memories with it; a deleted project's
 	// are archived, since deleting a project can be undone.
@@ -580,6 +589,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 		Views:              eng.conversations,
 		Updates:            updates,
 		FileTree:           fileTree,
+		Skills:             learned.Page,
 		// Accepted delete/compaction jobs ride the server lifecycle —
 		// a client that abandons a request can't cancel them, but
 		// shutdown does.

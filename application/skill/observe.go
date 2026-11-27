@@ -1,6 +1,7 @@
 // Package skill holds skill improvement. The observer reads the store and logs
-// one line for each eligible turn; the validator admits or refuses learned-skill
-// drafts against owner evidence, the live catalog, and the content scan.
+// one line for each eligible turn that shows a signal; the validator admits or
+// refuses learned-skill drafts against owner evidence, the live catalog, and the
+// content scan.
 package skill
 
 import (
@@ -24,9 +25,9 @@ const (
 	observeClip = 120
 )
 
-// Observer logs one skill_observe line per eligible finished turn. It reads the
-// store and writes only the log. A failed observation is logged and skipped; it
-// never affects the turn.
+// Observer logs one skill_observe line per eligible finished turn that shows a
+// signal, and nothing for a turn without one. It reads the store and writes only
+// the log. A failed observation is logged and skipped; it never affects the turn.
 type Observer struct {
 	convs  drepo.Conversation
 	ev     *Evidence
@@ -76,9 +77,13 @@ func (o *Observer) Observe(convID, kind string, origin valueobject.TurnOrigin, e
 		"owner", owner, "elapsed_ms", time.Since(start).Milliseconds())
 }
 
-// eligible is the gate. The window must end on a finished reply that was not
-// interrupted, and the turn's origin must name a person present. The origin
+// TurnEligible is the gate the composition root shares with the observer: a
+// finished reply that was not interrupted, from a person present. The origin
 // comes from the hub: an agent room writes no origin record of its own.
+func TurnEligible(w Window, origin valueobject.TurnOrigin) bool { return eligible(w, origin) }
+
+// eligible is the gate behind TurnEligible. The window must end on a finished
+// reply that was not interrupted, and the origin must name a person present.
 func eligible(w Window, origin valueobject.TurnOrigin) bool {
 	if len(w.Msgs) == 0 {
 		return false
