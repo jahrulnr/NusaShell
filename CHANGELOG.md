@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-28
+
 ### Added
 
 - A model or session option picked while a turn runs is kept as pending and applies to the **next** turn: the answer says 202 with `pending`, the room keeps both the running value and the waiting one through a reload, and the marker disappears on its own once the turn consumes it. A pick the agent no longer accepts is dropped with a notice instead of failing the turn.
