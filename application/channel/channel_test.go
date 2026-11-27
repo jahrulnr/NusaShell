@@ -143,7 +143,7 @@ func (r *fakeRooms) Approve(_, requestID, optionID string) error {
 	r.mu.Unlock()
 	return nil
 }
-func (r *fakeRooms) AgentCommands(string) []dservice.AgentCommand {
+func (r *fakeRooms) AgentCommands(context.Context, string) []dservice.AgentCommand {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.commands

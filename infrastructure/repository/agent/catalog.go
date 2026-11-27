@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
 // catalogSuffix marks the second JSON document per agent — the wire
@@ -54,14 +56,71 @@ func (r *Repository) SaveCatalog(ctx context.Context, id string, cat drepo.Agent
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := os.MkdirAll(r.path, 0o700); err != nil {
+	return writeJSONAtomic(r.path, r.catalogFile(id), id+".catalog.json.tmp-*", cat)
+}
+
+func (r *Repository) commandCatalogFile(conversationID string) string {
+	return filepath.Join(r.path, "conversations", conversationID+".commands.json")
+}
+
+// CommandCatalog returns the slash-command list one conversation's agent
+// session last reported. A missing file is the zero value: the session never
+// reported one.
+func (r *Repository) CommandCatalog(ctx context.Context, conversationID string) (drepo.AgentCommandCatalog, error) {
+	if err := valueobject.ValidID(conversationID); err != nil {
+		return drepo.AgentCommandCatalog{}, apperror.New(400, "invalid conversation id", err)
+	}
+	var cat drepo.AgentCommandCatalog
+	raw, err := os.ReadFile(r.commandCatalogFile(conversationID))
+	if errors.Is(err, os.ErrNotExist) {
+		return cat, nil
+	}
+	if err != nil {
+		return cat, err
+	}
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		return cat, fmt.Errorf("conversation %q command catalog corrupt: %w", conversationID, err)
+	}
+	return cat, nil
+}
+
+// SaveCommandCatalog replaces the conversation's last reported command list
+// atomically. An empty list is a real report and replaces what came before.
+func (r *Repository) SaveCommandCatalog(ctx context.Context, conversationID string, cat drepo.AgentCommandCatalog) error {
+	if err := valueobject.ValidID(conversationID); err != nil {
+		return apperror.New(400, "invalid conversation id", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dir := filepath.Join(r.path, "conversations")
+	return writeJSONAtomic(dir, r.commandCatalogFile(conversationID), conversationID+".commands.json.tmp-*", cat)
+}
+
+// DeleteCommandCatalog removes the conversation's command report. Missing is
+// success because delete is idempotent from the caller's side.
+func (r *Repository) DeleteCommandCatalog(ctx context.Context, conversationID string) error {
+	if err := valueobject.ValidID(conversationID); err != nil {
+		return apperror.New(400, "invalid conversation id", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := os.Remove(r.commandCatalogFile(conversationID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	raw, err := json.MarshalIndent(cat, "", "  ")
+	return nil
+}
+
+// writeJSONAtomic writes one small repository document through a unique temp
+// file and rename, so a crash leaves the old document or none, never a torn one.
+func writeJSONAtomic(dir, target, tmpPattern string, v any) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(r.path, id+".catalog.json.tmp-*")
+	f, err := os.CreateTemp(dir, tmpPattern)
 	if err != nil {
 		return err
 	}
@@ -75,5 +134,5 @@ func (r *Repository) SaveCatalog(ctx context.Context, id string, cat drepo.Agent
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, r.catalogFile(id))
+	return os.Rename(tmp, target)
 }

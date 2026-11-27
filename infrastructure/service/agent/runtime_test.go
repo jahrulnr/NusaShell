@@ -449,7 +449,7 @@ func TestOptionsAndCommands(t *testing.T) {
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	cmds := rt.Commands(in.Conversation.ID())
+	cmds := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID())
 	if len(cmds) == 0 || cmds[0].Name != "compact" {
 		t.Fatalf("commands = %+v", cmds)
 	}

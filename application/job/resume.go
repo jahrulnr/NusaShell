@@ -39,10 +39,16 @@ type Resume struct {
 // Send.Steer.
 func (j *Resume) Steer(text string) { j.steers.push(text) }
 
-func (j *Resume) SteerInput(in valueobject.UserInput, record *entity.Message) bool {
-	_, err := j.steers.SubmitBefore(in, j.Deps.Config.MailboxCap, record)
-	return err == nil
+func (j *Resume) SteerInput(in valueobject.UserInput, record *entity.Message) (any, bool) {
+	r, err := j.steers.SubmitBefore(in, j.Deps.Config.MailboxCap, record)
+	if err != nil {
+		return nil, false
+	}
+	return r, true
 }
+
+// RecallInput withdraws the pending input submitted under inputID.
+func (j *Resume) RecallInput(inputID string) bool { return j.steers.RecallID(inputID) }
 
 // SteerInputAvailable reports whether the mailbox has room right now.
 func (j *Resume) SteerInputAvailable() bool { return j.steers.available(j.Deps.Config.MailboxCap) }

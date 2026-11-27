@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"mime"
 	"net/url"
 	"path/filepath"
@@ -36,6 +37,7 @@ type turnSink struct {
 	onEvent event.TurnEventHandler
 	approve dservice.Approver
 	elicit  dservice.Elicitor
+	log     *slog.Logger
 
 	mu    sync.Mutex
 	parts []entity.MessagePart
@@ -60,6 +62,8 @@ type turnSink struct {
 	workspace string
 	save      func(ctx context.Context, name, mediaType string, data []byte) (valueobject.Attachment, error)
 	media     int
+	// droppedUnknown logs one contentless or unbound update per id, not once per pulse.
+	droppedUnknown map[string]bool
 }
 
 // callRecord is the latest known state of one agent tool call.
@@ -70,6 +74,8 @@ type callRecord struct {
 	input      string
 	output     string
 	status     string
+	keys       map[string]string
+	inference  string
 	at         time.Time
 	emitted    bool   // the tool-call event went out
 	resultSent bool   // the terminal tool_result event went out
@@ -77,7 +83,7 @@ type callRecord struct {
 }
 
 func newTurnSink(ctx context.Context, onEvent event.TurnEventHandler, approve dservice.Approver) *turnSink {
-	return &turnSink{ctx: ctx, onEvent: onEvent, approve: approve, calls: map[string]*callRecord{}, terms: map[string]string{}}
+	return &turnSink{ctx: ctx, onEvent: onEvent, approve: approve, calls: map[string]*callRecord{}, terms: map[string]string{}, droppedUnknown: map[string]bool{}}
 }
 
 func (t *turnSink) emit(ev event.TurnEvent) {
@@ -219,7 +225,22 @@ func (t *turnSink) apply(u acp.SessionUpdate) {
 		if u.ToolCallID == "" {
 			return
 		}
-		c := t.call(u.ToolCallID)
+		meta := parseDevinMeta(u.Meta)
+		if meta.Started != nil || meta.Completed != nil {
+			t.applySubagentLifecycle(u, meta)
+			return
+		}
+		c := t.calls[u.ToolCallID]
+		if c == nil {
+			if u.SessionUpdate == "tool_call_update" && !selfDescribingToolUpdate(u) {
+				t.dropUnknown(u.ToolCallID, "an update without title, kind, or input")
+				return
+			}
+			c = t.call(u.ToolCallID)
+		}
+		if meta.InferenceToolName != "" {
+			c.inference = meta.InferenceToolName
+		}
 		if u.Title != "" {
 			c.title = u.Title
 		} else if u.Name != "" && c.title == "" {
@@ -234,7 +255,13 @@ func (t *turnSink) apply(u acp.SessionUpdate) {
 		if u.Status != "" {
 			c.status = u.Status
 		}
-		if out := toolOutput(u.Content, u.RawOutput); out != "" {
+		if parent := meta.parent(); parent != "" {
+			if c.keys == nil {
+				c.keys = map[string]string{}
+			}
+			c.keys["acp.subagent.parent"] = parent
+		}
+		if out := toolOutput(u.Content, u.RawOutput); out != "" && c.keys["acp.subagent.parent"] == "" {
 			c.output = out
 		}
 		// A terminal block shows a terminal the agent runs through us:
@@ -412,6 +439,144 @@ func (t *turnSink) call(id string) *callRecord {
 	return c
 }
 
+// devinMeta is the adapter-local recognition table for Devin's subagent
+// lifecycle. cognition.ai keys never cross into records; what persists is the
+// neutral acp.subagent.* family.
+type devinMeta struct {
+	InferenceToolName string `json:"cognition.ai/inferenceToolName"`
+	Started           *struct {
+		AgentID      string `json:"agentId"`
+		Title        string `json:"title"`
+		Task         string `json:"task"`
+		Profile      string `json:"profile"`
+		Depth        int    `json:"depth"`
+		IsBackground *bool  `json:"isBackground"`
+		Model        string `json:"model"`
+	} `json:"cognition.ai/subagent_started"`
+	Completed *struct {
+		AgentID string `json:"agentId"`
+		Success bool   `json:"success"`
+		Summary string `json:"summary"`
+		Depth   int    `json:"depth"`
+	} `json:"cognition.ai/subagent_completed"`
+	Context struct {
+		ParentAgentID string `json:"parentAgentId"`
+	} `json:"cognition.ai/subagent_context"`
+}
+
+func parseDevinMeta(raw json.RawMessage) devinMeta {
+	var m devinMeta
+	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil {
+		return devinMeta{}
+	}
+	return m
+}
+
+func (m devinMeta) parent() string { return m.Context.ParentAgentID }
+
+// selfDescribingToolUpdate reports the only case in which an update may
+// introduce a record: it carries enough truth to be a record rather than a
+// pulse — a title, a kind, or input.
+func selfDescribingToolUpdate(u acp.SessionUpdate) bool {
+	if strings.TrimSpace(u.Title) != "" || strings.TrimSpace(u.Kind) != "" {
+		return true
+	}
+	raw := strings.TrimSpace(string(u.RawInput))
+	return raw != "" && raw != "null" && raw != "{}"
+}
+
+// dropUnknown records one diagnostic per id. Bare lifecycle pulses can repeat
+// for minutes; one line keeps the evidence without turning the log into the pulse.
+func (t *turnSink) dropUnknown(id, why string) {
+	if t.droppedUnknown[id] {
+		return
+	}
+	t.droppedUnknown[id] = true
+	log := t.log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("agent tool update dropped", "toolCall", id, "why", why)
+}
+
+// applySubagentLifecycle consumes Devin's lifecycle updates without minting a
+// record for the agentId they use as toolCallId. Started binds the id to the
+// matching unbound run call; completed annotates only through that written id.
+func (t *turnSink) applySubagentLifecycle(u acp.SessionUpdate, meta devinMeta) {
+	if st := meta.Started; st != nil {
+		agentID := st.AgentID
+		if agentID == "" {
+			agentID = u.ToolCallID
+		}
+		run := t.findUnboundRun(st.Title, st.Task)
+		if run == nil {
+			t.dropUnknown(u.ToolCallID, "subagent lifecycle has no run call")
+			return
+		}
+		if run.keys == nil {
+			run.keys = map[string]string{}
+		}
+		run.keys["acp.subagent.id"] = agentID
+		if st.Profile != "" {
+			run.keys["acp.subagent.profile"] = st.Profile
+		}
+		if st.Model != "" {
+			run.keys["acp.subagent.model"] = st.Model
+		}
+		if st.Depth != 0 {
+			run.keys["acp.subagent.depth"] = strconv.Itoa(st.Depth)
+		}
+		if st.IsBackground != nil {
+			run.keys["acp.subagent.background"] = strconv.FormatBool(*st.IsBackground)
+		}
+		return
+	}
+	co := meta.Completed
+	agentID := co.AgentID
+	if agentID == "" {
+		agentID = u.ToolCallID
+	}
+	for _, id := range t.order {
+		c := t.calls[id]
+		if c.keys["acp.subagent.id"] != agentID {
+			continue
+		}
+		c.keys["acp.subagent.success"] = strconv.FormatBool(co.Success)
+		if co.Summary != "" {
+			c.keys["acp.subagent.summary"] = co.Summary
+		}
+		if co.Depth != 0 {
+			c.keys["acp.subagent.depth"] = strconv.Itoa(co.Depth)
+		}
+		return
+	}
+	t.dropUnknown(u.ToolCallID, "subagent completion has no bound run call")
+}
+
+// findUnboundRun correlates a started lifecycle with a run call of this turn:
+// exact title+task first, then the most recent unbound run call. Correlation
+// never uses progress or timing — identity alone.
+func (t *turnSink) findUnboundRun(title, task string) *callRecord {
+	var fallback *callRecord
+	for _, v := range slices.Backward(t.order) {
+		c := t.calls[v]
+		if c.inference != "run_subagent" || c.keys["acp.subagent.id"] != "" {
+			continue
+		}
+		if fallback == nil {
+			fallback = c
+		}
+		var input struct {
+			Title string `json:"title"`
+			Task  string `json:"task"`
+		}
+		if json.Unmarshal([]byte(c.input), &input) == nil && input.Title == title && input.Task == task {
+			return c
+		}
+	}
+	return fallback
+}
+
 // progress emits the tool-call event once the call has started running
 // (agents first announce a call, then fill in its input), then streams
 // output as it grows.
@@ -419,7 +584,8 @@ func (t *turnSink) progress(c *callRecord) {
 	if !c.emitted && c.status != "" && c.status != "pending" {
 		t.emitCall(c)
 	}
-	if c.emitted && c.output != c.sent {
+	member := c.keys["acp.subagent.parent"] != ""
+	if c.emitted && !member && c.output != c.sent {
 		chunk := c.output
 		if strings.HasPrefix(c.output, c.sent) {
 			chunk = c.output[len(c.sent):]
@@ -433,7 +599,7 @@ func (t *turnSink) progress(c *callRecord) {
 	}
 	// The agent's terminal update is the explicit success/fail signal —
 	// output wording is not a reliable classifier for every tool.
-	if !c.resultSent && (c.status == "completed" || c.status == "failed") {
+	if !c.resultSent && !member && (c.status == "completed" || c.status == "failed") {
 		if tc, err := c.entity(); err == nil {
 			c.resultSent = true
 			failed := c.status == "failed"
@@ -468,6 +634,9 @@ func (c *callRecord) entity() (entity.ToolCall, error) {
 	tc, err := entity.NewToolCall(c.id, name, input, enum.TooltypeDelegated)
 	if err != nil {
 		return entity.ToolCall{}, err
+	}
+	for key, value := range c.keys {
+		tc.SetOptionalContent(key, value)
 	}
 	tc.SetCallAt(c.at)
 	return tc, nil
@@ -644,6 +813,12 @@ func (t *turnSink) finish(res acp.PromptResult, callErr error, cancelled bool) (
 			t.emit(event.NewToolCallEvent(tc))
 		}
 		if err := msg.AddToolCall(tc); err != nil {
+			continue
+		}
+		member := c.keys["acp.subagent.parent"] != ""
+		if member {
+			// Member activity never receives a completion. It keeps only what
+			// was introduced; inventing output or a failed verdict would lie.
 			continue
 		}
 		out := c.output

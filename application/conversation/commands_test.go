@@ -1,6 +1,7 @@
 package appconversation
 
 import (
+	"context"
 	"testing"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
@@ -128,7 +129,7 @@ type commandListingRuntime struct {
 	commands []dservice.AgentCommand
 }
 
-func (r commandListingRuntime) Commands(string) []dservice.AgentCommand {
+func (r commandListingRuntime) Commands(context.Context, string, string) []dservice.AgentCommand {
 	return append([]dservice.AgentCommand(nil), r.commands...)
 }
 

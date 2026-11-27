@@ -132,7 +132,7 @@ func (a *App) room(ctx context.Context, in dservice.InboundMessage, convID strin
 				a.reply(ctx, chat, "Could not link this chat: "+err.Error())
 				return
 			}
-			a.syncMenu(ctx, chat, a.rooms.AgentCommands(info.ID))
+			a.syncMenu(ctx, chat, a.rooms.AgentCommands(ctx, info.ID))
 			a.reply(ctx, chat, fmt.Sprintf("This chat now talks to @%s — %s.", info.Label, firstNonEmpty(info.Title, "Untitled")))
 			return
 		}

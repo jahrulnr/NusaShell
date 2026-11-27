@@ -43,7 +43,8 @@ async function reconnect(code) {
   await sleep(30);
 }
 
-const opened = (cmd, conversationId, turnId = 't1') => ws.serve({ type: 'turn.opened', requestId: cmd.requestId, conversationId, turnId, seq: 0 });
+const opened = (cmd, conversationId, turnId = 't1', payload) =>
+  ws.serve({ type: 'turn.opened', requestId: cmd.requestId, conversationId, turnId, seq: 0, ...(payload ? { payload } : {}) });
 const terminal = (cmd, type, conversationId, payload, turnId = 't1') =>
   ws.serve({ type, requestId: cmd.requestId, conversationId, turnId, seq: 1, payload });
 
@@ -269,7 +270,7 @@ async function openBusyThread(extra = {}, info = {}) {
   const r = state.rooms.c_1;
   assert.equal(chat.submit(r, 'work'), true);
   const cmd = sentTurns().at(-1);
-  opened(cmd, 'c_1', 't2');
+  opened(cmd, 'c_1', 't2', { steerable: true });
   await sleep(10);
   assert.equal(chat.isBusy(r), true);
   return { r, cmd };
@@ -1056,9 +1057,11 @@ test('an unconsumed attachment-only steer returns to the draft, not the queue', 
   assert.equal(r.queue.length, 0);
   assert.equal(sentTurns().length, 1, 'steer must not start a new turn');
   assert.match(state.toasts.at(-1).message, /back in the draft/);
+  assert.equal(state.toasts.at(-1).kind, 'info');
+  assert.equal(state.toasts.some((t) => t.kind === 'error'), false);
 });
 
-test('a terminal snapshot keeps an unconfirmed steer for a late rejection', async () => {
+test('a steer the server never accepted is one ordinary send after the turn ends', async () => {
   const { r, cmd } = await openBusyThread();
   const files = [{ key: 'k1', status: 'ready', id: 'u_1', name: 'shot.png' }];
   assert.equal(chat.submit(r, '', [], files, 't2'), true);
@@ -1068,8 +1071,113 @@ test('a terminal snapshot keeps an unconfirmed steer for a late rejection', asyn
   assert.equal(r.queue.length, 0);
   ws.serve({ type: 'error', requestId: steer.requestId, code: 'not_found', message: 'no live turn with that id' });
   assert.equal(r.steers.length, 0);
-  assert.deepEqual(r.files, files);
+  assert.equal(r.queue.length, 1, 'a steer the server never accepted is one ordinary send');
+  assert.deepEqual(r.queue[0].files, files);
+  assert.equal(state.toasts.length, 0, 'that failover has no toast');
+  await sleep(80);
+  assert.equal(r.queue.length, 0, 'the room takes that one send once the turn has ended');
+  assert.deepEqual(sentTurns().at(-1).payload.uploads, ['u_1']);
+});
+
+test('only a declared steerable turn is steered; kind send is not enough', async () => {
+  const { r } = await openBusyThread();
+  assert.equal(r.live.steerable, true, 'turn.opened stores the boolean it was given');
+  delete r.live.steerable;
+  assert.equal(r.live.kind, 'send');
+  const steers = () => ws.sent.filter((c) => c.type === 'turn.steer');
+  assert.equal(chat.submit(r, 'follow up', [], [], r.live.turnId), true);
+  assert.equal(steers().length, 0, 'an absent flag queues');
+  assert.equal(r.queue.at(-1).text, 'follow up');
+
+  r.live.steerable = false;
+  assert.equal(chat.submit(r, 'still no', [], [], r.live.turnId), true);
+  assert.equal(steers().length, 0, 'false queues the same way');
+  assert.equal(r.queue.at(-1).text, 'still no');
+
+  r.live.steerable = '';
+  assert.equal(chat.submit(r, 'blank flag', [], [], r.live.turnId), true);
+  assert.equal(steers().length, 0, 'an empty flag is absence');
+  assert.equal(r.queue.at(-1).text, 'blank flag');
+  assert.equal(state.toasts.length, 0);
+
+  r.live.kind = 'edit';
+  r.live.steerable = true;
+  assert.equal(chat.submit(r, 'declared', [], [], r.live.turnId), true);
+  assert.equal(steers().at(-1).type, 'turn.steer');
+  assert.equal(steers().at(-1).payload.content, 'declared', 'kind is not what grants the steer');
+
+  r.live.terminal = { type: 'turn.completed' };
+  const queued = r.queue.length;
+  assert.equal(chat.submit(r, 'after the end', [], [], r.live.turnId), true);
+  assert.equal(steers().at(-1).payload.content, 'declared', 'an ended turn is not steered again');
+  assert.equal(r.queue.at(-1).text, 'after the end');
+  assert.equal(r.queue.length, queued + 1);
+  assert.equal(state.toasts.length, 0, 'an ended turn queues with no toast');
+});
+
+test('a watched turn takes steerable from the opening frame and the active snapshot', async () => {
+  serveThread('c_watch');
+  chat.navigate('#/c/c_watch');
   await sleep(40);
+  const r = state.rooms.c_watch;
+  ws.serve({ type: 'conversation.activity', conversationId: 'c_watch', turnId: 't9', payload: { state: 'opened', kind: 'edit', requestId: 'req-other' } });
+  ws.serve({ type: 'turn.opened', conversationId: 'c_watch', turnId: 't9', seq: 0, payload: { steerable: true } });
+  await sleep(20);
+  assert.equal(r.live.kind, 'edit');
+  assert.equal(r.live.steerable, true);
+  assert.equal(chat.submit(r, 'into the edit', [], [], 't9'), true);
+  assert.equal(ws.sent.at(-1).type, 'turn.steer');
+
+  ws.open();
+  await sleep(40);
+  const watch = ws.sent.findLast((x) => x.type === 'turn.watch');
+  ws.serve({
+    type: 'turn.resync_required', requestId: watch.requestId, conversationId: 'c_watch', turnId: 't9',
+    payload: { turn: 'active', steerable: false },
+  });
+  assert.equal(r.live.steerable, false, 'a declared no replaces the earlier yes');
+  const queued = r.queue.length;
+  assert.equal(chat.submit(r, 'after the no', [], [], 't9'), true);
+  assert.notEqual(ws.sent.at(-1).type, 'turn.steer');
+  assert.equal(r.queue.length, queued + 1);
+
+  ws.open();
+  await sleep(40);
+  const watch2 = ws.sent.findLast((x) => x.type === 'turn.watch');
+  ws.serve({
+    type: 'turn.resync_required', requestId: watch2.requestId, conversationId: 'c_watch', turnId: 't9',
+    payload: { turn: 'active' },
+  });
+  assert.equal(r.live.steerable, false, 'a snapshot that omits the flag does not clear a declared no');
+});
+
+test('a steer the server never accepted is queued once, with no toast', async () => {
+  const { r } = await openBusyThread();
+  const cases = [
+    { code: 'not_found', message: 'no live turn with that id' },
+    { code: 'invalid_argument', message: 'that turn does not take steering' },
+    { code: 'queue_full', message: 'turn steering submission bound reached' },
+  ];
+  for (const err of cases) {
+    const before = state.toasts.length;
+    const n = r.queue.length;
+    assert.equal(chat.submit(r, 'line ' + err.code, [], [], 't2'), true);
+    const steer = ws.sent.at(-1);
+    assert.equal(steer.type, 'turn.steer');
+    ws.serve({ type: 'error', requestId: steer.requestId, code: err.code, message: err.message });
+    assert.equal(r.steers.length, 0);
+    assert.equal(r.queue.length, n + 1);
+    assert.equal(r.queue.at(-1).text, 'line ' + err.code);
+    assert.equal(state.toasts.length, before, err.code + ' does not toast');
+    assert.equal(ws.sent.filter((c) => c.type === 'turn.steer' && c.payload.content === 'line ' + err.code).length, 1);
+  }
+  r.draft = '';
+  assert.equal(chat.submit(r, 'bad payload', [], [], 't2'), true);
+  const bad = ws.sent.at(-1);
+  ws.serve({ type: 'error', requestId: bad.requestId, code: 'invalid_argument', message: 'turn.steer payload is invalid' });
+  assert.equal(r.draft, 'bad payload', 'a malformed steer returns to the draft');
+  assert.equal(r.queue.some((q) => q.text === 'bad payload'), false);
+  assert.equal(state.toasts.at(-1).kind, 'error');
 });
 
 test('steer receipts after reconnect reconcile pending, then a failed snapshot', async () => {
@@ -1112,7 +1220,7 @@ test('steer receipts after reconnect reconcile pending, then a failed snapshot',
 test('a never-saved first turn returns its queue, steers, and draft to home', async () => {
   serveThread('c_1', { infoFails: 99 });
   const cmd = firstSend('hello');
-  opened(cmd, 'c_1');
+  opened(cmd, 'c_1', 't1', { steerable: true });
   await sleep(10);
   const r = state.rooms.c_1;
   const files = [{ key: 'k1', status: 'ready', id: 'u_1', name: 'shot.png' }];

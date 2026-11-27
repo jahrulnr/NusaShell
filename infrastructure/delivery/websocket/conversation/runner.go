@@ -78,7 +78,7 @@ func (h *Hub) Run(ctx context.Context, convID, providerID, modelID, content stri
 	defer stop()
 	h.turns[t.id] = t
 	h.wg.Add(1)
-	h.emitLocked(t, "turn.opened", openedPayload{StartedAt: t.startedAt.UnixMilli()}, true)
+	h.emitLocked(t, "turn.opened", h.openedBody(t), true)
 	h.broadcastLocked(activityFrame(t, "opened"))
 	h.mu.Unlock()
 
@@ -131,7 +131,8 @@ func (h *Hub) Steer(convID, text string) bool {
 		// Forward outside the lock: the callback reaches into the
 		// application, and the fold it feeds re-enters the hub through the
 		// turn's event stream.
-		return steerJob(convID, text)
+		receipt, ok := steerJob(convID, valueobject.UserInput{Text: text})
+		return ok && receipt != nil
 	}
 	return false
 }

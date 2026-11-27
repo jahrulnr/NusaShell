@@ -43,7 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A queued or cross-room send no longer fails falsely with `send completed without a persistence receipt`: the job-owned live journal now seals with the same persistence receipt the send job committed, while the guard itself remains in place.
 - Agent slash-command catalogs now mirror the agent instead of inventing rows: an agent room has no native `compact` row unless its session reports one, an agent-reported command wins a name collision with a native thread command, and an agent that reports nothing leaves only `clear` and `fork`.
+- An agent-reported slash-command list is kept as conversation state after the agent process idle-stops or NusaShell restarts: the room serves the last list that same agent reported, a newer live report replaces it instead of merging, and an agent that never reported commands still shows none.
 - Chat-completions requests no longer send an unconditional prompt-cache TTL. Providers that support the extension accept different TTL vocabularies (and some reject the request outright), so the option stays absent until provider capability and TTL configuration are explicit.
 - A pick the agent does not offer yet is kept as deferred and reported as such, instead of being counted as applied and silently ignored — the turn still runs.
 - A file an agent hands over with no type (a voice note as `application/octet-stream`) is named by its bytes and file name, so it reaches the tool that can transcribe it instead of being stored as an opaque blob.

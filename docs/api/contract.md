@@ -176,6 +176,13 @@ following never leave the server on any endpoint or frame:
   a message from `turn.send` or `turn.edit` carries none. The id is owner-side
   bookkeeping only: provider replay and agent prompts see the message content
   alone.
+- **Whether a live turn takes steering.** `turn.opened` and the active
+  resync snapshot carry `steerable` as `true` or `false`, and `false` is
+  written, never omitted. Absent means unknown: the client queues the
+  draft and does not call `turn.steer`. A submission the server does not
+  accept is queued by the client, once; an accepted steer the turn never
+  consumes returns to the draft and does not become a queued send.
+  Frames and error codes are normative in [`websocket.md`](./websocket.md).
 - **Attachment references, not bytes.** Message and tool-output
   attachments project `mediaType`, `modality`, `uri`, and optional
   `name` — the stored reference (including `file://` local paths)

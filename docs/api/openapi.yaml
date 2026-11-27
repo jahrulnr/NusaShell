@@ -3273,12 +3273,16 @@ paths:
       summary: Multiplexed turn WebSocket
       description: |
         Upgrades to the single WebSocket that carries all turn traffic —
-        the commands `turn.send`, `turn.edit`, `turn.resume`, `turn.cancel`, `turn.watch`
-        and the event stream `turn.opened`/`turn.delta`/`turn.phase`/
+        the commands `turn.send`, `turn.edit`, `turn.resume`, `turn.cancel`,
+        `turn.watch`, `turn.steer`, `turn.steer_recall`
+        and the event stream `turn.opened` (carries `steerable`: `true` or
+        `false`, never omitted; absent means unknown and the client queues —
+        normative rules in `websocket.md`)/`turn.delta`/`turn.phase`/
         `turn.tool_call`/`turn.tool_input`/`turn.tool_output` (ordered
         tool argument and output chunks — progress, not completion)
         /`turn.step_finished`/`turn.completed`/
-        `turn.failed`, plus `turn.cancel_ack`, `turn.resync_required`, and
+        `turn.failed`, plus `turn.cancel_ack`, `turn.steer_ack`,
+        `turn.steer_recalled`, `turn.resync_required`, and
         a generic `error` frame for malformed commands.
 
         The handshake must satisfy the same-origin rule: `Host` must match

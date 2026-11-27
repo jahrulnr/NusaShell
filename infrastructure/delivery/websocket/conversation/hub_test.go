@@ -1767,3 +1767,62 @@ func TestQueuedNoticeNamesTheWaitingCount(t *testing.T) {
 	}
 	close(release)
 }
+
+// B-110: only the opening tool_call frame carries the adapter-neutral
+// subagent key family. Later frames correlate by callId and never repeat it.
+func TestToolCallFrameCarriesOnlyScopedSubagentKeysOnce(t *testing.T) {
+	member, err := entity.NewToolCall("member", "read_file", `{}`, enum.TooltypeDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member.SetOptionalContent("acp.subagent.parent", "run-1")
+	member.SetOptionalContent("gemini.thought_signature", "do-not-cross")
+	ordinary, err := entity.NewToolCall("ordinary", "exec", `{}`, enum.TooltypeDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHub(t, stubSender{fn: func(_ context.Context, convID, _, _, _ string, onEvent event.TurnEventHandler) (appconversation.SendResult, error) {
+		onEvent(event.NewToolCallEvent(member))
+		onEvent(event.NewToolOutputEvent(member, "work"))
+		onEvent(event.NewToolResultEvent(member, false))
+		onEvent(event.NewToolCallEvent(ordinary))
+		return appconversation.SendResult{ConversationID: convID, UserMessagePersisted: true}, nil
+	}})
+	ws := dial(t, h)
+	sendCommand(t, ws, `{"type":"turn.send","requestId":"keys","payload":{"providerId":"gw1","modelId":"m1","content":"hi"}}`)
+
+	payloads := map[string][]map[string]any{}
+	for {
+		f := readFrame(t, ws)
+		var payload map[string]any
+		if len(f.Payload) > 0 {
+			if err := json.Unmarshal(f.Payload, &payload); err != nil {
+				t.Fatalf("%s payload: %v", f.Type, err)
+			}
+		}
+		payloads[f.Type] = append(payloads[f.Type], payload)
+		if f.Type == "turn.completed" || f.Type == "turn.failed" {
+			break
+		}
+	}
+	if len(payloads["turn.tool_call"]) != 2 {
+		t.Fatalf("tool_call frames = %+v", payloads["turn.tool_call"])
+	}
+	memberKeys, ok := payloads["turn.tool_call"][0]["keys"].(map[string]any)
+	if !ok || memberKeys["acp.subagent.parent"] != "run-1" {
+		t.Fatalf("member keys = %#v", payloads["turn.tool_call"][0]["keys"])
+	}
+	if _, leaked := memberKeys["gemini.thought_signature"]; leaked {
+		t.Fatalf("raw optionalContent crossed: %#v", memberKeys)
+	}
+	if _, present := payloads["turn.tool_call"][1]["keys"]; present {
+		t.Fatalf("ordinary tool carried keys: %#v", payloads["turn.tool_call"][1])
+	}
+	for _, typ := range []string{"turn.tool_input", "turn.tool_output", "turn.tool_result"} {
+		for _, payload := range payloads[typ] {
+			if _, repeated := payload["keys"]; repeated {
+				t.Fatalf("%s repeated keys: %#v", typ, payload)
+			}
+		}
+	}
+}

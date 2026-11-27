@@ -187,6 +187,10 @@ func cancelAckFrame(requestID, convID, turnID string) serverFrame {
 // reattach and never restarts on reload.
 type openedPayload struct {
 	StartedAt int64 `json:"startedAt"` // unix milliseconds
+	// Steerable is written on every opened frame. False is a declared no,
+	// never an omitted field: a missing value is what an older peer looks
+	// like, and the client treats that as unknown.
+	Steerable bool `json:"steerable"`
 }
 
 // resyncPayload is the turn.resync_required body. Turn is "active"
@@ -196,8 +200,11 @@ type openedPayload struct {
 // client reconciles submitted steering against the snapshot and against
 // history, and never auto-resends an unknown outcome.
 type resyncPayload struct {
-	Turn      string              `json:"turn"`
-	StartedAt int64               `json:"startedAt,omitempty"` // unix milliseconds
+	Turn      string `json:"turn"`
+	StartedAt int64  `json:"startedAt,omitempty"` // unix milliseconds
+	// Steerable repeats the opened declaration on an active snapshot.
+	// It is always written: false stays on the wire.
+	Steerable bool                `json:"steerable"`
 	Steering  []steerStatePayload `json:"steering,omitempty"`
 	Terminal  *terminalPayload    `json:"terminal,omitempty"`
 	// Parts is the turn's bounded live snapshot — ordered segment-shaped
@@ -297,8 +304,9 @@ type reasoningPayload struct {
 }
 
 type toolCallPayload struct {
-	CallID string `json:"callId"`
-	Name   string `json:"name"`
+	CallID string            `json:"callId"`
+	Name   string            `json:"name"`
+	Keys   map[string]string `json:"keys,omitempty"`
 }
 
 type toolInputPayload struct {

@@ -241,10 +241,16 @@ func (j *Send) Steer(text string) { j.mailbox().push(text) }
 // SteerInput buffers a full input — text with its selections, uploads, marks
 // and relay record — so the fold can write one line carrying all of it. It
 // reports whether the mailbox took it; a full mailbox buffered nothing.
-func (j *Send) SteerInput(in valueobject.UserInput, record *entity.Message) bool {
-	_, err := j.mailbox().SubmitBefore(in, j.Deps.Config.MailboxCap, record)
-	return err == nil
+func (j *Send) SteerInput(in valueobject.UserInput, record *entity.Message) (any, bool) {
+	r, err := j.mailbox().SubmitBefore(in, j.Deps.Config.MailboxCap, record)
+	if err != nil {
+		return nil, false
+	}
+	return r, true
 }
+
+// RecallInput withdraws the pending input submitted under inputID.
+func (j *Send) RecallInput(inputID string) bool { return j.mailbox().RecallID(inputID) }
 
 // SteerInputAvailable reports whether the mailbox has room right now.
 func (j *Send) SteerInputAvailable() bool { return j.mailbox().available(j.Deps.Config.MailboxCap) }
@@ -522,7 +528,7 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		if j.Receipt == nil {
 			return apperror.NewInternalError("send persistence receipt missing", nil)
 		}
-		if err := j.Receipt.appendUserMessage(func() (bool, error) {
+		appendErr := j.Receipt.appendUserMessage(func() (bool, error) {
 			if j.Opts.AcceptedRecord != nil {
 				return true, nil
 			}
@@ -530,13 +536,15 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 				return false, apperror.New(408, "send canceled", err)
 			}
 			return d.Convs.AppendMessage(ctx, convID, user)
-		}); err != nil {
-			if fresh && !j.Receipt.UserMessagePersisted() {
+		})
+		persisted = j.Receipt.UserMessagePersisted()
+		if appendErr != nil {
+			if fresh && !persisted {
 				// The caller's ctx may already be canceled. A store that
 				// honors it would leave the partial room behind.
 				_ = d.Convs.Delete(context.WithoutCancel(ctx), convID)
 			}
-			return err
+			return appendErr
 		}
 
 		if agentRoom {

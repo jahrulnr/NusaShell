@@ -431,3 +431,123 @@ test('a queue a fork left behind sends when the owner comes back', async () => {
   assert.equal(sentTurns()[0].payload.content, 'left behind');
   assert.equal(r.queue.length, 0);
 });
+
+// A name the catalog has not classified yet is neither a command nor a
+// message. Enter waits for the catalog. It does not keep its own list.
+test('a harness compact typed before the catalog answers runs once the catalog does', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  serveRoom(['c_1'], {
+    'GET /api/commands': async () => { await gate; return catalog(native('compact'), native('clear'), native('fork')); },
+    'POST /api/conversations/c_1/commands': () => ({ command: 'compact', conversation: { id: 'c_1', title: 'Thread', providerId: 'p', modelId: 'm' } }),
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(30);
+  const r = state.rooms.c_1;
+  r.draft = '/compact';
+  assert.equal(chat.submit(r, '/compact'), false);
+  assert.equal(chat.submit(r, '/compact'), false, 'a second Enter during the wait does not send twice');
+  await sleep(40);
+  assert.equal(commandPosts().length, 0);
+  assert.equal(sentTurns().length, 0, 'it is not a message while the catalog is out');
+  assert.equal(r.draft, '/compact');
+  release();
+  await sleep(50);
+  assert.equal(commandPosts().length, 1);
+  assert.equal(commandPosts()[0].body.name, 'compact');
+  assert.equal(sentTurns().length, 0);
+  assert.equal(r.draft, '');
+});
+
+test('an agent compact that arrives with the catalog is still a turn', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  serveRoom(['c_1'], {
+    'GET /api/commands': async () => { await gate; return catalog(agent('compact'), native('clear'), native('fork')); },
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(30);
+  const r = state.rooms.c_1;
+  r.draft = '/compact';
+  assert.equal(chat.submit(r, '/compact'), false);
+  release();
+  await sleep(50);
+  assert.equal(commandPosts().length, 0, 'an agent row is not runCommand');
+  assert.equal(sentTurns().at(-1).payload.content, '/compact');
+  assert.equal(r.draft, '');
+});
+
+test('clear still runs while the catalog is unread', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  serveRoom(['c_1'], {
+    'GET /api/commands': async () => { await gate; return catalog(native('clear'), native('fork')); },
+    'POST /api/conversations/c_1/commands': () => [409, { code: 'confirmation_required', detail: 'clear requires confirm' }],
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(30);
+  const r = state.rooms.c_1;
+  r.draft = '/clear';
+  chat.submit(r, '/clear');
+  await sleep(20);
+  assert.equal(commandPosts().length, 1, 'clear does not wait for the catalog');
+  assert.equal(sentTurns().length, 0);
+  release();
+});
+
+test('a catalog that fails to load keeps the text and tells the owner', async () => {
+  const r = await openThread('c_1', {
+    'GET /api/commands': () => [500, { code: 'internal', detail: 'the command list could not be read' }],
+  });
+  r.draft = '/compact';
+  assert.equal(chat.submit(r, '/compact'), false);
+  assert.equal(sentTurns().length, 0);
+  assert.equal(commandPosts().length, 0);
+  assert.equal(r.draft, '/compact');
+  assert.equal(state.toasts.at(-1).message, 'Commands are unavailable: the command list could not be read');
+  assert.equal(state.toasts.at(-1).kind, 'info');
+});
+
+test('a catalog that answers after the bound does not send', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  serveRoom(['c_1'], {
+    'GET /api/commands': async () => { await gate; return catalog(native('compact'), native('clear'), native('fork')); },
+    'POST /api/conversations/c_1/commands': () => ({ command: 'compact', conversation: { id: 'c_1', title: 'Thread', providerId: 'p', modelId: 'm' } }),
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(30);
+  const r = state.rooms.c_1;
+  r.draft = '/compact';
+  chat.submit(r, '/compact');
+  await sleep(1200);
+  assert.equal(commandPosts().length, 0);
+  assert.equal(sentTurns().length, 0);
+  assert.equal(r.draft, '/compact');
+  assert.equal(state.toasts.at(-1).message, 'Commands are unavailable: the server did not answer');
+  release();
+  await sleep(50);
+  assert.equal(commandPosts().length, 0, 'the late catalog does not send the held line');
+  assert.equal(sentTurns().length, 0);
+  assert.equal(r.draft, '/compact');
+});
+
+test('editing the draft during the wait drops the held command', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  serveRoom(['c_1'], {
+    'GET /api/commands': async () => { await gate; return catalog(native('compact'), native('clear'), native('fork')); },
+    'POST /api/conversations/c_1/commands': () => ({ command: 'compact' }),
+  });
+  chat.navigate('#/c/c_1');
+  await sleep(30);
+  const r = state.rooms.c_1;
+  r.draft = '/compact';
+  chat.submit(r, '/compact');
+  r.draft = 'changed my mind';
+  release();
+  await sleep(50);
+  assert.equal(commandPosts().length, 0);
+  assert.equal(sentTurns().length, 0);
+  assert.equal(r.draft, 'changed my mind');
+});

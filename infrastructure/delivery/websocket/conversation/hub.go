@@ -216,17 +216,25 @@ type Hub struct {
 	// queueDepth reads how many messages wait in a room, so a queued notice
 	// names the count at emit time rather than a number kept beside the queue.
 	queueDepth func(convID string) int
-	// jobControlCancel/jobControlSteer reach the room worker that owns a
-	// journal-only turn's execution — the hub only journaled that turn, so
-	// canceling its bookkeeping context or writing to a steering mailbox it
-	// never had would touch nothing. The direction is one-way, hub→app, set
-	// once at wiring: the app never calls back into the hub through these,
-	// and a future need for the reverse direction means the design is wrong,
-	// not that the field pair is incomplete. Nil (the CLI's composition or a
-	// test) leaves journal-only turns uncancelable and unsteerable through
-	// the hub — the same blind run they had before, never a crash.
+	// jobControlCancel/jobControlSteer/jobControlRecall reach the room
+	// worker that owns a journal-only turn's execution — the hub only
+	// journaled that turn, so canceling its bookkeeping context or writing
+	// to a steering mailbox it never had would touch nothing. The direction
+	// is one-way, hub→app, set once at wiring: the app never calls back into
+	// the hub through these, and a future need for the reverse direction
+	// means the design is wrong, not that the set is incomplete. Nil (the
+	// CLI's composition or a test) leaves journal-only turns uncancelable
+	// and unsteerable through the hub — the same blind run they had before,
+	// never a crash. Steer carries the full input, including the command's
+	// request id, and returns the mailbox receipt the journal shares with
+	// the job. Recall withdraws that same id.
 	jobControlCancel func(convID string) bool
-	jobControlSteer  func(convID, text string) bool
+	jobControlSteer  func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool)
+	jobControlRecall func(convID, inputID string) bool
+	// jobControlMu serializes a journal-only steer or recall with its
+	// forward. The forward runs without h.mu — the worker it reaches can
+	// re-enter the hub through the turn's event stream.
+	jobControlMu sync.Mutex
 	// finished run after every turn ends (see OnFinished); events see
 	// every turn event (see OnEvent).
 	finished []func(convID, kind string, origin valueobject.TurnOrigin, external bool, err error)
@@ -259,11 +267,30 @@ func (h *Hub) UseUploads(u Uploads) { h.uploads = u }
 // interruption, and steer answers true only when the running job accepted
 // the input. Set once at composition time — see the field comment for the
 // direction rule.
-func (h *Hub) UseJobControl(cancel func(convID string) bool, steer func(convID, text string) bool) {
+func (h *Hub) UseJobControl(cancel func(convID string) bool, steer func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool), recall func(convID, inputID string) bool) {
 	h.mu.Lock()
 	h.jobControlCancel = cancel
 	h.jobControlSteer = steer
+	h.jobControlRecall = recall
 	h.mu.Unlock()
+}
+
+// steerableLocked reports whether this live turn accepts turn.steer.
+// A socket-admitted send has its own mailbox. A journal-only send does
+// only when the worker forward is wired. Anything else — edit, resume,
+// a finished turn — is a declared no. Callers hold h.mu.
+func (h *Hub) steerableLocked(t *turn) bool {
+	if t == nil || t.terminal || t.kind != turnSend {
+		return false
+	}
+	if t.jobOwned {
+		return h.jobControlSteer != nil
+	}
+	return t.steering != nil
+}
+
+func (h *Hub) openedBody(t *turn) openedPayload {
+	return openedPayload{StartedAt: t.startedAt.UnixMilli(), Steerable: h.steerableLocked(t)}
 }
 
 // UsePlanEvents sets the registry update_plan resolves the room's live
@@ -636,7 +663,7 @@ func (h *Hub) admitAndRun(c *conn, requestID, convID string, job turn) {
 	// worker before its Add. `opened` is journaled while still locked
 	// so seq 0 provably precedes every stream frame.
 	h.wg.Add(1)
-	h.emitLocked(t, "turn.opened", openedPayload{StartedAt: t.startedAt.UnixMilli()}, true)
+	h.emitLocked(t, "turn.opened", h.openedBody(t), true)
 	// The room-activity notice enqueues on every socket under the same
 	// lock — it provably follows seq 0 on each wire.
 	h.broadcastLocked(activityFrame(t, "opened"))

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,8 +14,10 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	repoagent "github.com/jahrulnr/nusashell/infrastructure/repository/agent"
 	repoupload "github.com/jahrulnr/nusashell/infrastructure/repository/upload"
 	repoworkspace "github.com/jahrulnr/nusashell/infrastructure/repository/workspace"
 	"github.com/jahrulnr/nusashell/infrastructure/service/agent/acp"
@@ -426,6 +429,94 @@ func TestIdleProcessesAreReaped(t *testing.T) {
 	}
 }
 
+// Commands the agent already reported are conversation state, not process
+// state: an idle-stop must not make them vanish.
+func TestCommandsSurviveIdleStop(t *testing.T) {
+	store := repoagent.New(t.TempDir(), nil)
+	rt, in := setupCatalog(t, "hello", store)
+	ctx := timeout(t)
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID())) == 0 {
+		t.Fatal("the session never reported its commands")
+	}
+	rt.ReapIdle(0)
+	if len(rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID())) == 0 {
+		t.Fatal("reported commands disappeared with the idle process")
+	}
+}
+
+// An agent that never reports commands leaves no rows behind, before or after
+// its process goes away — absence is the honest answer, not a placeholder.
+func TestCommandsStayAbsentWhenTheAgentNeverReportsAny(t *testing.T) {
+	store := repoagent.New(t.TempDir(), nil)
+	rt, in := setupCatalog(t, "hello", store)
+	if err := in.Agent.SetEnv(map[string]string{"FAKE_ACP_COMMANDS": "none"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := timeout(t)
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID()); len(got) != 0 {
+		t.Fatalf("commands = %+v, want none", got)
+	}
+	rt.ReapIdle(0)
+	if got := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID()); len(got) != 0 {
+		t.Fatalf("commands after idle-stop = %+v, want none", got)
+	}
+}
+
+// A later live session replaces the stored list as one report. Lists are
+// never merged: a command absent from the newer report disappears even when
+// it was present in the older one.
+func TestCommandsAreReplacedByTheNextLiveSession(t *testing.T) {
+	store := repoagent.New(t.TempDir(), nil)
+	rt, in := setupCatalog(t, "hello", store)
+	ctx := timeout(t)
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	in.Conversation.ForgetAgentSession()
+	if err := in.Agent.SetEnv(map[string]string{"FAKE_ACP_COMMANDS": "review,explain"}); err != nil {
+		t.Fatal(err)
+	}
+	next(t, &in, "again")
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	rt.ReapIdle(0)
+	got := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID())
+	names := make([]string, 0, len(got))
+	for _, cmd := range got {
+		names = append(names, cmd.Name)
+	}
+	if strings.Join(names, ",") != "review,explain" {
+		t.Fatalf("stored commands = %v, want exactly [review explain] — no merge with compact", names)
+	}
+}
+
+// The stored list belongs to the conversation's agent, not to the room key
+// alone: after the room moves to another agent, the previous agent's commands
+// cannot appear for the new one.
+func TestStoredCommandsDoNotCrossAnAgentSwitch(t *testing.T) {
+	store := repoagent.New(t.TempDir(), nil)
+	ctx := timeout(t)
+	cat := drepo.AgentCommandCatalog{AgentID: "old-agent", Commands: []dservice.AgentCommand{{Name: "compact"}}, ReportedAt: time.Now()}
+	if err := store.SaveCommandCatalog(ctx, "c_room", cat); err != nil {
+		t.Fatal(err)
+	}
+	rt := New(Options{ClientName: "nusashell-test", ClientVersion: "0", Catalog: store})
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+	if got := rt.Commands(ctx, "c_room", "new-agent"); len(got) != 0 {
+		t.Fatalf("the previous agent's commands crossed the switch: %+v", got)
+	}
+	if got := rt.Commands(ctx, "c_room", "old-agent"); len(got) != 1 || got[0].Name != "compact" {
+		t.Fatalf("the owning agent lost its stored commands: %+v", got)
+	}
+}
+
 func TestDiscardDeletesTheAgentsSession(t *testing.T) {
 	rt, in := setup(t, "hello")
 	trace := traceTo(t, in.Agent, map[string]string{})
@@ -555,5 +646,40 @@ func TestInstructionsWarnThatADroppedTurnsFilesStay(t *testing.T) {
 	}
 	if line := lineWith(readTrace(t, trace), "prompt_start"); !strings.Contains(line, "may still be there") {
 		t.Fatalf("the first input does not carry the warning: %s", line)
+	}
+}
+
+// Command updates obey the same wire-order discipline as options: a stale
+// replay cannot roll back — or durably overwrite — a newer report.
+func TestStaleCommandUpdateCannotClobberTheStoredReport(t *testing.T) {
+	store := repoagent.New(t.TempDir(), nil)
+	rt := New(Options{ClientName: "nusashell-test", ClientVersion: "0", Catalog: store})
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+	p := &proc{agentID: "fake", sessions: map[string]*session{}, early: map[string][]earlyUpdate{}}
+	s := &session{convID: "c_room", acpID: "sess", proc: p}
+	p.sessions["sess"] = s
+	rt.sessions["c_room"] = s
+	h := &handler{runtime: rt, proc: p}
+	mk := func(names ...string) string {
+		list := make([]map[string]string, 0, len(names))
+		for _, name := range names {
+			list = append(list, map[string]string{"name": name})
+		}
+		raw, _ := json.Marshal(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": list})
+		return string(raw)
+	}
+	h.OnNotification("session/update", "sess", json.RawMessage(mk("new")), 2)
+	h.OnNotification("session/update", "sess", json.RawMessage(mk("old")), 1)
+	ctx := timeout(t)
+	got := rt.Commands(ctx, "c_room", "fake")
+	if len(got) != 1 || got[0].Name != "new" {
+		t.Fatalf("live commands = %+v, want the newer report", got)
+	}
+	stored, err := store.CommandCatalog(ctx, "c_room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Commands) != 1 || stored.Commands[0].Name != "new" {
+		t.Fatalf("stored commands = %+v, want the newer report", stored.Commands)
 	}
 }

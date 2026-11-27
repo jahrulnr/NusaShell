@@ -59,7 +59,11 @@ type Steerable interface {
 // delivers it the same way — the job folds it at its own safe point.
 type InputSteerable interface {
 	Steerable
-	SteerInput(in valueobject.UserInput, record *entity.Message) bool
+	// SteerInput buffers the input and returns the mailbox receipt the
+	// caller shares with the job. The receipt is untyped here so this
+	// package does not depend on the job layer that owns it.
+	SteerInput(in valueobject.UserInput, record *entity.Message) (receipt any, ok bool)
+	RecallInput(inputID string) bool
 	SteerInputAvailable() bool
 }
 
@@ -200,20 +204,45 @@ func (w *Worker) Steer(text string) bool {
 
 // RecallSteer withdraws the newest un-fired input from the running job.
 // ok=false — nothing pending (or already consumed, or nothing running).
+func (w *Worker) RecallSteer() (string, bool) {
+	w.mu.Lock()
+	running := w.running
+	w.mu.Unlock()
+	if s, ok := running.(Steerable); ok {
+		return s.RecallSteer()
+	}
+	return "", false
+}
+
 // SteerInput buffers a full input on the running job. found is false when the
 // running job takes no steering at all — the caller falls back to its queue;
 // accepted is false when the job's mailbox was full and buffered nothing.
-func (w *Worker) SteerInput(in valueobject.UserInput, record *entity.Message) (found, accepted bool) {
+// receipt is the mailbox entry the caller can share with that job.
+func (w *Worker) SteerInput(in valueobject.UserInput, record *entity.Message) (found bool, receipt any, accepted bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.unwind || w.dead {
-		return false, false
+		return false, nil, false
 	}
 	s, ok := w.running.(InputSteerable)
 	if !ok {
-		return false, false
+		return false, nil, false
 	}
-	return true, s.SteerInput(in, record)
+	receipt, accepted = s.SteerInput(in, record)
+	return true, receipt, accepted
+}
+
+// RecallInput withdraws one pending input by the id it was submitted under.
+// False means nothing pending carries that id.
+func (w *Worker) RecallInput(inputID string) bool {
+	w.mu.Lock()
+	running := w.running
+	w.mu.Unlock()
+	s, ok := running.(InputSteerable)
+	if !ok {
+		return false
+	}
+	return s.RecallInput(inputID)
 }
 
 // SteerInputAvailable reports whether the running job both takes full input and
@@ -230,16 +259,6 @@ func (w *Worker) SteerInputAvailable() (found, available bool) {
 		return false, false
 	}
 	return true, s.SteerInputAvailable()
-}
-
-func (w *Worker) RecallSteer() (string, bool) {
-	w.mu.Lock()
-	running := w.running
-	w.mu.Unlock()
-	if s, ok := running.(Steerable); ok {
-		return s.RecallSteer()
-	}
-	return "", false
 }
 
 // OnWorkerGoroutine reports whether the CALLER is the goroutine currently

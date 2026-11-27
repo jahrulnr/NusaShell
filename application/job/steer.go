@@ -206,6 +206,27 @@ func (s *SteeringInput) requeue(entries []steeringEntry) {
 	s.pending = append(append([]steeringEntry(nil), entries...), s.pending...)
 }
 
+// RecallID withdraws the pending input submitted under inputID. Empty
+// ids never match: a text-only push has none, and recalling "the newest"
+// is a different operation. ok=false — unknown, claimed, persisted, or
+// already recalled. Atomic against claim, same as Recall.
+func (s *SteeringInput) RecallID(inputID string) bool {
+	if inputID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.pending {
+		if e.input.InputID != inputID || e.receipt == nil || e.receipt.State() != SteeringPending {
+			continue
+		}
+		s.pending = append(s.pending[:i], s.pending[i+1:]...)
+		e.receipt.markRecalled()
+		return true
+	}
+	return false
+}
+
 // Recall withdraws one exact pending input — atomic against claim, so a
 // receipt already drained or persisted can never be taken back.
 // ok=false — unknown, claimed, persisted, or already recalled.

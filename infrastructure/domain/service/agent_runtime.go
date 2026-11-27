@@ -179,9 +179,14 @@ type AgentRuntime interface {
 	Options(ctx context.Context, agent *aggregate.Agent, conversationID string) ([]AgentOption, OptionsState, OptionsSource, error)
 	// SetOption applies one option to the room's live session, if any.
 	SetOption(ctx context.Context, conversationID, id, value string) error
-	// Commands lists the slash commands the room's live session offers;
-	// empty before its first turn.
-	Commands(conversationID string) []AgentCommand
+	// DeleteCommands drops the conversation's stored command report after the
+	// room is deleted; absence is success.
+	DeleteCommands(ctx context.Context, conversationID string)
+	// Commands lists the slash commands the room's agent offers: the live
+	// session's once it has reported them, otherwise the last list that
+	// conversation's session reported for the same agent. Empty means the
+	// agent never reported one here.
+	Commands(ctx context.Context, conversationID, agentID string) []AgentCommand
 	// Steer delivers input into the room's running turn when the agent
 	// takes input mid-turn, and reports whether it did. delivered runs
 	// just before the input is recorded in the turn and announced, so the

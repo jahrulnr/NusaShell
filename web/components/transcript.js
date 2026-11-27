@@ -3,7 +3,7 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, liveHistory, liveSegments, joinText, group, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds, turnSeconds } from '../lib/turn.js';
+import { historyItems, liveHistory, liveSegments, joinText, group, foldGhosts, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds, turnSeconds } from '../lib/turn.js';
 import { queuedFor, watchQueued } from '../lib/queued.js';
 import { ToolRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
@@ -403,8 +403,10 @@ export function Transcript({ room, scroller }) {
   // Neighbouring text is one block: a part boundary is where the store seals a
   // step, not where the answer breaks. Joining before group() also keeps the
   // copy button's text identical to what was written.
-  const items = group(joinText(hist));
-  const liveGroups = group(joinText(liveItems));
+  // Empty failed rows from before members were recognized become one quiet
+  // count per turn. Folding before group() keeps that line out of the cards.
+  const items = group(joinText(foldGhosts(hist)));
+  const liveGroups = group(joinText(foldGhosts(liveItems)));
   // A finished turn ends with a button that copies what it said, as the
   // Markdown it was written in; a running turn gets one once it ends.
   const histEnds = turnEnds(items);
@@ -491,6 +493,7 @@ export function Transcript({ room, scroller }) {
       case 'text': return html`<${Markdown} key=${it.id} text=${it.text} room=${r} quote />`;
       case 'activity': return html`<${Activity} key=${it.id} room=${r} item=${it} live=${live} cwd=${cwd} />`;
       case 'interrupted': return html`<div key=${it.id} class="text-xs text-faint">— interrupted</div>`;
+      case 'ghosts': return html`<p key=${it.id} class="text-xs text-faint">${it.text}</p>`;
       case 'resync': return html`<div key=${it.id} class="text-xs text-faint">${it.text}</div>`;
       case 'approval': return html`<${ApprovalCard} key=${it.id} room=${r} seg=${it} />`;
       case 'elicitation': return html`<${ElicitationCard} key=${it.id} room=${r} seg=${it} />`;

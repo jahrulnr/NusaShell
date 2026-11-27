@@ -422,11 +422,17 @@ func (app *ConversationApp) SetAgentOption(ctx context.Context, convID, id, valu
 	return app.Annotate(ctx, convID, Annotation{AgentOption: &[2]string{id, value}})
 }
 
-// AgentCommands lists the slash commands the room's agent session offers.
-func (app *ConversationApp) AgentCommands(convID string) []dservice.AgentCommand {
+// AgentCommands lists the slash commands the room's agent offers: the live
+// session's report, or the last report this conversation stored for the same
+// agent while no live session has reported yet.
+func (app *ConversationApp) AgentCommands(ctx context.Context, convID string) []dservice.AgentCommand {
 	deps := app.depsSnapshot()
 	if deps.AgentRuntime == nil {
 		return []dservice.AgentCommand{}
 	}
-	return deps.AgentRuntime.Commands(convID)
+	info, err := deps.Convs.Info(ctx, convID)
+	if err != nil || info.AgentID == "" {
+		return []dservice.AgentCommand{}
+	}
+	return deps.AgentRuntime.Commands(ctx, convID, info.AgentID)
 }

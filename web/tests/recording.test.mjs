@@ -92,7 +92,7 @@ test('restoring a queued message brings its recording chip back', () => {
 test('a recording cannot steer — the draft and chip stay put', () => {
   const r = chat.room('c_1');
   r.id = 'c_1';
-  r.live = { turnId: 't1', kind: 'send', terminal: false };
+  r.live = { turnId: 't1', kind: 'send', terminal: false, steerable: true };
   r.recording = { id: 'rec_6', status: 'recording' };
   r.draft = 'mid-turn note';
   assert.equal(chat.submit(r, 'mid-turn note', [], [], 't1'), false);

@@ -164,6 +164,10 @@ type session struct {
 	configs  json.RawMessage       // the session's config options as last reported
 	modes    *acp.SessionModeState // legacy modes, when the agent reports them
 	commands []dservice.AgentCommand
+	// commandsKnown distinguishes "no command update yet" from an update that
+	// reported an empty list; only the first may fall back to the stored report.
+	commandsKnown bool
+	commandsSeq   uint64
 	// configSeq and modesSeq are the wire positions of the newest applied
 	// config options and modes. Notifications and responses are processed
 	// concurrently, so each writer applies only when it is newer on the
@@ -1509,8 +1513,24 @@ func (h *handler) OnNotification(method, sessionID string, raw json.RawMessage, 
 			cmds = append(cmds, cmd)
 		}
 		s.mu.Lock()
-		s.commands = cmds
+		updated := seq > s.commandsSeq
+		if updated {
+			s.commands = cmds
+			s.commandsKnown = true
+			s.commandsSeq = seq
+		}
 		s.mu.Unlock()
+		if updated && h.runtime.opts.Catalog != nil {
+			h.runtime.mu.Lock()
+			current := h.runtime.sessions[s.convID] == s
+			h.runtime.mu.Unlock()
+			if current {
+				cat := drepo.AgentCommandCatalog{AgentID: s.proc.agentID, Commands: slices.Clone(cmds), ReportedAt: time.Now()}
+				if err := h.runtime.opts.Catalog.SaveCommandCatalog(context.Background(), s.convID, cat); err != nil {
+					h.runtime.log.Warn("the agent command catalog could not be saved", "conversation", s.convID, "agent", s.proc.agentID, "error", err)
+				}
+			}
+		}
 		return
 	case "current_mode_update":
 		s.mu.Lock()
@@ -1884,15 +1904,43 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 	return optionApplied, nil
 }
 
-// Commands lists the slash commands of the room's live session.
-func (r *Runtime) Commands(conversationID string) []dservice.AgentCommand {
+// DeleteCommands drops the conversation's stored command report. Delete uses
+// it after the room is gone; a missing report is success.
+func (r *Runtime) DeleteCommands(ctx context.Context, conversationID string) {
+	if r.opts.Catalog == nil {
+		return
+	}
+	if err := r.opts.Catalog.DeleteCommandCatalog(ctx, conversationID); err != nil {
+		r.log.Warn("the agent command catalog could not be deleted", "conversation", conversationID, "error", err)
+	}
+}
+
+// Commands lists the slash commands the room's agent offers. A live session's
+// own report wins once it exists; before that, or after the process idle-stops,
+// the answer is the last list this conversation stored for the same agent. A
+// room that moved to another agent does not inherit the previous agent's list.
+func (r *Runtime) Commands(ctx context.Context, conversationID, agentID string) []dservice.AgentCommand {
 	r.mu.Lock()
 	s := r.sessions[conversationID]
 	r.mu.Unlock()
-	if s == nil {
+	if s != nil && s.proc.agentID == agentID {
+		s.mu.Lock()
+		known, cmds := s.commandsKnown, slices.Clone(s.commands)
+		s.mu.Unlock()
+		if known {
+			return cmds
+		}
+	}
+	if r.opts.Catalog == nil {
 		return []dservice.AgentCommand{}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.commands)
+	cat, err := r.opts.Catalog.CommandCatalog(ctx, conversationID)
+	if err != nil {
+		r.log.Warn("the agent command catalog could not be read", "conversation", conversationID, "agent", agentID, "error", err)
+		return []dservice.AgentCommand{}
+	}
+	if cat.AgentID != agentID {
+		return []dservice.AgentCommand{}
+	}
+	return slices.Clone(cat.Commands)
 }

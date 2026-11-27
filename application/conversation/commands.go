@@ -163,7 +163,7 @@ func (app *ConversationApp) Commands(ctx context.Context, convID string) ([]Comm
 		return nil, err
 	}
 	busy := app.busy(convID)
-	agentCommands := app.AgentCommands(convID)
+	agentCommands := app.AgentCommands(ctx, convID)
 	if info.AgentID != "" {
 		// In an agent room NusaShell proxies the agent's command surface.
 		// Context operations are never invented natively, and a name the agent

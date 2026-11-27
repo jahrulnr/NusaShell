@@ -1,11 +1,11 @@
-// Composer: per-room draft, Enter to send. While a send turn runs, Enter
-// steers that exact turn and Ctrl/⌘+Enter queues for after it; all three
-// carry the same draft — text, selections, and attachments. Anything
-// else that keeps the room busy queues too. Stop is always its own
-// control.
+// Composer: per-room draft, Enter to send. While the live turn declares
+// steerable, Enter steers that exact turn and Ctrl/⌘+Enter queues for after
+// it; all three carry the same draft — text, selections, and attachments.
+// A turn that does not declare it, and anything else that keeps the room
+// busy, queues. Stop is always its own control.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, emit, toast } from '../lib/store.js';
-import { submit, cancel, isBusy, roomBusy, retryCommand, dismissCommand, recallSteer, removeQueued, restoreQueued, resumeQueue, attachFiles, removeFile, navigate, quotedDraft, removeQuote } from '../lib/chat.js';
+import { submit, cancel, isBusy, roomBusy, canSteer, retryCommand, dismissCommand, recallSteer, removeQueued, restoreQueued, resumeQueue, attachFiles, removeFile, navigate, quotedDraft, removeQuote } from '../lib/chat.js';
 import { api, errorText } from '../lib/api.js';
 import { ownNote } from '../lib/queued.js';
 import { Icon } from './icons.js';
@@ -202,9 +202,9 @@ export function Composer({ room, hero = false }) {
   const ta = useRef();
   const [, bump] = useState(0);
   const live = r.live && !r.live.terminal;
-  const canSteer = live && r.live.kind === 'send';
-  const steerTurnId = canSteer ? r.live.turnId : '';
-  const [menu, setMenu] = usePopoverOpen(canSteer);
+  const steering = canSteer(r.live);
+  const steerTurnId = steering ? r.live.turnId : '';
+  const [menu, setMenu] = usePopoverOpen(steering);
   // What the composer answers to: a turn, or a command it started.
   const busy = roomBusy(r);
   const hasText = !!r.draft.trim();
@@ -325,7 +325,7 @@ export function Composer({ room, hero = false }) {
     e.preventDefault();
     attachFiles(r, files);
   };
-  // Enter steers when a send turn runs — attachments included — and
+  // Enter steers when this turn declared it — attachments included — and
   // queues otherwise.
   const primary = () => deliver(steerTurnId);
 
@@ -367,12 +367,12 @@ export function Composer({ room, hero = false }) {
     if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
     if (e.shiftKey) return;
     e.preventDefault();
-    if ((e.ctrlKey || e.metaKey) && canSteer) deliver();
+    if ((e.ctrlKey || e.metaKey) && steering) deliver();
     else primary();
   };
 
-  const placeholder = canSteer ? 'Steer the running turn…' : busy ? 'Queue a follow-up…' : hero ? 'What should we work on?' : 'Reply…';
-  const primaryLabel = native ? `Run /${native}` : canSteer ? 'Steer now' : busy ? 'Add to queue' : 'Send';
+  const placeholder = steering ? 'Steer the running turn…' : busy ? 'Queue a follow-up…' : hero ? 'What should we work on?' : 'Reply…';
+  const primaryLabel = native ? `Run /${native}` : steering ? 'Steer now' : busy ? 'Add to queue' : 'Send';
   const primaryTitle = primaryLabel + ' (Enter)';
 
   return html`<div class=${cx('w-full', hero ? '' : 'pb-[max(12px,env(safe-area-inset-bottom))]')}>
@@ -476,11 +476,11 @@ export function Composer({ room, hero = false }) {
         <div class="relative flex items-center">
           <button type="button" onClick=${primary} disabled=${!canSend} title=${primaryTitle} aria-label=${primaryLabel}
             class=${cx('h-8 shrink-0 inline-flex items-center justify-center transition',
-              canSteer ? 'w-8 rounded-l-full pl-1' : 'size-8 rounded-full',
+              steering ? 'w-8 rounded-l-full pl-1' : 'size-8 rounded-full',
               canSend ? 'bg-fg text-bg hover:opacity-90' : 'bg-panel text-faint border border-line')}>
-            ${r.command ? html`<${Spinner} size=${14} />` : html`<${Icon} name=${busy && !canSteer ? 'queue' : 'arrowUp'} size=${16} stroke=${2.25} />`}
+            ${r.command ? html`<${Spinner} size=${14} />` : html`<${Icon} name=${busy && !steering ? 'queue' : 'arrowUp'} size=${16} stroke=${2.25} />`}
           </button>
-          ${canSteer && html`<button type="button" onClick=${() => setMenu(!menu)} aria-label="More send options" aria-expanded=${menu}
+          ${steering && html`<button type="button" onClick=${() => setMenu(!menu)} aria-label="More send options" aria-expanded=${menu}
             class=${cx('h-8 w-6 shrink-0 inline-flex items-center justify-center rounded-r-full -ml-px',
               canSend ? 'bg-fg text-bg border-l border-bg/20 hover:opacity-90' : 'bg-panel text-faint border border-line')}>
             <${Icon} name="chevronDown" size=${13} stroke=${2.25} />

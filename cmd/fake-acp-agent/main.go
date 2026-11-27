@@ -28,6 +28,32 @@ type message struct {
 	Error   any             `json:"error,omitempty"`
 }
 
+// availableCommands is the session's advertised slash-command surface. Tests
+// override it through the agent launch environment; "none" means the agent
+// truly reports no commands, while comma-separated names report exactly those.
+func availableCommands() []any {
+	raw := strings.TrimSpace(os.Getenv("FAKE_ACP_COMMANDS"))
+	if raw == "none" {
+		return nil
+	}
+	if raw == "empty" {
+		return []any{}
+	}
+	names := []string{"compact"}
+	if raw != "" {
+		names = strings.Split(raw, ",")
+	}
+	out := make([]any, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		out = append(out, map[string]any{"name": name, "description": "Fake command " + name})
+	}
+	return out
+}
+
 type server struct {
 	mu      sync.Mutex
 	out     *bufio.Writer
@@ -303,12 +329,12 @@ func (s *server) handle(msg message) {
 			"sessionId": id,
 			"update":    map[string]any{"sessionUpdate": "config_option_update", "configOptions": s.configOptions()},
 		})
-		s.notify("session/update", map[string]any{
-			"sessionId": id,
-			"update": map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{
-				map[string]any{"name": "compact", "description": "Compact the fake context"},
-			}},
-		})
+		if cmds := availableCommands(); cmds != nil {
+			s.notify("session/update", map[string]any{
+				"sessionId": id,
+				"update":    map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": cmds},
+			})
+		}
 		s.respond(msg.ID, s.sessionResult(id))
 	case "session/load", "session/resume":
 		traceSessionPrompt(msg.Method, msg.Params)

@@ -63,12 +63,16 @@ func (d Deps) discardAgentSession(convID, agentID, sessionID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		discarded := false
 		if agentID != "" && d.Agents != nil {
 			if agent, err := d.Agents.Load(ctx, agentID); err == nil {
 				d.AgentRuntime.Discard(ctx, agent, convID, sessionID)
-				return
+				discarded = true
 			}
 		}
-		d.AgentRuntime.Release(ctx, convID)
+		if !discarded {
+			d.AgentRuntime.Release(ctx, convID)
+		}
+		d.AgentRuntime.DeleteCommands(ctx, convID)
 	}()
 }

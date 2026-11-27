@@ -68,6 +68,7 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 		if !h.emitLocked(t, "turn.tool_call", toolCallPayload{
 			CallID: tc.ID(),
 			Name:   tc.Name(),
+			Keys:   subagentKeys(tc.OptionalContent()),
 		}, false) {
 			// Provider-originated metadata exceeded the frame bound —
 			// terminate this turn only, sanitized.
@@ -386,4 +387,23 @@ type costPayload struct {
 // planPayload is an agent's whole current plan.
 type planPayload struct {
 	Entries json.RawMessage `json:"entries"`
+}
+
+// subagentKeys carries only the adapter-neutral acp.subagent.* facts the SA
+// contract allows across the websocket. optionalContent itself never crosses.
+func subagentKeys(all map[string]string) map[string]string {
+	if len(all) == 0 {
+		return nil
+	}
+	var keys map[string]string
+	for k, v := range all {
+		if !strings.HasPrefix(k, "acp.subagent.") {
+			continue
+		}
+		if keys == nil {
+			keys = map[string]string{}
+		}
+		keys[k] = v
+	}
+	return keys
 }

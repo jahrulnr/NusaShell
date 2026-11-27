@@ -298,12 +298,18 @@ Common envelope fields:
 }
 ```
 
-- Submits `content` into the **mailbox of the exact `turnId` named** —
-  never implicitly "the current turn". The turn must be a live
-  `turn.send` turn owned by this hub: unknown, finished, or
-  foreign-conversation ids answer `error`/`not_found`; edit turns
-  answer `error`/`invalid_argument` (`"that turn does not take
-  steering"`).
+- Submits `content` into the **steering path of the exact `turnId`
+  named** — never implicitly "the current turn". The turn must be a
+  live `turn.send` turn the server declared `steerable`: unknown,
+  finished, or foreign-conversation ids answer `error`/`not_found`.
+  When the room's worker owns the job the input is forwarded through
+  the same job-control path a cross-room steer takes. The forward
+  carries the full user input and this command's `requestId`; text
+  alone is not this command, and the ack names that id. A turn declared
+  not steerable (an edit, a compact, a resume) and a worker that
+  refuses the forward both answer `error`/`invalid_argument`
+  (`"that turn does not take steering"`) and store nothing — a
+  declared no is honest; a guessed maybe is not offered at all.
 - The payload uses the same user input as `turn.send`: `content`,
   selected `references` (UTF-8 byte offsets), `uploads`, and
   `annotations`. A message can contain only attachments or
@@ -339,6 +345,15 @@ Common envelope fields:
 - An unconsumed input (`pending` or `claimed` when the turn ends) is
   never delivered to a later turn as steering. The WebUI returns its
   complete input to the draft rather than adding it to the send queue.
+  The submission was accepted, so it does not become a queued send.
+- A submission the server never accepted is queued by the client as
+  one ordinary send, with no toast. That covers `not_found` (the turn
+  was already gone), `invalid_argument` `"that turn does not take
+  steering"` (declared not steerable, or the worker refused), and
+  `queue_full` when the room's send queue still accepts. The server
+  stored nothing and does not also queue. A malformed payload, a
+  recording, or a room queue that is also full stays an error — no
+  queue action answers those.
 
 ### `turn.steer_recall` — withdraw a pending steering input
 
@@ -363,6 +378,10 @@ Common envelope fields:
   reconciles safely on retry without growing the journal.
 - `payload.inputId` must be the `requestId` of a `turn.steer`
   previously accepted on this turn; anything else is `not_found`.
+  On a worker-owned turn the withdrawal is forwarded by that
+  `inputId` along the same path that accepted the steer. Recalling
+  a different input, or only the newest one, is not this command.
+  A recalled input returns to the draft. Recall never queues it.
 
 ### `turn.watch` — attach / reattach to a turn
 
@@ -416,7 +435,18 @@ each socket's writes go through one serialized writer with a bounded
 buffer. The payload carries `startedAt`, the server's admission
 wall-clock in unix milliseconds — a watcher that replays or reattaches
 adopts it, so a working timer shows the turn's real age, not the tab's
-attach time.
+attach time. It also carries `steerable`, the server's steering
+capability declaration for this exact turn: `true` when the turn takes
+`turn.steer` — whichever fold path then applies, the hub's own mailbox
+or forwarding to the worker that owns the job — and `false` when it
+never will (an edit, a compact, a resume). A client never derives the
+capability from the turn's kind: `kind` says what the turn is doing,
+`steerable` says what the server accepts. The server writes `true` or
+`false` and never omits the field: a missing field is what a peer that
+predates it looks like. Where the field is absent the capability is
+unknown, and unknown takes the lossless default — the client queues
+the input rather than steering it. `false` queues the same way. Only
+`true` sends `turn.steer`.
 
 ```json
 {
@@ -425,7 +455,7 @@ attach time.
   "conversationId": "c_k4j9xm2p8q1vz7w0t6nb5r3yhd",
   "turnId": "t_3kd9xm2p8q1vz7w0t6nb5r4yhf",
   "seq": 0,
-  "payload": { "startedAt": 1763851200000 }
+  "payload": { "startedAt": 1763851200000, "steerable": true }
 }
 ```
 
@@ -487,8 +517,11 @@ lost reconciles submitted inputs against it and against history —
 never by resending an unknown outcome.
 
 For an `"active"` turn the payload also carries the live snapshot:
-`startedAt` (unix ms, same clock `turn.opened` reports), `phase` (the
-last reported phase, when one is running), and `parts` — the turn's
+`startedAt` (unix ms, same clock `turn.opened` reports), `steerable`
+(the same `true` or `false` `turn.opened` wrote, still present when
+false — reattachment never weakens it and never drops a declared no),
+`phase` (the last reported phase, when one is
+running), and `parts` — the turn's
 bounded shadow document of what already streamed, folded to ordered
 segment records (`text`, `reasoning`, `tool`, `steer`, `plan`,
 `media`, `approval`, `elicitation`) in the same shapes the stream
@@ -680,7 +713,10 @@ untrusted display content — render it escaped, never as markup:
 
 `turn.tool_call` — the model requested a tool. This frame carries only
 call metadata, so oversized arguments can never turn the request itself
-into an oversized frame:
+into an oversized frame. When the call is activity of an ACP subagent,
+`keys` carries the adapter-neutral key family verbatim (currently
+`acp.subagent.parent`); ordinary tools omit `keys`. Later input, output,
+and result frames do not repeat it — they correlate by `callId`:
 
 ```json
 {

@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -170,5 +173,187 @@ func TestUsageUpdateWaitsOutASteer(t *testing.T) {
 	// The owner's input lands first, then what the agent said meanwhile.
 	if len(got) != 2 || got[0].Kind() != enum.TurnEventSteer || got[1].Kind() != enum.TurnEventContext {
 		t.Fatalf("events after release = %v", got)
+	}
+}
+
+// Devin's member tag is translated exactly once: the raw cognition.ai meta
+// stays inside the adapter, while the record carries only the neutral
+// acp.subagent.parent fact.
+func TestToolCallMemberMetaBecomesAScopedRecordKey(t *testing.T) {
+	sink := newTurnSink(context.Background(), func(event.TurnEvent) {}, nil)
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call","toolCallId":"member-1","title":"Read file","kind":"read","rawInput":{"file_path":"/tmp/x"},"_meta":{"cognition.ai/subagent_context":{"parentAgentId":"run-1"},"cognition.ai/timestamp":"2026-11-27T00:00:00Z"}}`))
+	sink.mu.Lock()
+	c := sink.calls["member-1"]
+	sink.mu.Unlock()
+	if c == nil {
+		t.Fatal("the member call was not recorded")
+	}
+	tc, err := c.entity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tc.OptionalContent()["acp.subagent.parent"]; got != "run-1" {
+		t.Fatalf("acp.subagent.parent = %q, want run-1", got)
+	}
+	if _, leaked := tc.OptionalContent()["cognition.ai/subagent_context"]; leaked {
+		t.Fatalf("raw cognition meta leaked into the record: %+v", tc.OptionalContent())
+	}
+}
+
+// A bare update is not a record. It neither mints one nor repeats its
+// diagnostic on every pulse.
+func TestBareUnknownToolCallUpdateIsDroppedOnce(t *testing.T) {
+	var events []event.TurnEvent
+	var logs bytes.Buffer
+	sink := newTurnSink(context.Background(), func(ev event.TurnEvent) { events = append(events, ev) }, nil)
+	sink.log = slog.New(slog.NewTextHandler(&logs, nil))
+	pulse := `{"sessionUpdate":"tool_call_update","toolCallId":"unknown-bare-1","status":"in_progress"}`
+	sink.update(usageUpdate(t, pulse))
+	sink.update(usageUpdate(t, pulse))
+
+	sink.mu.Lock()
+	_, minted := sink.calls["unknown-bare-1"]
+	parts := len(sink.parts)
+	sink.mu.Unlock()
+	if minted || parts != 0 || len(events) != 0 {
+		t.Fatalf("bare update minted=%v parts=%d events=%d", minted, parts, len(events))
+	}
+	if n := strings.Count(logs.String(), "agent tool update dropped"); n != 1 {
+		t.Fatalf("drop logs = %d, want one per id; logs:\n%s", n, logs.String())
+	}
+}
+
+// A tool_call_update may introduce a record only when it carries record truth
+// itself — here a title — rather than only a progress pulse.
+func TestSelfDescribingUnknownToolCallUpdateMintsOneRecord(t *testing.T) {
+	var events []event.TurnEvent
+	sink := newTurnSink(context.Background(), func(ev event.TurnEvent) { events = append(events, ev) }, nil)
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call_update","toolCallId":"late-1","title":"Read file","kind":"read","status":"in_progress"}`))
+
+	sink.mu.Lock()
+	c := sink.calls["late-1"]
+	sink.mu.Unlock()
+	if c == nil || c.title != "Read file" || c.kind != "read" {
+		t.Fatalf("self-describing update record = %+v", c)
+	}
+	if len(events) != 1 || events[0].Kind() != enum.TurnEventToolCall || events[0].ToolCall().Name() != "Read file" {
+		t.Fatalf("events = %v", events)
+	}
+}
+
+// Lifecycle ids are routing identities, not tool calls. Started correlates to
+// the exact unbound run call, completion annotates only through that written
+// id, and neither lifecycle id ever mints a record.
+func TestSubagentLifecycleAnnotatesTheRunCallWithoutMintingRecords(t *testing.T) {
+	sink := newTurnSink(context.Background(), func(event.TurnEvent) {}, nil)
+	for _, call := range []struct{ id, title, task string }{
+		{"run-a", "Alpha", "first task"},
+		{"run-b", "Beta", "second task"},
+	} {
+		input, _ := json.Marshal(map[string]string{"title": call.title, "task": call.task})
+		meta, _ := json.Marshal(map[string]string{"cognition.ai/inferenceToolName": "run_subagent"})
+		sink.update(acp.SessionUpdate{SessionUpdate: "tool_call", ToolCallID: call.id, Title: "Ran explore subagent " + call.title, RawInput: input, Meta: meta})
+	}
+
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call_update","toolCallId":"agent-beta","status":"in_progress","_meta":{"cognition.ai/subagent_started":{"agentId":"agent-beta","title":"Beta","task":"second task","profile":"subagent_explore","depth":2,"isBackground":false,"model":"devin"}}}`))
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call_update","toolCallId":"agent-beta","status":"completed","_meta":{"cognition.ai/subagent_completed":{"agentId":"agent-beta","success":true,"summary":"done","depth":2}}}`))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if _, minted := sink.calls["agent-beta"]; minted {
+		t.Fatal("the lifecycle id minted a tool record")
+	}
+	run := sink.calls["run-b"]
+	if run == nil {
+		t.Fatal("run-b was not recorded")
+	}
+	want := map[string]string{
+		"acp.subagent.id":         "agent-beta",
+		"acp.subagent.profile":    "subagent_explore",
+		"acp.subagent.depth":      "2",
+		"acp.subagent.background": "false",
+		"acp.subagent.model":      "devin",
+		"acp.subagent.success":    "true",
+		"acp.subagent.summary":    "done",
+	}
+	for key, value := range want {
+		if got := run.keys[key]; got != value {
+			t.Fatalf("%s = %q, want %q; keys=%+v", key, got, value, run.keys)
+		}
+	}
+	if other := sink.calls["run-a"]; other.keys["acp.subagent.id"] != "" {
+		t.Fatalf("the exact match was bypassed: run-a keys=%+v", other.keys)
+	}
+	for key := range run.keys {
+		if strings.HasPrefix(key, "cognition.ai/") {
+			t.Fatalf("raw cognition meta leaked into the record: %+v", run.keys)
+		}
+	}
+}
+
+// A lifecycle pulse with no run call is dropped once and never becomes a card.
+func TestUnboundSubagentLifecycleIsDroppedOnce(t *testing.T) {
+	var events []event.TurnEvent
+	var logs bytes.Buffer
+	sink := newTurnSink(context.Background(), func(ev event.TurnEvent) { events = append(events, ev) }, nil)
+	sink.log = slog.New(slog.NewTextHandler(&logs, nil))
+	pulse := `{"sessionUpdate":"tool_call_update","toolCallId":"agent-orphan","status":"in_progress","_meta":{"cognition.ai/subagent_started":{"agentId":"agent-orphan","title":"Orphan","task":"missing"}}}`
+	sink.update(usageUpdate(t, pulse))
+	sink.update(usageUpdate(t, pulse))
+
+	sink.mu.Lock()
+	_, minted := sink.calls["agent-orphan"]
+	sink.mu.Unlock()
+	if minted || len(events) != 0 {
+		t.Fatalf("unbound lifecycle minted=%v events=%d", minted, len(events))
+	}
+	if n := strings.Count(logs.String(), "agent tool update dropped"); n != 1 {
+		t.Fatalf("drop logs = %d, want one per id; logs:\n%s", n, logs.String())
+	}
+}
+
+// A member never receives a completion, so finishing must preserve it as
+// incomplete activity — not manufacture an output or a failed verdict. An
+// ordinary unfinished tool remains failed, which is the control.
+func TestFinishDoesNotForceAMemberFailed(t *testing.T) {
+	var events []event.TurnEvent
+	sink := newTurnSink(context.Background(), func(ev event.TurnEvent) { events = append(events, ev) }, nil)
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call","toolCallId":"member-1","title":"Read file","kind":"read","status":"in_progress","_meta":{"cognition.ai/subagent_context":{"parentAgentId":"agent-1"}}}`))
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call_update","toolCallId":"member-1","status":"completed","rawOutput":"member output"}`))
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call","toolCallId":"ordinary-1","title":"Write file","kind":"write","status":"in_progress"}`))
+
+	msg, err := sink.finish(acp.PromptResult{StopReason: "end_turn"}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := map[string]entity.ToolCall{}
+	for _, tc := range msg.ToolCalls() {
+		calls[tc.ID()] = tc
+	}
+	member := calls["member-1"]
+	if member.ID() == "" {
+		t.Fatal("the member call is missing from the finished message")
+	}
+	if member.Failed() || member.HasOutput() || member.Output() != "" {
+		t.Fatalf("member outcome manufactured: failed=%v hasOutput=%v output=%q", member.Failed(), member.HasOutput(), member.Output())
+	}
+	ordinary := calls["ordinary-1"]
+	if !ordinary.Failed() {
+		t.Fatal("control failed: an ordinary unfinished tool must remain failed")
+	}
+	var memberResults, memberOutputs int
+	for _, ev := range events {
+		if ev.ToolCall().ID() != "member-1" {
+			continue
+		}
+		switch ev.Kind() {
+		case enum.TurnEventToolResult:
+			memberResults++
+		case enum.TurnEventToolOutput:
+			memberOutputs++
+		}
+	}
+	if memberResults != 0 || memberOutputs != 0 {
+		t.Fatalf("member outcome events: results=%d outputs=%d, want none", memberResults, memberOutputs)
 	}
 }

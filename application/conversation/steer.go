@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -44,22 +45,52 @@ func (app *ConversationApp) Steer(ctx context.Context, convID string, message st
 // before that write; a capacity race after the write is not a refusal — the
 // caller falls back to the queue with the record.
 func (app *ConversationApp) SteerInput(ctx context.Context, convID string, in valueobject.UserInput) (bool, *entity.Message, error) {
-	if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 {
-		return false, nil, apperror.New(400, "empty steer", fmt.Errorf("steer has no text or uploads"))
+	taken, record, _, err := app.deliverSteer(ctx, convID, in)
+	return taken, record, err
+}
+
+// AcceptSteer is the journal's view of SteerInput: the receipt is the one
+// the running job will claim and persist, so a hub record that keeps it
+// sees the same state the fold does. ok is false when nothing was buffered.
+func (app *ConversationApp) AcceptSteer(ctx context.Context, convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+	_, _, receipt, err := app.deliverSteer(ctx, convID, in)
+	if err != nil || receipt == nil {
+		return nil, false
+	}
+	return receipt, true
+}
+
+// RecallInput withdraws one pending steer by the id it was submitted under.
+func (app *ConversationApp) RecallInput(convID, inputID string) bool {
+	if strings.TrimSpace(inputID) == "" {
+		return false
 	}
 	app.mu.Lock()
 	w := app.workers[convID]
 	app.mu.Unlock()
 	if w == nil {
-		return false, nil, nil
+		return false
+	}
+	return w.RecallInput(inputID)
+}
+
+func (app *ConversationApp) deliverSteer(ctx context.Context, convID string, in valueobject.UserInput) (bool, *entity.Message, *appjob.SteeringReceipt, error) {
+	if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 {
+		return false, nil, nil, apperror.New(400, "empty steer", fmt.Errorf("steer has no text or uploads"))
+	}
+	app.mu.Lock()
+	w := app.workers[convID]
+	app.mu.Unlock()
+	if w == nil {
+		return false, nil, nil, nil
 	}
 	if in.Relay != nil {
 		found, available := w.SteerInputAvailable()
 		if !found {
-			return false, nil, nil
+			return false, nil, nil, nil
 		}
 		if !available {
-			return true, nil, apperror.New(429, "that thread's steering mailbox is full — nothing was written; try again once its turn folds the input it holds", nil)
+			return true, nil, nil, apperror.New(429, "that thread's steering mailbox is full — nothing was written; try again once its turn folds the input it holds", nil)
 		}
 	}
 	var record *entity.Message
@@ -67,22 +98,23 @@ func (app *ConversationApp) SteerInput(ctx context.Context, convID string, in va
 		var err error
 		record, err = app.persistRelayLine(ctx, convID, in)
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
 	}
-	found, accepted := w.SteerInput(in, record)
+	found, raw, accepted := w.SteerInput(in, record)
+	receipt, _ := raw.(*appjob.SteeringReceipt)
 	if !found {
-		return false, record, nil
+		return false, record, nil, nil
 	}
 	if !accepted {
 		if in.Relay != nil {
 			// The preflight lost a race. The line already exists, so this is no
 			// longer a clean 429: the queue can accept the same record instead.
-			return false, record, nil
+			return false, record, nil, nil
 		}
-		return true, nil, apperror.New(429, "that thread's steering mailbox is full — nothing was written; try again once its turn folds the input it holds", nil)
+		return true, nil, nil, apperror.New(429, "that thread's steering mailbox is full — nothing was written; try again once its turn folds the input it holds", nil)
 	}
-	return true, record, nil
+	return true, record, receipt, nil
 }
 
 // persistRelayLine is the room's one writer of a relayed prompt's provenance:

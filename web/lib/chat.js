@@ -125,6 +125,13 @@ export const isBusy = (r) => !!(r.live || r.pendingOpen || r.settling);
 // retry, and the header's Compact button ask.
 export const roomBusy = (r) => isBusy(r) || !!r.command;
 
+// canSteer is the server's declaration on this live turn. Kind says what the
+// turn is doing; it does not say the server will accept turn.steer. Only a
+// boolean true steers. False, empty, and a missing field all queue — a missing
+// field is a server that predates the declaration, and the lossless default
+// is to queue.
+export const canSteer = (live) => !!(live && !live.terminal && live.steerable === true);
+
 // watching answers whether a room has a turn this tab can watch right now —
 // the fact every surface must read from the same source: the record's
 // activeTurnId, or the live stream on the room object (which a list record
@@ -1010,16 +1017,79 @@ function prependDraft(r, text, refs, files) {
   r.refs = [...liveReferences(text, refs), ...kept];
 }
 
-// submit is the composer's Enter: steer the running send turn, queue
-// behind it, or send now. refs are the draft's selections (editor
-// offsets); files are the uploads attached to the draft. All three
-// modes carry the same message — they differ only in timing.
+// CATALOG_HOLD_MS is how long Enter waits when the first line is a name this
+// room has not classified yet. Past that, the text stays and the owner is told.
+const CATALOG_HOLD_MS = 1000;
+
+// commandDecided is true once this room can say what the name is: a catalog
+// row, a reserved thread command, or a catalog that has already answered and
+// left the name out. An unread catalog is not a guess.
+function commandDecided(r, name) {
+  if (isNativeCommand(r, name)) return true;
+  if ((r.catalog?.items || []).some((c) => c.name === name)) return true;
+  if (r.catalog?.status === 'ready') return true;
+  // A refresh that fails keeps the last list. A name that list does not
+  // contain is ordinary text. An error with no list is not a decision.
+  return r.catalog?.status === 'error' && (r.catalog.items || []).length > 0;
+}
+
+// holdForCatalog keeps the draft and dispatches once the catalog answers,
+// with the same rules as a catalog that was already here. A second Enter
+// while this wait is open does nothing. A catalog that fails, or that is
+// still out when the bound ends, is said; the text is not sent and not cleared.
+function holdForCatalog(r, text, refs, files, steerTurnId) {
+  if (r.commandHold) return;
+  const draft = r.draft;
+  r.commandHold = true;
+  const flight = r.catalogFlight || loadCommands(r);
+  const bound = new Promise((resolve) => setTimeout(resolve, CATALOG_HOLD_MS));
+  Promise.race([
+    Promise.resolve(flight).then(() => 'answered', () => 'answered'),
+    bound.then(() => 'bound'),
+  ]).then((which) => {
+    r.commandHold = false;
+    if (r.draft !== draft) return;
+    const name = parseCommand(text)?.name;
+    if (which === 'answered' && commandDecided(r, name)) {
+      const sent = submit(r, text, refs, files, steerTurnId);
+      // submit leaves a turn's draft for the composer to clear. The composer
+      // already returned, so the hold clears it — and only if it is still the
+      // line that was held.
+      if (sent && r.draft === draft) {
+        r.draft = '';
+        r.refs = [];
+        r.files = [];
+        r.quotes = [];
+        r.recording = null;
+        r.caret = 0;
+        emit();
+      }
+      return;
+    }
+    toast('Commands are unavailable: ' + (r.catalog?.error || 'the server did not answer'), 'info');
+  });
+}
+
+// submit is the composer's Enter: steer a turn the server declared
+// steerable, queue behind a busy room, or send now. refs are the draft's
+// selections (editor offsets); files are the uploads attached to the draft.
+// All three modes carry the same message — they differ only in timing.
 export function submit(r, text, refs = [], files = [], steerTurnId = '') {
   // A native command is an action, not a turn: recognized on the draft's first
   // line, it never becomes a message to the model or the agent — not even when
   // the room refuses it. The caller keeps the draft; only the server's 200
   // spends it.
   const cmd = parseCommand(text);
+  // A name the catalog has not classified yet is not a message and not a
+  // command. Wait for the answer. Do not keep a list of names here.
+  if (cmd && !commandDecided(r, cmd.name)) {
+    if (r.catalog?.status === 'error' && !r.catalogFlight) {
+      toast('Commands are unavailable: ' + (r.catalog.error || 'the server did not answer'), 'info');
+      return false;
+    }
+    holdForCatalog(r, text, refs, files, steerTurnId);
+    return false;
+  }
   if (cmd && isNativeCommand(r, cmd.name)) {
     // The command is spent from the draft here, once: submit is the only
     // place that knows the text it sent. What it carried — attachments,
@@ -1044,15 +1114,15 @@ export function submit(r, text, refs = [], files = [], steerTurnId = '') {
   text = text.trim();
   if (!text && !files.length && !r.recording) return false;
   const message = { text, references, files, recording: r.recording };
-  if (steerTurnId) {
+  const target = steerTurnId && r.live?.turnId === steerTurnId && !r.live.terminal ? r.live : null;
+  // Only the declaration sends turn.steer. A live turn whose flag is false
+  // or absent, and a turn that has already ended, fall through and become
+  // one ordinary send. Nothing was accepted, so there is no toast.
+  if (target && canSteer(target)) {
     if (message.recording) {
       // A recording belongs to a new message — the server refuses it in
       // a steer. Keep the draft and the chip; the owner stops the turn.
       toast('A recording goes with a new message — wait for the turn to end or remove it.', 'info');
-      return false;
-    }
-    if (r.live?.turnId !== steerTurnId || r.live.kind !== 'send' || r.live.terminal) {
-      toast('That turn has ended. Your message is still in the draft.', 'info');
       return false;
     }
     const inputId = command(r, 'steer', { type: 'turn.steer', conversationId: r.id, turnId: steerTurnId, payload: messagePayload(message) }, text);
@@ -1061,6 +1131,14 @@ export function submit(r, text, refs = [], files = [], steerTurnId = '') {
     emit();
     return true;
   }
+  return placeOrdinary(r, message);
+}
+
+// placeOrdinary is one ordinary send: onto the room queue while the room is
+// busy, or out immediately when it is idle. It answers whether the input
+// was taken. A path that cannot take it leaves the input where the caller
+// can still restore it.
+function placeOrdinary(r, message) {
   if (roomBusy(r) || r.queue.length) {
     r.queue.push({ ...message, id: newRequestId() });
     // An explicit send in an idle room releases a held queue, oldest first.
@@ -1069,6 +1147,14 @@ export function submit(r, text, refs = [], files = [], steerTurnId = '') {
     return true;
   }
   return sendNow(r, message);
+}
+
+// steerUnaccepted is a turn.steer the server stored nothing for. Those three
+// answers become one ordinary send. Any other rejection stays an error.
+const STEER_REFUSAL = 'that turn does not take steering';
+function steerUnaccepted(f) {
+  if (f.code === 'not_found' || f.code === 'queue_full') return true;
+  return f.code === 'invalid_argument' && f.message === STEER_REFUSAL;
 }
 
 // messagePayload is the wire body every mode shares: text, selections
@@ -1481,7 +1567,11 @@ function onOpened(f) {
     if (state.route.view === 'home') navigate('#/c/' + encodeURIComponent(f.conversationId));
     loadInfo(r, { created: true });
   }
-  r.live = newTurn({ turnId: f.turnId, requestId: f.requestId, conversationId: f.conversationId, kind: req.kind === 'send' ? 'send' : 'edit', startedAt: f.payload?.startedAt });
+  r.live = newTurn({
+    turnId: f.turnId, requestId: f.requestId, conversationId: f.conversationId,
+    kind: req.kind === 'send' ? 'send' : 'edit', startedAt: f.payload?.startedAt,
+    steerable: f.payload?.steerable,
+  });
   r.live.lastSeq = 0;
   r.live.userText = req.kind === 'send' || req.kind === 'edit' ? req.text : null;
   r.live.userRefs = req.kind === 'send' ? r.pendingOpen?.references || null : null;
@@ -1519,7 +1609,14 @@ function onError(f) {
     } else if (req.kind === 'send') restoreDraft(r, req.text, mine?.references, mine?.files, mine?.recording);
   } else if (req.kind === 'steer') {
     const s = r.steers.find((x) => x.inputId === f.requestId);
-    if (s) { r.steers = r.steers.filter((x) => x !== s); restoreDraft(r, s.text, s.references, s.files); }
+    if (s) r.steers = r.steers.filter((x) => x !== s);
+    // Never accepted: one ordinary send, and no toast. The server stored
+    // nothing and does not also queue. A refusal this path cannot place
+    // (the room queue will not take it) falls through to the error.
+    if (s && steerUnaccepted(f) && placeOrdinary(r, {
+      text: s.text, references: s.references || [], files: s.files || [], recording: s.recording || null,
+    })) return;
+    if (s) restoreDraft(r, s.text, s.references, s.files, s.recording);
   } else if (req.kind === 'watch') {
     if (r.live && !r.live.terminal) { r.live = null; loadHistory(r); }
   }
@@ -1540,6 +1637,9 @@ function onResync(f) {
     // appending after it. When the bound trimmed earlier output — or no
     // snapshot came at all — say so instead of faking completeness.
     if (p.startedAt) r.live.startedAt = p.startedAt;
+    // The active snapshot carries the same declaration as turn.opened.
+    // A snapshot that omits it does not invent one and does not clear one.
+    if (p.steerable === true || p.steerable === false) r.live.steerable = p.steerable;
     if (p.phase) r.live.phase = { phase: p.phase.phase, retryAfterMs: p.phase.retryAfterMs, at: Date.now() };
     if (p.parts) {
       snapshotSegments(r.live, p.parts);
@@ -1637,8 +1737,9 @@ async function onTerminal(r, f) {
     r.steers = r.steers.filter((x) => x !== mine);
   }
   if (steerReturned) toast('The turn ended before it could use your steer. Your input is back in the draft.', 'info');
-  // A command can reach the server after this terminal snapshot. Keep its
-  // input until a late rejection can restore it; do not resend it blindly.
+  // A command can still be in flight after this snapshot. Keep the tray row
+  // until that answer arrives: an unaccepted steer is queued from the error,
+  // and any other rejection still restores the draft.
   for (const s of r.steers) if (s.turnId === live?.turnId) s.state = 'unknown';
 
   if (f.type === 'turn.failed' && r.minted && live?.kind === 'send' && p.userMessagePersisted === false) {

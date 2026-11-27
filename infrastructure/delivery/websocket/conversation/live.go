@@ -84,7 +84,7 @@ func (h *Hub) Open(convID, kind string, origin valueobject.TurnOrigin) (event.Tu
 	h.admitSeq++
 	t.admitted = h.admitSeq
 	h.turns[t.id] = t
-	h.emitLocked(t, "turn.opened", openedPayload{StartedAt: t.startedAt.UnixMilli()}, true)
+	h.emitLocked(t, "turn.opened", h.openedBody(t), true)
 	h.broadcastLocked(activityFrame(t, "opened"))
 	h.mu.Unlock()
 

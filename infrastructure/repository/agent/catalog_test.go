@@ -125,3 +125,78 @@ func TestCatalogRemovedWithTheAgent(t *testing.T) {
 		t.Fatalf("catalog survived the agent's delete: %+v, %v", cat, err)
 	}
 }
+
+// A conversation's command catalog round-trips as one replacement: the second
+// report is the whole list, including an empty list, never a merge.
+func TestCommandCatalogRoundTripAndReplacement(t *testing.T) {
+	repo := New(t.TempDir(), nil)
+	cat := drepo.AgentCommandCatalog{
+		AgentID: "codex",
+		Commands: []dservice.AgentCommand{
+			{Name: "compact", Description: "Compact", Hint: "keep"},
+			{Name: "review", Description: "Review"},
+		},
+		ReportedAt: time.Now().Truncate(time.Second),
+	}
+	if err := repo.SaveCommandCatalog(t.Context(), "c_room", cat); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.CommandCatalog(t.Context(), "c_room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentID != "codex" || len(got.Commands) != 2 || got.Commands[0].Hint != "keep" || got.ReportedAt.IsZero() {
+		t.Fatalf("command catalog = %+v", got)
+	}
+	got.Commands = nil
+	if err := repo.SaveCommandCatalog(t.Context(), "c_room", drepo.AgentCommandCatalog{AgentID: "codex", Commands: []dservice.AgentCommand{}, ReportedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := repo.CommandCatalog(t.Context(), "c_room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replaced.Commands) != 0 {
+		t.Fatalf("replacement merged old commands: %+v", replaced.Commands)
+	}
+}
+
+// No report is not an error: the conversation reads as the zero catalog.
+func TestCommandCatalogMissingReadsAsZero(t *testing.T) {
+	repo := New(t.TempDir(), nil)
+	cat, err := repo.CommandCatalog(t.Context(), "c_missing")
+	if err != nil || cat.AgentID != "" || cat.Commands != nil {
+		t.Fatalf("CommandCatalog(absent) = %+v, %v — want zero, nil", cat, err)
+	}
+}
+
+// The id becomes a path under the store; reject anything the domain id rule
+// would reject instead of letting it escape the conversations directory.
+func TestCommandCatalogRejectsAnInvalidConversationID(t *testing.T) {
+	repo := New(t.TempDir(), nil)
+	if err := repo.SaveCommandCatalog(t.Context(), "../escape", drepo.AgentCommandCatalog{}); err == nil {
+		t.Fatal("a traversal id was stored")
+	}
+	if _, err := repo.CommandCatalog(t.Context(), "../escape"); err == nil {
+		t.Fatal("a traversal id was read")
+	}
+}
+
+// Deleting a conversation's command report is idempotent: present or absent,
+// the room's delete lifecycle can call it and finish.
+func TestDeleteCommandCatalog(t *testing.T) {
+	repo := New(t.TempDir(), nil)
+	if err := repo.SaveCommandCatalog(t.Context(), "c_room", drepo.AgentCommandCatalog{AgentID: "codex", Commands: []dservice.AgentCommand{{Name: "compact"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteCommandCatalog(t.Context(), "c_room"); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := repo.CommandCatalog(t.Context(), "c_room")
+	if err != nil || cat.AgentID != "" {
+		t.Fatalf("catalog survived delete: %+v, %v", cat, err)
+	}
+	if err := repo.DeleteCommandCatalog(t.Context(), "c_room"); err != nil {
+		t.Fatalf("second delete: %v", err)
+	}
+}

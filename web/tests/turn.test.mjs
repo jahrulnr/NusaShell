@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, toolSummary, toolFailed, closeStatus, toolEnding, userLayout, formatDuration, toolClock, splitReplyQuote, relayName, turnEnds, toolRoom, shortHandle } from '../lib/turn.js';
+import { newTurn, applyFrame, snapshotSegments, historyItems, liveHistory, liveSegments, joinText, group, foldGhosts, isGhostTool, toolSummary, toolFailed, closeStatus, toolEnding, userLayout, formatDuration, toolClock, splitReplyQuote, relayName, turnEnds, toolRoom, shortHandle } from '../lib/turn.js';
 
 const turn = () => newTurn({ turnId: 't1', requestId: 'r1', conversationId: 'c1', kind: 'send' });
 const frame = (type, payload, seq) => ({ type, payload, seq });
@@ -75,6 +75,48 @@ test('a tool streams output, then settles with its result', () => {
   applyFrame(t, frame('turn.tool_output', { callId: 'a', text: 'y' }, 5));
   assert.equal(t.segments[0].status, 'success');
   assert.equal(t.segments[0].output, 'xy');
+});
+
+test('a member is only the opening frame key, and it survives step end and turn end', () => {
+  const t = turn();
+  const memberKey = { 'acp.subagent.parent': 'run-1' };
+  applyFrame(t, frame('turn.tool_call', { callId: 'm', name: 'read_file', keys: memberKey }, 0));
+  applyFrame(t, frame('turn.tool_call', { callId: 'p', name: 'exec' }, 1));
+  // A frame field named parent is not the marker. Neither is an empty key.
+  applyFrame(t, frame('turn.tool_call', { callId: 'g', name: 'read_file', parent: 'run-1' }, 2));
+  applyFrame(t, frame('turn.tool_call', { callId: 'e', name: 'read_file', keys: { 'acp.subagent.parent': '' } }, 3));
+  applyFrame(t, frame('turn.tool_output', { callId: 'm', text: 'still going' }, 4));
+  // A settle that is not a step end does not verdict the member either.
+  applyFrame(t, frame('turn.steer', { inputId: 'i', text: 'go', final: true }, 5));
+  const member = t.segments.find((s) => s.callId === 'm');
+  assert.equal(member.parent, 'run-1');
+  assert.equal(member.status, 'streaming');
+  applyFrame(t, frame('turn.step_finished', { finishReason: 'stop' }, 6));
+  assert.equal(member.status, 'streaming', 'a member still running is not a failed call');
+  assert.equal(t.segments.find((s) => s.callId === 'p').status, 'failed', 'an ordinary call with no result still fails');
+  assert.equal(t.segments.find((s) => s.callId === 'g').status, 'failed', 'a parent field is not a member marker');
+  assert.equal(t.segments.find((s) => s.callId === 'g').parent, '');
+  assert.equal(t.segments.find((s) => s.callId === 'e').status, 'failed', 'an empty key is absence');
+  applyFrame(t, frame('turn.tool_output', { callId: 'p', text: 'late' }, 7));
+  assert.equal(t.segments.find((s) => s.callId === 'p').status, 'failed', 'a finished ordinary row does not return to streaming');
+  applyFrame(t, frame('turn.completed', {}, 8));
+  assert.equal(member.status, 'streaming');
+  assert.notEqual(member.status, 'failed');
+});
+
+test('a member survives a failed turn, and a key that arrives later is not a marker', () => {
+  const t = turn();
+  applyFrame(t, frame('turn.tool_call', { callId: 'm', name: 'read_file', keys: { 'acp.subagent.parent': 'run-1' } }, 0));
+  applyFrame(t, frame('turn.tool_call', { callId: 'late', name: 'exec' }, 1));
+  applyFrame(t, frame('turn.tool_output', { callId: 'late', text: '', keys: { 'acp.subagent.parent': 'run-1' } }, 2));
+  applyFrame(t, frame('turn.failed', { status: 500 }, 3));
+  const member = t.segments.find((s) => s.callId === 'm');
+  assert.equal(member.parent, 'run-1');
+  assert.equal(member.status, 'requested');
+  assert.equal(t.segments.find((s) => s.callId === 'late').status, 'failed');
+  member.status = 'failed';
+  applyFrame(t, frame('turn.tool_output', { callId: 'm', text: 'x' }, 4));
+  assert.equal(member.status, 'streaming');
 });
 
 test('a tool with no result fails when the turn ends, and pending questions are withdrawn', () => {
@@ -813,6 +855,88 @@ test('one search result naming two rooms renders two names, in one shape', () =>
     { label: '', title: 'Read file di luar folder', short: '' },
     { label: '', title: '', short: '@c_C' },
   ]);
+});
+
+const ghost = (id) => ({ id, name: '', input: '', output: '', status: 'failed' });
+const assistant = (id, calls, tail = []) => ({
+  id, role: 'assistant', toolCalls: calls,
+  parts: [...calls.map((c) => ({ kind: 'tool_call', toolCallId: c.id })), ...tail],
+});
+
+test('empty failed tool rows become one quiet count, after the tools that remain', () => {
+  const messages = [
+    assistant('a1', [ghost('g1'), ghost('g2'), ghost('g3'), { id: 'real', name: 'exec', input: '{"command":"ls"}', output: '', status: 'failed' }], [{ kind: 'text', text: 'done' }]),
+    { id: 'u', role: 'user', content: 'next' },
+    assistant('a2', [ghost('g4')]),
+  ];
+  const raw = historyItems(messages);
+  const shown = group(joinText(foldGhosts(raw)));
+  const lines = shown.filter((it) => it.kind === 'ghosts');
+  assert.deepEqual(lines.map((it) => it.text), [
+    '3 agent events with no recorded detail',
+    '1 agent event with no recorded detail',
+  ]);
+  assert.equal(shown.some((it) => it.kind === 'activity' && it.items.some(isGhostTool)), false, 'a ghost is not a card');
+  assert.equal(shown.filter((it) => it.kind === 'tool').length, 0);
+  const activity = shown.find((it) => it.kind === 'activity');
+  assert.equal(activity.items.length, 1);
+  assert.equal(activity.items[0].name, 'exec');
+  const lineAt = shown.findIndex((it) => it.kind === 'ghosts');
+  assert.ok(lineAt > shown.findIndex((it) => it.kind === 'activity'), 'the count follows that turn\'s tool rows');
+  assert.ok(lineAt < shown.findIndex((it) => it.kind === 'text'), 'and it stays with the turn, ahead of its text');
+  assert.equal(shown.filter((it) => it.kind === 'user').length, 1);
+});
+
+test('a turn with no empty failed rows is left as it was', () => {
+  const plain = historyItems([{ id: 'a', role: 'assistant', content: 'hello' }]);
+  assert.equal(foldGhosts(plain), plain);
+  const named = historyItems([assistant('a', [{ id: 'real', name: 'exec', input: '{"command":"ls"}', output: '', status: 'failed' }])]);
+  assert.equal(foldGhosts(named), named);
+  assert.equal(named[0].kind, 'tool');
+  const pending = historyItems([assistant('a', [{ id: 'p', name: '', input: '', status: 'pending' }])]);
+  assert.equal(foldGhosts(pending), pending, 'a call that has not finished is not a ghost');
+  assert.equal(pending[0].status, 'pending');
+  const namedWord = historyItems([assistant('a', [{ id: 'real', name: 'exec', input: '{"command":"ls"}', output: 'failed', status: 'failed' }])]);
+  assert.equal(foldGhosts(namedWord), namedWord, 'a named call whose output is the word failed stays a card');
+});
+
+test('an empty failed row stored as the word failed is still one quiet line', () => {
+  const shown = foldGhosts(historyItems([
+    assistant('a', [ghost('g1'), { id: 'g2', name: '', input: '', output: 'failed', status: 'failed' }]),
+  ]));
+  assert.deepEqual(shown.map((it) => it.kind), ['ghosts']);
+  assert.equal(shown[0].text, '2 agent events with no recorded detail');
+});
+
+// The capture, as stored: entity() wrote name "tool" and input "{}" because
+// the row had no title, kind, or input. type "delegated" is on every call.
+const captured = (id, output = '') => ({
+  id, name: 'tool', type: 'delegated', status: 'failed', input: '{}', output,
+});
+
+test('two stored placeholder rows are one quiet line', () => {
+  // The capture, both spellings finish() leaves in an empty output.
+  const shown = group(joinText(foldGhosts(historyItems([
+    assistant('a', [captured('unknown-bare-1', ''), captured('agent-9c1d', 'failed')]),
+  ]))));
+  assert.deepEqual(shown.map((it) => it.kind), ['ghosts']);
+  assert.equal(shown[0].text, '2 agent events with no recorded detail');
+  assert.equal(shown.some((it) => it.kind === 'tool' || it.kind === 'activity'), false, 'neither placeholder is a card');
+  const noisy = historyItems([assistant('b', [captured('g', 'ran\n(exit 1)')])]);
+  assert.equal(foldGhosts(noisy), noisy, 'a real output on the placeholder pair stays a card');
+});
+
+test('a real call that failed with no output stays a card', () => {
+  const plain = { id: 'call-plain-2', name: 'Run workspace tests', type: 'delegated', status: 'failed', input: '{}', output: '' };
+  const items = historyItems([assistant('a', [plain, captured('unknown-bare-1'), captured('agent-9c1d', 'failed')])]);
+  const shown = foldGhosts(items);
+  assert.equal(shown.filter((it) => it.kind === 'tool').length, 1);
+  assert.equal(shown.find((it) => it.kind === 'tool').name, 'Run workspace tests');
+  assert.equal(shown.find((it) => it.kind === 'ghosts').text, '2 agent events with no recorded detail');
+  const realInput = historyItems([assistant('b', [{ id: 't', name: 'tool', type: 'delegated', status: 'failed', input: '{"path":"a.go"}', output: '' }])]);
+  assert.equal(foldGhosts(realInput), realInput, 'the placeholder name with a real input is not the pair');
+  const pending = historyItems([assistant('c', [{ id: 'p', name: 'tool', type: 'delegated', status: 'pending', input: '{}', output: '' }])]);
+  assert.equal(foldGhosts(pending), pending, 'a call that has not failed is not a ghost');
 });
 
 test('a tool that names no room keeps the summary of its arguments', () => {

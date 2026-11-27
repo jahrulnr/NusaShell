@@ -55,7 +55,7 @@ type Rooms interface {
 	Approve(convID, requestID, optionID string) error
 	AnswerElicitation(convID, id string, a valueobject.ElicitationAnswer) error
 	// AgentCommands are the slash commands the room's agent session offers.
-	AgentCommands(convID string) []dservice.AgentCommand
+	AgentCommands(ctx context.Context, convID string) []dservice.AgentCommand
 	// Roots are the folders a room's turns work in and the storage that
 	// reaches them; a reply's file links resolve only inside them.
 	Roots(ctx context.Context, p appconversation.Place) (drepo.Workspace, []string, error)
@@ -682,7 +682,7 @@ func (a *App) syncMenus(ctx context.Context, convID string) {
 	if err != nil || len(links) == 0 {
 		return
 	}
-	cmds := a.rooms.AgentCommands(convID)
+	cmds := a.rooms.AgentCommands(ctx, convID)
 	for _, l := range links {
 		a.syncMenu(ctx, l.Chat(), cmds)
 	}

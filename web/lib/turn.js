@@ -13,8 +13,8 @@ export const STEER_INPUT = 'inputId';
 // server has said when it started (turn.opened), because a tab never invents a start.
 export const turnSeconds = (t, now = Date.now()) => (t?.startedAt ? Math.floor((now - t.startedAt) / 1000) : null);
 
-export function newTurn({ turnId, requestId, conversationId, kind, startedAt }) {
-  return {
+export function newTurn({ turnId, requestId, conversationId, kind, startedAt, steerable }) {
+  const turn = {
     turnId, requestId, conversationId, kind,
     lastSeq: -1,
     segments: [],
@@ -24,13 +24,28 @@ export function newTurn({ turnId, requestId, conversationId, kind, startedAt }) 
     terminal: null,       // the terminal frame once it arrives
     n: 0,
   };
+  // Only the wire's boolean. Absent stays absent: the client queues rather
+  // than treating a missing field as permission to steer.
+  if (steerable === true || steerable === false) turn.steerable = steerable;
+  return turn;
 }
 
 const last = (t) => t.segments[t.segments.length - 1];
 
+// toolParent is the run a subagent member belongs to. The only wire field is
+// keys['acp.subagent.parent'] on the opening turn.tool_call, the same name the
+// record uses. An empty value is absence. A frame field named parent is not a link.
+function toolParent(p) {
+  const linked = p?.keys?.['acp.subagent.parent'];
+  return typeof linked === 'string' && linked !== '' ? linked : '';
+}
+
 function settleTools(t, why, definitive = false) {
   for (const s of t.segments) {
-    if (s.kind !== 'tool' || s.status === 'success' || s.status === 'failed') continue;
+    // A member is skipped for every settle, definitive or not: its run outlives
+    // the step and the turn, and a missing result is not a failure. The skip
+    // is the stored key from the opening frame, not a guess about the call.
+    if (s.kind !== 'tool' || s.parent || s.status === 'success' || s.status === 'failed') continue;
     // A call that produced no result before the turn ended did not
     // succeed; an empty successful call gets an explicit tool_result and
     // never reaches this fallback. Model activity can resume while an
@@ -76,8 +91,11 @@ export function applyFrame(t, f) {
   switch (f.type) {
     case 'turn.opened':
       // The server's admission clock — a watcher replays this frame and
-      // adopts it, so the working timer survives the reattach.
+      // adopts it, so the working timer survives the reattach. steerable is
+      // the same declaration: true or false is written, and a missing field
+      // is left missing.
       if (p.startedAt) t.startedAt = p.startedAt;
+      if (p.steerable === true || p.steerable === false) t.steerable = p.steerable;
       break;
     case 'turn.delta': {
       const s = last(t);
@@ -103,7 +121,7 @@ export function applyFrame(t, f) {
     case 'turn.tool_call':
       // at is when this tab saw the call start: the row's clock reads from it,
       // and the frame carries no clock of its own.
-      t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'tool', callId: p.callId, name: p.name, input: '', output: '', status: 'requested', at: Date.now() });
+      t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'tool', callId: p.callId, name: p.name, input: '', output: '', status: 'requested', parent: toolParent(p), at: Date.now() });
       if (t.phase?.phase === 'reasoning') t.phase = null;
       break;
     case 'turn.tool_input': {
@@ -116,8 +134,12 @@ export function applyFrame(t, f) {
       if (s) {
         s.output += p.text || '';
         // A late chunk after a terminal result is still data, but it must
-        // not put a finished row back into the running state.
-        if (s.status !== 'success' && s.status !== 'failed') s.status = 'streaming';
+        // not put a finished row back into the running state. A member has
+        // no verdict: a later chunk is the run continuing, even if a sweep
+        // had marked the row.
+        if (s.parent) {
+          if (s.status !== 'success') s.status = 'streaming';
+        } else if (s.status !== 'success' && s.status !== 'failed') s.status = 'streaming';
       }
       break;
     }
@@ -186,7 +208,7 @@ export function applyFrame(t, f) {
         // A failed/cancelled turn leaves any call without a terminal
         // result unsettled; no output wording can make it a success.
         for (const s of t.segments) {
-          if (s.kind === 'tool' && s.status !== 'success' && s.status !== 'failed') {
+          if (s.kind === 'tool' && !s.parent && s.status !== 'success' && s.status !== 'failed') {
             s.status = 'failed';
             s.settled = 'Turn failed';
             // Its clock stops here too: the row keeps the time it ran.
@@ -567,6 +589,72 @@ export function historyItems(messages, cwd = '') {
     // how far the chat confirmed it.
     if (m.sentFiles?.length || m.receipt) out.push({ id: `${m.id}:sent`, kind: 'delivery', files: m.sentFiles || [], receipt: m.receipt || '' });
   }
+  return out;
+}
+
+// A stored ghost is a failed tool row whose every content field is blank or
+// a sentinel: name blank or "tool", input blank, null, or "{}", output blank
+// or the word "failed", and no kind. The DTO type is not read — every call
+// is marked delegated. A real title, a real input, a real output, or a row
+// that has not failed stays a card.
+const blank = (v) => !String(v ?? '').trim();
+function ghostOutput(v) {
+  const s = String(v ?? '').trim();
+  return s === '' || s === 'failed';
+}
+function sentinelName(v) {
+  const s = String(v ?? '').trim();
+  return s === '' || s === 'tool';
+}
+function sentinelInput(v) {
+  if (v == null) return true;
+  const s = String(v).trim();
+  return s === '' || s === '{}';
+}
+export function isGhostTool(it) {
+  return !!it && it.kind === 'tool' && it.status === 'failed'
+    && ghostOutput(it.output) && sentinelName(it.name) && sentinelInput(it.input) && blank(it.toolKind);
+}
+
+// ghostCountText is the one quiet line a turn uses for its ghosts. The
+// singular is its own sentence; the count is the fact the line keeps.
+export function ghostCountText(n) {
+  return n === 1
+    ? '1 agent event with no recorded detail'
+    : `${n} agent events with no recorded detail`;
+}
+
+const TURN_EDGE = new Set(['user', 'note', 'compaction']);
+
+// foldGhosts replaces the empty failed tool rows of one turn with a single
+// quiet line, placed after the last tool row that remains. A turn with none
+// is returned as it was. Runs before group(), so the line is not a card.
+export function foldGhosts(items) {
+  if (!items?.some(isGhostTool)) return items || [];
+  const out = [];
+  let turn = [];
+  const flush = () => {
+    if (!turn.length) return;
+    const ghosts = turn.filter(isGhostTool);
+    if (!ghosts.length) { out.push(...turn); turn = []; return; }
+    const kept = [];
+    let afterTool = -1;
+    for (const it of turn) {
+      if (isGhostTool(it)) continue;
+      if (it.kind === 'tool') afterTool = kept.length;
+      kept.push(it);
+    }
+    const line = { id: 'ghosts:' + ghosts[0].id, kind: 'ghosts', n: ghosts.length, text: ghostCountText(ghosts.length) };
+    if (afterTool < 0) kept.push(line);
+    else kept.splice(afterTool + 1, 0, line);
+    out.push(...kept);
+    turn = [];
+  };
+  for (const it of items) {
+    if (TURN_EDGE.has(it.kind)) { flush(); out.push(it); continue; }
+    turn.push(it);
+  }
+  flush();
   return out;
 }
 

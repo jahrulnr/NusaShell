@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	appconversation "github.com/jahrulnr/nusashell/application/conversation"
+	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -122,7 +125,7 @@ func TestCancelJournalOnlyTurnForwardsToTheWorker(t *testing.T) {
 	t.Skip("ack is UI plumbing; what must be proven first is that the job ends — see the chain test")
 	h := newHub(t, stubSender{})
 	cancelled := make(chan string, 1)
-	h.UseJobControl(func(convID string) bool { cancelled <- convID; return true }, nil)
+	h.UseJobControl(func(convID string) bool { cancelled <- convID; return true }, nil, nil)
 	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
 	if handler == nil {
 		t.Fatal("surface refused the turn")
@@ -158,7 +161,7 @@ func TestCancelJournalOnlyTurnForwardsToTheWorker(t *testing.T) {
 func TestCancelJournalOnlyTurnWithoutAWorkerIsNotAcked(t *testing.T) {
 	t.Skip("ack is UI plumbing; what must be proven first is that the job ends — see the chain test")
 	h := newHub(t, stubSender{})
-	h.UseJobControl(func(convID string) bool { return false }, nil)
+	h.UseJobControl(func(convID string) bool { return false }, nil, nil)
 	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
 	if handler == nil {
 		t.Fatal("surface refused the turn")
@@ -188,7 +191,7 @@ func TestCancelJournalOnlyTurnWithoutAWorkerIsNotAcked(t *testing.T) {
 func TestHubCancelAnswersTrueOnlyWhenTheWorkerTakesIt(t *testing.T) {
 	h := newHub(t, stubSender{})
 	workerAlive := false
-	h.UseJobControl(func(convID string) bool { return workerAlive }, nil)
+	h.UseJobControl(func(convID string) bool { return workerAlive }, nil, nil)
 	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
 	if handler == nil {
 		t.Fatal("surface refused the turn")
@@ -209,7 +212,10 @@ func TestHubCancelAnswersTrueOnlyWhenTheWorkerTakesIt(t *testing.T) {
 func TestSteerJournalOnlyTurnForwardsToTheWorker(t *testing.T) {
 	h := newHub(t, stubSender{})
 	steered := make(chan string, 1)
-	h.UseJobControl(nil, func(convID, text string) bool { steered <- text; return true })
+	h.UseJobControl(nil, func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+		steered <- in.Text
+		return &appjob.SteeringReceipt{}, true
+	}, nil)
 	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
 	if handler == nil {
 		t.Fatal("surface refused the turn")
@@ -225,5 +231,184 @@ func TestSteerJournalOnlyTurnForwardsToTheWorker(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("steer never reached the worker callback")
+	}
+}
+
+func activityTurn(t *testing.T, ws *websocket.Conn, convID string) string {
+	t.Helper()
+	for {
+		f := readAnyFrame(t, ws)
+		if f.Type == "conversation.activity" && f.ConversationID == convID && f.TurnID != "" {
+			return f.TurnID
+		}
+	}
+}
+
+func inputIDOf(t *testing.T, f frame) string {
+	t.Helper()
+	var p steerInputPayload
+	if err := json.Unmarshal(f.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	return p.InputID
+}
+
+// A worker-owned send is steered through the websocket command, not only
+// through Hub.Steer. The forward carries the command's request id, and
+// recall withdraws that id rather than whichever input arrived last.
+func TestJobOwnedSteerCommandReachesTheWorkerAndRecallNamesThatInput(t *testing.T) {
+	box := appjob.NewSteeringInput()
+	var got []valueobject.UserInput
+	h := newHub(t, stubSender{})
+	h.UseJobControl(nil,
+		func(convID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+			if convID != "c_job" {
+				t.Errorf("steer conv = %q", convID)
+				return nil, false
+			}
+			got = append(got, in)
+			receipt, err := box.SubmitBefore(in, 0, nil)
+			if err != nil {
+				t.Errorf("mailbox: %v", err)
+				return nil, false
+			}
+			return receipt, true
+		},
+		func(convID, inputID string) bool {
+			if convID != "c_job" {
+				return false
+			}
+			return box.RecallID(inputID)
+		},
+	)
+	ws := dial(t, h)
+	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the turn")
+	}
+	defer seal(true, nil)
+	turnID := activityTurn(t, ws, "c_job")
+
+	sendCommand(t, ws, `{"type":"turn.steer","requestId":"older","conversationId":"c_job","turnId":"`+turnID+`","payload":{"content":"older text"}}`)
+	ack := readUntil(t, ws, "turn.steer_ack")
+	if inputIDOf(t, ack) != "older" {
+		t.Fatalf("ack input = %q, want the command requestId", inputIDOf(t, ack))
+	}
+	sendCommand(t, ws, `{"type":"turn.steer","requestId":"newer","conversationId":"c_job","turnId":"`+turnID+`","payload":{"content":"newer text"}}`)
+	if id := inputIDOf(t, readUntil(t, ws, "turn.steer_ack")); id != "newer" {
+		t.Fatalf("second ack input = %q", id)
+	}
+	if len(got) != 2 || got[0].Text != "older text" || got[0].InputID != "older" || got[1].Text != "newer text" || got[1].InputID != "newer" {
+		t.Fatalf("forwarded inputs = %+v, want both texts with their request ids", got)
+	}
+
+	sendCommand(t, ws, `{"type":"turn.steer_recall","requestId":"rc","conversationId":"c_job","turnId":"`+turnID+`","payload":{"inputId":"older"}}`)
+	recalled := readUntil(t, ws, "turn.steer_recalled")
+	if inputIDOf(t, recalled) != "older" {
+		t.Fatalf("recalled input = %q, want older", inputIDOf(t, recalled))
+	}
+	if !box.RecallID("newer") {
+		t.Fatal("recall withdrew the newest input instead of the named one")
+	}
+	if box.RecallID("older") {
+		t.Fatal("the named input was still pending after recall")
+	}
+}
+
+// A worker that refuses the forward stores nothing and does not ack.
+func TestRefusedJobSteerStoresNothing(t *testing.T) {
+	calls := 0
+	h := newHub(t, stubSender{})
+	h.UseJobControl(nil, func(string, valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+		calls++
+		return nil, false
+	}, func(string, string) bool {
+		t.Fatal("recall ran for a steer the worker refused")
+		return false
+	})
+	ws := dial(t, h)
+	handler, seal := h.Open("c_job", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the turn")
+	}
+	defer seal(true, nil)
+	turnID := activityTurn(t, ws, "c_job")
+	sendCommand(t, ws, `{"type":"turn.steer","requestId":"s1","conversationId":"c_job","turnId":"`+turnID+`","payload":{"content":"no"}}`)
+	f := readFrame(t, ws)
+	if f.Type != "error" || f.Code != "invalid_argument" || !strings.Contains(f.Message, "does not take steering") {
+		t.Fatalf("refusal = %+v, want invalid_argument that the turn does not take steering", f)
+	}
+	if calls != 1 {
+		t.Fatalf("forward calls = %d, want 1 — dropping the call stores nothing only if it was attempted and refused", calls)
+	}
+	sendCommand(t, ws, `{"type":"turn.steer_recall","requestId":"rc","conversationId":"c_job","turnId":"`+turnID+`","payload":{"inputId":"s1"}}`)
+	f = readFrame(t, ws)
+	if f.Type != "error" || f.Code != "not_found" {
+		t.Fatalf("recall after refusal = %+v, want not_found — the steer was stored", f)
+	}
+}
+
+// steerable is written on turn.opened and on the active resync snapshot,
+// including when the answer is no. A missing field would look like an
+// older server, which the client treats as unknown.
+func TestLiveTurnWritesSteerableEvenWhenFalse(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	h := newHub(t, stubSender{fn: func(ctx context.Context, id, _, _, _ string, _ event.TurnEventHandler) (appconversation.SendResult, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return appconversation.SendResult{ConversationID: id, UserMessagePersisted: true}, nil
+	}})
+	h.UseJobControl(nil, func(string, valueobject.UserInput) (*appjob.SteeringReceipt, bool) {
+		return &appjob.SteeringReceipt{}, true
+	}, nil)
+	ws := dial(t, h)
+	sendCommand(t, ws, `{"type":"turn.send","requestId":"req-1","payload":{"providerId":"gw1","modelId":"m1","content":"hi"}}`)
+	opened := readUntil(t, ws, "turn.opened")
+	if !strings.Contains(string(opened.Payload), `"steerable":true`) {
+		t.Fatalf("admitted send opened %s, want steerable true", opened.Payload)
+	}
+	sendCommand(t, ws, `{"type":"turn.watch","requestId":"w-send","conversationId":"`+opened.ConversationID+`","turnId":"`+opened.TurnID+`","afterSeq":1000}`)
+	resync := readUntil(t, ws, "turn.resync_required")
+	if !strings.Contains(string(resync.Payload), `"steerable":true`) {
+		t.Fatalf("active send resync %s, want steerable true", resync.Payload)
+	}
+
+	handler, seal := h.Open("c_edit", "edit", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the edit")
+	}
+	defer seal(true, nil)
+	editID := activityTurn(t, ws, "c_edit")
+	sendCommand(t, ws, `{"type":"turn.watch","requestId":"w-edit","conversationId":"c_edit","turnId":"`+editID+`","afterSeq":-1}`)
+	editOpened := readUntilTurn(t, ws, "turn.opened", editID)
+	if !strings.Contains(string(editOpened.Payload), `"steerable":false`) {
+		t.Fatalf("edit opened %s, want steerable false written", editOpened.Payload)
+	}
+	sendCommand(t, ws, `{"type":"turn.watch","requestId":"w-edit2","conversationId":"c_edit","turnId":"`+editID+`","afterSeq":1000}`)
+	editResync := readUntilTurn(t, ws, "turn.resync_required", editID)
+	if !strings.Contains(string(editResync.Payload), `"steerable":false`) {
+		t.Fatalf("active edit resync %s, want steerable false written", editResync.Payload)
+	}
+
+	bare := newHub(t, stubSender{})
+	ws2 := dial(t, bare)
+	handler, seal2 := bare.Open("c_bare", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
+	if handler == nil {
+		t.Fatal("surface refused the bare send")
+	}
+	defer seal2(true, nil)
+	bareID := activityTurn(t, ws2, "c_bare")
+	sendCommand(t, ws2, `{"type":"turn.watch","requestId":"w-bare","conversationId":"c_bare","turnId":"`+bareID+`","afterSeq":-1}`)
+	bareOpened := readUntil(t, ws2, "turn.opened")
+	if !strings.Contains(string(bareOpened.Payload), `"steerable":false`) {
+		t.Fatalf("unwired worker send opened %s, want steerable false", bareOpened.Payload)
+	}
+	sendCommand(t, ws2, `{"type":"turn.watch","requestId":"w-bare2","conversationId":"c_bare","turnId":"`+bareID+`","afterSeq":1000}`)
+	bareResync := readUntil(t, ws2, "turn.resync_required")
+	if !strings.Contains(string(bareResync.Payload), `"steerable":false`) {
+		t.Fatalf("unwired worker send resync %s, want steerable false", bareResync.Payload)
 	}
 }

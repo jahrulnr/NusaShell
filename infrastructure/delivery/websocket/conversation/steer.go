@@ -88,6 +88,7 @@ func (h *Hub) resyncForLocked(t *turn) resyncPayload {
 		// part produced so far, marked when content had to drop.
 		p.Turn = "active"
 		p.StartedAt = t.startedAt.UnixMilli()
+		p.Steerable = h.steerableLocked(t)
 		if t.live != nil {
 			p.Parts = append([]*livePart{}, t.live.parts...)
 			p.Dropped = t.live.dropped
@@ -167,13 +168,24 @@ func (h *Hub) turnSteer(c *conn, cmd command) {
 		return
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	t, found := h.turns[cmd.TurnID]
 	if !found || t.terminal || t.conversationID != convID {
+		h.mu.Unlock()
 		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
 		return
 	}
-	if t.kind != turnSend || t.steering == nil {
+	if t.kind != turnSend {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
+		return
+	}
+	if t.jobOwned {
+		h.mu.Unlock()
+		h.forwardOwnedSteer(c, cmd, convID, payload, in)
+		return
+	}
+	defer h.mu.Unlock()
+	if t.steering == nil {
 		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
 		return
 	}
@@ -244,13 +256,24 @@ func (h *Hub) turnSteerRecall(c *conn, cmd command) {
 		return
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	t, found := h.turns[cmd.TurnID]
 	if !found || t.terminal || t.conversationID != convID {
+		h.mu.Unlock()
 		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
 		return
 	}
-	if t.kind != turnSend || t.steering == nil {
+	if t.kind != turnSend {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
+		return
+	}
+	if t.jobOwned {
+		h.mu.Unlock()
+		h.recallOwnedSteer(c, cmd, convID, payload.InputID)
+		return
+	}
+	defer h.mu.Unlock()
+	if t.steering == nil {
 		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
 		return
 	}
@@ -273,4 +296,156 @@ func (h *Hub) turnSteerRecall(c *conn, cmd command) {
 		// Claimed or persisted — consumed input is never restored.
 		c.push(errorFrame(cmd.RequestID, "not_found", "steering input already consumed"))
 	}
+}
+
+// forwardOwnedSteer journals a steer on a worker-owned send by handing the
+// full input to the same job-control forward Hub.Steer uses. The receipt
+// comes back from that forward: it is the job's mailbox receipt, so a later
+// claim or persist is visible on the snapshot without a second record.
+func (h *Hub) forwardOwnedSteer(c *conn, cmd command, convID string, payload messageInputPayload, in valueobject.UserInput) {
+	h.jobControlMu.Lock()
+	defer h.jobControlMu.Unlock()
+
+	h.mu.Lock()
+	t, found := h.turns[cmd.TurnID]
+	if !found || t.terminal || t.conversationID != convID || !t.jobOwned || t.kind != turnSend {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	if t.steerByInput == nil {
+		t.steerByInput = map[string]*steerRecord{}
+	}
+	if prev, dup := t.steerByInput[cmd.RequestID]; dup {
+		h.answerOwnedSteerDup(c, cmd, convID, t, prev, payload)
+		h.mu.Unlock()
+		return
+	}
+	if len(t.steerRecords) >= maxSteerInputs {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "queue_full", "turn steering submission bound reached"))
+		return
+	}
+	steerJob := h.jobControlSteer
+	if steerJob == nil {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
+		return
+	}
+	in.InputID = cmd.RequestID
+	h.mu.Unlock()
+
+	receipt, ok := steerJob(convID, in)
+
+	h.mu.Lock()
+	t, found = h.turns[cmd.TurnID]
+	gone := !found || t.terminal || t.conversationID != convID
+	recall := h.jobControlRecall
+	h.mu.Unlock()
+	if gone {
+		if ok && receipt != nil && recall != nil {
+			recall(convID, in.InputID)
+		}
+		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	if !ok || receipt == nil {
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
+		return
+	}
+	h.mu.Lock()
+	t = h.turns[cmd.TurnID]
+	if t == nil || t.terminal || t.conversationID != convID {
+		h.mu.Unlock()
+		if recall != nil {
+			recall(convID, in.InputID)
+		}
+		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	if t.steerByInput == nil {
+		t.steerByInput = map[string]*steerRecord{}
+	}
+	rec := &steerRecord{inputID: cmd.RequestID, content: in.Text, payload: payload, receipt: receipt}
+	t.steerRecords = append(t.steerRecords, rec)
+	t.steerByInput[cmd.RequestID] = rec
+	h.emitLocked(t, "turn.steer_ack", steerInputPayload{InputID: rec.inputID}, false)
+	if _, subscribed := t.subscribed[c]; !subscribed {
+		c.push(steerAckFrame(cmd.RequestID, convID, t.id, rec.inputID))
+	}
+	h.mu.Unlock()
+}
+
+func (h *Hub) answerOwnedSteerDup(c *conn, cmd command, convID string, t *turn, prev *steerRecord, payload messageInputPayload) {
+	if !prev.payload.equal(payload) {
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "steering requestId reused with different input"))
+		return
+	}
+	if prev.receipt != nil && prev.receipt.State() == appjob.SteeringRecalled {
+		c.push(errorFrame(cmd.RequestID, "gone", "steering input was recalled"))
+		return
+	}
+	c.push(steerAckFrame(cmd.RequestID, convID, t.id, prev.inputID))
+}
+
+// recallOwnedSteer withdraws one worker-held input by the id the steer
+// carried. The newest input is not a substitute: a different id stays pending.
+func (h *Hub) recallOwnedSteer(c *conn, cmd command, convID, inputID string) {
+	h.jobControlMu.Lock()
+	defer h.jobControlMu.Unlock()
+
+	h.mu.Lock()
+	t, found := h.turns[cmd.TurnID]
+	if !found || t.terminal || t.conversationID != convID || !t.jobOwned || t.kind != turnSend {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	rec, ok := t.steerByInput[inputID]
+	if !ok || rec == nil || rec.receipt == nil {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "not_found", "no steering input with that id"))
+		return
+	}
+	switch rec.receipt.State() {
+	case appjob.SteeringRecalled:
+		turnID := t.id
+		kept := rec.inputID
+		h.mu.Unlock()
+		c.push(steerRecalledFrame(cmd.RequestID, convID, turnID, kept))
+		return
+	case appjob.SteeringPending:
+	default:
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "not_found", "steering input already consumed"))
+		return
+	}
+	recall := h.jobControlRecall
+	if recall == nil {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "invalid_argument", "that turn does not take steering"))
+		return
+	}
+	h.mu.Unlock()
+
+	recall(convID, inputID)
+
+	h.mu.Lock()
+	t, found = h.turns[cmd.TurnID]
+	if !found || t.terminal || t.conversationID != convID {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "not_found", "no live turn with that id"))
+		return
+	}
+	rec = t.steerByInput[inputID]
+	if rec == nil || rec.receipt == nil || rec.receipt.State() != appjob.SteeringRecalled {
+		h.mu.Unlock()
+		c.push(errorFrame(cmd.RequestID, "not_found", "steering input already consumed"))
+		return
+	}
+	h.emitLocked(t, "turn.steer_recalled", steerInputPayload{InputID: rec.inputID}, false)
+	if _, subscribed := t.subscribed[c]; !subscribed {
+		c.push(steerRecalledFrame(cmd.RequestID, convID, t.id, rec.inputID))
+	}
+	h.mu.Unlock()
 }

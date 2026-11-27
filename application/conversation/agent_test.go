@@ -244,8 +244,9 @@ func (a *scriptedAgent) SetOption(_ context.Context, _, _, value string) error {
 	}
 	return nil
 }
-func (a *scriptedAgent) Commands(string) []dservice.AgentCommand { return nil }
-func (a *scriptedAgent) Status(string) dservice.AgentStatus      { return dservice.AgentStatus{} }
+func (a *scriptedAgent) Commands(context.Context, string, string) []dservice.AgentCommand { return nil }
+func (a *scriptedAgent) DeleteCommands(context.Context, string)                           {}
+func (a *scriptedAgent) Status(string) dservice.AgentStatus                               { return dservice.AgentStatus{} }
 func (a *scriptedAgent) Steer(_ context.Context, _ string, input valueobject.UserInput, _ string, delivered func()) bool {
 	if !a.steerable {
 		return false
@@ -1132,6 +1133,18 @@ func (failingCatalog) Catalog(context.Context, string) (drepo.AgentCatalog, erro
 }
 func (failingCatalog) SaveCatalog(context.Context, string, drepo.AgentCatalog) error {
 	return fmt.Errorf("catalog unwritable")
+}
+
+func (failingCatalog) CommandCatalog(context.Context, string) (drepo.AgentCommandCatalog, error) {
+	return drepo.AgentCommandCatalog{}, fmt.Errorf("command catalog unreadable")
+}
+
+func (failingCatalog) SaveCommandCatalog(context.Context, string, drepo.AgentCommandCatalog) error {
+	return fmt.Errorf("command catalog unwritable")
+}
+
+func (failingCatalog) DeleteCommandCatalog(context.Context, string) error {
+	return fmt.Errorf("command catalog undeletable")
 }
 
 // D1: a pick for an id the stored catalog knows but the session does not
