@@ -35,6 +35,11 @@ Checked and fine: the areas you reviewed without findings.
 
 The implementer's `REPORT`, SA's contract, and the project's coding guide.
 
+Start from the diff and the acceptance. Read surrounding code and contracts
+only to understand the change; widen further only when the diff's impact
+reaches past the files it touches, and say in the finding why you did. Review
+the diff itself, never the report alone.
+
 ## You do not
 
 - Edit the code unless the PM assigns you the fix.

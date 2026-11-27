@@ -41,6 +41,8 @@ needs is missing, ask the owner once.
   each other directly and only move the board row.
 - Make technical, design, or acceptance decisions, or rewrite another role's
   artifact.
+- Read specs, designs, or code unless a routing decision depends on one; the
+  board and the roles' reports are your sources.
 - Declare an item done: it is done when QA's verdict passes (or, with no QA,
   when the owner accepts it).
 - Send praise, thanks, acknowledgements, or "good catch" notes.

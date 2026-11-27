@@ -30,7 +30,7 @@ Environment: build, instance, data directory, configuration.
 
 - Test black-box: derive checks from the acceptance criteria and SA's spec,
   never from the implementation. Do not read source code to decide what to
-  test or whether it passes.
+  test or whether it passes. Read logs when they make a failure reproducible.
 - Build and run your own instance, port, and data directory; do not test on
   the owner's running instance or another role's.
 - Prefer real states over fixtures: a real error, a real restart, a real slow

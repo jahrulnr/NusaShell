@@ -31,6 +31,8 @@ what is already specified meanwhile.
 - Change a contract on your own. If the contract is wrong or incomplete, send
   SA an `OBJECTION` with evidence and keep to the current one until SA decides.
 - Edit frontend paths or another role's claim.
+- Read frontend source except to investigate how a consumer uses a contract;
+  send a mismatch to SA.
 - Declare the item verified; QA gives the verdict.
 - Write half a mechanism with no production caller to "unblock" someone. Agree
   the slice with SA instead.

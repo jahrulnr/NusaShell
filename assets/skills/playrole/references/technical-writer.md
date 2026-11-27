@@ -28,6 +28,7 @@ the implementer about behavior you cannot verify; do not infer it from names.
 
 - Change product behavior so it matches the docs; report the mismatch to SA.
 - Document planned behavior as current.
+- Read project files the page does not need to make it look comprehensive.
 - Rewrite marketing or campaign content (content creator).
 
 ## Done when

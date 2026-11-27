@@ -137,6 +137,7 @@ Open every message with one envelope line, then at most about ten lines:
 What: the action or the result, in one or two sentences.
 Evidence / acceptance: commands run and their result, or the criteria to meet.
 Artifact: path to the file with the details.
+Open: assumptions and unresolved issues that affect the recipient, or —.
 Next: who acts next.
 ```
 
@@ -174,15 +175,20 @@ does not take it. The PM routes; with no PM, the PA does.
 UI/UX sends its data needs to SA. Add the technical writer when the item changes
 documented behavior, and the Reviewer wherever the team has one.
 
-- A handoff is an artifact, its acceptance criteria, and where it lives. The
-  receiver must be able to start without asking; if they have to ask, the
-  sender completes the handoff instead of discussing it.
+- A handoff is the artifact, its acceptance criteria, where it lives, what is
+  in and out of scope, the assumptions it rests on, and what is still open.
+  Link the exact file or quote the excerpt the receiver needs; never make them
+  read unrelated documents to find what changed. The receiver must be able to
+  start without asking; if they have to ask, the sender completes the handoff
+  instead of discussing it.
 - Ready gates. Work does not start until its inputs exist:
   - Work that touches a wire (HTTP, WebSocket, events, storage format, CLI
     output): SA's written contract (OpenAPI, schema, or event spec) exists
     before BE or FE starts.
-  - UI work: UI/UX's design covers empty, loading or slow, error, success, and
-    unavailable states before FE starts. FE does not invent a missing state.
+  - UI work: UI/UX's design covers every state its checklist requires (empty,
+    loading or slow, each contract error, success, unavailable, and for
+    long-running work in progress, cancelled, and stale) before FE starts. FE
+    does not invent a missing state.
   - Testing: PA's acceptance criteria exist before QA tests.
 - Done means the acceptance criteria are met, with evidence, and QA's `VERDICT`
   is `pass` where the team has QA. An implementer reports evidence; an
@@ -203,12 +209,40 @@ documented behavior, and the Reviewer wherever the team has one.
 - Run a full gate only inside a window DevOps (or the PM) records on the board,
   when no claimed path is mid-change.
 
-## 7. Spend tokens on the role, not the talk
+## 7. Spend tokens on the role
+
+Read for your deliverable, not to understand the project. Load context in this
+order and stop as soon as you can produce the deliverable:
+
+1. This skill and your role file.
+2. Your board row, the item's acceptance, and the message that started the turn.
+3. The source your role learns the current state from (section 1).
+4. From another role's artifact, only the contract, decision, or excerpt your
+   item depends on.
+5. Anything still missing: one `QUESTION` to its owner naming what you need.
+   Do not search the project for it.
+
+Opening anything beyond that — another role's source, another component's
+code, a project-wide index or overview — needs one of these reasons, and you
+state the question it answers before you open it:
+
+- a defect you own crosses into that component, and its contract and observed
+  behavior do not explain it;
+- you are the Reviewer and the diff's impact reaches past the files it touches;
+- you are SA and the artifact you design against is missing or stale;
+- the owner of that source asked you to review it.
+
+"It exists", "the index links it", "it might be relevant", and "I want the
+whole picture first" are not reasons. Owning a source of truth does not license
+reading the rest of the project either.
 
 - Work inside your role. Review other roles' work only when you are QA or the
   Reviewer, or when an owner of that work asks.
+- Change nothing outside the item. A problem you notice outside it is a
+  `FINDING` to its owner, not a fix you make.
 - Do not explain to someone why their decision was right, narrate your
-  process, or praise a report. A `REPORT` is result, evidence, next owner.
+  process, or praise a report. A `REPORT` is result, evidence, open issues,
+  next owner.
 - When your item is done, take your next board item or end the turn.
 
 ## 8. Escalate to the owner

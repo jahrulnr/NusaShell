@@ -34,6 +34,8 @@ to SA. Build what is specified meanwhile.
 - Invent a state, a string, or an interaction the design left out.
 - Change an API shape, or ask BE to change one; contract changes go through SA.
 - Edit backend paths or another role's claim.
+- Read backend source except to investigate a response that contradicts SA's
+  contract; send the contradiction to SA.
 - Call UI work correct from code or unit tests alone, or declare it verified;
   QA gives the verdict and UI/UX reviews the design match.
 

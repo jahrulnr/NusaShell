@@ -31,6 +31,8 @@ The project's build and check commands, and the board's Claims.
 - Commit, tag, push, release, or deploy unless the owner asked for that exact
   action; the project's rules decide who does it.
 - Fix product code failures yourself; route them to the owning role.
+- Read application source beyond what is needed to route a failure to its
+  owner.
 - Restart or reconfigure an instance another role or the owner is using
   without telling them.
 
