@@ -232,7 +232,7 @@ Full schemas, typed errors, and examples live in
 | `GET /api/agents` · `GET /api/agents/{id}` | Agent projections: `id`, `name`, `command`, `args`, `env` (`[{name, ref}]`, never values), `policy`. |
 | `PUT /api/agents/{id}` · `DELETE /api/agents/{id}` | Full-replace upsert (body `{name, command, args, env, policy}`; an env value that is a stored ref is kept, anything else is vaulted) and removal. |
 | `GET /api/agents/detect` · `POST /api/agents/import` | Known agent CLIs found on `PATH`, and registering the ones not configured yet. |
-| `GET /api/agents/{id}/models` | Models the agent offers, read from a throwaway session; starts the agent on first use. |
+| `GET /api/agents/{id}/models` | The agent's model catalog from the server's cache (`ModelCatalog`). `status` is `known` or `unknown` and is always written. `known` carries `data` (empty means the agent stated that it offers no models; `current` marks the one it is on). `unknown` omits `data` and carries `default` (`by: agent`, `id` the current id or `""` when the agent did not name one) plus `reason`. A cache miss starts the agent once inside the server. Sign-in required is `401`, a session that could not open is `502`, no runtime is `503`; the problem `detail` names the cause. None of those is `200` with `data: []`. |
 | `GET /api/agents/{id}/options` | The agent's own session options before any room exists — `{ "data": […], "status", "source" }` in the same shape and `status`/`source` contract as a room's agent-options. Because no room session is being read, `source` is `catalog` or `agent-default`, never `session`; the values are the agent's, and a thread's overrides are read from its own agent-options. Starts the agent on first use, which can take a while. |
 | `GET /api/agents/{id}/status` | The agent's process without starting it: `state` (`stopped`, `running`, `error`), `pid`, `uptimeMs`, `lastError`, `authNeeded`, `canLogout`, `logs` (its latest 400 stderr lines, kept across restarts), and `authMethods` (`[{id, name, description, type, command}]`; a `terminal` method carries its command line, for a terminal of the owner's own). |
 | `POST /api/agents/{id}/authenticate` · `POST /api/agents/{id}/logout` · `POST /api/agents/{id}/restart` | Sign the agent in with body `{methodId}` (starts it when needed; a `terminal` method is `400` — it runs through `sign-in`), sign it out and stop it (`400` when it does not support that), or stop its process so the next turn starts it again. Each answers `204`. A turn on an agent that needs a sign-in fails with `502 upstream_error`. |
@@ -241,8 +241,8 @@ Full schemas, typed errors, and examples live in
 | `GET /api/conversations/{id}/elicitations` · `POST /api/conversations/{id}/elicitations/{elicitationId}` | Open requests for input from the room's agent (`[{id, mode, message, schema, url, expiresAt}]`, `mode` is `form` or `url`), and answering one with body `{action, content}`: `action` is `accept`, `decline`, or `cancel`; `content` (accept only) must match the form's schema — a missing required field, an unknown field, or a wrong type, length, range, pattern, or choice is `400` and the request stays open. `204`; `404` when nothing waits under that id. An open request carries a deadline — fifteen minutes — and one that runs out resolves itself as `cancel` marked `expired`, not as a refusal by the owner; `expiresAt` is absent when a request has no deadline. |
 | `GET /api/conversations/{id}/agent-options` · `PUT /api/conversations/{id}/agent-options` | The agent's session options for the room — `{ "data": [{ id, name, description, category, type, current, choices: [{value, name, description}] }], "status": "ready" | "empty", "source": "session" | "catalog" | "agent-default" }` — and setting one with body `{id, value}`: `200` when the pick applies now, `202` with the same list plus `pending` when a turn is running and the pick waits for the next one. `source` says where the list came from: only `session` is the room's live session and may be presented as the options in force now; `catalog` is the stored list a real session last reported, and `agent-default` is the agent's probe/default answer. The latter two are fallback evidence for an idle room and must be labelled as such, never as the live session's options. `status` says what the list means: `ready` is definitive (an empty list is the agent truly offering no session options) while `empty` is transient — the agent reports nothing right now and a later read may fill it, so a client offers a refresh and never writes the permanent "no options" line; a failure answers the HTTP error, never a `status` value. The room keeps its picks and applies them before each turn. |
 | `GET /api/commands?conversationId=` | The composer's slash-command catalog — `{ "data": [{ name, description, hint, source, enabled, reason }] }`. A harness room carries the native commands (`compact`, `clear`, `fork`). An agent room carries the thread commands NusaShell owns (`clear`, `fork`) plus exactly the commands its agent session reports; context operations are never invented for it, so `compact` exists there only as an agent-reported row, and an agent-reported name wins a collision with a native thread command. `enabled`/`reason` are the server's verdict for this room; a live turn turns rows off with `reason: "Wait for the turn to finish"`. Without `conversationId` it answers the native set with every row off and `reason: "Send a message first"`. |
-| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Items include `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` while jobs queue behind it, and `pending` while a pick waits for the next turn. `limit` default 30, max 100. |
-| `GET /api/conversations/{id}` | One projection. Detail adds `canCompact`, `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` for the jobs queued behind it, and `pending` while a pick waits for the next turn. |
+| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Every item carries `lifecycle` (`ThreadLifecycle`, the same value `conversation_list` uses). Items also include `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` while jobs queue behind it, and `pending` while a pick waits for the next turn. `limit` default 30, max 100. |
+| `GET /api/conversations/{id}` | One projection, with the same `lifecycle`. Detail adds `canCompact`, `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` for the jobs queued behind it, and `pending` while a pick waits for the next turn. |
 | `GET /api/conversations/{id}/messages?start&limit` | Ranged history; `start >= 0` absolute, negative counts back from the end. `limit` max 100. |
 | `PATCH /api/conversations/{id}` | Any of `title`, `projectId` (`""` takes the room out of its project; an unknown id is `400`), `pinned`, `label` (the room's `@handle`: 1–24 of `a-z0-9` with inner hyphens, a leading `@` dropped; `""` clears; invalid `400`, taken by another room `409`), and `routing` (`{replyToOrigin, mirrorFinal, notifyApprovals}`; `null` returns to the defaults); absent fields keep their value. Queued on the room's worker, so it lands after a running turn. Answers the updated projection, which carries `label` and `routing` when set. |
 | `GET /api/conversations/{id}/export` | The whole thread as one JSON download (`Content-Disposition: attachment; filename=nusashell-<id>.json`): `{ exportedAt, conversation, messages }`, in the shapes the projection and messages routes serve. |
@@ -492,8 +492,8 @@ keep-tail, including after a checkpoint when that tail still exceeds it.
 The same response — and each item of the list projection — includes
 `activeTurnId` and `activeTurnKind` (`send` or `edit`) when this
 process's turn hub has a non-terminal turn for the room, so a client
-can attach with `turn.watch`. Both fields are omitted when the room is
-idle. They are not persisted conversation state. Both also carry
+can attach with `turn.watch`. Both fields are omitted when there is
+no live turn. They are not persisted conversation state. Both also carry
 `waiting`: how many jobs queue behind that turn, read from the same
 worker queue the `conversation.queued` notice counts. The notice is a
 nudge a tab can miss — a fresh load, a reconnect, a socket dropped for
@@ -551,6 +551,72 @@ shape in brief:
 - Disconnecting the socket never aborts a turn — sends run under a
   server-scoped context, and `userMessagePersisted` tells the truth
   about whether the user line committed.
+
+## Read-only model list
+
+`nusashell model list` answers what a runtime can use, through the
+running server (`--addr` as the other server commands). It takes
+exactly one of `--agent <id>` and `--provider <id>`. Neither flag, or
+both, is a usage error and does not call the server. `--json` prints
+one `ModelCatalog` object. The command does not start an agent
+process. There is no MCP tool for this; a room runs the command. An
+MCP tool waits until this command is shown to be insufficient.
+
+Exit `0` for both `known` and `unknown` — unknown is an answer.
+Non-zero for a usage error or an HTTP error, printing the problem
+`detail` and not a catalog.
+
+**Agent.** `GET /api/agents/{id}/models`, and print that body. The
+server must not turn a session that reported no model list into
+`data: []`. Human lines are `<id>  <name>`, with `current` on the
+current row. A known empty catalog prints `no models`. Unknown prints
+`unknown`, the default, and the reason, and prints no rows.
+
+**Provider.** `GET /api/providers/{id}`, then the same object. `404`
+prints the problem `detail` and no catalog. A decoded record
+(`endpoint` non-empty) is `status: known`, `source: config`. `data`
+is `models` mapped to `{id, name, current}`, with `name` falling back
+to `id`. `current` is true only for `models.threads.model` when
+`models.threads.provider` is this provider; a settings id that is not
+in the catalog marks no row and does not make the catalog unknown.
+An empty `models` array is a known empty catalog, including when
+`broken` is true because the credential will not resolve — the human
+line may say the credential is broken and still prints the rows. A
+record that did not decode (`broken: true` and `endpoint` empty) is
+`status: unknown`, `source: config`, no `data`, reason `provider
+record cannot be read`. `default.by` is `settings` and `default.id`
+is `models.threads.model` when that setting names this provider and a
+non-empty model; otherwise `default.by` is `unset` and `default.id`
+is `""`.
+
+A body with no `status`, or `status: unknown` rendered as `data: []`
+or as a blank catalog, is wrong. An empty list means the catalog is
+known to contain nothing.
+
+## Thread lifecycle
+
+`lifecycle` is one closed word on every conversation projection — list
+and detail — and on every `conversation_list` row:
+`running`, `approval`, `interrupted`, `failed`, `idle`, `unknown`.
+The server always writes it. A client that finds it absent treats the
+thread as `unknown` and does not show `idle`. `busy` is only an echo
+of `running` or `approval`; it is not how a caller decides the other
+four. `waiting` stays the count of jobs behind the live turn. It is
+not a lifecycle, and a `running` room may have `waiting` greater than
+zero.
+
+First match:
+
+1. `approval` — a live turn is waiting on the owner, an approval or an elicitation. A leftover request from a turn that has ended does not win.
+2. `running` — a live turn is not waiting on the owner.
+3. `unknown` — no live turn, and the last terminal cannot be read, or no terminal is stored. A room whose first turn was never admitted is `unknown`, not `idle`.
+4. `interrupted` — the last terminal was an interruption: a stop, a restart cut, or a stored `finishReason` of `interrupted`. A later turn that completed replaces it.
+5. `failed` — the last terminal failed and was not an interruption.
+6. `idle` — the last terminal completed. This is the only `idle`.
+
+A restart that leaves `finishReason: interrupted` shows `interrupted` on the list call. The caller does not open the room to learn that. Mapping `interrupted` to `idle`, or an unreadable terminal to `idle`, is wrong.
+
+`conversation_spawn` answers only after the first turn is admitted or the start has failed. Success carries `started: true` next to `threadId`, `afterSeq`, and `thread`. `thread.lifecycle` is the thread at that moment: `running` or `approval` while the turn is live, `failed` or `interrupted` when it has already ended that way, or `idle` when it has already completed. It is never `unknown` on that success, and the success is never the unadmitted row (`runtime: "none"`, `busy: false`, `messages: 0`). A start that does not admit is an error whose detail names the cause. There is no successful row with `started: false`.
 
 ## Implementation work required
 

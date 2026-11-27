@@ -17,6 +17,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoconversation "github.com/jahrulnr/nusashell/infrastructure/repository/conversation"
@@ -28,6 +29,8 @@ type fakeRooms struct {
 	msgs      map[string][]entity.Message
 	named     map[string]string
 	approvals map[string][]valueobject.ApprovalRequest
+	// histErr makes one room's history unreadable.
+	histErr map[string]error
 	// env is where the target's workspace runs; the zero value is "", which the
 	// attachment path treats as remote/unknown.
 	env enum.Environment
@@ -38,7 +41,7 @@ func (f *fakeRooms) List(context.Context) ([]drepo.ConversationInfo, error) {
 	defer f.mu.Unlock()
 	out := append([]drepo.ConversationInfo(nil), f.infos...)
 	for i := range out {
-		out[i].MessageCount = len(f.msgs[out[i].ID])
+		out[i].MessageCount = storedCount(out[i].MessageCount, len(f.msgs[out[i].ID]))
 	}
 	return out, nil
 }
@@ -48,17 +51,20 @@ func (f *fakeRooms) Info(_ context.Context, id string) (drepo.ConversationInfo, 
 	defer f.mu.Unlock()
 	for _, i := range f.infos {
 		if i.ID == id {
-			i.MessageCount = len(f.msgs[id])
+			i.MessageCount = storedCount(i.MessageCount, len(f.msgs[id]))
 			return i, nil
 		}
 	}
 	return drepo.ConversationInfo{}, apperror.NewNotFoundError("conversation "+id, nil)
 }
 
-func (f *fakeRooms) History(_ context.Context, id string, start, end int) ([]entity.Message, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]entity.Message(nil), f.msgs[id][start:end]...), nil
+// storedCount keeps a count the meta already recorded when the loaded
+// messages are shorter. That is an unreadable tail, not an empty room.
+func storedCount(stored, loaded int) int {
+	if stored > loaded {
+		return stored
+	}
+	return loaded
 }
 
 func (f *fakeRooms) Environment(context.Context, string) (enum.Environment, error) {
@@ -74,6 +80,27 @@ func (f *fakeRooms) PendingApprovals(convID string) []valueobject.ApprovalReques
 		return nil
 	}
 	return f.approvals[convID]
+}
+
+func (f *fakeRooms) PendingElicitations(string) []valueobject.Elicitation { return nil }
+
+func (f *fakeRooms) History(_ context.Context, id string, start, end int) ([]entity.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.histErr[id]; err != nil {
+		return nil, err
+	}
+	msgs := f.msgs[id]
+	if start < 0 {
+		start = 0
+	}
+	if end > len(msgs) {
+		end = len(msgs)
+	}
+	if start > end {
+		start = end
+	}
+	return append([]entity.Message(nil), msgs[start:end]...), nil
 }
 
 func (f *fakeRooms) Annotate(_ context.Context, id string, a appconversation.Annotation) (bool, error) {
@@ -103,9 +130,28 @@ type fakeTurns struct {
 	busy  map[string]bool
 	rooms *fakeRooms
 	gate  chan struct{}
+	// fail ends the turn before a room exists.
+	fail error
 }
 
 func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string, attachments []valueobject.Attachment, opts appjob.SendOptions, _ event.TurnEventHandler) (string, appconversation.SendResult, error) {
+	f.mu.Lock()
+	fail := f.fail
+	if f.busy == nil {
+		f.busy = map[string]bool{}
+	}
+	if fail == nil {
+		f.busy[convID] = true
+	}
+	f.mu.Unlock()
+	if fail != nil {
+		return "", appconversation.SendResult{}, fail
+	}
+	defer func() {
+		f.mu.Lock()
+		delete(f.busy, convID)
+		f.mu.Unlock()
+	}()
 	f.rooms.mu.Lock()
 	known := false
 	for _, i := range f.rooms.infos {
@@ -119,6 +165,11 @@ func (f *fakeTurns) Run(_ context.Context, convID, provider, model, text string,
 	f.rooms.mu.Unlock()
 	f.rooms.add(convID, enum.RoleUser, text)
 	f.rooms.add(convID, enum.RoleAssistant, "done: "+text)
+	f.rooms.mu.Lock()
+	if msgs := f.rooms.msgs[convID]; len(msgs) > 0 {
+		msgs[len(msgs)-1].SetFinishReason(enum.FinishReasonStop)
+	}
+	f.rooms.mu.Unlock()
 	f.runs <- run{convID, provider, model, opts.Agent, opts.Project, text, opts.Origin, attachments, opts.Relay}
 	f.mu.Lock()
 	gate := f.gate
@@ -248,7 +299,7 @@ func setupSteer(t *testing.T, queue Queue, uploads drepo.Uploads, steers Steers)
 		}
 		q.canStart = func(convID string) bool { return !turns.Busy(convID) }
 	}
-	return New(context.Background(), rooms, turns, queue, steers, uploads, fakeProjects{}, nil, nil, nil), rooms, turns
+	return New(context.Background(), rooms, turns, queue, steers, uploads, fakeProjects{}, nil, nil, nil, nil), rooms, turns
 }
 
 type fakeChats struct {
@@ -278,7 +329,7 @@ func TestSearchExportReport(t *testing.T) {
 	}
 	chat, _ := valueobject.NewChatRef("telegram", "42", "")
 	chats := &fakeChats{origin: map[string]valueobject.ChatRef{"c_self": chat}}
-	app := New(context.Background(), rooms, turns, &fakeQueue{}, &fakeSteers{}, nil, fakeProjects{}, chats, outputs, nil)
+	app := New(context.Background(), rooms, turns, &fakeQueue{}, &fakeSteers{}, nil, fakeProjects{}, chats, outputs, nil, nil)
 	ctx := context.Background()
 
 	out, err := app.Search(ctx, "c_self", SearchInput{Query: "BUILT"})
@@ -393,6 +444,13 @@ func TestSendStopAndSpawn(t *testing.T) {
 	out, err = app.Spawn(ctx, "c_self", SpawnInput{Prompt: "research", Title: "Research", Project: "Site"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if out["started"] != true {
+		t.Fatalf("spawn success = %+v, want started true", out)
+	}
+	spawned := out["thread"].(Thread)
+	if spawned.Lifecycle != "running" || (spawned.Runtime == "none" && !spawned.Busy && spawned.Messages == 0) {
+		t.Fatalf("spawn returned the unadmitted row: %+v", spawned)
 	}
 	r = <-turns.runs
 	if r.conv != out["threadId"] || r.provider != "prov" || r.model != "m1" || r.project != "p1" {
@@ -703,5 +761,180 @@ func TestSendFallsBackToTheQueueWhenNoTurnTakesIt(t *testing.T) {
 	}
 	if len(q.enqueued) != 1 {
 		t.Fatalf("enqueued = %v, want one", q.enqueued)
+	}
+}
+
+// negotiatedCatalog is the model list the server's handshake recorded.
+type negotiatedCatalog struct {
+	models map[string][]dservice.AgentModel
+}
+
+func (c negotiatedCatalog) Catalog(_ context.Context, id string) (drepo.AgentCatalog, error) {
+	return drepo.AgentCatalog{Models: c.models[id]}, nil
+}
+
+func TestSpawnRejectsAModelOutsideTheNegotiatedCatalog(t *testing.T) {
+	app, rooms, turns := setup(t)
+	app.models = negotiatedCatalog{models: map[string][]dservice.AgentModel{
+		"cursor": {
+			{ID: "grok-4.7", Name: "Grok 4.7", Current: true},
+			{ID: "grok-4.6", Name: "Grok 4.6"},
+		},
+	}}
+	ctx := context.Background()
+
+	out, err := app.Spawn(ctx, "c_self", SpawnInput{Prompt: "go", Agent: "cursor", Model: "grok-4.7-high"})
+	if err == nil {
+		t.Fatalf("spawn accepted a model the catalog does not offer: %+v", out)
+	}
+	if apperror.As(err).StatusCode() != 400 || !strings.Contains(err.Error(), "grok-4.7") || !strings.Contains(err.Error(), "grok-4.6") {
+		t.Fatalf("refusal = %v, want 400 naming the offered ids", err)
+	}
+	_, err = app.Spawn(ctx, "c_self", SpawnInput{Prompt: "go", Agent: "cursor", Model: "grok-4.7[context=256k,reasoning_effort=high,fast=true]"})
+	if err == nil || apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("composite id accepted: %v", err)
+	}
+	select {
+	case r := <-turns.runs:
+		t.Fatalf("a refused model started a turn: %+v", r)
+	default:
+	}
+	rooms.mu.Lock()
+	n := len(rooms.infos)
+	rooms.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("a refused spawn left %d rooms, want the two that already existed", n)
+	}
+
+	// No catalog yet: a named model is still refused, and an empty model
+	// is the agent's own default.
+	app.models = negotiatedCatalog{}
+	if _, err := app.Spawn(ctx, "c_self", SpawnInput{Prompt: "go", Agent: "cursor", Model: "grok-4.7"}); err == nil || !strings.Contains(err.Error(), "not been negotiated") {
+		t.Fatalf("unnegotiated catalog = %v", err)
+	}
+	if _, err := app.Spawn(ctx, "c_self", SpawnInput{Prompt: "go", Agent: "cursor"}); err != nil {
+		t.Fatalf("empty model = %v, want the agent default", err)
+	}
+	r := <-turns.runs
+	if r.agent != "cursor" || r.model != "" {
+		t.Fatalf("default spawn = %+v", r)
+	}
+
+	app.models = negotiatedCatalog{models: map[string][]dservice.AgentModel{
+		"cursor": {{ID: "grok-4.7", Name: "Grok 4.7", Current: true}},
+	}}
+	if _, err := app.Spawn(ctx, "c_self", SpawnInput{Prompt: "go", Agent: "cursor", Model: "grok-4.7"}); err != nil {
+		t.Fatal(err)
+	}
+	r = <-turns.runs
+	if r.agent != "cursor" || r.model != "grok-4.7" {
+		t.Fatalf("offered model = %+v", r)
+	}
+
+	// A catalog that was never wired refuses a named model instead of storing it.
+	app.models = nil
+	if _, err := app.Spawn(ctx, "c_self", SpawnInput{Prompt: "go", Agent: "cursor", Model: "grok-4.7"}); apperror.As(err).StatusCode() != 503 {
+		t.Fatalf("unwired catalog = %v, want 503", err)
+	}
+}
+
+// Interrupted and an unreadable terminal are never idle. The list and the
+// detail row both say so, through the same constructor the server uses.
+func TestLifecycleNeverMapsInterruptedOrUnreadableToIdle(t *testing.T) {
+	app, rooms, turns := setup(t)
+	cut, err := entity.NewMessage(enum.RoleAssistant, "cut off")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut.SetFinishReason(enum.FinishReasonInterrupted)
+	rooms.infos = append(rooms.infos,
+		drepo.ConversationInfo{ID: "c_cut"},
+		drepo.ConversationInfo{ID: "c_bad", Terminal: "not-a-terminal"},
+		drepo.ConversationInfo{ID: "c_fail", Terminal: "failed"},
+		drepo.ConversationInfo{ID: "c_dark"},
+		drepo.ConversationInfo{ID: "c_live"},
+	)
+	rooms.msgs["c_cut"] = []entity.Message{cut}
+	rooms.msgs["c_dark"] = []entity.Message{cut}
+	rooms.histErr = map[string]error{"c_dark": apperror.New(500, "history unreadable", nil)}
+	turns.busy["c_live"] = true
+	rooms.approvals = map[string][]valueobject.ApprovalRequest{"c_live": {{}}}
+
+	out, err := app.List(context.Background(), "c_self", ListInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, row := range out["threads"].([]Thread) {
+		got[row.ID] = row.Lifecycle
+		if row.Lifecycle == "" {
+			t.Fatalf("%s omitted lifecycle", row.ID)
+		}
+	}
+	if got["c_cut"] != "interrupted" || got["c_cut"] == "idle" {
+		t.Fatalf("interrupted room = %q, want interrupted", got["c_cut"])
+	}
+	if got["c_bad"] != "unknown" || got["c_bad"] == "idle" {
+		t.Fatalf("unreadable terminal = %q, want unknown", got["c_bad"])
+	}
+	if got["c_dark"] != "unknown" || got["c_dark"] == "idle" {
+		t.Fatalf("unreadable history = %q, want unknown", got["c_dark"])
+	}
+	if got["c_fail"] != "failed" || got["c_fail"] == "idle" {
+		t.Fatalf("failed room = %q, want failed", got["c_fail"])
+	}
+	if got["c_live"] != "approval" {
+		t.Fatalf("live approval = %q, want approval", got["c_live"])
+	}
+	read, err := app.Read(context.Background(), "c_self", ReadInput{Thread: "c_cut"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read["thread"].(Thread).Lifecycle != "interrupted" {
+		t.Fatalf("detail = %+v, want interrupted", read["thread"])
+	}
+}
+
+// A stored "completed" does not make the room idle when the history it
+// names cannot be read. An empty tail against a positive count is that case.
+func TestStoredCompletedIsUnknownWhenHistoryIsEmpty(t *testing.T) {
+	app, rooms, _ := setup(t)
+	done, err := entity.NewMessage(enum.RoleAssistant, "ok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done.SetFinishReason(enum.FinishReasonStop)
+	rooms.infos = append(rooms.infos,
+		drepo.ConversationInfo{ID: "c_gone", Terminal: "completed", MessageCount: 5, ActiveCount: 5},
+		drepo.ConversationInfo{ID: "c_done", Terminal: "completed", MessageCount: 1, ActiveCount: 1},
+	)
+	rooms.msgs["c_done"] = []entity.Message{done}
+	out, err := app.List(context.Background(), "c_self", ListInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, row := range out["threads"].([]Thread) {
+		got[row.ID] = row.Lifecycle
+	}
+	if got["c_gone"] != "unknown" {
+		t.Fatalf("unreadable history = %q, want unknown", got["c_gone"])
+	}
+	if got["c_done"] != "idle" {
+		t.Fatalf("readable completed history = %q, want idle", got["c_done"])
+	}
+}
+
+func TestSpawnThatDoesNotAdmitIsAnError(t *testing.T) {
+	app, rooms, turns := setup(t)
+	turns.fail = apperror.New(503, "server is shutting down", nil)
+	if _, err := app.Spawn(context.Background(), "c_self", SpawnInput{Prompt: "go"}); apperror.As(err).StatusCode() != 503 || !strings.Contains(err.Error(), "shutting down") {
+		t.Fatalf("unadmitted start = %v, want the cause", err)
+	}
+	rooms.mu.Lock()
+	n := len(rooms.infos)
+	rooms.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("a start that did not admit left %d rooms", n)
 	}
 }

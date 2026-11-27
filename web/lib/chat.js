@@ -442,7 +442,38 @@ export async function loadAgents() {
   emit();
 }
 
-// agentModels loads an agent's model list once; the first call may start
+// agentCatalog reads a ModelCatalog. status comes first: known is the
+// list, and an empty list means the agent stated it offers nothing.
+// unknown omits data and carries the default and the reason — an empty
+// array on that body is not the catalog. A body with no status is the
+// same non-answer, except a list that is already present, which is the
+// shape this picker showed before status was written.
+function agentCatalog(r) {
+  const body = r && typeof r === 'object' ? r : {};
+  const d = body.default && typeof body.default === 'object' ? body.default : {};
+  const unknown = {
+    status: 'ready',
+    report: 'unknown',
+    list: [],
+    error: null,
+    reason: typeof body.reason === 'string' ? body.reason : '',
+    default: {
+      id: typeof d.id === 'string' ? d.id : '',
+      by: typeof d.by === 'string' ? d.by : '',
+      name: typeof d.name === 'string' ? d.name : '',
+    },
+  };
+  if (body.status === 'unknown') return unknown;
+  if (body.status === 'known') {
+    return { status: 'ready', report: 'known', list: Array.isArray(body.data) ? body.data : [], error: null };
+  }
+  if (Array.isArray(body.data) && body.data.length > 0) {
+    return { status: 'ready', report: 'known', list: body.data, error: null };
+  }
+  return unknown;
+}
+
+// agentModels loads an agent's model catalog once; the first call may start
 // the agent process. force re-asks after an agent changed or failed.
 export async function loadAgentModels(agentId, force = false) {
   const cur = state.agentModels[agentId];
@@ -451,7 +482,7 @@ export async function loadAgentModels(agentId, force = false) {
   emit();
   try {
     const r = await api.agentModels(agentId);
-    state.agentModels[agentId] = { status: 'ready', list: r.data || [], error: null };
+    state.agentModels[agentId] = agentCatalog(r);
   } catch (err) {
     state.agentModels[agentId] = { status: 'error', list: [], error: errorText(err) };
   }

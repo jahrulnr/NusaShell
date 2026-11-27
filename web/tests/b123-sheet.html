@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/vendor/slim-select/slimselect.css">
+  <link rel="stylesheet" href="/styles/app.css">
+  <script src="/vendor/tailwind/tailwind.browser.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: var(--bg);
+      --color-raised: var(--raised);
+      --color-line: var(--line);
+      --color-fg: var(--fg);
+      --color-muted: var(--muted);
+      --color-faint: var(--faint);
+      --color-accent: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <pre id="snap"></pre>
+  <script type="module">
+    import { html, render } from '/vendor/preact/htm-preact.mjs';
+    import { Popover } from '/components/ui.js';
+    const App = () => html`<div id="anchor" style="position:fixed;left:16px;bottom:24px;width:140px;height:32px">
+      <button type="button">Model</button>
+      <${Popover} open=${true} onClose=${() => {}} layer="top" placement="top-end" label="Choose model" scroll="list" class="sm:w-[400px]">
+        <p>Search models</p>
+      </${Popover}>
+    </div>`;
+    render(html`<${App} />`, document.getElementById('root'));
+    const write = () => {
+      const panel = document.querySelector('[role="dialog"]');
+      const backdrop = document.querySelector('[aria-hidden="true"]');
+      const r = panel.getBoundingClientRect();
+      document.getElementById('snap').textContent = JSON.stringify({
+        className: panel.className,
+        popover: panel.getAttribute('popover'),
+        backdrop: backdrop ? backdrop.className : null,
+        rect: { x: r.x, y: r.y, top: r.top, right: r.right, bottom: r.bottom, left: r.left, width: r.width, height: r.height },
+        vw: innerWidth, vh: innerHeight,
+      });
+    };
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      write();
+      document.documentElement.dataset.ready = '1';
+    }));
+  </script>
+</body>
+</html>

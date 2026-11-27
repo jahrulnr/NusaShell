@@ -6,7 +6,7 @@ import { toast, useStore } from '../lib/store.js';
 import { api, errorText } from '../lib/api.js';
 import { selection, isBusy, loadAgentOptions, sessionModeName, setSessionOption, sessionOptionValue, agentOptionMap, agentChipVisible, showOptionsInline } from '../lib/chat.js';
 import { Icon } from './icons.js';
-import { Button, ErrorBlock, Popover, Select, Spinner, Toggle, usePopoverOpen } from './ui.js';
+import { Button, ErrorBlock, Popover, Select, Spinner, Toggle, usePopoverOpen, usePopoverTrigger } from './ui.js';
 
 // AgentOptionsNotice says what the list cannot say by itself. A read that failed
 // with no list to show is the failure, with its retry. A refresh that failed after
@@ -53,6 +53,7 @@ export function AgentOptions({ room: r }) {
   const opts = r.agentOptions;
   const visible = !!r.id && !!sel.agentId && agentChipVisible(opts);
   const [open, setOpen] = usePopoverOpen(visible);
+  const press = usePopoverTrigger(open, setOpen);
   const load = async () => {
     if (!r.id || !sel.agentId) return;
     loadAgentOptions(r);
@@ -88,12 +89,12 @@ export function AgentOptions({ room: r }) {
   const pendOpts = agentOptionMap(r.info?.pending?.options);
   const hint = Object.keys(pendOpts).length ? 'Applies to the next turn' : '';
   return html`<div class="relative">
-    <button type="button" onClick=${() => setOpen(!open)} aria-expanded=${open} title="Agent session options"
+    <button type="button" onPointerDownCapture=${press.onPointerDownCapture} onClick=${press.onClick} aria-expanded=${open} title="Agent session options"
       class="flex items-center gap-1.5 h-8 px-2 rounded-lg text-[13px] text-muted hover:text-fg hover:bg-hover max-w-40">
       <${Icon} name="sliders" size=${14} class="shrink-0" />
       <span class="truncate">${modeName || 'Options'}</span>
     </button>
-    <${Popover} open=${open} onClose=${() => setOpen(false)} placement="top-end" label="Agent session options" class="sm:w-[400px] flex flex-col">
+    <${Popover} open=${open} onClose=${() => setOpen(false)} layer="top" placement="top-end" label="Agent session options" class="sm:w-[400px] flex flex-col">
       <div class="shrink-0 px-3 pt-2.5 pb-1 text-xs text-faint">Agent session</div>
       ${opts.status === 'loading' && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} size=${12} /> Asking the agent…</div>`}
       <${AgentOptionsNotice} room=${r} class="mx-3 my-2.5" />

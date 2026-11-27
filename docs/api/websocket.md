@@ -46,7 +46,7 @@ upgrade — it does not define frames.
   process has a non-terminal transport turn for that room. A client that
   loads or selects the room attaches with `turn.watch` and `afterSeq: -1`,
   then re-reads HTTP on the terminal frame. The fields are absent when
-  the room is idle. A journal gap still answers `turn.resync_required`;
+  there is no live turn. A journal gap still answers `turn.resync_required`;
   missing deltas are not invented.
 - **Disconnects are not cancels.** Turn commands run under a
   server-scoped cancellable context, not the socket's — closing the

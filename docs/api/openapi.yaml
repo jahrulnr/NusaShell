@@ -286,7 +286,8 @@ paths:
         (best-effort). Backed by a full repository `List` sliced after the
         fact — the result is **not a snapshot**: writes between page
         requests shift offsets, so a client paging a live list may see
-        duplicates or gaps.
+        duplicates or gaps. Each item carries `lifecycle`, the same
+        closed value as the detail and as `conversation_list`.
       parameters:
         - name: offset
           in: query
@@ -313,6 +314,7 @@ paths:
                     messageCount: 14
                     activeCount: 14
                     sealedSegments: 0
+                    lifecycle: idle
                 page: { offset: 0, limit: 30, total: 41, hasMore: true }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
@@ -433,6 +435,7 @@ paths:
                 activeCount: 6
                 sealedSegments: 2
                 canCompact: true
+                lifecycle: idle
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1436,21 +1439,62 @@ paths:
       operationId: listAgentModels
       tags: [agents]
       summary: The models an agent offers
-      description: Starts the agent on first use, which can take a while; an agent that cannot start answers an error.
+      description: |
+        The agent's model catalog, from the server's cache. A cache miss
+        starts the agent once inside the server and keeps the answer
+        until the agent's definition changes. A caller does not start
+        an agent process of its own.
+
+        `status` is `known` or `unknown` and is always written.
+        `known`: `data` is the list the picker shows, and `current`
+        marks the model the agent is on. An empty `data` means the
+        agent stated that it offers no models.
+        `unknown`: the session did not report a model list. `data` is
+        absent — an empty array is not this answer. `default.by` is
+        `agent`. `default.id` is the current id when the session named
+        one, and `""` when it did not (the agent picks, and the id is
+        not known). `reason` says why.
+
+        A failure is not a catalog. Sign-in required is `401`, a
+        session that could not open is `502`, and no runtime is `503`.
+        The problem's `detail` names the cause. None of these is `200`
+        with `data: []`.
       responses:
         "200":
-          description: The agent's models; `current` marks the one it runs.
+          description: |
+            The catalog. Read `status` before `data`. `data` present
+            and empty is a known empty catalog. `status: unknown`
+            carries `default` and no `data`.
           content:
             application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data: { type: array, items: { $ref: "#/components/schemas/AgentModel" } }
+              schema: { $ref: "#/components/schemas/ModelCatalog" }
+              examples:
+                known:
+                  value:
+                    status: known
+                    source: cache
+                    data:
+                      - { id: "grok-4.7", name: "Grok 4.7", current: true }
+                      - { id: "grok-4.7-fast", name: "Grok 4.7 Fast", current: false }
+                knownEmpty:
+                  value: { status: known, source: cache, data: [] }
+                unknown:
+                  value:
+                    status: unknown
+                    source: cache
+                    default: { id: "", by: agent }
+                    reason: "the agent reported no model list"
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: The agent needs a sign-in. `detail` names that cause.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/Internal" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
   /api/agents/{agentId}/options:
     parameters:
@@ -3706,7 +3750,7 @@ components:
 
     Conversation:
       type: object
-      required: [id, providerId, modelId, environment, usage, createdAt, updatedAt, messageCount, activeCount, sealedSegments]
+      required: [id, providerId, modelId, environment, usage, createdAt, updatedAt, messageCount, activeCount, sealedSegments, lifecycle]
       properties:
         id: { type: string, example: "c_k4j9xm2p8q1vz7w0t6nb5r3yhd" }
         title:
@@ -3751,7 +3795,7 @@ components:
           description: Present on detail and command responses; whether manual compaction can fold new live history.
         activeTurnId:
           type: string
-          description: Present on detail and on list items while this process has a non-terminal transport turn for the room. A client attaches with turn.watch. Omitted when the room is idle and never part of persisted state.
+          description: Present on detail and on list items while this process has a non-terminal transport turn for the room. A client attaches with turn.watch. Omitted when there is no live turn, and never part of persisted state.
         activeTurnKind:
           type: string
           enum: [send, edit]
@@ -3759,7 +3803,8 @@ components:
         waiting:
           type: integer
           minimum: 0
-          description: Jobs queued behind the room's running turn — the same number the conversation.queued notice carries. Present on detail and on list items so a tab that missed that notice still opens on the real count; omitted when nothing waits and never part of persisted state.
+          description: Jobs queued behind the room's running turn — the same number the conversation.queued notice carries. Present on detail and on list items so a tab that missed that notice still opens on the real count; omitted when nothing waits and never part of persisted state. A count, not a lifecycle. A running room may be waiting.
+        lifecycle: { $ref: "#/components/schemas/ThreadLifecycle" }
         pending:
           $ref: "#/components/schemas/Pending"
       additionalProperties: false
@@ -3775,6 +3820,24 @@ components:
         hasMore: { type: boolean }
       additionalProperties: false
 
+    ThreadLifecycle:
+      type: string
+      enum: [running, approval, interrupted, failed, idle, unknown]
+      description: |
+        The thread's lifecycle, required on every conversation
+        projection and on every `conversation_list` row. Always one of
+        these six words. Never omitted, and never derived by the
+        client from `busy`. An absent value is `unknown`, not `idle`.
+        First match, in this order: `approval` — a live turn is waiting
+        on the owner (an approval or an elicitation); `running` — a
+        live turn is not waiting on the owner; `unknown` — no live
+        turn, and the last terminal cannot be read or none is stored;
+        `interrupted` — the last terminal was an interruption (a stop,
+        a restart, `finishReason: interrupted`) and no later turn has
+        replaced it; `failed` — the last terminal failed and was not
+        an interruption; `idle` — the last terminal completed.
+        `waiting` stays a count and is not one of these words.
+        Normative rules are in contract.md under Thread lifecycle.
     ConversationPage:
       type: object
       required: [data, page]
@@ -4527,7 +4590,48 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        current: { type: boolean }
+        current: { type: boolean, description: "True for the model the agent is on. At most one row." }
+    ModelCatalog:
+      type: object
+      required: [status, source]
+      description: |
+        A runtime's model catalog, shared by `GET /api/agents/{agentId}/models`
+        and by `nusashell model list --json`. `status` is never omitted.
+        `known` means `data` is the catalog, and an empty array means
+        this runtime offers no models. `unknown` means the catalog
+        could not be read: `data` is absent, and `default` is the model
+        a turn will use. An empty list is never the spelling of unknown.
+      properties:
+        status: { type: string, enum: [known, unknown] }
+        source:
+          type: string
+          enum: [cache, config]
+          description: "`cache` is the server's agent-model cache. `config` is the stored provider record. This route answers `cache`."
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/AgentModel" }
+          description: Present if and only if `status` is `known`.
+        default: { $ref: "#/components/schemas/ModelCatalogDefault" }
+        reason:
+          type: string
+          description: Present when `status` is `unknown`. A short cause, not a stack.
+      additionalProperties: false
+    ModelCatalogDefault:
+      type: object
+      required: [id, by]
+      description: |
+        Required when `status` is `unknown`. `id` is the model a turn
+        will use, or `""` when that id is not known. `by` says who
+        supplies it. Absent on a `known` catalog — `current` on a row
+        is that fact.
+      properties:
+        id: { type: string }
+        name: { type: string }
+        by:
+          type: string
+          enum: [agent, settings, unset]
+          description: "`agent` — the agent picks. `settings` — `models.threads` names this id. `unset` — no default is configured."
+      additionalProperties: false
     AgentStatus:
       type: object
       required: [state, logs, authMethods]

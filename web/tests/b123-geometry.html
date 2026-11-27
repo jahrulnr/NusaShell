@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/vendor/slim-select/slimselect.css">
+  <link rel="stylesheet" href="/styles/app.css">
+  <script src="/vendor/tailwind/tailwind.browser.js"></script>
+  <script src="/vendor/slim-select/slimselect.es.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: var(--bg);
+      --color-panel: var(--panel);
+      --color-raised: var(--raised);
+      --color-hover: var(--hover);
+      --color-line: var(--line);
+      --color-fg: var(--fg);
+      --color-muted: var(--muted);
+      --color-faint: var(--faint);
+      --color-accent: var(--accent);
+      --color-accent-fg: var(--accent-fg);
+      --color-bad: var(--bad);
+    }
+  </style>
+</head>
+<body>
+  <aside id="sidebar" style="position:fixed;inset:0 auto 0 0;width:220px;z-index:20;background:#111;color:#fff">Sidebar</aside>
+  <div id="scroller" style="position:fixed;left:220px;right:0;top:0;bottom:0;overflow:auto">
+    <div style="height:2400px;position:relative">
+      <div id="hosts" style="position:absolute;top:640px;left:24px;width:220px"></div>
+    </div>
+  </div>
+  <pre id="out"></pre>
+  <script type="module">
+    import { html, render } from '/vendor/preact/htm-preact.mjs';
+    import { state } from '/lib/store.js';
+    import { ModelPicker, WorkspacePicker } from '/components/pickers.js';
+    import { AgentOptions } from '/components/agentbar.js';
+
+    const hits = [];
+    window.fetch = async (url) => {
+      const u = String(url);
+      hits.push(u);
+      const body = u.includes('/fs/browse')
+        ? { path: '/work', parent: '/', entries: [{ name: 'src', path: '/work/src' }], roots: [{ name: 'work', path: '/work' }] }
+        : { data: [], status: 'empty' };
+      const status = u.includes('/upstreams') ? 500 : 200;
+      const payload = status === 500 ? { code: 'unavailable', detail: 'down' } : body;
+      return { ok: status < 400, status, text: async () => JSON.stringify(payload) };
+    };
+
+    const model = { id: 'alpha', name: 'Alpha', supportedEfforts: ['low', 'high'] };
+    state.providers = { status: 'ready', error: null, items: [{ id: 'or', name: 'OpenRouter', models: [model, { id: 'beta', name: 'Beta' }, { id: 'gamma', name: 'Gamma' }] }] };
+    state.agents = { status: 'ready', error: null, items: [{ id: 'dev', name: 'Dev' }] };
+    state.agentModels = { dev: { status: 'ready', list: [{ id: 'adaptive', name: 'Adaptive', current: true }], error: null } };
+    state.projects = { status: 'ready', error: null, items: [] };
+    state.conn = 'open';
+
+    const modelRoom = { id: 'c_model', sel: { providerId: 'or', modelId: 'alpha', agentId: '', effort: 'default', upstream: '', workspace: '' }, info: null, agentOptions: { status: 'idle', list: [] } };
+    const workRoom = { id: '', sel: { providerId: '', modelId: '', agentId: '', effort: 'default', upstream: '', workspace: '' }, info: null };
+    const agentRoom = {
+      id: 'c_agent',
+      sel: { agentId: 'dev', modelId: 'adaptive', providerId: '', effort: 'default', upstream: '', workspace: '' },
+      info: null,
+      agentOptions: {
+        status: 'ready', report: 'ready', key: 'c:c_agent', at: Date.now(), failures: 0, error: null,
+        list: [{ id: 'mode', name: 'Mode', type: 'select', current: 'build', choices: [{ value: 'build', name: 'Build' }, { value: 'plan', name: 'Plan' }] }],
+      },
+    };
+    const emptyRoom = { id: '', sel: { providerId: '', modelId: '', agentId: '', effort: 'default', upstream: '', workspace: '' }, info: null, agentOptions: { status: 'idle', list: [] } };
+
+    const Hosts = () => html`<div>
+      <div id="hostile" style="overflow:hidden;height:40px;width:180px;transform:translateZ(0);contain:paint">
+        <div id="model"><${ModelPicker} room=${modelRoom} /></div>
+      </div>
+      <div id="work" style="margin-top:16px"><${WorkspacePicker} room=${workRoom} /></div>
+      <div id="agent" style="margin-top:16px"><${AgentOptions} room=${agentRoom} /></div>
+    </div>`;
+    const Empty = () => html`<div id="empty"><${ModelPicker} room=${emptyRoom} /></div>`;
+
+    const root = document.getElementById('hosts');
+    const paint = () => {
+      state.providers = { status: 'ready', error: null, items: [{ id: 'or', name: 'OpenRouter', models: [model, { id: 'beta', name: 'Beta' }, { id: 'gamma', name: 'Gamma' }] }] };
+      render(html`<${Hosts} />`, root);
+    };
+    paint();
+
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const trigger = (id) => document.querySelector('#' + id + ' button');
+    const panel = () => document.querySelector('[role="dialog"]');
+    const inside = (node, root) => !!(node && root && (node === root || root.contains(node)));
+    const box = (el) => el.getBoundingClientRect();
+    const click = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    const pointerClick = (el) => {
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1, button: 0 }));
+    };
+
+    window.B123 = {
+      hits,
+      trigger, panel, box, paint, pointerClick, wait,
+      open(id) { pointerClick(trigger(id)); },
+      showEmpty() {
+        state.providers = { status: 'ready', error: null, items: [{ id: 'or', name: 'OpenRouter', models: [] }] };
+        state.agents = { status: 'ready', error: null, items: [] };
+        const host = document.createElement('div');
+        host.id = 'f3';
+        host.style.cssText = 'position:fixed;left:260px;bottom:24px';
+        document.body.appendChild(host);
+        render(html`<${Empty} />`, host);
+        return host;
+      },
+    };
+    document.documentElement.dataset.ready = '1';
+  </script>
+</body>
+</html>

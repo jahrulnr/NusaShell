@@ -383,7 +383,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	eng.conversations.UseRecordings(recordings)
 	browsers.UseInstaller(browserMgr)
 	browsers.UseHistory(repobrowserhistory.New(eng.db))
-	control := appcontrol.New(context.WithoutCancel(ctx), eng.conversations, hub, eng.conversations, eng.conversations, eng.uploads, eng.projectRepo, chats, eng.toolOutputs, slog.Default())
+	control := appcontrol.New(context.WithoutCancel(ctx), eng.conversations, hub, eng.conversations, eng.conversations, eng.uploads, eng.projectRepo, chats, eng.toolOutputs, slog.Default(), eng.agentCatalog)
 	catalogs := []deliverymcp.Catalog{deliverymcp.Conversation(control), deliverymcp.Browser(browsers), deliverymcp.Memory(eng.memory)}
 	mcpPool := toolmcp.NewPool()
 	closeMCPPool := sync.OnceFunc(func() { mcpPool.Close() })

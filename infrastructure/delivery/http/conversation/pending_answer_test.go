@@ -37,6 +37,10 @@ type liveRoom struct {
 	// annotateErr makes the room refuse a write, as the application does for a
 	// pick the room cannot take.
 	annotateErr error
+	// histErr makes History fail, so a terminal that is not stored cannot be read.
+	histErr error
+	// compactErr is a history load that failed. Detail still answers.
+	compactErr error
 }
 
 func (r *liveRoom) park(fill func(p *drepo.PendingSelection)) {
@@ -59,13 +63,21 @@ func (r *liveRoom) Info(context.Context, string) (drepo.ConversationInfo, error)
 	return r.info, nil
 }
 
-func (r *liveRoom) CanCompact(context.Context, string) (bool, error) { return false, nil }
+func (r *liveRoom) CanCompact(context.Context, string) (bool, error) {
+	if r.compactErr != nil {
+		return false, r.compactErr
+	}
+	return false, nil
+}
 
 func (r *liveRoom) List(context.Context) ([]drepo.ConversationInfo, error) {
 	return append([]drepo.ConversationInfo{r.info}, r.extra...), nil
 }
 
 func (r *liveRoom) History(context.Context, string, int, int) ([]entity.Message, error) {
+	if r.histErr != nil {
+		return nil, r.histErr
+	}
 	return nil, nil
 }
 

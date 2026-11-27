@@ -24,6 +24,8 @@ type Service interface {
 	Detect(ctx context.Context) ([]appagent.Candidate, error)
 	ImportDetected(ctx context.Context) ([]appagent.View, error)
 	Models(ctx context.Context, id string) ([]appagent.Model, error)
+	// ModelList is the stored catalog. It does not start the agent.
+	ModelList(ctx context.Context, id string) (appagent.ModelList, error)
 	// Options reports the session options the agent offers — its modes and
 	// config options — before any room exists.
 	Options(ctx context.Context, id string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error)
@@ -150,12 +152,44 @@ func (s *server) models(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := s.svc.Models(c.Request.Context(), id)
+	out, err := s.svc.ModelList(c.Request.Context(), id)
 	if err != nil {
 		transport.RespondError(c, err)
 		return
 	}
-	c.JSON(200, listBody[appagent.Model]{Data: out})
+	c.JSON(200, toModelCatalog(out))
+}
+
+// catalogDefaultWire is the model a turn uses when the catalog is unknown.
+type catalogDefaultWire struct {
+	ID string `json:"id"`
+	By string `json:"by"`
+}
+
+// modelCatalogWire is the ModelCatalog document. Data is present only for
+// a known catalog, and an empty slice there means the runtime offers no
+// models. Unknown omits data; an empty list is not that answer.
+type modelCatalogWire struct {
+	Status  string              `json:"status"`
+	Source  string              `json:"source"`
+	Data    *[]appagent.Model   `json:"data,omitempty"`
+	Default *catalogDefaultWire `json:"default,omitempty"`
+	Reason  string              `json:"reason,omitempty"`
+}
+
+func toModelCatalog(in appagent.ModelList) modelCatalogWire {
+	w := modelCatalogWire{Status: in.Status, Source: in.Source, Reason: in.Reason}
+	if in.Status == "known" {
+		rows := in.Models
+		if rows == nil {
+			rows = []appagent.Model{}
+		}
+		w.Data = &rows
+		return w
+	}
+	w.Default = &catalogDefaultWire{ID: in.DefaultID, By: in.DefaultBy}
+	w.Reason = in.Reason
+	return w
 }
 
 // options answers the agent's own session options — modes and config —

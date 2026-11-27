@@ -162,7 +162,7 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 					return err
 				}
 			}
-			err := d.runAgentTurn(ctx, convID, conv, driver, *conv.Last(), onEvent, &j.steers, j.Opts.Origin)
+			err := d.runAgentTurn(ctx, convID, conv, driver, *conv.Last(), onEvent, &j.steers, j.Opts.Origin, "")
 			// Even a failed turn: the room's record forgot the old session
 			// when the rewrite was stored, and the turn saves the new one.
 			d.retireAgentSession(convID, prevAgent, prevSession, conv)

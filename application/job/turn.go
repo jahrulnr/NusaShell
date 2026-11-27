@@ -352,6 +352,7 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 				}
 				if ok {
 					conv.Append(partial)
+					conv.SetTerminal("interrupted")
 					if _, perr := d.Convs.AppendMessage(ctx, convID, partial); perr != nil {
 						return perr
 					}
@@ -359,6 +360,22 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 						return perr
 					}
 				}
+			}
+			if conv.Terminal() != "interrupted" {
+				// The user line is already history. The refusal has to be
+				// one too: a system pin and the provider log are not a
+				// message the thread shows.
+				if !assistantIn(added) {
+					text := apperror.As(err).Error()
+					if msg, merr := entity.NewMessage(enum.RoleAssistant, text); merr == nil {
+						conv.Append(msg)
+						if _, perr := d.Convs.AppendMessage(context.WithoutCancel(ctx), convID, msg); perr != nil {
+							return perr
+						}
+					}
+				}
+				conv.SetTerminal("failed")
+				_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 			}
 			return err
 		}
@@ -374,12 +391,16 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 					if perr := stampInterrupted(ctx, &partial); perr != nil {
 						return perr
 					}
+					conv.SetTerminal("interrupted")
 					if _, perr := d.Convs.AppendMessage(context.WithoutCancel(ctx), convID, partial); perr != nil {
 						return perr
 					}
 					if perr := d.Convs.Save(context.WithoutCancel(ctx), conv); perr != nil {
 						return perr
 					}
+				} else {
+					conv.SetTerminal("interrupted")
+					_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 				}
 				return apperror.New(408, "turn canceled", ctx.Err())
 			}
@@ -399,10 +420,13 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 			if err := stampInterrupted(ctx, conv.Last()); err != nil {
 				return err
 			}
+			conv.SetTerminal("interrupted")
 			// The partial reply and interrupted markers are history, not
 			// speculative work — they must commit even though the turn
 			// ctx just died; a ctx-honoring store would drop them.
 			persistCtx = context.WithoutCancel(ctx)
+		} else {
+			conv.SetTerminal("completed")
 		}
 		for _, m := range added {
 			if _, err := d.Convs.AppendMessage(persistCtx, convID, m); err != nil {
@@ -433,6 +457,8 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 			// adapter dropped it. Fail the turn loudly instead of
 			// letting an empty assistant reply settle the room.
 			if last.FinishReason() == enum.FinishReasonToolCalls {
+				conv.SetTerminal("failed")
+				_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 				return apperror.New(502, "provider requested tool calls but sent none", fmt.Errorf("finish_reason=tool_calls with zero calls"))
 			}
 			// The turn ends with images withheld and the history still
@@ -449,6 +475,8 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 		if step == ccfg.MaxTurnStep-1 {
 			// The unanswered pending calls stay in history — a retry
 			// replays them, which is honest: the model did ask.
+			conv.SetTerminal("failed")
+			_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 			return apperror.New(500, "tool loop limit reached", fmt.Errorf("%d steps without a final answer", ccfg.MaxTurnStep))
 		}
 		var perr error
@@ -460,12 +488,24 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 	return nil
 }
 
+// assistantIn reports whether this attempt already kept an assistant line.
+func assistantIn(msgs []entity.Message) bool {
+	for _, m := range msgs {
+		if m.Role() == enum.RoleAssistant {
+			return true
+		}
+	}
+	return false
+}
+
 // finishPending runs origin calls that still have no output and patches
 // each result onto the message. hitMediaLimit comes back set when an
 // image result was withheld for the serving's cap.
 func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.Conversation, driver EnvironmentDriver, model entity.Model, last *entity.Message, onEvent event.TurnEventHandler, hitMediaLimit bool) (bool, error) {
 	for _, call := range pendingCalls(*last) {
 		if err := ctx.Err(); err != nil {
+			conv.SetTerminal("interrupted")
+			_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 			if err := d.persistInterrupted(ctx, convID, last); err != nil {
 				return hitMediaLimit, err
 			}
@@ -620,17 +660,23 @@ func (d Deps) finishPending(ctx context.Context, convID string, conv *aggregate.
 		}()
 		if err != nil {
 			if ctx.Err() != nil {
+				conv.SetTerminal("interrupted")
+				_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 				if stampErr := d.persistInterrupted(ctx, convID, last); stampErr != nil {
 					return hitMediaLimit, stampErr
 				}
 				return hitMediaLimit, apperror.New(408, "turn canceled", ctx.Err())
 			}
+			conv.SetTerminal("failed")
+			_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 			return hitMediaLimit, err
 		}
 		// A tool that reported its result while the turn was canceled has
 		// already written it above; the turn still ends canceled — with the
 		// captured output in history instead of a marker over it.
 		if ctx.Err() != nil {
+			conv.SetTerminal("interrupted")
+			_ = d.Convs.Save(context.WithoutCancel(ctx), conv)
 			if err := d.persistInterrupted(ctx, convID, last); err != nil {
 				return hitMediaLimit, err
 			}

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles/app.css">
+  <script src="/vendor/tailwind/tailwind.browser.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: var(--bg);
+      --color-panel: var(--panel);
+      --color-raised: var(--raised);
+      --color-hover: var(--hover);
+      --color-line: var(--line);
+      --color-fg: var(--fg);
+      --color-muted: var(--muted);
+      --color-faint: var(--faint);
+      --color-accent: var(--accent);
+      --color-accent-fg: var(--accent-fg);
+      --color-bad: var(--bad);
+    }
+  </style>
+</head>
+<body class="bg-bg text-fg">
+  <div id="root" class="p-6 flex gap-16"></div>
+  <pre id="out"></pre>
+  <script type="module">
+    import { html, render } from '/vendor/preact/htm-preact.mjs';
+    import { state } from '/lib/store.js';
+    import { loadAgents, loadAgentModels } from '/lib/chat.js';
+    import { ModelPicker } from '/components/pickers.js';
+
+    const unknown = {
+      status: 'unknown', source: 'cache', data: [],
+      default: { id: 'grok-4.7', by: 'agent' },
+      reason: 'the agent reported no model list',
+    };
+    const knownEmpty = { status: 'known', source: 'cache', data: [] };
+    window.fetch = async (url) => {
+      const u = String(url);
+      let data = { data: [], status: 'empty' };
+      if (u.includes('/agents/devin/models')) data = unknown;
+      else if (u.includes('/agents/empty/models')) data = knownEmpty;
+      else if (u.includes('/api/agents')) data = { data: [{ id: 'devin', name: 'Devin' }, { id: 'empty', name: 'Empty' }] };
+      else if (u.includes('/providers')) data = { data: [] };
+      else if (u.includes('/context')) data = { estimate: 0, total: 0 };
+      return { ok: true, status: 200, text: async () => JSON.stringify(data) };
+    };
+
+    const opts = { status: 'idle', list: [], error: null, at: 0, key: '', failures: 0, toastId: null };
+    const unknownRoom = { id: 'c_unknown', sel: {}, info: { agentId: 'devin', modelId: '' }, agentOptions: { ...opts } };
+    const emptyRoom = { id: 'c_empty', sel: {}, info: { agentId: 'empty', modelId: '' }, agentOptions: { ...opts } };
+    state.conn = 'open';
+    state.rooms.c_unknown = unknownRoom;
+    state.rooms.c_empty = emptyRoom;
+
+    await loadAgents();
+    await loadAgentModels('devin', true);
+    await loadAgentModels('empty', true);
+    render(html`<div class="flex gap-16">
+      <div id="unknown"><${ModelPicker} room=${unknownRoom} /></div>
+      <div id="empty"><${ModelPicker} room=${emptyRoom} /></div>
+    </div>`, document.getElementById('root'));
+    document.querySelector('#unknown button').click();
+    document.querySelector('#empty button').click();
+    document.body.dataset.ready = '1';
+  </script>
+</body>
+</html>

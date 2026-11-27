@@ -242,6 +242,21 @@ func (r *ConversationRepository) readMetaUnvalidated(id string) (metaRecord, err
 	return m, nil
 }
 
+// readMetaDir reads a meta file that is not at the live room path. A parked
+// copy's directory name does not match the record id, so the live-path check
+// cannot be applied.
+func readMetaDir(dir string) (metaRecord, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, metaFile))
+	if err != nil {
+		return metaRecord{}, err
+	}
+	var m metaRecord
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return metaRecord{}, fmt.Errorf("meta corrupt: %w", err)
+	}
+	return m, nil
+}
+
 func (r *ConversationRepository) writeMeta(id string, m metaRecord) error {
 	return writeMetaFile(r.convDir(id), m)
 }

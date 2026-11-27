@@ -125,17 +125,17 @@ func TestRunTurnRetryExhaustion(t *testing.T) {
 	if want := int32(1 + len(sendRetryBackoff)); svc.calls != want {
 		t.Fatalf("calls = %d, want %d", svc.calls, want)
 	}
-	// Exhaustion persists nothing: no attempt appended a message, so history
-	// gains no assistant line — a retry cycle can never leave duplicates.
-	if got := assistantLines(conv.Messages()); len(got) != 0 {
-		t.Fatalf("in-memory assistants = %d, want none", len(got))
+	// Exhaustion leaves the refusal once. The retries did not each append a
+	// line, and the sentence is the one the thread shows.
+	if got := assistantLines(conv.Messages()); len(got) != 1 || got[0].Content() != "upstream unreachable" {
+		t.Fatalf("in-memory assistants = %d, want the one refusal", len(got))
 	}
 	loaded, lerr := d.Convs.Load(t.Context(), "room")
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
-	if got := assistantLines(loaded.Messages()); len(got) != 0 {
-		t.Fatalf("stored assistants = %d, want none", len(got))
+	if got := assistantLines(loaded.Messages()); len(got) != 1 || got[0].Content() != "upstream unreachable" {
+		t.Fatalf("stored assistants = %d, want the one refusal", len(got))
 	}
 }
 

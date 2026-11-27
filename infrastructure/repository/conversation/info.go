@@ -45,6 +45,7 @@ func (r *ConversationRepository) Info(ctx context.Context, convID string) (drepo
 		MessageCount:   meta.MessageCount,
 		ActiveCount:    meta.ActiveCount,
 		SealedSegments: meta.SealedSegments,
+		Terminal:       meta.Terminal,
 		CreatedAt:      meta.CreatedAt,
 		UpdatedAt:      meta.UpdatedAt,
 	}, nil

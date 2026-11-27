@@ -582,8 +582,20 @@ back with its `updatedAt`; it never clears an unmentioned field. `pause` and
   first `/`, so `openrouter/openrouter/auto` means provider `openrouter`,
   model `openrouter/auto`.
 
-This is a runtime binding command, not NusaMation's ACP session-option
-selector (`value[k=v,...]`); session options stay in Settings → Agents.
+`nusashell model list` prints the catalog a runtime can use. Pass
+exactly one of `--agent <id>` and `--provider <id>`. It asks the
+running server and does not start an agent process. `--json` prints
+the `ModelCatalog` object in [the API contract](api/contract.md#read-only-model-list).
+
+`known` lists each model (`id`, `name`, and `current` when it is the
+one in force). A known empty catalog prints `no models`. `unknown`
+prints `unknown`, the default that will apply, and the reason — it
+does not print an empty list. An agent that needs sign-in, or a
+provider that is missing, prints that cause and no catalog.
+
+`nusashell model <thread> <selector>` remains a runtime binding. It is
+not NusaMation's ACP session-option selector (`value[k=v,...]`);
+session options stay in Settings → Agents.
 
 ### `nusashell conversations`
 

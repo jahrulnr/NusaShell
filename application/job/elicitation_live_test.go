@@ -133,7 +133,7 @@ func TestElicitationLiveOwnerAccept(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb})
+		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, "")
 	}()
 	e := <-asked
 	t.Logf("wire request: id=%s message=%q deadline=%s", e.ID(), e.Message(), e.Deadline().Format("15:04:05.000"))
@@ -172,7 +172,7 @@ func TestElicitationLiveOwnerDecline(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb})
+		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, "")
 	}()
 	e := <-asked
 	if err := broker.Answer(conv.ID(), e.ID(), valueobject.ElicitationAnswer{Action: "decline"}); err != nil {
@@ -201,7 +201,7 @@ func TestElicitationLiveDeadlineExpires(t *testing.T) {
 			actions = append(actions, ev.Delta())
 		}
 	}
-	if err := d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}); err != nil {
+	if err := d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, ""); err != nil {
 		t.Fatal(err)
 	}
 	reply := conv.Last().Content()
@@ -224,7 +224,7 @@ func TestElicitationLiveDeadlineExpires(t *testing.T) {
 func TestElicitationLiveAutomationDeclinesAtOnce(t *testing.T) {
 	d, conv, broker := liveElicitDeps(t, 15*time.Minute)
 	start := time.Now()
-	if err := d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), nil, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginAutomation}); err != nil {
+	if err := d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), nil, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginAutomation}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if el := time.Since(start); el > 10*time.Second {
@@ -258,7 +258,7 @@ func TestElicitationLiveTurnCancelUnanswered(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- d.runAgentTurn(ctx, conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb})
+		done <- d.runAgentTurn(ctx, conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, "")
 	}()
 	<-asked
 	cancel()
@@ -282,7 +282,7 @@ func TestElicitationLiveURLStillPresented(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo url"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb})
+		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo url"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, "")
 	}()
 	e := <-asked
 	t.Logf("wire request: mode=%s url=%s message=%q", e.Mode(), e.URL(), e.Message())
@@ -312,7 +312,7 @@ func TestElicitationLiveAnswerAfterResolve404(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb})
+		done <- d.runAgentTurn(t.Context(), conv.ID(), conv, nil, livePrompt(t, "elicit-demo"), emit, nil, valueobject.TurnOrigin{Kind: enum.TurnOriginWeb}, "")
 	}()
 	e := <-asked
 	if err := broker.Answer(conv.ID(), e.ID(), valueobject.ElicitationAnswer{Action: "accept", Content: []byte(`{"environment":"staging","replicas":2}`)}); err != nil {

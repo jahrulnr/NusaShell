@@ -71,6 +71,7 @@ func (s *server) list(c *gin.Context) {
 		if s.turns != nil {
 			dto.TurnActive = s.turns.TurnActive(i.ID)
 		}
+		s.applyLifecycle(c.Request.Context(), i, &dto)
 		// One room's unreadable pick must not blind the owner to every other room:
 		// the row keeps its place and says so, and opening the room shows why.
 		dto.Pending, dto.PendingUnreadable = pendingView(c.Request.Context(), s.reads, i.ID)

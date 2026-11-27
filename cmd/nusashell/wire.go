@@ -104,6 +104,9 @@ type engine struct {
 	planEvents *toolplan.Dispatcher
 	// agentRepo resolves an agent's saved environment.
 	agentRepo drepo.Agent
+	// agentCatalog is the model list the server negotiated with each agent.
+	// Spawn checks a named model against it; the same repository holds both.
+	agentCatalog drepo.AgentCatalogStore
 	// skills is the skill catalog reference search offers.
 	skills drepo.Skills
 	// skillBudget is the catalog byte budget, copied from
@@ -524,6 +527,7 @@ func compose(cfg config.Config, secrets *reposecret.Store, configPath, workspace
 		mcpTools:      mcpTools,
 		planEvents:    planEvents,
 		agentRepo:     agentRepo,
+		agentCatalog:  agentRepo,
 		skills:        skillStore,
 		skillBudget:   skillBudget,
 		skillWriter:   skillWriter,

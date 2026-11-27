@@ -94,7 +94,7 @@ func (r *ConversationRepository) assignLabel(conv *aggregate.Conversation, m *me
 	if err != nil {
 		return err
 	}
-	if owner, taken := used[m.Label]; taken {
+	if owner, taken := used[valueobject.NormalizeLabel(m.Label)]; taken {
 		return apperror.New(409, "another thread already uses @"+m.Label,
 			fmt.Errorf("label %q belongs to conversation %s", m.Label, owner))
 	}
@@ -103,7 +103,9 @@ func (r *ConversationRepository) assignLabel(conv *aggregate.Conversation, m *me
 
 // labelsInUseLocked maps every stored handle to the room holding it, skipping
 // exceptID. A room whose record cannot be read holds no resolvable handle
-// either — List refuses such a store — so it is left out.
+// either — List refuses such a store — so it is left out. A parked copy
+// whose live room is missing still holds its handle: recovery puts that
+// room back.
 func (r *ConversationRepository) labelsInUseLocked(exceptID string) (map[string]string, error) {
 	entries, err := os.ReadDir(r.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -121,7 +123,23 @@ func (r *ConversationRepository) labelsInUseLocked(exceptID string) (map[string]
 		if err != nil || meta.Label == "" {
 			continue
 		}
-		used[meta.Label] = meta.ID
+		claimLabel(used, meta.Label, meta.ID)
+	}
+	if err := r.parkedLabelsLocked(exceptID, used); err != nil {
+		return nil, err
 	}
 	return used, nil
+}
+
+// claimLabel records one owner for a handle. A later sighting of the same
+// name does not replace that owner; the name stays taken either way.
+func claimLabel(used map[string]string, label, id string) {
+	label = valueobject.NormalizeLabel(label)
+	if label == "" {
+		return
+	}
+	if _, exists := used[label]; exists {
+		return
+	}
+	used[label] = id
 }

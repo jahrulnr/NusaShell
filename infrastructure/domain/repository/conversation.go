@@ -50,6 +50,10 @@ type ConversationInfo struct {
 	MessageCount   int
 	ActiveCount    int
 	SealedSegments int
+	// Terminal is the last turn's stored outcome: "completed", "failed",
+	// "interrupted", or empty when none was stored. A word outside those
+	// three cannot be read. It is room state, not a list lifecycle.
+	Terminal string
 }
 
 // PendingSelection is a room's runtime pick and session-option picks waiting for

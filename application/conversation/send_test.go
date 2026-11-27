@@ -319,11 +319,24 @@ func TestSendFailedKeepsUserTurn(t *testing.T) {
 		t.Fatal("failed provider send must report its committed user line")
 	}
 	conv, _ := app.deps.Convs.Load(t.Context(), "c2")
-	last := conv.Last()
-	pinOK := last.Role() == enum.RoleSystem && len(last.ToolCalls()) == 1 &&
-		last.ToolCalls()[0].Type() == enum.TooltypeInjection
-	if len(conv.Messages()) != 2 || !pinOK {
-		t.Fatal("failed send must persist user turn + workspace pin, without a reply")
+	var user, pin, reply int
+	for _, m := range conv.Messages() {
+		switch m.Role() {
+		case enum.RoleUser:
+			user++
+		case enum.RoleAssistant:
+			reply++
+			if m.Content() != "slow down" {
+				t.Fatalf("refusal = %q, want the provider's sentence", m.Content())
+			}
+		case enum.RoleSystem:
+			if len(m.ToolCalls()) == 1 && m.ToolCalls()[0].Type() == enum.TooltypeInjection {
+				pin++
+			}
+		}
+	}
+	if user != 1 || pin != 1 || reply != 1 {
+		t.Fatalf("failed send messages = user %d pin %d reply %d, want the user line, the pin, and the refusal", user, pin, reply)
 	}
 	if conv.Title() != "ping" {
 		t.Fatalf("failed first send title = %q, want the persisted user message", conv.Title())

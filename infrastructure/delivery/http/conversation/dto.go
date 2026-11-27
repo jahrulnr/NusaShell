@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	appconversation "github.com/jahrulnr/nusashell/application/conversation"
 	"github.com/jahrulnr/nusashell/infrastructure/delivery/http/internal/transport"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
@@ -87,6 +88,9 @@ type conversationDTO struct {
 	// not be read. Its pending is then null, which here means unknown, not
 	// "nothing waits". A room's own detail fails instead, so the reason shows.
 	PendingUnreadable bool `json:"pendingUnreadable,omitempty"`
+	// Lifecycle is the thread's state. The server always writes one of the
+	// six words. It is not derived from busy.
+	Lifecycle string `json:"lifecycle"`
 }
 
 // agentOptionsDTO is an agent room's session options as the agent answered: the
@@ -195,6 +199,9 @@ func toConversation(i drepo.ConversationInfo) conversationDTO {
 		MessageCount:   i.MessageCount,
 		ActiveCount:    i.ActiveCount,
 		SealedSegments: i.SealedSegments,
+		// Unknown until applyLifecycle reads the live turn and the terminal.
+		// A forgotten call stays unknown, which is never a claim of idle.
+		Lifecycle: appconversation.LifecycleUnknown,
 	}
 }
 

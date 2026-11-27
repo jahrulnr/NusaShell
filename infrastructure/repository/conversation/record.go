@@ -42,6 +42,9 @@ type metaRecord struct {
 	// SymbolMapRefusedAt is the root the symbol-map gate refused; absent
 	// means "never evaluated", so no migration is needed for older records.
 	SymbolMapRefusedAt string `json:"symbolMapRefusedAt,omitempty"`
+	// Terminal is the last turn's outcome. Absent on rooms written before
+	// the field existed, which is "nothing stored", not a completed turn.
+	Terminal string `json:"terminal,omitempty"`
 }
 
 type routingRecord struct {
@@ -76,6 +79,7 @@ func metaFor(conv *aggregate.Conversation) metaRecord {
 		// The symbol-map verdict is room state, not history: one root (or
 		// "" for none), dropped by the aggregate's own transitions.
 		SymbolMapRefusedAt: conv.SymbolMapRefusedAt(),
+		Terminal:           conv.Terminal(),
 		// SystemPrompt is deliberately absent: the prompt ships embedded in
 		// the binary, so it is applied in memory, never persisted.
 	}

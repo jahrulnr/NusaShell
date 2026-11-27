@@ -57,6 +57,39 @@ func (r *ConversationRepository) stageRoom(id string) (string, error) {
 	return os.MkdirTemp(root, id+stagedMark)
 }
 
+// parkedLabelsLocked reserves a handle that still belongs to a room waiting
+// in the staging area. Recovery puts that room back under its old name, so a
+// new room must not be given the same handle while the copy is parked. A
+// parked copy whose live room is already present does not count: recovery
+// keeps the live room and drops the copy.
+func (r *ConversationRepository) parkedLabelsLocked(exceptID string, used map[string]string) error {
+	entries, err := os.ReadDir(filepath.Join(r.path, stagingRoot))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.Contains(entry.Name(), parkedMark) {
+			continue
+		}
+		id, ok := stagedRoomID(entry.Name())
+		if !ok || id == exceptID {
+			continue
+		}
+		if _, err := os.Lstat(r.convDir(id)); err == nil {
+			continue
+		}
+		meta, err := readMetaDir(filepath.Join(r.path, stagingRoot, entry.Name()))
+		if err != nil || meta.Label == "" {
+			continue
+		}
+		claimLabel(used, meta.Label, id)
+	}
+	return nil
+}
+
 // parkedName names the place a swap parks the live room. The suffix orders
 // copies of one room, so a recovery that finds more than one restores the
 // newest.

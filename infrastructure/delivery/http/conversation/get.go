@@ -103,6 +103,7 @@ func (s *server) export(c *gin.Context) {
 	// the whole thread: the thread says so, and opening the room shows the reason.
 	conv := toConversation(info)
 	conv.Pending, conv.PendingUnreadable = pendingView(ctx, s.reads, id)
+	s.applyLifecycle(ctx, info, &conv)
 	out := struct {
 		ExportedAt   time.Time       `json:"exportedAt"`
 		Conversation conversationDTO `json:"conversation"`

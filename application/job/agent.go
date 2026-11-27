@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ import (
 // its permission requests through the agent's policy and the owner, and
 // tries mid-turn steering; what the agent cannot take becomes a follow-up
 // prompt after the current prompt yields at its next safe point or ends.
-func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.Conversation, driver EnvironmentDriver, input entity.Message, onEvent event.TurnEventHandler, steers *SteeringInput, origin valueobject.TurnOrigin) error {
+func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.Conversation, driver EnvironmentDriver, input entity.Message, onEvent event.TurnEventHandler, steers *SteeringInput, origin valueobject.TurnOrigin, model string) error {
 	if d.Agents == nil || d.AgentRuntime == nil {
 		return apperror.New(503, "agent runtime unavailable", nil)
 	}
@@ -95,6 +96,13 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 	if d.MCPServers != nil {
 		servers = d.MCPServers(convID)
 	}
+	// model is what this turn asks for. Empty keeps the room's stored id.
+	// A refusal must not leave the rejected id stored: the next send would
+	// die at the same gate and look like a healthy idle room.
+	priorModel := conv.ModelID()
+	if model != "" {
+		conv.SetModelID(model)
+	}
 	for {
 		before := len(conv.Messages())
 		// Steering that arrives while the agent works goes straight into
@@ -151,9 +159,29 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 				}
 			})
 		}
-		err := d.AgentRuntime.Prompt(ctx, dservice.AgentPrompt{Agent: agent, Conversation: conv, Workspace: dir, Input: input, Model: conv.ModelID(), ExtraFolders: extra, MCPServers: servers, Options: agentOptions(agent, conv), Elicit: elicit, OnStarted: started, Origin: origin}, emit, approve)
+		attempted := conv.ModelID()
+		err := d.AgentRuntime.Prompt(ctx, dservice.AgentPrompt{Agent: agent, Conversation: conv, Workspace: dir, Input: input, Model: attempted, ExtraFolders: extra, MCPServers: servers, Options: agentOptions(agent, conv), Elicit: elicit, OnStarted: started, Origin: origin}, emit, approve)
 		stopLive()
 		steering.Wait()
+		if err != nil && modelNotOffered(err) {
+			if model != "" && priorModel != model {
+				conv.SetModelID(priorModel)
+			} else {
+				conv.SetModelID("")
+			}
+			if !assistantSince(conv, before) {
+				text := apperror.As(err).Error()
+				if attempted != "" {
+					text = text + " (" + attempted + ")"
+				}
+				if msg, merr := entity.NewMessage(enum.RoleAssistant, text); merr == nil {
+					conv.Append(msg)
+				}
+			}
+		}
+		// The stored word is what a later list reads. A refusal must say
+		// failed, and a stop must say interrupted — neither is a completed turn.
+		conv.SetTerminal(turnTerminal(err, conv, before))
 		// The runtime appends the reply even when the turn broke off —
 		// partial output is history the owner already watched stream.
 		persistCtx := ctx
@@ -229,6 +257,55 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 			input = joined
 		}
 	}
+}
+
+// modelNotOffered is the identity refusal selectModel returns. Other
+// failures keep the model the room asked for.
+func modelNotOffered(err error) bool {
+	ae := apperror.As(err)
+	return ae.StatusCode() == 400 && ae.Error() == "the agent does not offer this model"
+}
+
+// assistantSince reports whether the turn already appended an assistant line.
+func assistantSince(conv *aggregate.Conversation, before int) bool {
+	for _, m := range conv.Messages()[before:] {
+		if m.Role() == enum.RoleAssistant {
+			return true
+		}
+	}
+	return false
+}
+
+// turnTerminal is the word a list reads after this prompt. A stop or a
+// restart is interrupted. Any other error is failed. A prompt that
+// returned is completed, unless the reply it kept was itself cut short.
+func turnTerminal(err error, conv *aggregate.Conversation, before int) string {
+	if interruptedTurn(err) || assistantInterrupted(conv, before) {
+		return "interrupted"
+	}
+	if err != nil {
+		return "failed"
+	}
+	return "completed"
+}
+
+func interruptedTurn(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apperror.As(err).StatusCode() == 408 {
+		return true
+	}
+	return errors.Is(err, dservice.ErrInterruptedByUser) || errors.Is(err, dservice.ErrServerRestarted) || errors.Is(err, context.Canceled)
+}
+
+func assistantInterrupted(conv *aggregate.Conversation, before int) bool {
+	for _, m := range conv.Messages()[before:] {
+		if m.Role() == enum.RoleAssistant && m.FinishReason() == enum.FinishReasonInterrupted {
+			return true
+		}
+	}
+	return false
 }
 
 // followUpMessage answers the line a follow-up writes, nil when everything the

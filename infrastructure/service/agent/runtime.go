@@ -178,8 +178,9 @@ type session struct {
 	// catalogModels and catalogCurrent are the session's model block kept
 	// for catalog writes: verbatim ids from models.availableModels when the
 	// agent reports it, else the config-options' own list.
-	catalogModels  []dservice.AgentModel
-	catalogCurrent string
+	catalogModels      []dservice.AgentModel
+	catalogModelsKnown bool
+	catalogCurrent     string
 	// modelSet records whether a model pick was set on this session since
 	// it opened — as opposed to the value it arrived with. It gates the
 	// one-time list refresh below: a session resumed onto a model it never
@@ -494,9 +495,9 @@ func (r *Runtime) ensureSession(ctx context.Context, p *proc, conv *aggregate.Co
 	if state.Modes != nil {
 		modesSeq = state.WireSeq
 	}
-	catalogModels, catalogCurrent := sessionCatalogModels(&state)
+	catalogModels, catalogCurrent, catalogModelsKnown := sessionCatalogModels(&state)
 	s = &session{convID: conv.ID(), acpID: state.SessionID, proc: p, folders: folders, tools: tools, configs: state.ConfigOptions, modes: state.Modes,
-		configSeq: configSeq, modesSeq: modesSeq, catalogModels: catalogModels, catalogCurrent: catalogCurrent,
+		configSeq: configSeq, modesSeq: modesSeq, catalogModels: catalogModels, catalogModelsKnown: catalogModelsKnown, catalogCurrent: catalogCurrent,
 		instructions: instructions, preamble: preamble{recap: !restored, instructions: !takesSystemPrompt && (!restored || replaced)}}
 	p.mu.Lock()
 	// Notifications and requests are routed by session id, so an agent that
@@ -733,16 +734,25 @@ func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent e
 // verbatim availableModels/currentModelId when the agent reports the field,
 // else the model option's own list — the only model surface some agents
 // (the fake) expose.
-func sessionCatalogModels(state *acp.SessionState) ([]dservice.AgentModel, string) {
+// sessionCatalogModels reads the session's model block. reported is false
+// when the session did not name a model list; an empty reported list means
+// the agent offers no models, which is not the same answer.
+func sessionCatalogModels(state *acp.SessionState) (models []dservice.AgentModel, current string, reported bool) {
 	if state.Models != nil {
-		models := make([]dservice.AgentModel, 0, len(state.Models.AvailableModels))
+		models = make([]dservice.AgentModel, 0, len(state.Models.AvailableModels))
 		for _, m := range state.Models.AvailableModels {
 			models = append(models, dservice.AgentModel{ID: m.ModelID, Name: m.Name, Current: m.ModelID == state.Models.CurrentModelID})
 		}
-		return models, state.Models.CurrentModelID
+		return models, state.Models.CurrentModelID, true
 	}
-	_, current, models := modelOption(state.ConfigOptions)
-	return models, current
+	id, current, models := modelOption(state.ConfigOptions)
+	if id == "" {
+		return nil, "", false
+	}
+	if models == nil {
+		models = []dservice.AgentModel{}
+	}
+	return models, current, true
 }
 
 // writeCatalog records the offered surface this session last reported —
@@ -754,11 +764,12 @@ func (r *Runtime) writeCatalog(s *session) {
 	}
 	s.mu.Lock()
 	cat := drepo.AgentCatalog{
-		Options:      sessionOptions(s.configs, s.modes),
-		Models:       slices.Clone(s.catalogModels),
-		CurrentModel: s.catalogCurrent,
-		Caps:         s.proc.caps,
-		ProbedAt:     time.Now(),
+		Options:        sessionOptions(s.configs, s.modes),
+		Models:         slices.Clone(s.catalogModels),
+		ModelsReported: s.catalogModelsKnown,
+		CurrentModel:   s.catalogCurrent,
+		Caps:           s.proc.caps,
+		ProbedAt:       time.Now(),
 	}
 	s.mu.Unlock()
 	if len(cat.Options) == 0 {
@@ -871,7 +882,7 @@ func (r *Runtime) Models(ctx context.Context, a *aggregate.Agent) ([]dservice.Ag
 	r.models[a.ID()] = modelCache{fingerprint: fp, models: models, options: sessionOptions(state.ConfigOptions, state.Modes)}
 	r.mu.Unlock()
 	if r.opts.Catalog != nil {
-		catModels, catCurrent := sessionCatalogModels(&state)
+		catModels, catCurrent, catKnown := sessionCatalogModels(&state)
 		options := sessionOptions(state.ConfigOptions, state.Modes)
 		if len(options) == 0 {
 			// Same rule as writeCatalog: an empty probe list is "the
@@ -879,7 +890,7 @@ func (r *Runtime) Models(ctx context.Context, a *aggregate.Agent) ([]dservice.Ag
 			// a good stored snapshot outlives it.
 			r.log.Info("agent catalog write skipped: the probe offered nothing", "agent", a.ID())
 		} else {
-			cat := drepo.AgentCatalog{Options: options, Models: catModels,
+			cat := drepo.AgentCatalog{Options: options, Models: catModels, ModelsReported: catKnown,
 				CurrentModel: catCurrent, Caps: p.caps, ProbedAt: time.Now()}
 			if err := r.opts.Catalog.SaveCatalog(ctx, a.ID(), cat); err != nil {
 				r.log.Warn("the agent catalog could not be saved", "agent", a.ID(), "error", err)

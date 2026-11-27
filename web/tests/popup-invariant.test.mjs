@@ -22,7 +22,7 @@ installDOM();
 import { before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { html, render } from '/vendor/preact/htm-preact.mjs';
-import { state } from '../lib/store.js';
+import { emit, state } from '../lib/store.js';
 import * as chat from '../lib/chat.js';
 import { ModelPicker } from '../components/pickers.js';
 import { AgentOptions, AgentOptionsNotice } from '../components/agentbar.js';
@@ -561,6 +561,39 @@ const freshRoomOptionsStay = async () => {
   }
 };
 
+// A store tick that leaves the model ids and their order alone must not rebuild
+// the rows and must not move the scroll. Search is the change that starts at the top.
+const catalogTickKeepsScroll = async () => {
+  serveModelRoom();
+  const { host, dialog } = await openModelPanel();
+  try {
+    const body = dialog.querySelector('[data-scroll="list"]');
+    assert.ok(body, 'the list scroller exists');
+    const rows = () => [...body.querySelectorAll('button.w-full')];
+    const before = rows();
+    assert.ok(before.length > 1, 'the catalog has more than one model');
+    body.scrollTop = 64;
+    const agent = state.agentModels.devin;
+    state.agentModels = {
+      ...state.agentModels,
+      devin: { ...agent, list: agent.list.map((m) => ({ ...m })) },
+    };
+    state.conn = 'open';
+    emit();
+    await sleep(160);
+    const live = doc.querySelector('[role="dialog"] [data-scroll="list"]');
+    assert.equal(live, body, 'an unchanged catalog keeps the list scroller');
+    assert.equal(live.scrollTop, 64, 'an unchanged catalog leaves the scroll where the owner put it');
+    const after = rows();
+    assert.equal(after.length, before.length);
+    after.forEach((row, i) => assert.equal(row, before[i], 'an unchanged catalog does not rebuild the model list'));
+  } finally {
+    render(null, host);
+    host.remove();
+  }
+};
+
+test('an unchanged catalog keeps the model list and its scroll', catalogTickKeepsScroll);
 test('reasoning effort stays put while the model list scrolls', effortStaysWithTheList);
 test('a new room keeps the agent options out of the model list', freshRoomOptionsStay);
 test('the panel says a pick applies next turn only while the record parks it', agentHintFollowsRecord);

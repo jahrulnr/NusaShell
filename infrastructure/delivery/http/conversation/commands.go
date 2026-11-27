@@ -97,7 +97,9 @@ func pendingView(ctx context.Context, reads PendingReader, convID string) (pendi
 func (s *server) project(ctx context.Context, info drepo.ConversationInfo) (conversationDTO, error) {
 	available, err := s.reads.CanCompact(ctx, info.ID)
 	if err != nil {
-		return conversationDTO{}, err
+		// The tail would not load. The room still opens: compact is not
+		// available, and the lifecycle read says the history is unknown.
+		available = false
 	}
 	out := toConversation(info)
 	out.CanCompact = &available
@@ -116,6 +118,7 @@ func (s *server) project(ctx context.Context, info drepo.ConversationInfo) (conv
 	// A waiting pick that cannot be read does not fail the room either: the room
 	// answers pending null and says it is unreadable, so the owner still opens it.
 	out.Pending, out.PendingUnreadable = pendingView(ctx, s.reads, info.ID)
+	s.applyLifecycle(ctx, info, &out)
 	// The room's agent options come from the reading the picker draws, so the
 	// two cannot disagree. A read that fails does not fail the room, which the
 	// owner still needs: the room says it is unreadable instead, and the

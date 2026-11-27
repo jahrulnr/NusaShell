@@ -15,11 +15,16 @@ import (
 // when no live session or probe is fresher: it is what survives a restart,
 // and what makes a stored pick's id "known" rather than refused.
 type AgentCatalog struct {
-	Options      []dservice.AgentOption `json:"options,omitempty"`
-	Models       []dservice.AgentModel  `json:"models,omitempty"`
-	CurrentModel string                 `json:"currentModel,omitempty"`
-	Caps         json.RawMessage        `json:"caps,omitempty"`
-	ProbedAt     time.Time              `json:"probedAt"`
+	Options []dservice.AgentOption `json:"options,omitempty"`
+	Models  []dservice.AgentModel  `json:"models,omitempty"`
+	// ModelsReported is true when the session reported a model list,
+	// including a list with no models. Absent, with no models stored,
+	// means the session did not report one — that is unknown, not an
+	// empty catalog.
+	ModelsReported bool            `json:"modelsReported,omitempty"`
+	CurrentModel   string          `json:"currentModel,omitempty"`
+	Caps           json.RawMessage `json:"caps,omitempty"`
+	ProbedAt       time.Time       `json:"probedAt"`
 }
 
 // AgentCommandCatalog is the slash-command surface one agent session last

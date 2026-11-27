@@ -55,3 +55,17 @@ test('before the first answer ever arrives there is nothing to show', () => {
   assert.equal(upstreamControl({ status: 'loading', key: 'p|A', list: [], had: false }, 'p|A').show, false);
   assert.equal(upstreamControl({ status: 'ready', key: 'p|A', list: [], had: false }, 'p|A').show, false);
 });
+
+test('a failed read mounts the control before any list has arrived', () => {
+  const ctl = upstreamControl({ status: 'error', key: 'p|A', list: [], had: false }, 'p|A');
+  assert.equal(ctl.show, true);
+  assert.equal(ctl.error, true);
+  assert.deepEqual(ctl.list, []);
+  // Another model's failure does not mount this one's control.
+  assert.equal(upstreamControl({ status: 'error', key: 'p|A', list: [], had: false }, 'p|B').show, false);
+});
+
+test('a load or a failure does not keep the previous model\'s upstreams', () => {
+  assert.deepEqual(upstreamControl({ status: 'loading', key: 'p|B', list: UP, had: true }, 'p|B').list, []);
+  assert.deepEqual(upstreamControl({ status: 'error', key: 'p|B', list: UP, had: true }, 'p|B').list, []);
+});

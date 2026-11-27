@@ -548,10 +548,7 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		}
 
 		if agentRoom {
-			if j.ModelID != "" {
-				conv.SetModelID(j.ModelID)
-			}
-			err = d.runAgentTurn(ctx, convID, conv, driver, user, onEvent, j.mailbox(), j.Opts.Origin)
+			err = d.runAgentTurn(ctx, convID, conv, driver, user, onEvent, j.mailbox(), j.Opts.Origin, j.ModelID)
 			d.retireAgentSession(convID, prevAgent, prevSession, conv)
 		} else {
 			err = d.runTurn(ctx, convID, conv, driver, prov, model, svc, onEvent, j.mailbox(), j.Opts.Origin)

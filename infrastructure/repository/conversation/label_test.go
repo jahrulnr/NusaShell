@@ -2,6 +2,8 @@ package repoconversation
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -100,5 +102,57 @@ func TestSaveKeepsItsOwnLabel(t *testing.T) {
 	}
 	if got := stored.Label(); got != label {
 		t.Fatalf("handle changed on update: %q, want %q", got, label)
+	}
+}
+
+// A crash between a clear's two renames parks the live room. Its handle is
+// still theirs: the next room must not be given it, and putting the parked
+// room back must not rename it. Otherwise two rooms share one @label.
+func TestParkedRoomKeepsItsLabelAndANewRoomDoesNotTakeIt(t *testing.T) {
+	repo := NewConversationRepository(t.TempDir())
+	var held *aggregate.Conversation
+	for range 8 {
+		conv := unsavedRoom(t)
+		if err := repo.Save(context.Background(), conv); err != nil {
+			t.Fatal(err)
+		}
+		if conv.Label() == "eagle" {
+			held = conv
+		}
+	}
+	if held == nil {
+		t.Fatal("the eighth room should have been given eagle")
+	}
+	parked := filepath.Join(repo.path, stagingRoot, held.ID()+parkedMark+"1")
+	if err := os.MkdirAll(filepath.Dir(parked), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(repo.convDir(held.ID()), parked); err != nil {
+		t.Fatal(err)
+	}
+
+	next := unsavedRoom(t)
+	if err := repo.Save(context.Background(), next); err != nil {
+		t.Fatal(err)
+	}
+	infos, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := map[string]string{}
+	for _, info := range infos {
+		if info.Label == "" {
+			continue
+		}
+		if other, taken := owners[info.Label]; taken {
+			t.Fatalf("rooms %s and %s share @%s", other, info.ID, info.Label)
+		}
+		owners[info.Label] = info.ID
+	}
+	if owners["eagle"] != held.ID() {
+		t.Fatalf("@eagle belongs to %s, want the parked room %s", owners["eagle"], held.ID())
+	}
+	if next.Label() == "eagle" {
+		t.Fatal("the new room was given the parked room's label")
 	}
 }

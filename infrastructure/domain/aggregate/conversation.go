@@ -51,6 +51,11 @@ type Conversation struct {
 	// rebind re-evaluates by comparison, and it is a cache of a deterministic
 	// probe, never a claim about the tree.
 	symbolMapRefusedAt string
+	// terminal is the last turn's stored outcome: "completed", "failed",
+	// "interrupted", or "" when none was stored. Any other word cannot be
+	// read. It is not a lifecycle — a list derives that from this word
+	// together with whether a turn is live.
+	terminal string
 }
 
 // DefaultEnvironment is the execution binding every room starts with —
@@ -366,6 +371,14 @@ func (c *Conversation) SetProviderID(providerID string) {
 func (c *Conversation) SetModelID(modelID string) {
 	c.modelID = modelID
 }
+
+// Terminal is the last turn's stored outcome. Empty means none was stored.
+func (c *Conversation) Terminal() string { return c.terminal }
+
+// SetTerminal records the last turn's outcome. The list reads it back; a
+// word it does not know is kept so the list can say the terminal is
+// unreadable instead of inventing a completed turn.
+func (c *Conversation) SetTerminal(v string) { c.terminal = v }
 
 // SetEffort stores the reasoning effort the owner picked for the room, so a
 // turn started anywhere — another browser, a chat, an automation — runs with

@@ -35,19 +35,107 @@ export function Button({ children, onClick, kind = 'default', class: cls = '', d
 }
 
 // Popover anchored to its wrapper; a bottom sheet on narrow screens.
-// Closes on outside pointerdown and Escape. Beside its wrapper it opens on the
-// side `placement` asks for unless its content does not fit there and the other
-// side is clearly better (lib/placement.js), and it is capped at the room on the
-// side it took, so a tall panel never runs off the screen. The side and the cap
-// are measured after every render while open, because the content and the
-// anchor move without the panel's props changing.
+// layer "top" (the three pickers) uses the Popover API above 640px so the
+// panel escapes the composer's overflow. Below 640px, or where the API is
+// missing, it is the same sheet and flow panel as every other menu.
+// Beside its wrapper it opens on the side `placement` asks for unless its
+// content does not fit there and the other side is clearly better
+// (lib/placement.js), and it is capped at the room on the side it took, so a
+// tall panel never runs off the screen. The side and the cap are measured
+// after every render while open, because the content and the anchor move
+// without the panel's props changing.
 // scroll names the scroll owner. "panel" — the default, for short menus — is
 // the panel itself: everything inside scrolls as one block. "list" is for a
 // panel with a fixed header or footer around a long list: the panel is a
 // column that does not scroll, and the caller's list area is the one scroll
 // owner (flex-1 min-h-0 overflow-y-auto), so the header and footer never
 // leave the frame.
-export function Popover({ open, onClose, children, class: cls = '', placement = 'top-start', label, scroll = 'panel' }) {
+const DESKTOP_QUERY = '(min-width: 640px)';
+
+// The Popover API is the top layer. Where it is missing there is no polyfill:
+// the panel stays in the flow, which is the layout every other menu uses.
+const popoverApi = () => typeof HTMLElement !== 'undefined' && 'popover' in HTMLElement.prototype;
+
+const useTop = (layer) => layer === 'top' && popoverApi() && matchMedia(DESKTOP_QUERY).matches;
+
+// The trigger is the button that sits in the wrapper ahead of the panel, not
+// a button inside the panel.
+function triggerOf(panel) {
+  const parent = panel.parentElement;
+  const kids = parent?.children;
+  if (!kids) return null;
+  for (const child of kids) {
+    if (child === panel) break;
+    if (child.localName === 'button') return child;
+  }
+  return null;
+}
+
+function reveal(panel) {
+  if (panel.matches?.(':popover-open')) return;
+  const source = triggerOf(panel);
+  try {
+    if (source) panel.showPopover({ source });
+    else panel.showPopover();
+  } catch (err) {
+    if (err?.name === 'InvalidStateError') return;
+    try { panel.showPopover(); } catch { /* already open, or the options object was refused */ }
+  }
+}
+
+// Measuring the panel's own height lifts its cap for a moment. That reflow
+// can throw the model list back to the top, so the list's scroll is put back.
+function contentHeight(el) {
+  const scroller = el.querySelector?.('[data-scroll="list"]');
+  const top = scroller ? scroller.scrollTop : 0;
+  const capped = el.style.maxHeight;
+  el.style.maxHeight = '';
+  const need = el.offsetHeight;
+  el.style.maxHeight = capped;
+  if (scroller) scroller.scrollTop = top;
+  return need;
+}
+
+// A top-layer panel is positioned from the anchor with fixed coordinates.
+// The top side pins the bottom edge, so growing content stays against the
+// anchor instead of sliding away from it. Returns 'gone' when the anchor has
+// left the viewport, which closes the panel.
+function placeTop(panel, placement) {
+  const anchor = panel.parentElement;
+  // A stub element has no isConnected; only an explicit false means it left the document.
+  if (!anchor || anchor.isConnected === false) return 'gone';
+  const r = anchor.getBoundingClientRect();
+  if (!(r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth)) return 'gone';
+  const [prefer, align] = placement.split('-');
+  const above = r.top - 16, below = innerHeight - r.bottom - 16;
+  const need = contentHeight(panel);
+  const side = chooseSide(prefer, above, below, need);
+  const room = Math.floor(Math.max(160, Math.min(side === 'top' ? above : below, innerHeight * 0.75)));
+  const width = panel.offsetWidth;
+  let left = align === 'end' ? r.right - width : r.left;
+  left = Math.max(8, Math.min(left, innerWidth - 8 - width));
+  // The UA [popover] rule sets inset, margin, padding, and canvas color.
+  // The utilities name the same overrides; these assignments apply them even
+  // when a utility has not been generated yet.
+  panel.style.inset = 'auto';
+  panel.style.margin = '0';
+  panel.style.padding = '0';
+  panel.style.color = 'var(--fg)';
+  panel.style.left = left + 'px';
+  panel.style.right = 'auto';
+  panel.style.maxHeight = room + 'px';
+  panel.style.setProperty('--panel-room', room + 'px');
+  if (side === 'top') {
+    panel.style.top = 'auto';
+    panel.style.bottom = (innerHeight - r.top + 8) + 'px';
+  } else {
+    panel.style.bottom = 'auto';
+    panel.style.top = (r.bottom + 4) + 'px';
+  }
+  return side;
+}
+
+export function Popover({ open, onClose, children, class: cls = '', placement = 'top-start', label, scroll = 'panel', layer = 'flow' }) {
   if (scroll !== 'panel' && scroll !== 'list') throw new Error(`scroll must be "panel" or "list", got ${JSON.stringify(scroll)}`);
   const ref = useRef();
   const [fit, setFit] = useState(null); // { side, room } beside the wrapper, null on a bottom sheet
@@ -60,10 +148,7 @@ export function Popover({ open, onClose, children, class: cls = '', placement = 
     // The content's own height, read with the cap lifted for an instant (and
     // put back exactly, so the framework's idea of the style stays true).
     const el = ref.current;
-    const capped = el.style.maxHeight;
-    el.style.maxHeight = '';
-    const need = el.offsetHeight;
-    el.style.maxHeight = capped;
+    const need = contentHeight(el);
     const side = chooseSide(prefer, above, below, need);
     const room = Math.floor(Math.max(160, Math.min(side === 'top' ? above : below, innerHeight * 0.75)));
     // The same side and room hand back the previous value, so a render that
@@ -72,22 +157,91 @@ export function Popover({ open, onClose, children, class: cls = '', placement = 
   };
   // Divergence, not change, asks for the measure (the rule Select and
   // selectionbar follow): it runs after every render while open, and closing
-  // forgets the old side and room.
-  useLayoutEffect(() => { if (open) measure(); else setFit(null); });
+  // forgets the old side and room. Top mode writes coordinates directly.
+  useLayoutEffect(() => {
+    if (!open) { setFit(null); return; }
+    if (useTop(layer)) {
+      const el = ref.current;
+      if (!el) return;
+      reveal(el);
+      if (placeTop(el, placement) === 'gone') onClose();
+      return;
+    }
+    measure();
+  });
   useLayoutEffect(() => {
     if (!open) return;
-    addEventListener('resize', measure);
-    return () => removeEventListener('resize', measure);
-  }, [open, placement]);
+    const onResize = () => {
+      const el = ref.current;
+      if (useTop(layer)) {
+        if (el && placeTop(el, placement) === 'gone') onClose();
+      } else measure();
+    };
+    addEventListener('resize', onResize);
+    return () => removeEventListener('resize', onResize);
+  }, [open, placement, layer]);
+  // Crossing the sheet line while a top-layer panel is open closes it. The
+  // two layouts are different markup, and an open panel does not morph.
   useEffect(() => {
-    if (!open) return;
+    if (!open || layer !== 'top') return;
+    const mq = matchMedia(DESKTOP_QUERY);
+    if (typeof mq.addEventListener !== 'function') return;
+    const onChange = () => onClose();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [open, layer]);
+  useEffect(() => {
+    if (!open || !useTop(layer)) return;
+    const el = ref.current;
+    let frame = 0;
+    const onScroll = (e) => {
+      const panel = ref.current;
+      if (panel && e.target instanceof Node && panel.contains(e.target)) return;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const panelNow = ref.current;
+        if (!panelNow) return;
+        if (placeTop(panelNow, placement) === 'gone') onClose();
+      });
+    };
+    const onToggle = (e) => { if (e.newState === 'closed') onClose(); };
+    // Escape is the browser's. Unmounting on that close can drop the focus
+    // the browser was about to return to the trigger, so put it back.
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      const trigger = el ? triggerOf(el) : null;
+      queueMicrotask(() => { if (trigger && document.activeElement !== trigger) trigger.focus(); });
+    };
+    el?.addEventListener('toggle', onToggle);
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('scroll', onScroll, true);
+    return () => {
+      el?.removeEventListener('toggle', onToggle);
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('scroll', onScroll, true);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [open, layer, placement]);
+  // Flow mode still closes itself. Top mode leaves light dismiss, Escape, and
+  // a second popover to the browser, so this listener must not also run.
+  useEffect(() => {
+    if (!open || useTop(layer)) return;
     const down = (e) => { if (e.target.closest?.('.ss-content')) return; if (ref.current && !ref.current.contains(e.target) && !ref.current.parentElement.contains(e.target)) onClose(); };
     const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
     document.addEventListener('pointerdown', down, true);
     document.addEventListener('keydown', key, true);
     return () => { document.removeEventListener('pointerdown', down, true); document.removeEventListener('keydown', key, true); };
-  }, [open]);
+  }, [open, layer]);
   if (!open) return null;
+  if (useTop(layer)) {
+    return html`<div ref=${ref} popover="auto" role="dialog" aria-label=${label}
+      style=${{ inset: 'auto', margin: 0, padding: 0, color: 'var(--fg)' }}
+      class=${cx('fixed inset-auto m-0 p-0 text-fg z-50 bg-raised border border-line rounded-xl shadow-pop text-[13px]',
+        scroll === 'list' ? 'flex flex-col overflow-hidden' : 'overflow-auto', cls)}>
+      ${children}
+    </div>`;
+  }
   const pos = cx(
     (fit?.side || prefer) === 'top' ? 'sm:bottom-full sm:mb-2' : 'sm:top-full sm:mt-1',
     align === 'end' ? 'sm:right-0' : 'sm:left-0',
@@ -104,6 +258,26 @@ export function Popover({ open, onClose, children, class: cls = '', placement = 
         'fixed inset-x-2 bottom-2 max-h-[75dvh] sm:absolute sm:inset-x-auto sm:bottom-auto', pos, cls)}>
       ${children}
     </div>`;
+}
+
+// usePopoverTrigger records whether the panel was open at pointerdown, then
+// the click uses that record. A light dismiss closes the panel before the
+// click, and reading the flag at click time would open it again. A keyboard
+// click (detail 0) never went through pointerdown, so it uses the flag now.
+export function usePopoverTrigger(open, setOpen) {
+  const atPointer = useRef(null);
+  return {
+    onPointerDownCapture: () => { atPointer.current = open; },
+    onClick: (e) => {
+      const recorded = atPointer.current;
+      atPointer.current = null;
+      // A pointer click uses the open flag from pointerdown, so a light
+      // dismiss that already closed the panel is not undone by the click.
+      // A keyboard click, and a click that never saw pointerdown, toggles
+      // the flag as it is now.
+      setOpen(e.detail !== 0 && recorded !== null ? !recorded : !open);
+    },
+  };
 }
 
 // usePopoverOpen is a popover's open flag, owned by the anchor that shows it: a
@@ -144,6 +318,20 @@ export function Dialog({ open, onClose, title, children, footer, backdrop = fals
   </dialog>`;
 }
 
+// A slim-select list has to live in the same top layer as its select, or a
+// pick is a click outside the panel and the browser dismisses it. A dialog
+// wins, then an open popover, then the document.
+function selectHost(el) {
+  const dialog = el.closest?.('dialog');
+  if (dialog) return dialog;
+  let n = el.parentElement;
+  while (n) {
+    if (n.getAttribute?.('popover') != null) return n;
+    n = n.parentElement;
+  }
+  return document.body;
+}
+
 // Select wraps slim-select; options: [{ value, text }].
 export function Select({ value, options, onChange, search = false, class: cls = '', label, disabled = false, dense = false, deferSelection = false }) {
   const el = useRef();
@@ -153,9 +341,9 @@ export function Select({ value, options, onChange, search = false, class: cls = 
   useEffect(() => {
     ss.current = new SlimSelect({
       select: el.current,
-      // A modal <dialog> sits in the top layer, so the list must live
-      // inside it; fixed positioning keeps viewport coordinates either way.
-      settings: { showSearch: search, contentLocation: el.current.closest('dialog') || document.body, contentPosition: 'fixed', openPosition: 'auto', modal: 'off' },
+      // A modal dialog or a top-layer popover sits above the document, so the
+      // list must live inside it; fixed positioning keeps viewport coordinates either way.
+      settings: { showSearch: search, contentLocation: selectHost(el.current), contentPosition: 'fixed', openPosition: 'auto', modal: 'off' },
       events: {
         // deferSelection submits the pick without letting slim-select mark
         // it: the value shows only when the server reflects it back.

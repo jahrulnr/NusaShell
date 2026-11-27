@@ -132,7 +132,7 @@ func Register(api *gin.RouterGroup, d Deps) {
 	if jobs == nil {
 		jobs = context.Background()
 	}
-	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, queue: d.Queue, turns: d.Turns, clearActivity: d.ActivityClearer, commands: d.Commands, agent: d.Agent}
+	s := &server{reads: d.Reads, writes: d.Writes, jobs: jobs, live: d.LiveTurns, queue: d.Queue, turns: d.Turns, clearActivity: d.ActivityClearer, commands: d.Commands, agent: d.Agent, approvals: d.Approvals, elicitations: d.Elicitations}
 	if d.Approvals != nil {
 		a := &approvals{svc: d.Approvals}
 		api.GET("/conversations/:id/approvals", a.list)
@@ -192,4 +192,6 @@ type server struct {
 	turns         TurnLiveness
 	jobs          context.Context
 	clearActivity interface{ Clear() }
+	approvals     Approver
+	elicitations  Elicitor
 }

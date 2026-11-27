@@ -316,6 +316,52 @@ func (app *AgentApp) Models(ctx context.Context, id string) ([]Model, error) {
 	return out, nil
 }
 
+// ModelList is the catalog a caller can print without starting the agent.
+// It reads the catalog the server last stored. A session that never
+// reported a model list is unknown, with the default the agent named, and
+// not an empty list. An empty reported list is a known catalog of nothing.
+type ModelList struct {
+	Status    string
+	Source    string
+	Models    []Model
+	DefaultID string
+	DefaultBy string
+	Reason    string
+}
+
+func (app *AgentApp) ModelList(ctx context.Context, id string) (ModelList, error) {
+	if _, err := app.agents.Inspect(ctx, id); err != nil {
+		return ModelList{}, err
+	}
+	store, ok := app.agents.(drepo.AgentCatalogStore)
+	if !ok {
+		return ModelList{}, apperror.New(503, "agent model catalog is unavailable", nil)
+	}
+	cat, err := store.Catalog(ctx, id)
+	if err != nil {
+		return ModelList{}, err
+	}
+	if !cat.ModelsReported && len(cat.Models) == 0 {
+		return ModelList{
+			Status: "unknown", Source: "cache",
+			DefaultID: cat.CurrentModel, DefaultBy: "agent",
+			Reason: "the agent reported no model list",
+		}, nil
+	}
+	rows := make([]Model, 0, len(cat.Models))
+	for _, m := range cat.Models {
+		if m.ID == "" {
+			continue
+		}
+		name := m.Name
+		if name == "" {
+			name = m.ID
+		}
+		rows = append(rows, Model{ID: m.ID, Name: name, Current: m.Current})
+	}
+	return ModelList{Status: "known", Source: "cache", Models: rows}, nil
+}
+
 // Options reports the session options an agent offers before any room
 // exists: its modes (plan, build, bypass permissions…) and config options,
 // read from the probe session the model listing already opens. A room reads

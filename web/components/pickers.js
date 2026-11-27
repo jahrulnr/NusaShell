@@ -4,14 +4,14 @@
 // effort and upstream choices; agents add the session options they report
 // (modes such as plan/build/bypass, and their own config). The product mode
 // hides the runtime it leaves out.
-import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
+import { html, useEffect, useMemo, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore } from '../lib/store.js';
 import { api } from '../lib/api.js';
 import { selection, setSelection, loadProviders, loadAgents, loadAgentModels, isBusy, loadAgentOptions, sessionOptionValue, setSessionOption, agentOptionMap } from '../lib/chat.js';
 import { Icon } from './icons.js';
 import { AgentOptionsNotice } from './agentbar.js';
 import { FolderBrowser } from './folders.js';
-import { cx, Popover, Spinner, ErrorBlock, Select, fmtTokens, usePopoverOpen } from './ui.js';
+import { cx, Popover, Spinner, ErrorBlock, Select, fmtTokens, usePopoverOpen, usePopoverTrigger } from './ui.js';
 import { editProject } from './projects.js';
 
 const ALL_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -23,18 +23,31 @@ const upstreamCache = new Map();
 // and the frame between a pick and its effect — because an unmounted select
 // is the flicker an owner reads as the popup closing and reopening. Its
 // content stays honest instead: the list renders only for the key it was
-// fetched for, so a model whose upstreams are still loading (or never had
-// any) offers 'Auto' alone, which is what the reset value already says.
+// fetched for, and a load or a failure never keeps the previous model's
+// list. A failure mounts the control even before any list has arrived, so
+// the owner can retry; a load or an empty answer before that first list
+// still hides it.
 export const upstreamControl = (up, key) => ({
-  show: !!up.had,
-  list: up.key === key ? up.list || [] : [],
-  loading: up.status === 'loading',
+  show: !!up.had || (up.status === 'error' && up.key === key),
+  list: up.key === key && up.status !== 'loading' && up.status !== 'error' ? up.list || [] : [],
+  loading: up.status === 'loading' && up.key === key,
+  error: up.status === 'error' && up.key === key,
 });
+
+// catalogDefaultLine is the default an unknown catalog names. The words
+// match the read-only model list: unset, the supplier in parentheses, or
+// the id and who supplies it.
+function catalogDefaultLine(d) {
+  if (!d || !d.by || d.by === 'unset') return 'default: unset';
+  if (!d.id) return `default: (${d.by})`;
+  return `default: ${d.id} (${d.by})`;
+}
 
 // agentModelLabel names an agent choice: the picked model when there is
 // one, else the model the agent itself would run — the one it marks
 // current. Until the list says which that is, the button names the agent
-// and the state instead of lending the agent's name to a model.
+// and the state instead of lending the agent's name to a model. An unknown
+// catalog names its default when that default has an id.
 export function agentModelLabel(s, agentId, modelId) {
   const name = s.agents.items.find((x) => x.id === agentId)?.name || agentId;
   const st = s.agentModels[agentId];
@@ -43,7 +56,9 @@ export function agentModelLabel(s, agentId, modelId) {
     return m?.name || modelId;
   }
   const cur = st?.list.find((x) => x.current);
-  return cur ? cur.name || cur.id : `${name} · default`;
+  if (cur) return cur.name || cur.id;
+  if (st?.report === 'unknown' && (st.default?.name || st.default?.id)) return st.default.name || st.default.id;
+  return `${name} · default`;
 }
 
 export function ModelPicker({ room }) {
@@ -51,11 +66,14 @@ export function ModelPicker({ room }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const bodyRef = useRef();
-  // A changed filter is a new target: the list starts at its top. Effort,
-  // upstream, and session options live in the band under the list, so a
-  // refresh of those never moves this scroll.
+  // A changed filter is a new target: the list starts at its top. Anything
+  // else that re-renders the picker — a store tick, effort, upstream — leaves
+  // the scroll where the owner put it. The rows follow the same rule.
   useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [q]);
   const [upstreams, setUpstreams] = useState({ status: 'idle', list: [] });
+  // A failed read is not cached, and the provider/model key does not change
+  // when Retry is pressed, so the effect needs its own token to run again.
+  const [upToken, setUpToken] = useState(0);
   const sel = selection(room);
   const provs = s.providers;
   const agents = s.agents;
@@ -100,15 +118,15 @@ export function ModelPicker({ room }) {
       setUpstreams((u) => ({ status: 'ready', key, list, had: u.had || list.length > 0 }));
       return;
     }
-    setUpstreams((u) => ({ ...u, status: 'loading', key }));
+    setUpstreams((u) => ({ status: 'loading', key, list: [], had: u.had }));
     let live = true;
     api.upstreams(sel.providerId, sel.modelId).then((r) => {
       const list = r.data || [];
       upstreamCache.set(key, list);
       if (live) setUpstreams((u) => ({ status: 'ready', key, list, had: u.had || list.length > 0 }));
-    }, () => live && setUpstreams((u) => ({ ...u, status: 'error', key })));
+    }, () => { if (live) setUpstreams((u) => ({ status: 'error', key, list: [], had: u.had })); });
     return () => { live = false; };
-  }, [open, sel.providerId, sel.modelId]);
+  }, [open, sel.providerId, sel.modelId, upToken]);
 
   const needle = q.trim().toLowerCase();
   const hit = (...xs) => !needle || xs.some((x) => String(x || '').toLowerCase().includes(needle));
@@ -118,48 +136,33 @@ export function ModelPicker({ room }) {
   })).filter((x) => x.models.length);
   for (const a of agents.items) {
     const st = s.agentModels[a.id] || { status: 'idle', list: [] };
-    const models = st.list.filter((m) => hit(m.name, m.id, a.id, a.name));
+    // unknown is an answer with no rows. A data array on that body is not
+    // the catalog, and it must not become the empty-list row.
+    const unknown = st.report === 'unknown';
+    const models = (unknown ? [] : st.list || []).filter((m) => hit(m.name, m.id, a.id, a.name));
     // An agent whose list came back empty still runs — on a model only it
-    // can name. The row says so instead of offering a fake model.
-    const bare = st.status === 'ready' && !st.list.length;
-    if (!needle || models.length || st.status !== 'ready' || (bare && hit(a.id, a.name))) {
-      groups.push({ kind: 'agent', id: a.id, name: a.name || a.id, status: st.status, error: st.error, models, bare });
+    // can name. The row says so instead of offering a fake model. That is
+    // a known empty catalog, not an unknown one.
+    const bare = st.status === 'ready' && !unknown && !(st.list || []).length;
+    const shown = !needle || models.length || st.status !== 'ready' || (bare && hit(a.id, a.name))
+      || (unknown && hit(a.id, a.name, st.reason, st.default?.id, st.default?.name, st.default?.by));
+    if (shown) {
+      groups.push({
+        kind: 'agent', id: a.id, name: a.name || a.id, status: st.status, error: st.error, models, bare, unknown,
+        reason: st.reason || '', deflt: st.default || null,
+      });
     }
   }
   const loading = provs.status === 'loading' || agents.status === 'loading';
   const nothing = !loading && provs.status === 'ready' && !provs.items.length && agents.status === 'ready' && !agents.items.length;
-
-  const label = sel.agentId ? agentModelLabel(s, sel.agentId, sel.modelId) : cur ? (cur.name || cur.id) : sel.modelId || 'Choose model';
-  const chosen = !!(sel.agentId || sel.modelId);
-  // The record's pending is the pick that applies to the next turn — the
-  // chip names it already, and this small marker says it is not running yet.
-  const pending = room.info?.pending;
-  const pendOpts = agentOptionMap(pending?.options);
-  return html`<div class="relative min-w-0">
-    <button type="button" onClick=${() => setOpen(!open)} aria-haspopup="dialog" aria-expanded=${open}
-      class=${cx('flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] hover:bg-hover max-w-[44vw] sm:max-w-64', chosen ? 'text-fg' : 'text-warn')}>
-      ${sel.agentId && html`<${Icon} name="bot" size=${14} class="text-faint shrink-0" />`}
-      <span class="truncate">${label}</span>
-      ${!sel.agentId && sel.effort && sel.effort !== 'default' && html`<span class="text-faint shrink-0">${sel.effort}</span>`}
-      ${(pending?.agentId || pending?.providerId) && html`<span class="text-faint shrink-0 text-[11px]">next turn</span>`}
-      <${Icon} name="chevronDown" size=${14} class="text-faint" />
-    </button>
-    <${Popover} open=${open} onClose=${() => setOpen(false)} placement="top-end" label="Choose model" scroll="list" class="sm:w-[400px]">
-      <div class="shrink-0 bg-raised flex items-center gap-2 px-3 h-11 border-b border-line">
-        <${Icon} name="search" class="text-faint" />
-        <input autofocus value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search models"
-          class="flex-1 bg-transparent outline-none text-[13px]" />
-      </div>
-      <div ref=${bodyRef} data-scroll="list" class="flex-1 min-h-0 overflow-y-auto">
-      <div class="py-1">
-        ${loading && !groups.length && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} /> Loading providers…</div>`}
-        ${provs.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Providers unavailable" message=${provs.error} onRetry=${loadProviders} /></div>`}
-        ${agents.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Agents unavailable" message=${agents.error} onRetry=${loadAgents} /></div>`}
-        ${nothing && html`<div class="px-3 py-4 text-muted">
-          Nothing to chat with yet. <a class="text-accent underline" href="#/" onClick=${() => setOpen(false)}>Set one up</a>.
-        </div>`}
-        ${!loading && !nothing && !groups.length && html`<div class="px-3 py-4 text-muted">No model matches “${q}”.</div>`}
-        ${groups.map((grp) => html`<div key=${grp.kind + ':' + grp.id}>
+  // The open list is rebuilt only when the model ids or their order change,
+  // or the checked row does. A store tick that leaves those alone keeps the
+  // same row nodes, so the scroll is not thrown back to the top.
+  const listKey = groups.map((g) => g.kind + ':' + g.id + '=' + g.models.map((m) => m.id).join(',')
+    + (g.unknown ? '|unknown:' + (g.deflt?.by || '') + ':' + (g.deflt?.id || '') + ':' + (g.reason || '') : '')
+    + (g.bare ? '|bare' : '')).join(';')
+    + '>' + (sel.agentId || '') + '/' + (sel.providerId || '') + '/' + (sel.modelId || '');
+  const modelRows = useMemo(() => groups.map((grp) => html`<div key=${grp.kind + ':' + grp.id}>
           <div class="px-3 pt-2 pb-1 text-[11px] text-faint flex items-center gap-1.5">
             <span class="truncate">${grp.name}</span>
             <span class="shrink-0 rounded px-1 border border-line text-[10px] leading-4">${grp.kind === 'agent' ? 'ACP' : 'API'}</span>
@@ -188,13 +191,51 @@ export function ModelPicker({ room }) {
               ${active && html`<${Icon} name="check" size=${14} class="text-accent" />`}
             </button>`;
           })}
+          ${grp.unknown && html`<div class="px-3 py-1.5 text-[12px] text-muted flex flex-col gap-0.5">
+            <span>unknown</span>
+            <span>${catalogDefaultLine(grp.deflt)}</span>
+            ${grp.reason ? html`<span class="break-words">${grp.reason}</span>` : null}
+          </div>`}
           ${grp.bare && html`<button type="button"
             onClick=${() => setSelection(room, { agentId: grp.id, providerId: '', modelId: '', effort: 'default', upstream: '' })}
             class=${cx('w-full flex items-center gap-2 px-3 h-8 text-left hover:bg-hover', sel.agentId === grp.id && !sel.modelId && 'bg-hover')}>
             <span class="flex-1 truncate text-muted">This agent lists no models; it runs its own choice</span>
             ${sel.agentId === grp.id && !sel.modelId && html`<${Icon} name="check" size=${14} class="text-accent" />`}
           </button>`}
-        </div>`)}
+        </div>`), [listKey]);
+
+  const press = usePopoverTrigger(open, setOpen);
+  const label = sel.agentId ? agentModelLabel(s, sel.agentId, sel.modelId) : cur ? (cur.name || cur.id) : sel.modelId || 'Choose model';
+  const chosen = !!(sel.agentId || sel.modelId);
+  // The record's pending is the pick that applies to the next turn — the
+  // chip names it already, and this small marker says it is not running yet.
+  const pending = room.info?.pending;
+  const pendOpts = agentOptionMap(pending?.options);
+  return html`<div class="relative min-w-0">
+    <button type="button" onPointerDownCapture=${press.onPointerDownCapture} onClick=${press.onClick} aria-haspopup="dialog" aria-expanded=${open}
+      class=${cx('flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] hover:bg-hover max-w-[44vw] sm:max-w-64', chosen ? 'text-fg' : 'text-warn')}>
+      ${sel.agentId && html`<${Icon} name="bot" size=${14} class="text-faint shrink-0" />`}
+      <span class="truncate">${label}</span>
+      ${!sel.agentId && sel.effort && sel.effort !== 'default' && html`<span class="text-faint shrink-0">${sel.effort}</span>`}
+      ${(pending?.agentId || pending?.providerId) && html`<span class="text-faint shrink-0 text-[11px]">next turn</span>`}
+      <${Icon} name="chevronDown" size=${14} class="text-faint" />
+    </button>
+    <${Popover} open=${open} onClose=${() => setOpen(false)} layer="top" placement="top-end" label="Choose model" scroll="list" class="sm:w-[400px]">
+      <div class="shrink-0 bg-raised flex items-center gap-2 px-3 h-11 border-b border-line">
+        <${Icon} name="search" class="text-faint" />
+        <input autofocus value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search models"
+          class="flex-1 bg-transparent outline-none text-[13px]" />
+      </div>
+      <div ref=${bodyRef} data-scroll="list" class="flex-1 min-h-0 overflow-y-auto">
+      <div class="py-1">
+        ${loading && !groups.length && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} /> Loading providers…</div>`}
+        ${provs.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Providers unavailable" message=${provs.error} onRetry=${loadProviders} /></div>`}
+        ${agents.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Agents unavailable" message=${agents.error} onRetry=${loadAgents} /></div>`}
+        ${nothing && html`<div class="px-3 py-4 text-muted">
+          Nothing to chat with yet. <a class="text-accent underline" href="#/" onClick=${() => setOpen(false)}>Set one up</a>.
+        </div>`}
+        ${!loading && !nothing && !groups.length && html`<div class="px-3 py-4 text-muted">${q.trim() ? `No model matches “${q}”.` : 'No models are listed for these providers.'}</div>`}
+        ${modelRows}
       </div>
       </div>
       ${(cur || sel.agentId) && html`<div data-scroll="controls" class="shrink-0 min-h-0 overflow-y-auto border-t border-line bg-raised" style=${{ maxHeight: 'calc(var(--panel-room) * 0.4)' }}>
@@ -210,6 +251,10 @@ export function ModelPicker({ room }) {
           <${Select} dense label="Upstream" class="w-full" search value=${sel.upstream || ''}
             options=${[{ value: '', text: 'Auto' }, ...upCtl.list.map((p) => ({ value: p.slug, text: p.name }))]}
             onChange=${(v) => setSelection(room, { upstream: v })} />
+          ${upCtl.error && html`<span class="flex items-center gap-2 text-[11px]">
+            <span class="flex-1 text-bad">Upstreams unavailable</span>
+            <button type="button" class="text-accent shrink-0" onClick=${() => setUpToken((n) => n + 1)}>Retry</button>
+          </span>`}
         </label>`}
       </div>`}
       ${sel.agentId && html`<div class="px-3 py-2.5 flex flex-col gap-2">
@@ -271,6 +316,7 @@ export function WorkspacePicker({ room }) {
   const projectId = room.id ? room.info?.projectId : s.newProjectId;
   const project = projectId && s.projects.items.find((p) => p.id === projectId);
   const [open, setOpen] = usePopoverOpen(!project);
+  const press = usePopoverTrigger(open, setOpen);
   if (project) {
     return html`<button type="button" onClick=${() => editProject(project)} title=${project.folders.join('\n')}
       class="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] text-muted hover:text-fg hover:bg-hover max-w-[40vw] sm:max-w-56">
@@ -278,12 +324,12 @@ export function WorkspacePicker({ room }) {
     </button>`;
   }
   return html`<div class="relative">
-    <button type="button" onClick=${() => setOpen(!open)} aria-haspopup="dialog" aria-expanded=${open} title=${sel.workspace || 'Choose a working directory'}
+    <button type="button" onPointerDownCapture=${press.onPointerDownCapture} onClick=${press.onClick} aria-haspopup="dialog" aria-expanded=${open} title=${sel.workspace || 'Choose a working directory'}
       class="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] text-muted hover:text-fg hover:bg-hover max-w-[40vw] sm:max-w-56">
       <${Icon} name="folder" size=${15} />
       <span class="truncate">${base(sel.workspace) || 'Workspace'}</span>
     </button>
-    <${Popover} open=${open} onClose=${() => setOpen(false)} placement="top-start" label="Working directory" class="sm:w-[420px] flex flex-col">
+    <${Popover} open=${open} onClose=${() => setOpen(false)} layer="top" placement="top-start" label="Working directory" class="sm:w-[420px] flex flex-col">
       ${open && html`<${FolderBrowser} scroll="panel" start=${sel.workspace || ''} title="Working directory"
         onPick=${(path) => { setSelection(room, { workspace: path }); setOpen(false); }} onCancel=${() => setOpen(false)} />`}
     </${Popover}>

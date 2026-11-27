@@ -13,10 +13,15 @@ import (
 )
 
 const modelUsage = `usage: ` + CLIName + ` model <thread> [selector] [--addr HOST:PORT] [--json]
+       ` + CLIName + ` model list (--agent <id> | --provider <id>) [--addr HOST:PORT] [--json]
 
 A thread's runtime binding, through the running server. With no selector
 it prints the current one. <thread> is the thread's id — ` + CLIName + ` conversations list
 prints them (@labels resolve there, not here).
+
+` + CLIName + ` model list prints the catalog a runtime can use. Pass exactly one of
+--agent and --provider. It asks the running server and does not start an
+agent. --json prints one ModelCatalog object.
 
 Selectors:
   agent:<id>           run the thread on this agent
@@ -32,6 +37,8 @@ func Model(args []string, stdout, stderr io.Writer) int {
 		case "-h", "--help", "help":
 			fmt.Fprint(stdout, modelUsage)
 			return 0
+		case "list":
+			return modelList(args[1:], stdout, stderr)
 		}
 	}
 	fs := flag.NewFlagSet("model", flag.ContinueOnError)

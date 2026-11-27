@@ -125,7 +125,7 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 			if last.Role() != enum.RoleUser || !last.Editable() {
 				return apperror.New(409, "nothing to retry — send a new message to the agent", nil)
 			}
-			if err := d.runAgentTurn(ctx, convID, conv, driver, *last, onEvent, &j.steers, j.Opts.Origin); err != nil {
+			if err := d.runAgentTurn(ctx, convID, conv, driver, *last, onEvent, &j.steers, j.Opts.Origin, ""); err != nil {
 				return err
 			}
 			return d.Convs.Save(ctx, conv)
