@@ -64,6 +64,12 @@ type turnSink struct {
 	media     int
 	// droppedUnknown logs one contentless or unbound update per id, not once per pulse.
 	droppedUnknown map[string]bool
+	// clock is preparing until markPrompted, then waiting except while an
+	// update is being applied. promptedAt and lastUpdateAt are unix
+	// milliseconds; zero means that stamp has not been written.
+	clock        string
+	promptedAt   int64
+	lastUpdateAt int64
 }
 
 // callRecord is the latest known state of one agent tool call.
@@ -168,8 +174,60 @@ func (t *turnSink) release(input valueobject.UserInput, recordID string, accepte
 	return taken
 }
 
+// markPrompted stamps the prompt write and moves the clock to waiting.
+// An update before this stays preparing and does not count as work.
+func (t *turnSink) markPrompted(at int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if at <= 0 {
+		at = time.Now().UnixMilli()
+	}
+	t.promptedAt = at
+	t.clock = "waiting"
+	t.emit(event.NewClockEvent("waiting", t.promptedAt, 0))
+}
+
+func agentUpdateKind(kind string) bool {
+	switch kind {
+	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan":
+		return true
+	default:
+		return false
+	}
+}
+
+// noteWorkingLocked stamps the update. Callers hold t.mu. A clock of
+// working before the prompt write is not emitted.
+func (t *turnSink) noteWorkingLocked() {
+	if t.promptedAt == 0 {
+		return
+	}
+	t.lastUpdateAt = time.Now().UnixMilli()
+	t.clock = "working"
+	t.emit(event.NewClockEvent("working", t.promptedAt, t.lastUpdateAt))
+}
+
+// noteQuietLocked ends the update. Silence after it is waiting.
+// Callers hold t.mu.
+func (t *turnSink) noteQuietLocked() {
+	if t.promptedAt == 0 || t.clock != "working" {
+		return
+	}
+	t.clock = "waiting"
+	t.emit(event.NewClockEvent("waiting", t.promptedAt, t.lastUpdateAt))
+}
+
 // apply folds one session update into the turn. Callers hold t.mu.
 func (t *turnSink) apply(u acp.SessionUpdate) {
+	working := agentUpdateKind(u.SessionUpdate)
+	if working {
+		t.noteWorkingLocked()
+	}
+	defer func() {
+		if working {
+			t.noteQuietLocked()
+		}
+	}()
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		var block acp.ContentBlock
@@ -529,6 +587,7 @@ func (t *turnSink) applySubagentLifecycle(u acp.SessionUpdate, meta devinMeta) {
 		if st.IsBackground != nil {
 			run.keys["acp.subagent.background"] = strconv.FormatBool(*st.IsBackground)
 		}
+		t.announceKeys(run)
 		return
 	}
 	co := meta.Completed
@@ -541,16 +600,32 @@ func (t *turnSink) applySubagentLifecycle(u acp.SessionUpdate, meta devinMeta) {
 		if c.keys["acp.subagent.id"] != agentID {
 			continue
 		}
-		c.keys["acp.subagent.success"] = strconv.FormatBool(co.Success)
+		// success false is not a specified state. Writing it, or a
+		// summary beside it, would be a failed card. Leave the run
+		// without success true: that is the incomplete path.
+		if !co.Success {
+			return
+		}
+		c.keys["acp.subagent.success"] = "true"
 		if co.Summary != "" {
 			c.keys["acp.subagent.summary"] = co.Summary
 		}
 		if co.Depth != 0 {
 			c.keys["acp.subagent.depth"] = strconv.Itoa(co.Depth)
 		}
+		t.announceKeys(c)
 		return
 	}
 	t.dropUnknown(u.ToolCallID, "subagent completion has no bound run call")
+}
+
+// announceKeys sends the run's keys again once the opening frame has
+// already gone out. The call id stays the parent tool-call id. A call
+// that has not been announced yet carries the keys on its first frame.
+func (t *turnSink) announceKeys(c *callRecord) {
+	if c != nil && c.emitted {
+		t.emitCall(c)
+	}
 }
 
 // findUnboundRun correlates a started lifecycle with a run call of this turn:

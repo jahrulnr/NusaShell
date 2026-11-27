@@ -148,6 +148,15 @@ type Thread struct {
 	// that frame still knows a room is waiting; a room with nothing
 	// waiting carries no field.
 	Waiting int `json:"waiting,omitempty"`
+	// AgentClass is written while an agent failure holds the room, and
+	// omitted when it does not. Retry is auto during a retry and none
+	// once the turn has ended in that class. RetryAt is the unix
+	// millisecond time the agent named, and only then. AgentMessage is
+	// the agent's words. The four match GET /api/conversations.
+	AgentClass   string `json:"agentClass,omitempty"`
+	Retry        string `json:"retry,omitempty"`
+	RetryAt      *int64 `json:"retryAt,omitempty"`
+	AgentMessage string `json:"agentMessage,omitempty"`
 }
 
 func (a *App) thread(ctx context.Context, self string, i drepo.ConversationInfo) Thread {
@@ -165,6 +174,15 @@ func (a *App) thread(ctx context.Context, self string, i drepo.ConversationInfo)
 	}
 	if a.queue != nil {
 		t.Waiting = a.queue.QueueDepth(i.ID)
+	}
+	if hold, ok := appjob.CurrentAgentHold(i.ID); ok {
+		t.AgentClass = hold.Class
+		t.Retry = hold.Retry
+		t.AgentMessage = hold.Message
+		if hold.RetryAt > 0 {
+			at := hold.RetryAt
+			t.RetryAt = &at
+		}
 	}
 	return t
 }
@@ -189,7 +207,7 @@ func (a *App) roomTerminal(ctx context.Context, i drepo.ConversationInfo) (strin
 
 func runtimeName(i drepo.ConversationInfo) string {
 	switch {
-	case i.AgentID != "":
+	case i.Kind().MirrorsAgentCommands():
 		return "agent " + i.AgentID
 	case i.ProviderID != "":
 		return "model " + i.ProviderID + "/" + i.ModelID

@@ -77,7 +77,7 @@ export function ModelPicker({ room }) {
   const sel = selection(room);
   const provs = s.providers;
   const agents = s.agents;
-  const cur = sel.agentId ? null : provs.items.find((g) => g.id === sel.providerId)?.models.find((m) => m.id === sel.modelId);
+  const cur = sel.runtime === 'agent' ? null : provs.items.find((g) => g.id === sel.providerId)?.models.find((m) => m.id === sel.modelId);
 
   // Agents report their models from a live session; ask each once the
   // picker opens.
@@ -86,7 +86,7 @@ export function ModelPicker({ room }) {
     for (const a of agents.items) loadAgentModels(a.id);
   }, [open, agents.items.length]);
   // An agent room names its model in the button; fetch the names for it.
-  useEffect(() => { if (sel.agentId) loadAgentModels(sel.agentId); }, [sel.agentId]);
+  useEffect(() => { if (sel.runtime === 'agent' && sel.agentId) loadAgentModels(sel.agentId); }, [sel.runtime, sel.agentId]);
   const efforts = cur?.supportedEfforts?.length ? cur.supportedEfforts : ALL_EFFORTS;
   const upCtl = upstreamControl(upstreams, sel.providerId + '|' + sel.modelId);
 
@@ -106,12 +106,12 @@ export function ModelPicker({ room }) {
   // can already accept.
   const busy = isBusy(room);
   useEffect(() => {
-    if (!open || !sel.agentId) return;
+    if (!open || sel.runtime !== 'agent') return;
     loadAgentOptions(room);
-  }, [open, sel.agentId, room.id]);
+  }, [open, sel.runtime, room.id]);
 
   useEffect(() => {
-    if (!open || sel.agentId || !sel.providerId || !sel.modelId) return;
+    if (!open || sel.runtime === 'agent' || !sel.providerId || !sel.modelId) return;
     const key = sel.providerId + '|' + sel.modelId;
     if (upstreamCache.has(key)) {
       const list = upstreamCache.get(key);
@@ -179,11 +179,11 @@ export function ModelPicker({ room }) {
             // marks current: that row carries the check, so the pick the
             // button names is the same one the list shows.
             const active = grp.kind === 'agent'
-              ? sel.agentId === grp.id && (sel.modelId ? sel.modelId === m.id : !!m.current)
-              : !sel.agentId && grp.id === sel.providerId && m.id === sel.modelId;
+              ? sel.runtime === 'agent' && sel.agentId === grp.id && (sel.modelId ? sel.modelId === m.id : !!m.current)
+              : sel.runtime === 'harness' && grp.id === sel.providerId && m.id === sel.modelId;
             const pick = grp.kind === 'agent'
-              ? () => setSelection(room, { agentId: grp.id, providerId: '', modelId: m.id, effort: 'default', upstream: '' })
-              : () => setSelection(room, { agentId: '', providerId: grp.id, modelId: m.id, effort: 'default', upstream: '' });
+              ? () => setSelection(room, { runtime: 'agent', agentId: grp.id, providerId: '', modelId: m.id, effort: 'default', upstream: '' })
+              : () => setSelection(room, { runtime: 'harness', agentId: '', providerId: grp.id, modelId: m.id, effort: 'default', upstream: '' });
             return html`<button key=${m.id || 'default'} type="button" onClick=${pick}
               class=${cx('w-full flex items-center gap-2 px-3 h-8 text-left hover:bg-hover', active && 'bg-hover')}>
               <span class="flex-1 truncate">${m.name || m.id}</span>
@@ -197,16 +197,16 @@ export function ModelPicker({ room }) {
             ${grp.reason ? html`<span class="break-words">${grp.reason}</span>` : null}
           </div>`}
           ${grp.bare && html`<button type="button"
-            onClick=${() => setSelection(room, { agentId: grp.id, providerId: '', modelId: '', effort: 'default', upstream: '' })}
-            class=${cx('w-full flex items-center gap-2 px-3 h-8 text-left hover:bg-hover', sel.agentId === grp.id && !sel.modelId && 'bg-hover')}>
+            onClick=${() => setSelection(room, { runtime: 'agent', agentId: grp.id, providerId: '', modelId: '', effort: 'default', upstream: '' })}
+            class=${cx('w-full flex items-center gap-2 px-3 h-8 text-left hover:bg-hover', sel.runtime === 'agent' && sel.agentId === grp.id && !sel.modelId && 'bg-hover')}>
             <span class="flex-1 truncate text-muted">This agent lists no models; it runs its own choice</span>
-            ${sel.agentId === grp.id && !sel.modelId && html`<${Icon} name="check" size=${14} class="text-accent" />`}
+            ${sel.runtime === 'agent' && sel.agentId === grp.id && !sel.modelId && html`<${Icon} name="check" size=${14} class="text-accent" />`}
           </button>`}
         </div>`), [listKey]);
 
   const press = usePopoverTrigger(open, setOpen);
-  const label = sel.agentId ? agentModelLabel(s, sel.agentId, sel.modelId) : cur ? (cur.name || cur.id) : sel.modelId || 'Choose model';
-  const chosen = !!(sel.agentId || sel.modelId);
+  const label = sel.runtime === 'agent' ? agentModelLabel(s, sel.agentId, sel.modelId) : cur ? (cur.name || cur.id) : sel.modelId || 'Choose model';
+  const chosen = sel.runtime === 'agent' || !!(sel.runtime === 'harness' && sel.modelId);
   // The record's pending is the pick that applies to the next turn — the
   // chip names it already, and this small marker says it is not running yet.
   const pending = room.info?.pending;
@@ -214,10 +214,10 @@ export function ModelPicker({ room }) {
   return html`<div class="relative min-w-0">
     <button type="button" onPointerDownCapture=${press.onPointerDownCapture} onClick=${press.onClick} aria-haspopup="dialog" aria-expanded=${open}
       class=${cx('flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13px] hover:bg-hover max-w-[44vw] sm:max-w-64', chosen ? 'text-fg' : 'text-warn')}>
-      ${sel.agentId && html`<${Icon} name="bot" size=${14} class="text-faint shrink-0" />`}
+      ${sel.runtime === 'agent' && html`<${Icon} name="bot" size=${14} class="text-faint shrink-0" />`}
       <span class="truncate">${label}</span>
-      ${!sel.agentId && sel.effort && sel.effort !== 'default' && html`<span class="text-faint shrink-0">${sel.effort}</span>`}
-      ${(pending?.agentId || pending?.providerId) && html`<span class="text-faint shrink-0 text-[11px]">next turn</span>`}
+      ${sel.runtime === 'harness' && sel.effort && sel.effort !== 'default' && html`<span class="text-faint shrink-0">${sel.effort}</span>`}
+      ${(pending?.runtime === 'agent' || pending?.runtime === 'harness') && html`<span class="text-faint shrink-0 text-[11px]">next turn</span>`}
       <${Icon} name="chevronDown" size=${14} class="text-faint" />
     </button>
     <${Popover} open=${open} onClose=${() => setOpen(false)} layer="top" placement="top-end" label="Choose model" scroll="list" class="sm:w-[400px]">
@@ -238,7 +238,7 @@ export function ModelPicker({ room }) {
         ${modelRows}
       </div>
       </div>
-      ${(cur || sel.agentId) && html`<div data-scroll="controls" class="shrink-0 min-h-0 overflow-y-auto border-t border-line bg-raised" style=${{ maxHeight: 'calc(var(--panel-room) * 0.4)' }}>
+      ${(cur || sel.runtime === 'agent') && html`<div data-scroll="controls" class="shrink-0 min-h-0 overflow-y-auto border-t border-line bg-raised" style=${{ maxHeight: 'calc(var(--panel-room) * 0.4)' }}>
       ${cur && html`<div class="px-3 py-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
         <label class="flex flex-col gap-1 min-w-0 only-of-type:col-span-full">
           <span class="text-xs text-muted truncate">Reasoning effort</span>
@@ -257,7 +257,7 @@ export function ModelPicker({ room }) {
           </span>`}
         </label>`}
       </div>`}
-      ${sel.agentId && html`<div class="px-3 py-2.5 flex flex-col gap-2">
+      ${sel.runtime === 'agent' && html`<div class="px-3 py-2.5 flex flex-col gap-2">
         ${agentOpts.status === 'loading' && html`<div class="flex items-center gap-2 text-faint text-xs"><${Spinner} size=${12} /> Asking the agent…</div>`}
         <${AgentOptionsNotice} room=${room} />
         ${agentOpts.status === 'ready' && !agentOpts.list.length && (agentOpts.report === 'empty'

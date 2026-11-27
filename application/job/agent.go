@@ -36,7 +36,12 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 	// The runtime calls back from its own goroutines; subscribers expect
 	// one ordered stream. Usage rides the finished event onto the room, and
 	// the agent's report on its context window rides the context event.
+	// lastUpdate is the last agent update's stamp. While it stays zero the
+	// prompt has produced nothing, which is the only stretch a rate limit
+	// may retry.
 	var mu sync.Mutex
+	var lastUpdate int64
+	var rateAttempts int
 	emit := func(ev event.TurnEvent) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -49,6 +54,10 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 			// An agent names a room nobody has named; the room is saved
 			// with the turn.
 			conv.AdoptAgentTitle(ev.Delta())
+		case enum.TurnEventClock:
+			if ev.LastUpdateAt() > 0 {
+				lastUpdate = ev.LastUpdateAt()
+			}
 		}
 		if onEvent != nil {
 			onEvent(ev)
@@ -103,7 +112,18 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 	if model != "" {
 		conv.SetModelID(model)
 	}
+	// Admission through the prompt write is preparing, including the
+	// session load inside the prompt. The stamp is not startedAt.
+	emit(event.NewClockEvent("preparing", 0, 0))
+	// An explicit Retry skips the pause once. A later automatic retry
+	// of this same turn still waits.
+	release := pauseReleased(ctx)
 	for {
+		if perr := waitAgentPause(ctx, agent.ID(), conv.ModelID(), conv.Upstream(), release); perr != nil {
+			ClearAgentHold(convID)
+			return perr
+		}
+		release = false
 		before := len(conv.Messages())
 		// Steering that arrives while the agent works goes straight into
 		// its turn when the agent takes it; what it does not take stays
@@ -179,6 +199,26 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 				}
 			}
 		}
+		if class, ok := apperror.AgentClass(err); ok && class == apperror.AgentClassRateLimited {
+			var delay time.Duration
+			var delayed interface{ RetryAfter() time.Duration }
+			if errors.As(err, &delayed) {
+				delay = delayed.RetryAfter()
+			}
+			wait, retry := rateLimitWait(delay, rateAttempts, lastUpdate != 0)
+			pauseAgent(agent.ID(), attempted, conv.Upstream(), wait)
+			if retry {
+				rateAttempts++
+				hold, _ := HoldFrom(err)
+				hold.Retry = "auto"
+				if delay == 0 {
+					hold.RetryAt = 0
+				}
+				NoteAgentHold(convID, hold)
+				emit(event.NewStatusEvent(enum.TurnStatusRetryWait, wait))
+				continue
+			}
+		}
 		// The stored word is what a later list reads. A refusal must say
 		// failed, and a stop must say interrupted — neither is a completed turn.
 		conv.SetTerminal(turnTerminal(err, conv, before))
@@ -197,8 +237,12 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 			return perr
 		}
 		if err != nil {
+			rememberAgentHold(convID, err)
 			return err
 		}
+		ClearAgentHold(convID)
+		lastUpdate = 0
+		rateAttempts = 0
 		if steers == nil {
 			return nil
 		}

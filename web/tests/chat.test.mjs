@@ -22,7 +22,7 @@ function serveThread(id, { infoFails = 0, messages = [], info = {} } = {}, extra
 }
 
 // firstSend types into the home composer and sends.
-function firstSend(text, sel = { providerId: 'p', modelId: 'm' }) {
+function firstSend(text, sel = { runtime: 'harness', providerId: 'p', modelId: 'm' }) {
   const home = chat.freshRoom();
   home.draft = '';
   home.sel = sel;
@@ -115,7 +115,7 @@ test('the first read racing the server\'s save retries instead of showing "not f
 test('a first message the server never saved returns to the home composer', async () => {
   serveThread('c_1', { infoFails: 99 });
   state.newProjectId = 'proj1';
-  const cmd = firstSend('hello', { providerId: 'p', modelId: 'missing' });
+  const cmd = firstSend('hello', { runtime: 'harness', providerId: 'p', modelId: 'missing' });
   opened(cmd, 'c_1');
   await sleep(10);
   assert.equal(location.hash, '#/c/c_1');
@@ -188,7 +188,7 @@ test('a message sent while the socket is down is kept and not queued as sent', (
   ws.readyState = 0;
   const home = chat.freshRoom();
   home.draft = '';
-  home.sel = { providerId: 'p', modelId: 'm' };
+  home.sel = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   assert.equal(chat.submit(home, 'hello'), false);
   assert.equal(chat.isBusy(home), false);
   assert.match(state.toasts.at(-1).message, /Not connected/);
@@ -253,7 +253,7 @@ test('a turn relayed from another thread keeps the answer above it, then shows t
 
 // ---------- the model picked while a turn runs ----------
 
-const pick = { providerId: 'p', modelId: 'm' };
+const pick = { runtime: 'harness', providerId: 'p', modelId: 'm' };
 const patches = () => calls.filter((c) => c.method === 'PATCH');
 const contextReads = () => calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/context'));
 
@@ -261,7 +261,7 @@ const contextReads = () => calls.filter((c) => c.method === 'GET' && c.url.start
 async function openBusyThread(extra = {}, info = {}) {
   state.prefs = { ...state.prefs, lastModel: pick };
   serveThread('c_1', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info }, {
-    'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', title: 'Thread', ...call.body }),
+    'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', title: 'Thread', runtime: call.body.agentId ? 'agent' : 'harness', ...call.body }),
     'GET /api/context': { estimate: 50_000, total: 1_000_000 },
     ...extra,
   });
@@ -280,16 +280,16 @@ test('a model picked on an idle room shows the new binding — no pending, no ma
   // The same pick with no turn running is applied, not parked: the answer
   // is 200 with the record already bound to it. Nothing waits, so nothing
   // may carry a "next turn" marker.
-  const info = { providerId: 'p', modelId: 'm' };
+  const info = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   serveThread('c_1', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info }, {
-    'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', title: 'Thread', ...call.body }),
+    'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', title: 'Thread', runtime: call.body.agentId ? 'agent' : 'harness', ...call.body }),
     'GET /api/context': { estimate: 50_000, total: 1_000_000 },
   });
   chat.navigate('#/c/c_1');
   await sleep(40);
   const r = state.rooms.c_1;
   calls.length = 0;
-  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  chat.setSelection(r, { runtime: 'harness', providerId: 'p2', modelId: 'm2' });
   await sleep(40);
   assert.equal(patches().length, 1);
   assert.equal(r.info.pending, undefined, 'an idle answer carries no pending');
@@ -301,7 +301,7 @@ test('a model picked on an idle room shows the new binding — no pending, no ma
 test('a model picked while a turn runs binds the room at once', async () => {
   const { r } = await openBusyThread();
   calls.length = 0;
-  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  chat.setSelection(r, { runtime: 'harness', providerId: 'p2', modelId: 'm2' });
   await sleep(40);
   // The pick is sent now — the room stores it and applies it to the next
   // turn. The meter still describes the model that is running, so it waits.
@@ -317,8 +317,8 @@ test('a pick stored while busy shows from the record\'s pending', async () => {
   // model (it runs now) and carries the pick under `pending` (next turn).
   // The picker shows the pending value — stored, so it survives a reload —
   // and the running binding stays readable on the record.
-  const parked = { providerId: 'p2', modelId: 'm2', acceptedAt: '2026-11-25T23:15:04Z' };
-  const info = { providerId: 'p', modelId: 'm' };
+  const parked = { runtime: 'harness', providerId: 'p2', modelId: 'm2', acceptedAt: '2026-11-25T23:15:04Z' };
+  const info = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   const { r } = await openBusyThread({
     'PATCH /api/conversations/c_1': () => {
       info.pending = parked; // the record now carries the pick for the next turn
@@ -326,7 +326,7 @@ test('a pick stored while busy shows from the record\'s pending', async () => {
     },
   }, info);
   calls.length = 0;
-  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  chat.setSelection(r, { runtime: 'harness', providerId: 'p2', modelId: 'm2' });
   await sleep(40);
   assert.equal(patches().length, 1);
   assert.equal(r.info.providerId, 'p', 'the record still names what runs now');
@@ -341,8 +341,8 @@ test('a pick stored while busy shows from the record\'s pending', async () => {
 test('pending drained by the next turn drops the marker back to the running value', async () => {
   // When the record no longer carries pending — the pick ran — the display
   // follows the binding the record names, without a reload.
-  const parked = { providerId: 'p2', modelId: 'm2', acceptedAt: '2026-11-25T23:15:04Z' };
-  const info = { providerId: 'p', modelId: 'm' };
+  const parked = { runtime: 'harness', providerId: 'p2', modelId: 'm2', acceptedAt: '2026-11-25T23:15:04Z' };
+  const info = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   const { r } = await openBusyThread({
     'PATCH /api/conversations/c_1': () => {
       info.pending = parked;
@@ -350,7 +350,7 @@ test('pending drained by the next turn drops the marker back to the running valu
     },
   }, info);
   calls.length = 0;
-  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  chat.setSelection(r, { runtime: 'harness', providerId: 'p2', modelId: 'm2' });
   await sleep(40);
   assert.equal(r.info.pending.providerId, 'p2');
   // The record drains: the pick is the binding now, and a room change makes
@@ -368,10 +368,10 @@ test('pending drained by the next turn drops the marker back to the running valu
 test('a bind refused while busy puts the room value back', async () => {
   const { r } = await openBusyThread({
     'PATCH /api/conversations/c_1': () => [409, { code: 'conflict', detail: 'that model is not offered' }],
-  }, { providerId: 'p', modelId: 'm' });
+  }, { runtime: 'harness', providerId: 'p', modelId: 'm' });
   calls.length = 0;
   state.toasts = [];
-  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  chat.setSelection(r, { runtime: 'harness', providerId: 'p2', modelId: 'm2' });
   await sleep(40);
   assert.equal(patches().length, 1);
   assert.match(state.toasts.at(-1)?.message || '', /Could not save this thread's model/);
@@ -381,7 +381,7 @@ test('a bind refused while busy puts the room value back', async () => {
 test('a message queued behind the turn still carries the choice, beside the bind', async () => {
   const { r, cmd } = await openBusyThread();
   calls.length = 0;
-  chat.setSelection(r, { providerId: 'p2', modelId: 'm2' });
+  chat.setSelection(r, { runtime: 'harness', providerId: 'p2', modelId: 'm2' });
   assert.equal(chat.submit(r, 'next'), true);
   terminal(cmd, 'turn.completed', 'c_1', { userMessagePersisted: true }, 't2');
   await sleep(60);
@@ -422,7 +422,7 @@ test('the context meter follows the stream, keeps its size between turns, and as
 });
 
 test('an agent room shows what its agent reports about its own context', async () => {
-  serveThread('c_a', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { agentId: 'claude', modelId: 'opus' } }, {
+  serveThread('c_a', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { runtime: 'agent', agentId: 'claude', modelId: 'opus' } }, {
     'GET /api/context': { estimate: 0, total: 200_000, live: 53_000, cost: { amount: 0.04, currency: 'USD' } },
   });
   chat.navigate('#/c/c_a');
@@ -453,7 +453,7 @@ test('an agent room shows what its agent reports about its own context', async (
 });
 
 test('a notice from the agent shows as a toast of its severity', async () => {
-  serveThread('c_n', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { agentId: 'claude', modelId: 'opus' } }, {
+  serveThread('c_n', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { runtime: 'agent', agentId: 'claude', modelId: 'opus' } }, {
     'GET /api/context': { estimate: 0, total: 0 },
   });
   chat.navigate('#/c/c_n');
@@ -475,7 +475,7 @@ test('a notice from the agent shows as a toast of its severity', async () => {
 });
 
 test('a room with no agent report yet has no meter to show', async () => {
-  serveThread('c_b', { info: { agentId: 'claude', modelId: 'opus' } }, {
+  serveThread('c_b', { info: { runtime: 'agent', agentId: 'claude', modelId: 'opus' } }, {
     'GET /api/context': { estimate: 0, total: 0 },
   });
   chat.navigate('#/c/c_b');
@@ -486,22 +486,22 @@ test('a room with no agent report yet has no meter to show', async () => {
 // ---------- the effort a room keeps ----------
 
 test('a thread opens with the effort stored on it, as after a reload or a server restart', async () => {
-  serveThread('c_1', { info: { providerId: 'p', modelId: 'm', effort: 'xhigh', upstream: 'Alpha' } });
+  serveThread('c_1', { info: { runtime: 'harness', providerId: 'p', modelId: 'm', effort: 'xhigh', upstream: 'Alpha' } });
   chat.navigate('#/c/c_1');
   await sleep(40);
   const sel = chat.selection(state.rooms.c_1);
   assert.deepEqual([sel.providerId, sel.modelId, sel.effort, sel.upstream], ['p', 'm', 'xhigh', 'Alpha']);
 
   // A thread that stores none shows the model's own.
-  serveThread('c_2', { info: { providerId: 'p', modelId: 'm' } });
+  serveThread('c_2', { info: { runtime: 'harness', providerId: 'p', modelId: 'm' } });
   chat.navigate('#/c/c_2');
   await sleep(40);
   assert.equal(chat.selection(state.rooms.c_2).effort, 'default');
 });
 
 test('picking an effort saves it on the thread without rebinding its model', async () => {
-  serveThread('c_1', { info: { providerId: 'p', modelId: 'm' } }, {
-    'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', providerId: 'p', modelId: 'm', ...call.body }),
+  serveThread('c_1', { info: { runtime: 'harness', providerId: 'p', modelId: 'm' } }, {
+    'PATCH /api/conversations/c_1': (call) => ({ id: 'c_1', runtime: 'harness', providerId: 'p', modelId: 'm', ...call.body }),
     'GET /api/context': { estimate: 1, total: 1000 },
   });
   chat.navigate('#/c/c_1');
@@ -522,7 +522,7 @@ test('picking an effort saves it on the thread without rebinding its model', asy
 // already bound. Sending the agent anyway failed every edit in an agent thread
 // with "turn.edit payload is invalid".
 test('an edit or a retry in an agent thread carries no agent, a send does', async () => {
-  serveThread('c_ag', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { agentId: 'claude', modelId: 'opus' } }, {
+  serveThread('c_ag', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { runtime: 'agent', agentId: 'claude', modelId: 'opus' } }, {
     'GET /api/context': { estimate: 0, total: 0 },
   });
   chat.navigate('#/c/c_ag');
@@ -540,14 +540,14 @@ test('an edit or a retry in an agent thread carries no agent, a send does', asyn
 
   // A send still names the agent.
   r.pendingOpen = null;
-  r.sel = { agentId: 'claude', modelId: 'opus' };
+  r.sel = { runtime: 'agent', agentId: 'claude', modelId: 'opus' };
   assert.equal(chat.submit(r, 'next'), true);
   const send = sentTurns().at(-1);
   assert.deepEqual([send.payload.agentId, send.payload.modelId], ['claude', 'opus']);
 });
 
 test('an edit in a provider thread still carries the picker\'s model and effort', async () => {
-  serveThread('c_pv', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { providerId: 'p', modelId: 'm' } }, {
+  serveThread('c_pv', { messages: [{ id: 'm1', role: 'user', content: 'first' }], info: { runtime: 'harness', providerId: 'p', modelId: 'm' } }, {
     'GET /api/context': { estimate: 0, total: 1000 },
   });
   chat.navigate('#/c/c_pv');
@@ -566,7 +566,7 @@ test('every turn from the web names its effort, "default" included', async () =>
   state.rooms = {};
   const home = chat.freshRoom();
   home.draft = '';
-  home.sel = { providerId: 'p', modelId: 'm', effort: 'max' };
+  home.sel = { runtime: 'harness', providerId: 'p', modelId: 'm', effort: 'max' };
   chat.submit(home, 'again');
   assert.equal(sentTurns().at(-1).payload.effort, 'max');
 });
@@ -1273,7 +1273,7 @@ test('a quote rides above the draft and is written ahead of its text when sent',
 
 test('a side chat opens the new-thread composer on the origin runtime, project, and a link back', async () => {
   const origin = chat.room('c_side');
-  origin.info = { id: 'c_side', title: 'Plan [v2]', agentId: 'claude', modelId: 'opus', projectId: 'p_1', workspace: '/w' };
+  origin.info = { id: 'c_side', title: 'Plan [v2]', runtime: 'agent', agentId: 'claude', modelId: 'opus', projectId: 'p_1', workspace: '/w' };
   const home = chat.freshRoom();
   home.draft = 'unsent';
   assert.equal(chat.startSideChat(origin, 'the bit', 'and this?'), true);
@@ -1281,7 +1281,7 @@ test('a side chat opens the new-thread composer on the origin runtime, project, 
   assert.equal(location.hash, '#/');
   assert.equal(home.draft, '');
   assert.equal(chat.quotedDraft(home.quotes, home.draft).text, 'From [Plan \\[v2\\]](/#/c/c_side):\n\n> the bit\n\nand this?');
-  assert.deepEqual(home.sel, { agentId: 'claude', modelId: 'opus' });
+  assert.deepEqual(home.sel, { runtime: 'agent', agentId: 'claude', modelId: 'opus' });
   assert.equal(state.newProjectId, 'p_1');
   assert.deepEqual(home.sideOf, { id: 'c_side', title: 'Plan [v2]' });
   assert.equal(sentTurns().filter((c) => c.payload?.content?.includes('the bit')).length, 0, 'nothing runs until the owner sends');
@@ -1294,27 +1294,27 @@ test('a side chat opens the new-thread composer on the origin runtime, project, 
   assert.equal(home.sideOf, null);
 
   const plain = chat.room('c_side2');
-  plain.info = { id: 'c_side2', title: 'API', providerId: 'p', modelId: 'm', effort: 'high', upstream: 'u', workspace: '/w2' };
+  plain.info = { id: 'c_side2', title: 'API', runtime: 'harness', providerId: 'p', modelId: 'm', effort: 'high', upstream: 'u', workspace: '/w2' };
   chat.startSideChat(plain, 'x');
-  assert.deepEqual(home.sel, { providerId: 'p', modelId: 'm', effort: 'high', upstream: 'u', workspace: '/w2' });
+  assert.deepEqual(home.sel, { runtime: 'harness', providerId: 'p', modelId: 'm', effort: 'high', upstream: 'u', workspace: '/w2' });
   assert.equal(state.newProjectId, '');
   home.draft = ''; home.quotes = []; home.sel = {}; home.sideOf = null;
 });
 
 test('a new thread starts on the owner default, and a pick or a binding wins over it', () => {
   const saved = state.threadDefault;
-  state.prefs.lastModel = { providerId: 'p_last', modelId: 'm_last', effort: 'high' };
+  state.prefs.lastModel = { runtime: 'harness', providerId: 'p_last', modelId: 'm_last', effort: 'high' };
   state.threadDefault = { agent: 'claude', provider: '', model: 'opus' };
   const home = chat.freshRoom();
   home.sel = {};
   assert.deepEqual([chat.selection(home).agentId, chat.selection(home).modelId, chat.selection(home).effort], ['claude', 'opus', 'default']);
   state.threadDefault = { agent: '', provider: 'or', model: 'gpt', effort: 'max' };
   assert.deepEqual([chat.selection(home).providerId, chat.selection(home).modelId, chat.selection(home).effort], ['or', 'gpt', 'max']);
-  home.sel = { providerId: 'p2', modelId: 'm2' };
+  home.sel = { runtime: 'harness', providerId: 'p2', modelId: 'm2' };
   assert.equal(chat.selection(home).providerId, 'p2', 'a pick in the composer wins');
   home.sel = {};
   const bound = chat.room('c_bound_default');
-  bound.info = { id: 'c_bound_default', providerId: 'px', modelId: 'mx' };
+  bound.info = { id: 'c_bound_default', runtime: 'harness', providerId: 'px', modelId: 'mx' };
   assert.equal(chat.selection(bound).providerId, 'px', 'a started thread keeps its own');
   state.threadDefault = null;
   assert.equal(chat.selection(home).providerId, 'p_last', 'unset falls back to the last pick');
@@ -1814,7 +1814,7 @@ test('workingBlind marks work without a live turn — and nothing else', () => {
 // blind work leads (only what the transcript cannot show), the worker's queue
 // depth follows in queuedNote's words — or nothing at all.
 test('roomLine composes the blind clause, the queue clause, both, or nothing', () => {
-  const blindRoom = { info: { turnActive: true } };
+  const blindRoom = { info: { turnActive: true, runtime: 'harness' } };
   assert.equal(chat.roomLine(blindRoom, 2).text, 'Working — no live view · 2 waiting to run');
   assert.equal(chat.roomLine(blindRoom, null).text, 'Working — no live view · waiting to run', 'a lost count keeps the words, drops the number');
   assert.equal(chat.roomLine(blindRoom, 0).text, 'Working — no live view');
@@ -1830,6 +1830,14 @@ test('roomLine composes the blind clause, the queue clause, both, or nothing', (
 
   assert.equal(chat.roomLine(idleRoom, 0), null, 'idle and empty renders nothing');
   assert.equal(chat.roomLine({ info: { turnActive: true, activeTurnId: 't1' } }, 0), null, 'a watchable turn is the transcript\'s claim, not the line\'s');
+  assert.equal(chat.roomLine({ info: { turnActive: true, runtime: 'agent' } }, 2).text, 'Running — no live view · 2 waiting to run');
+  assert.equal(chat.roomLine({ info: { turnActive: true, runtime: 'agent' } }, null).text, 'Running — no live view · waiting to run');
+  assert.equal(chat.roomLine({ info: { turnActive: true } }, 0), null, 'an unknown runtime has no work clause');
+  assert.equal(chat.roomLine({ info: { turnActive: true, runtime: 'agent' } }, 0).text, 'Running — no live view');
+  assert.equal(chat.rowWorkTitle({ turnActive: true, runtime: 'agent' }), 'Running — no live view');
+  assert.equal(chat.rowWorkTitle({ turnActive: true, runtime: 'harness' }), 'Working — no live view');
+  assert.equal(chat.rowWorkTitle({ turnActive: true }), '');
+  assert.equal(chat.blindWords('agent').endsWith('yet'), false);
 });
 
 // A3 — the owner's screenshot: the tab streams its turn (r.live) while the
@@ -1999,4 +2007,35 @@ test('a stop tool answer names the same count, and the newer number wins', async
   await sleep(20);
   assert.equal(queuedFor('c_2'), 0);
   assert.ok(r.live, 'the calling turn is untouched');
+});
+
+test('a clock frame changes the agent status on the frame', async () => {
+  const { r } = await openBusyThread();
+  r.info = { ...(r.info || {}), runtime: 'agent' };
+  ws.serve({ type: 'turn.phase', conversationId: 'c_1', turnId: 't2', seq: 1, payload: { phase: 'clock', clock: 'waiting', promptedAt: 1000, lastUpdateAt: 5000 } });
+  await sleep(20);
+  assert.equal(r.live.clock, 'waiting');
+  assert.equal(r.live.promptedAt, 1000);
+  const view = chat.liveStatus(r, 65000);
+  assert.equal(view.text, 'Waiting for the agent');
+  assert.equal(view.note, 'no update for 60s');
+  assert.equal(view.slow, true);
+  assert.equal(view.text.includes('Working'), false);
+});
+
+test('an agent failure keeps the class, and a stop is not a card', async () => {
+  const { r, cmd } = await openBusyThread();
+  r.info = { ...(r.info || {}), runtime: 'agent' };
+  terminal(cmd, 'turn.failed', 'c_1', {
+    status: 402, code: 'quota_exhausted', agentClass: 'quota_exhausted', retry: 'none',
+    agentMessage: 'quota <b>gone</b>', userMessagePersisted: true,
+  }, 't2');
+  await sleep(80);
+  const card = chat.honestyCard(r);
+  assert.equal(card.title, 'Agent quota used up');
+  assert.equal(card.body, 'Send again after the quota resets.');
+  assert.equal(card.retry, false);
+  assert.equal(card.message, 'quota <b>gone</b>');
+  assert.equal(JSON.stringify(card).includes('unknown error'), false);
+  assert.equal(JSON.stringify(card).includes('agent turn failed'), false);
 });

@@ -148,8 +148,8 @@ func TestInfoShowsTheRunningTurnsModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ModelID != "m2" {
-		t.Fatalf("mid-turn the projection shows %q, want the running turn's m2", info.ModelID)
+	if info.ModelID != "m2" || info.Runtime != enum.RuntimeHarness {
+		t.Fatalf("mid-turn the projection shows %q %q, want the running turn's m2 harness", info.ModelID, info.Runtime)
 	}
 	// The job reference, held while the turn runs: after it ends the same job
 	// must report no active binding. Reading the worker instead would answer
@@ -158,17 +158,20 @@ func TestInfoShowsTheRunningTurnsModel(t *testing.T) {
 	w := app.workers["c_model"]
 	app.mu.Unlock()
 	var job interface {
-		ActiveModel() (string, string, bool)
+		Active() (appjob.ActiveBinding, bool)
 	}
 	if w != nil {
 		if running := w.Running(); running != nil {
 			job, _ = running.(interface {
-				ActiveModel() (string, string, bool)
+				Active() (appjob.ActiveBinding, bool)
 			})
 		}
 	}
 	if job == nil {
 		t.Fatal("the running job does not expose its binding")
+	}
+	if b, ok := job.Active(); !ok || b.Kind != enum.RuntimeHarness || b.ModelID != "m2" {
+		t.Fatalf("mid-turn binding = %+v ok=%v, want harness m2", b, ok)
 	}
 	release(t, app, p, done, "c_model")
 	info, err = app.Info(ctx, "c_model")
@@ -178,7 +181,7 @@ func TestInfoShowsTheRunningTurnsModel(t *testing.T) {
 	if info.ModelID != "m2" {
 		t.Fatalf("after the turn the projection shows %q, want the stored m2", info.ModelID)
 	}
-	if _, _, ok := job.ActiveModel(); ok {
+	if _, ok := job.Active(); ok {
 		t.Fatal("the active binding outlived its turn on the job that ran it")
 	}
 }

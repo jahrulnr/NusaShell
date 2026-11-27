@@ -8,6 +8,7 @@ import (
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	dtransport "github.com/jahrulnr/nusashell/infrastructure/delivery/transport"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 )
@@ -60,15 +61,29 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 	case enum.TurnEventToolCall:
 		t.inReasoning = false
 		tc := ev.ToolCall()
-		p := &livePart{Kind: "tool", CallID: tc.ID(), Name: tc.Name(), Status: "requested"}
+		keys := subagentKeys(tc.OptionalContent())
+		t.live.phase = nil
+		// A later frame for a call already on the row replaces keys.
+		// It does not open a second row and does not stream the input again.
+		if p := t.live.tools[tc.ID()]; p != nil {
+			t.live.replaceKeys(tc.ID(), keys)
+			if !h.emitLocked(t, "turn.tool_call", toolCallPayload{
+				CallID: tc.ID(),
+				Name:   tc.Name(),
+				Keys:   keys,
+			}, false) {
+				h.markOverflowedLocked(t)
+			}
+			break
+		}
+		p := &livePart{Kind: "tool", CallID: tc.ID(), Name: tc.Name(), Status: "requested", Keys: keys}
 		t.live.tools[tc.ID()] = p
 		t.live.push(p)
 		t.live.toolInput(tc.ID(), tc.Input())
-		t.live.phase = nil
 		if !h.emitLocked(t, "turn.tool_call", toolCallPayload{
 			CallID: tc.ID(),
 			Name:   tc.Name(),
-			Keys:   subagentKeys(tc.OptionalContent()),
+			Keys:   keys,
 		}, false) {
 			// Provider-originated metadata exceeded the frame bound —
 			// terminate this turn only, sanitized.
@@ -211,6 +226,30 @@ func (h *Hub) onEvent(t *turn, ev event.TurnEvent) {
 			Phase:        ev.Status().String(),
 			RetryAfterMs: ev.Wait().Milliseconds(),
 		}, false) {
+			h.markOverflowedLocked(t)
+		}
+	case enum.TurnEventClock:
+		// working before the prompt write is not a clock this turn has.
+		if ev.Clock() == "working" && ev.PromptedAt() == 0 && t.promptedAt == 0 {
+			break
+		}
+		t.agent = true
+		if ev.Clock() != "" {
+			t.clock = ev.Clock()
+		}
+		if ev.PromptedAt() > 0 {
+			t.promptedAt = ev.PromptedAt()
+		}
+		if ev.LastUpdateAt() > 0 {
+			t.lastUpdateAt = ev.LastUpdateAt()
+		}
+		payload := phasePayload{Phase: "clock", Clock: t.clock}
+		if t.promptedAt > 0 {
+			at := t.promptedAt
+			payload.PromptedAt = &at
+		}
+		t.live.phase = &payload
+		if !h.emitLocked(t, "turn.phase", payload, false) {
 			h.markOverflowedLocked(t)
 		}
 	case enum.TurnEventApproval:
@@ -389,21 +428,8 @@ type planPayload struct {
 	Entries json.RawMessage `json:"entries"`
 }
 
-// subagentKeys carries only the adapter-neutral acp.subagent.* facts the SA
-// contract allows across the websocket. optionalContent itself never crosses.
+// subagentKeys is the acp.subagent family on a tool_call frame.
+// optionalContent itself never crosses, and neither does cognition.ai.
 func subagentKeys(all map[string]string) map[string]string {
-	if len(all) == 0 {
-		return nil
-	}
-	var keys map[string]string
-	for k, v := range all {
-		if !strings.HasPrefix(k, "acp.subagent.") {
-			continue
-		}
-		if keys == nil {
-			keys = map[string]string{}
-		}
-		keys[k] = v
-	}
-	return keys
+	return entity.SubagentKeys(all)
 }

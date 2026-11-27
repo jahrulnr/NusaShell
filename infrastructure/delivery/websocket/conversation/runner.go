@@ -78,6 +78,7 @@ func (h *Hub) Run(ctx context.Context, convID, providerID, modelID, content stri
 	defer stop()
 	h.turns[t.id] = t
 	h.wg.Add(1)
+	h.noteAgentLocked(t)
 	h.emitLocked(t, "turn.opened", h.openedBody(t), true)
 	h.broadcastLocked(activityFrame(t, "opened"))
 	h.mu.Unlock()

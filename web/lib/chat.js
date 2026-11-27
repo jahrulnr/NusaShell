@@ -147,30 +147,210 @@ export const watching = (x) => {
 // workingBlind answers whether the room is working without a live view: its
 // record says a turn is active but names none to watch (activeTurnId always
 // wins — when it is there, the turn is live and this is not blind; and a room
-// this tab is streaming is never blind — the transcript already claims
-// "Working…" for it). Compact, fork, and a queue job all arrive the same way,
-// so the indicator only ever says "working"; what kind is the turn's own
-// business.
+// this tab is streaming is never blind — the transcript already claims the
+// turn). The words for that state come from runtime, not from this flag.
 export const workingBlind = (r) => !!r?.info?.turnActive && !r.info?.activeTurnId && !r.live;
+
+// blindWords is the work clause for a blind room. agent and harness are the
+// only runtimes that name it (D-17). Anything else, including empty, names
+// nothing. The key is runtime, never agentId.
+export function blindWords(runtime) {
+  if (runtime === 'agent') return 'Running — no live view';
+  if (runtime === 'harness') return 'Working — no live view';
+  return '';
+}
+
+// rowWorkTitle is the list-row orb title: the same words as the work clause,
+// with no trailing "yet" (D-19). A watched row is not blind, so it has none.
+export function rowWorkTitle(x) {
+  if (!x || x.activeTurnId || !x.turnActive) return '';
+  return blindWords(x.runtime);
+}
 
 // roomLine composes the one status line above the composer: at most two
 // clauses joined by " · " — a blind-work clause (only what the transcript
 // cannot show) and the worker's queue depth in queuedNote's words — or null
 // when neither is true. Data, not markup, so every state is testable without
-// a DOM: blind picks the orb-idle icon and the tooltip, the queue-only line
-// takes the queue icon, and truncation eats the queue tail first because the
-// work clause leads.
+// a DOM: the work clause picks the orb-idle icon and the why tooltip, the
+// queue-only line takes the queue icon, and truncation eats the queue tail
+// first because the work clause leads.
 export function roomLine(r, waiting) {
-  const blind = workingBlind(r);
+  const words = workingBlind(r) ? blindWords(r?.info?.runtime) : '';
   const parts = [];
-  if (blind) parts.push('Working — no live view');
+  if (words) parts.push(words);
   if (waiting === null || waiting > 0) parts.push(queuedNote(waiting));
   if (!parts.length) return null;
   return {
-    blind,
+    blind: !!words,
     text: parts.join(' · '),
-    tip: blind ? 'This turn is running without a live view; its output appears when it finishes.' : null,
+    tip: words ? 'This turn is running without a live view; its output appears when it finishes.' : null,
   };
+}
+
+// secsUntil is how many whole seconds remain until a server stamp. Null when
+// the stamp was not sent. Never a client-invented delay.
+function secsUntil(ms, now) {
+  if (typeof ms !== 'number') return null;
+  return Math.max(0, Math.ceil((ms - now) / 1000));
+}
+
+function elapsedSecs(from, now) {
+  if (typeof from !== 'number') return null;
+  return Math.max(0, Math.floor((now - from) / 1000));
+}
+
+// agentTimeSeconds is lastUpdateAt minus promptedAt, only when both exist.
+export function agentTimeSeconds(promptedAt, lastUpdateAt) {
+  if (typeof promptedAt !== 'number' || typeof lastUpdateAt !== 'number') return null;
+  if (lastUpdateAt < promptedAt) return null;
+  return Math.floor((lastUpdateAt - promptedAt) / 1000);
+}
+
+// shortClass is the list-row phrase for a hold. The words are the design's.
+export function shortClass(row, now = Date.now()) {
+  const kind = row?.agentClass;
+  if (kind === 'rate_limited') {
+    const n = secsUntil(row.retryAt, now);
+    return n > 0 ? `rate limited, retry in ${n}s` : 'rate limited';
+  }
+  if (kind === 'quota_exhausted') return 'quota used up';
+  if (kind === 'credential') return 'sign-in refused';
+  if (kind === 'process') return 'agent stopped';
+  if (kind === 'unknown') return String(row.agentMessage || '').split('\n')[0].trim();
+  return '';
+}
+
+// rowStatus is the visible list-row line. A blind room uses the work clause.
+// A hold uses the lifecycle word and the short class. Unknown with messages
+// reads "Status unknown". Unknown with none is blank. interrupted stays
+// interrupted.
+export function rowStatus(x, now = Date.now()) {
+  if (!x) return '';
+  const blind = x.turnActive && !x.activeTurnId ? blindWords(x.runtime) : '';
+  if (blind && !watching(x)) return blind;
+  const life = x.lifecycle || '';
+  const count = x.messageCount || 0;
+  if (life === 'interrupted') {
+    const short = shortClass(x, now);
+    return short ? `interrupted · ${short}` : 'interrupted';
+  }
+  if ((life === 'unknown' || !life) && !count && !x.agentClass) return '';
+  if ((life === 'unknown' || !life) && count && !x.agentClass) return 'Status unknown';
+  if (!x.agentClass) return '';
+  const short = shortClass(x, now);
+  const word = life || 'unknown';
+  return short ? `${word} · ${short}` : word;
+}
+
+function pendingAsk(live) {
+  return !!live?.segments?.some((s) => (s.kind === 'approval' || s.kind === 'elicitation') && s.status === 'pending');
+}
+
+function autoWaitText(row, now) {
+  const n = secsUntil(row?.retryAt, now);
+  return n > 0 ? `Rate limited by the agent: retrying in ${n}s` : 'Rate limited by the agent: retrying';
+}
+
+// liveStatus is the transcript status line. The clock word comes from the
+// server. A client tick only formats a counter from a stamp the server sent.
+// Provider rooms keep the sentences they already use (provider: true).
+export function liveStatus(room, now = Date.now()) {
+  const live = room?.live;
+  const agent = room?.info?.runtime === 'agent';
+  if (room?.pendingOpen) return agent ? { text: 'Sending' } : { provider: true };
+  if (room?.settling) return agent ? { text: 'Finishing' } : { provider: true };
+  if (live?.canceling) return agent ? { text: 'Stopping' } : { provider: true };
+  if (pendingAsk(live)) return null;
+  if (!agent) return { provider: true };
+  if (live?.phase?.phase === 'retry_wait' || live?.retry === 'auto' || (!live && room.info?.retry === 'auto')) {
+    return { text: autoWaitText(live?.retryAt != null ? live : room.info, now) };
+  }
+  if (!live) return null;
+  const clock = live.clock;
+  if (clock === 'working' && typeof live.promptedAt !== 'number') return { text: 'In progress' };
+  if (clock === 'preparing') {
+    const counter = elapsedSecs(live.startedAt, now);
+    return { text: 'Preparing the agent', counter, slow: counter != null && counter >= 60 };
+  }
+  if (clock === 'waiting') {
+    const from = typeof live.lastUpdateAt === 'number' ? live.lastUpdateAt : live.promptedAt;
+    const counter = elapsedSecs(from, now);
+    return {
+      text: 'Waiting for the agent',
+      note: counter != null ? `no update for ${counter}s` : '',
+      slow: counter != null && counter >= 60,
+    };
+  }
+  if (clock === 'working') {
+    return {
+      text: live.phase?.phase === 'reasoning' ? 'Thinking' : 'Working',
+      counter: elapsedSecs(live.promptedAt, now),
+    };
+  }
+  return { text: 'In progress' };
+}
+
+// honestyCard is the failure card. Null when this room has no failed turn of
+// its own, when the newest prompt has an answer, when the line was not saved,
+// or when the server is still retrying (that is a countdown, not a card).
+// A named wait is a future retryAt. It is a sentence on the card. It does not
+// hide Retry, and it does not make the room busy.
+export function honestyCard(room, now = Date.now()) {
+  if (!room || room.hideHonesty) return null;
+  const frame = room.failed?.agentClass ? room.failed : null;
+  const info = room.info?.lifecycle === 'failed' && room.info.agentClass ? room.info : null;
+  const src = frame || info;
+  if (!src || src.retry === 'auto') return null;
+  if (src.userMessagePersisted === false) return null;
+  if (!waitingPrompt(room)) return null;
+  const kind = src.agentClass;
+  const message = typeof src.agentMessage === 'string' ? src.agentMessage : '';
+  const seen = typeof src.lastUpdateAt === 'number';
+  let title = '';
+  let body = '';
+  if (kind === 'rate_limited') {
+    title = 'Rate limited by the agent';
+    const n = secsUntil(src.retryAt, now);
+    body = n > 0 ? `The agent asked to wait ${n}s.` : message;
+  } else if (kind === 'quota_exhausted') {
+    title = 'Agent quota used up';
+    body = 'Send again after the quota resets.';
+  } else if (kind === 'credential') {
+    title = 'Agent sign-in refused';
+    body = "This is the agent's sign-in, not your NusaShell login.";
+  } else if (kind === 'process') {
+    title = typeof src.promptedAt === 'number' ? 'The agent never answered.' : 'The agent did not start. Nothing was sent to it.';
+  } else if (kind === 'unknown') {
+    title = 'The agent reported an error';
+    body = message.trim() ? '' : 'The agent gave no words.';
+  } else return null;
+  const retry = src.retry === 'none' && (kind === 'rate_limited' || ((kind === 'process' || kind === 'unknown') && !seen));
+  let retryOff = '';
+  if (seen && kind === 'rate_limited') retryOff = 'Automatic retry is off. Retry still sends.';
+  else if (seen && (kind === 'process' || kind === 'unknown')) retryOff = 'Retry is off, so nothing runs twice.';
+  const waiting = queuedFor(room.id) || (typeof room.info?.waiting === 'number' ? room.info.waiting : 0);
+  const shown = message.trim();
+  return {
+    title,
+    body,
+    message: shown && body !== message ? message : '',
+    retryOff,
+    retry,
+    queue: waiting > 0 ? waiting : 0,
+  };
+}
+
+// takeHonesty copies the stamps and the class a frame carried. Absent fields
+// stay absent. A zero or a null is not a stamp.
+function takeHonesty(target, p) {
+  if (!target || !p) return;
+  if (typeof p.clock === 'string' && p.clock) target.clock = p.clock;
+  for (const k of ['startedAt', 'promptedAt', 'lastUpdateAt', 'retryAt']) {
+    if (typeof p[k] === 'number' && p[k] > 0) target[k] = p[k];
+  }
+  if (typeof p.agentClass === 'string' && p.agentClass) target.agentClass = p.agentClass;
+  if (typeof p.retry === 'string' && p.retry) target.retry = p.retry;
+  if (typeof p.agentMessage === 'string') target.agentMessage = p.agentMessage;
 }
 
 // The queue poll closes the one gap the wire leaves: a room's waiting count
@@ -644,8 +824,8 @@ export async function loadEarlier(r) {
 // none to show.
 export async function fetchContext(r, { keepLive = false, force = false } = {}) {
   const sel = selection(r);
-  const agentRoom = !!sel.agentId && !!r.id && sel.agentId === r.info?.agentId;
-  if ((sel.agentId && !agentRoom) || (!r.id && !(sel.providerId && sel.modelId))) { r.ctx = null; emit(); return; }
+  const agentRoom = sel.runtime === 'agent' && !!r.id && sel.agentId === r.info?.agentId;
+  if ((sel.runtime === 'agent' && !agentRoom) || (!r.id && sel.runtime !== 'agent' && !(sel.providerId && sel.modelId))) { r.ctx = null; emit(); return; }
   if (r.ctxFlight) {
     if (force || r.ctxStale) r.ctxAgain = true;
     return r.ctxFlight;
@@ -676,30 +856,44 @@ export async function fetchContext(r, { keepLive = false, force = false } = {}) 
 // owner's default for new threads, else the last model the user picked.
 // A choice is either an API provider or an agent; both carry a
 // modelId. upstream pins the backend behind an aggregator provider.
+const knownKind = (x) => (x?.runtime === 'agent' || x?.runtime === 'harness' ? x.runtime : '');
+
 export function selection(r) {
   const p = state.prefs.lastModel || {};
   // A room carries its own model, effort, and upstream pin: they are stored
   // with it, so they are what the picker shows after a reload or a restart.
   // A pick parked on the record (pending) applies to the next turn — it is
   // stored, so it is the selection the picker shows, ahead of the binding
-  // the running turn still uses.
+  // the running turn still uses. The kind is the server's runtime field.
   const pend = r.info?.pending;
-  const bound = r.info?.agentId ? { agentId: r.info.agentId, modelId: r.info.modelId }
-    : r.info?.providerId ? { providerId: r.info.providerId, modelId: r.info.modelId, effort: r.info.effort, upstream: r.info.upstream } : null;
-  const parked = pend && (pend.agentId ? { agentId: pend.agentId, modelId: pend.modelId }
-    : pend.providerId ? { providerId: pend.providerId, modelId: pend.modelId } : null);
+  const info = r.info;
+  const bound = knownKind(info) === 'agent'
+    ? { runtime: 'agent', agentId: info.agentId, modelId: info.modelId }
+    : knownKind(info) === 'harness'
+      ? { runtime: 'harness', providerId: info.providerId, modelId: info.modelId, effort: info.effort, upstream: info.upstream }
+      : null;
+  const parked = knownKind(pend) === 'agent'
+    ? { runtime: 'agent', agentId: pend.agentId, modelId: pend.modelId }
+    : knownKind(pend) === 'harness'
+      ? { runtime: 'harness', providerId: pend.providerId, modelId: pend.modelId }
+      : null;
   const stored = (parked || bound) && {
     ...(parked || bound),
     effort: pend?.effort ?? (parked || bound).effort,
     upstream: pend?.upstream ?? (parked || bound).upstream,
   };
   const t = !r.id && state.threadDefault;
-  const fallback = t?.agent ? { agentId: t.agent, modelId: t.model }
-    : t?.provider && t?.model ? { providerId: t.provider, modelId: t.model, effort: t.effort || 'default' } : null;
-  const base = r.sel.providerId || r.sel.agentId ? r.sel : stored || fallback || p;
+  // The threads default is a settings binding, constructed from the settings
+  // fields. A room's kind is never read off an identifier.
+  const fallback = t?.agent ? { runtime: 'agent', agentId: t.agent, modelId: t.model }
+    : t?.provider && t?.model ? { runtime: 'harness', providerId: t.provider, modelId: t.model, effort: t.effort || 'default' } : null;
+  const picked = knownKind(r.sel) ? r.sel : null;
+  const base = picked || stored || fallback || (knownKind(p) ? p : {});
+  const agent = base.runtime === 'agent';
   return {
-    agentId: base.agentId || '',
-    providerId: base.agentId ? '' : base.providerId || '',
+    runtime: agent ? 'agent' : base.runtime === 'harness' ? 'harness' : '',
+    agentId: agent ? (base.agentId || '') : '',
+    providerId: agent ? '' : (base.providerId || ''),
     modelId: base.modelId || '',
     effort: r.sel.effort ?? (stored ? stored.effort || 'default' : fallback ? (fallback.effort || 'default') : p.effort) ?? 'default',
     upstream: r.sel.upstream ?? (stored ? stored.upstream || '' : fallback ? '' : p.upstream) ?? '',
@@ -723,9 +917,9 @@ export function setSelection(r, patch) {
     r.agentOptions = { status: 'idle', list: [], error: null, at: 0, key: '', failures: 0, toastId: null };
     loadAgentOptions(r, { force: true });
   }
-  if (patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined || patch.effort !== undefined || patch.upstream !== undefined) {
+  if (patch.runtime !== undefined || patch.providerId !== undefined || patch.agentId !== undefined || patch.modelId !== undefined || patch.effort !== undefined || patch.upstream !== undefined) {
     const s = selection(r);
-    state.prefs = { ...state.prefs, lastModel: { agentId: s.agentId, providerId: s.providerId, modelId: s.modelId, effort: s.effort, upstream: s.upstream } };
+    state.prefs = { ...state.prefs, lastModel: { runtime: s.runtime, agentId: s.agentId, providerId: s.providerId, modelId: s.modelId, effort: s.effort, upstream: s.upstream } };
     try { localStorage.setItem('nusashell.prefs', JSON.stringify(state.prefs)); } catch { /* ignore */ }
     // A turn that is running is not changed by this, and the meter still
     // describes the model that is actually running — it refreshes when the
@@ -750,8 +944,8 @@ export function setSelection(r, patch) {
 // agentOptionsKey names what a room's list is read from: the room when it
 // exists, else the agent standing in for a thread that does not exist yet.
 const agentOptionsKey = (r) => {
-  const agentId = selection(r).agentId;
-  return r.id ? `c:${r.id}` : agentId ? `a:${agentId}` : '';
+  const s = selection(r);
+  return r.id ? `c:${r.id}` : s.runtime === 'agent' && s.agentId ? `a:${s.agentId}` : '';
 };
 
 // agentOptionMap reads a pick list in either wire form — the ordered
@@ -918,8 +1112,9 @@ let writes = 0;
 // would re-render the list (and the header) for the same values, which is
 // what a stream of refreshes does all day. A different key is a change, and
 // the record is applied.
-const RECORD_FIELDS = ['title', 'projectId', 'pinned', 'memoryOff', 'label', 'providerId', 'modelId',
-  'agentId', 'effort', 'upstream', 'workspace', 'messageCount', 'activeTurnId', 'activeTurnKind', 'pending', 'turnActive'];
+const RECORD_FIELDS = ['title', 'projectId', 'pinned', 'memoryOff', 'label', 'runtime', 'providerId', 'modelId',
+  'agentId', 'effort', 'upstream', 'workspace', 'messageCount', 'activeTurnId', 'activeTurnKind', 'pending', 'turnActive',
+  'lifecycle', 'agentClass', 'retry', 'retryAt', 'agentMessage'];
 const recordKey = (x) => (x ? RECORD_FIELDS.map((k) => (typeof x[k] === 'object' && x[k] !== null ? JSON.stringify(x[k]) : x[k]) ?? '').join('\u0000') : '');
 const sameRecords = (a, b) => !!a && !!b && recordKey(a) === recordKey(b);
 
@@ -948,16 +1143,17 @@ export function applyRoomInfo(info) {
 // browser — runs the model the owner picked. Without it the choice lived
 // only in this browser: the picker read the new model off local state while
 // the room kept answering on the one it was bound to last.
-async function persistSelection(r, s, runtime = true) {
+async function persistSelection(r, s, bindModel = true) {
   // A room that does not exist yet takes the choice when its first turn
   // runs; there is nothing to bind.
   if (!r.id) return;
-  if (s.agentId ? !runtime : !s.providerId || !s.modelId) return;
+  const agent = s.runtime === 'agent';
+  if (s.runtime === 'agent' ? !bindModel || !s.agentId : !s.providerId || !s.modelId) return;
   // The effort and the upstream pin are the room's too, and go with the
   // model; an agent takes only its model.
-  const body = s.agentId
+  const body = agent
     ? { agentId: s.agentId, ...(s.modelId ? { modelId: s.modelId } : {}) }
-    : { ...(runtime ? { providerId: s.providerId, modelId: s.modelId } : {}), effort: s.effort, upstream: s.upstream };
+    : { ...(bindModel ? { providerId: s.providerId, modelId: s.modelId } : {}), effort: s.effort, upstream: s.upstream };
   try {
     applyRoomInfo(await api.annotate(r.id, body));
     // The room carries the choice now, so the local override is spent:
@@ -967,14 +1163,14 @@ async function persistSelection(r, s, runtime = true) {
     // for the next turn — either way the DTO shows it, so the override goes.
     // Neither naming it means the pick was stored somewhere the record does
     // not say: keep showing it rather than snap back to the old binding.
-    const names = (x) => s.agentId
-      ? x?.agentId === s.agentId && (s.modelId ? x?.modelId === s.modelId : true)
-      : x?.providerId === s.providerId && x?.modelId === s.modelId;
-    if (names(r.info) || names(r.info?.pending)) r.sel = { agentId: undefined, providerId: undefined, modelId: undefined, effort: undefined, upstream: undefined };
+    const names = (x) => agent
+      ? x?.runtime === 'agent' && x?.agentId === s.agentId && (s.modelId ? x?.modelId === s.modelId : true)
+      : x?.runtime === 'harness' && x?.providerId === s.providerId && x?.modelId === s.modelId;
+    if (names(r.info) || names(r.info?.pending)) r.sel = { runtime: undefined, agentId: undefined, providerId: undefined, modelId: undefined, effort: undefined, upstream: undefined };
   } catch (err) {
     // The picker had already shown the choice; put it back to the room's
     // binding rather than leave a selection the server never took.
-    r.sel = { agentId: undefined, providerId: undefined, modelId: undefined, effort: undefined, upstream: undefined };
+    r.sel = { runtime: undefined, agentId: undefined, providerId: undefined, modelId: undefined, effort: undefined, upstream: undefined };
     toast('Could not save this thread\'s model: ' + errorText(err), 'error');
   }
   emit();
@@ -987,7 +1183,7 @@ async function persistSelection(r, s, runtime = true) {
 function turnPayload(r, extra, resend = false) {
   const s = selection(r);
   const p = { ...extra };
-  if (s.agentId) {
+  if (s.runtime === 'agent') {
     if (!resend) {
       // Reasoning effort and upstream pins are provider settings; an agent
       // takes only its model.
@@ -1208,7 +1404,7 @@ function messagePayload({ text, references = [], files = [], recording = null })
 function sendNow(r, message) {
   const { text } = message;
   const s = selection(r);
-  if (!r.id && !s.agentId && !(s.providerId && s.modelId)) {
+  if (!r.id && !(s.runtime === 'agent' ? s.agentId : s.providerId && s.modelId)) {
     toast('Choose a model before sending.', 'error');
     return false;
   }
@@ -1543,6 +1739,7 @@ function onFrame(f) {
   }
   const compacting = r.live.phase?.phase === 'compacting';
   if (!applyFrame(r.live, f)) return;
+  takeHonesty(r.live, f.payload);
   noteFrame(r, f);
   // A fold just ended: the history is smaller than any size reported before
   // it, so the meter asks the server rather than keep showing the old one.
@@ -1570,7 +1767,7 @@ function onFrame(f) {
     if (f.payload?.final) releaseSteers(r, [inputId]);
   }
   // A provider call reports the size it was sent; an agent's figure comes from its own reports.
-  if (f.type === 'turn.step_finished' && f.payload?.usage && r.ctx && !selection(r).agentId) r.ctx.live = f.payload.usage.totalInputTokens;
+  if (f.type === 'turn.step_finished' && f.payload?.usage && r.ctx && selection(r).runtime !== 'agent') r.ctx.live = f.payload.usage.totalInputTokens;
   if (f.type === 'turn.completed' || f.type === 'turn.failed') onTerminal(r, f);
   emit();
 }
@@ -1581,7 +1778,7 @@ function onOpened(f) {
     // A watcher replays the opening frame of a turn another command or
     // channel started — adopt the server's clock for its timer.
     const r = state.rooms[f.conversationId];
-    if (r?.live && !r.live.terminal && r.live.turnId === f.turnId) { applyFrame(r.live, f); noteFrame(r, f); emit(); }
+    if (r?.live && !r.live.terminal && r.live.turnId === f.turnId) { applyFrame(r.live, f); takeHonesty(r.live, f.payload); noteFrame(r, f); emit(); }
     return;
   }
   let r = room(req.key);
@@ -1604,6 +1801,9 @@ function onOpened(f) {
     steerable: f.payload?.steerable,
   });
   r.live.lastSeq = 0;
+  r.agentTime = null;
+  r.hideHonesty = false;
+  takeHonesty(r.live, f.payload);
   r.live.userText = req.kind === 'send' || req.kind === 'edit' ? req.text : null;
   r.live.userRefs = req.kind === 'send' ? r.pendingOpen?.references || null : null;
   r.live.userFiles = req.kind === 'send' ? r.pendingOpen?.files || null : null;
@@ -1668,6 +1868,7 @@ function onResync(f) {
     // appending after it. When the bound trimmed earlier output — or no
     // snapshot came at all — say so instead of faking completeness.
     if (p.startedAt) r.live.startedAt = p.startedAt;
+    takeHonesty(r.live, p);
     // The active snapshot carries the same declaration as turn.opened.
     // A snapshot that omits it does not invent one and does not clear one.
     if (p.steerable === true || p.steerable === false) r.live.steerable = p.steerable;
@@ -1810,16 +2011,25 @@ async function onTerminal(r, f) {
       restoreDraft(r, live.userText, live.userRefs, live.userFiles, live.userRecording);
     }
     if (p.status === 408) {
+      // A user stop is not a failure.
+      r.failed = null;
       if (!live?.canceling) toast('Turn was interrupted.', 'info');
     } else if (unstarted || leaving) {
       // Say it once, keep the draft, and leave no failure card (and no Retry)
       // for a turn the server never ran to completion.
-      toast(p.message || (leaving ? 'The server restarted before the turn finished.' : 'The turn never started.'), leaving ? 'warning' : 'error');
+      toast((p.agentClass && p.agentMessage) || p.message || (leaving ? 'The server restarted before the turn finished.' : 'The turn never started.'), leaving ? 'warning' : 'error');
       r.failed = null;
     } else {
       r.failed = { status: p.status, code: p.code, message: p.message || '' };
+      if (p.agentClass) {
+        r.hideHonesty = false;
+        takeHonesty(r.failed, p);
+        if (p.userMessagePersisted === true) r.failed.userMessagePersisted = true;
+      }
     }
   }
+  if (f.type === 'turn.completed' && r.info?.runtime === 'agent') r.agentTime = agentTimeSeconds(p.promptedAt, p.lastUpdateAt);
+  else if (f.type === 'turn.failed') r.agentTime = null;
   r.settling = true;
   // The turn wrote history — or, on a failed send that never persisted,
   // wrote nothing. The loaders dedupe and TTL-gate, so the activity
@@ -2222,9 +2432,9 @@ export function startSideChat(origin, text, reply = '') {
   const projectId = origin.info?.projectId || '';
   const title = origin.info?.title || 'Untitled thread';
   const prior = { draft: home.draft, refs: home.refs, files: home.files, quotes: home.quotes, sel: home.sel, sideOf: home.sideOf, projectId: state.newProjectId };
-  home.sel = s.agentId
-    ? { agentId: s.agentId, modelId: s.modelId || undefined }
-    : { providerId: s.providerId, modelId: s.modelId, effort: s.effort, upstream: s.upstream };
+  home.sel = s.runtime === 'agent'
+    ? { runtime: 'agent', agentId: s.agentId, modelId: s.modelId || undefined }
+    : { runtime: 'harness', providerId: s.providerId, modelId: s.modelId, effort: s.effort, upstream: s.upstream };
   // A project thread works in the project's folders; a plain one in its own.
   if (!projectId && s.workspace) home.sel.workspace = s.workspace;
   state.newProjectId = projectId;

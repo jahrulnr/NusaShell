@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -24,8 +26,11 @@ type ConversationInfo struct {
 	Upstream    string
 	Workspace   string
 	Environment enum.Environment
-	// AgentID names the bound external agent; empty = the model runtime.
+	// AgentID names the bound external agent; empty = the harness.
 	AgentID string
+	// Runtime is the kind of that binding. Readers use its matrix methods.
+	// Empty means the caller has not projected it yet; Kind derives it.
+	Runtime enum.Runtime
 	// ProjectID names the owning project; empty = none.
 	ProjectID string
 	Pinned    bool
@@ -56,6 +61,16 @@ type ConversationInfo struct {
 	Terminal string
 }
 
+// Kind is the room's runtime. A projection that already carries one wins,
+// so an active turn can answer with the kind it is running. Otherwise the
+// stored agent id is the only derivation.
+func (i ConversationInfo) Kind() enum.Runtime {
+	if i.Runtime != "" {
+		return i.Runtime
+	}
+	return aggregate.RuntimeOfBinding(i.AgentID)
+}
+
 // PendingSelection is a room's runtime pick and session-option picks waiting for
 // the room's next turn: a selection is never applied mid-turn (a turn's runtime
 // is fixed when it starts), so the pick waits in its own file beside the record
@@ -67,6 +82,52 @@ type ConversationInfo struct {
 // reverse), effort and upstream replace their own value, and options merge by
 // id — a later pick for the same option wins.
 type PendingSelection struct {
+	// Binding is the parked runtime, or nil when the pick does not change it.
+	// At most one. Effort, upstream, and options ride beside it.
+	Binding  *valueobject.RuntimeBinding `json:"-"`
+	Effort   *enum.Effort                `json:"effort,omitempty"`
+	Upstream *string                     `json:"upstream,omitempty"`
+	Options  map[string]string           `json:"options,omitempty"`
+	// AcceptedAt is when the owner's latest pick was taken — the answer a 202
+	// carries, and what a surface shows a returning owner.
+	AcceptedAt time.Time `json:"acceptedAt"`
+}
+
+// AgentID is the parked agent, empty when the pick is not an agent target.
+func (s PendingSelection) AgentID() string {
+	if s.Binding == nil {
+		return ""
+	}
+	return s.Binding.AgentID()
+}
+
+// AgentModel is the model the parked agent reports.
+func (s PendingSelection) AgentModel() string {
+	if s.Binding == nil {
+		return ""
+	}
+	return s.Binding.AgentModel()
+}
+
+// ProviderID is the parked provider route.
+func (s PendingSelection) ProviderID() string {
+	if s.Binding == nil {
+		return ""
+	}
+	return s.Binding.ProviderID()
+}
+
+// ModelID is the parked provider model.
+func (s PendingSelection) ModelID() string {
+	if s.Binding == nil {
+		return ""
+	}
+	return s.Binding.ModelID()
+}
+
+// pendingWire is the file shape. The binding is one target, stored as the
+// identifiers the file already used, and rebuilt through the constructors.
+type pendingWire struct {
 	AgentID    string            `json:"agentId,omitempty"`
 	AgentModel string            `json:"agentModel,omitempty"`
 	ProviderID string            `json:"providerId,omitempty"`
@@ -74,9 +135,44 @@ type PendingSelection struct {
 	Effort     *enum.Effort      `json:"effort,omitempty"`
 	Upstream   *string           `json:"upstream,omitempty"`
 	Options    map[string]string `json:"options,omitempty"`
-	// AcceptedAt is when the owner's latest pick was taken — the answer a 202
-	// carries, and what a surface shows a returning owner.
-	AcceptedAt time.Time `json:"acceptedAt"`
+	AcceptedAt time.Time         `json:"acceptedAt"`
+}
+
+func (s PendingSelection) MarshalJSON() ([]byte, error) {
+	w := pendingWire{Effort: s.Effort, Upstream: s.Upstream, Options: s.Options, AcceptedAt: s.AcceptedAt}
+	if s.Binding != nil {
+		w.AgentID = s.Binding.AgentID()
+		w.AgentModel = s.Binding.AgentModel()
+		w.ProviderID = s.Binding.ProviderID()
+		w.ModelID = s.Binding.ModelID()
+	}
+	return json.Marshal(w)
+}
+
+func (s *PendingSelection) UnmarshalJSON(raw []byte) error {
+	var w pendingWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return err
+	}
+	s.Effort, s.Upstream, s.Options, s.AcceptedAt = w.Effort, w.Upstream, w.Options, w.AcceptedAt
+	s.Binding = nil
+	switch {
+	case w.AgentID != "" && (w.ProviderID != "" || w.ModelID != ""): // binding-constructor
+		return errors.New("a parked pick names an agent and a provider")
+	case w.AgentID != "": // binding-constructor
+		b, err := valueobject.NewAgentBinding(w.AgentID, w.AgentModel)
+		if err != nil {
+			return err
+		}
+		s.Binding = &b
+	case w.ProviderID != "" || w.ModelID != "": // binding-constructor
+		b, err := valueobject.NewHarnessBinding(w.ProviderID, w.ModelID)
+		if err != nil {
+			return err
+		}
+		s.Binding = &b
+	}
+	return nil
 }
 
 // Empty reports that no pick survives in the selection — the one definition
@@ -84,7 +180,7 @@ type PendingSelection struct {
 // never disagree about what "nothing parked" means. AcceptedAt is metadata,
 // not a pick: a generation stamp alone does not make a selection non-empty.
 func (s PendingSelection) Empty() bool {
-	return s.AgentID == "" && s.AgentModel == "" && s.ProviderID == "" && s.ModelID == "" &&
+	return (s.Binding == nil || s.Binding.IsZero()) &&
 		s.Effort == nil && s.Upstream == nil && len(s.Options) == 0
 }
 

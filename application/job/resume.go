@@ -2,11 +2,9 @@ package job
 
 import (
 	"context"
-	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
-	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
@@ -115,50 +113,14 @@ func (j *Resume) Execute(execCtx context.Context) (err error) {
 		if _, err := d.applyProject(ctx, conv); err != nil {
 			return err
 		}
-		if err := AgentPickRefusal(conv.Runtime() == enum.RuntimeAgent, &j.Opts.Effort, &j.Opts.Upstream); err != nil {
-			return err
-		}
-		if conv.Runtime() == enum.RuntimeAgent {
-			// The agent keeps its own record of the dialogue, so only a
-			// turn that never got a reply can be handed to it again.
-			last := conv.Last()
-			if last.Role() != enum.RoleUser || !last.Editable() {
-				return apperror.New(409, "nothing to retry — send a new message to the agent", nil)
-			}
-			if err := d.runAgentTurn(ctx, convID, conv, driver, *last, onEvent, &j.steers, j.Opts.Origin, ""); err != nil {
-				return err
-			}
-			return d.Convs.Save(ctx, conv)
-		}
-		prov, model, svc, err := d.resolveProvider(ctx, convID, conv, driver, j.ProviderID, j.ModelID)
+		ex, err := executorFor(conv.Runtime())
 		if err != nil {
 			return err
 		}
-		providerID, modelID := prov.ID(), model.ID()
-		useSelection(&model, conv, j.Opts)
-		if j.Opts.Workspace != "" {
-			if driver.Workspace() == nil {
-				return apperror.New(500, "environment workspace unavailable", nil)
-			}
-			root, err := driver.Workspace().CheckRoot(j.Opts.Workspace)
-			if err != nil {
-				return apperror.New(400, "invalid conversation workspace", err)
-			}
-			conv.SetWorkspace(root)
-		}
-		extra, err := d.applyProject(ctx, conv)
-		if err != nil {
+		if err := ex.refuse(&j.Opts.Effort, &j.Opts.Upstream); err != nil {
 			return err
 		}
-		// File tools reach the project's other folders by absolute path.
-		ctx = dservice.WithExtraFolders(ctx, extra)
-		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, onEvent, &j.steers, j.Opts.Origin); err != nil {
-			return err
-		}
-		conv.SetProviderID(providerID)
-		conv.SetModelID(modelID)
-		rememberSelection(conv, j.Opts)
-		return d.Convs.Save(ctx, conv)
+		return ex.resume(ctx, d, j, conv, driver, onEvent)
 	}()
 	return err
 }

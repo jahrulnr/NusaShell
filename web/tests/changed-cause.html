@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles/app.css">
+  <script src="/vendor/tailwind/tailwind.browser.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: var(--bg);
+      --color-panel: var(--panel);
+      --color-raised: var(--raised);
+      --color-hover: var(--hover);
+      --color-line: var(--line);
+      --color-fg: var(--fg);
+      --color-muted: var(--muted);
+      --color-faint: var(--faint);
+      --color-accent: var(--accent);
+      --color-accent-fg: var(--accent-fg);
+      --color-bad: var(--bad);
+    }
+  </style>
+</head>
+<body class="bg-bg text-fg">
+  <div id="root" class="max-w-3xl p-6"></div>
+  <script type="module">
+    import { html, render } from '/vendor/preact/htm-preact.mjs';
+    import { state } from '/lib/store.js';
+    import { Skills } from '/components/skills.js';
+
+    const wrote = "the loop wrote this skill's file, but the decision was not recorded";
+    const drifted = "the skill's file changed since its row was written";
+    const row = (over) => ({
+      name: 'release-notes',
+      description: 'Use when writing release notes',
+      source: 'nusashell',
+      path: '/data/skills/release-notes/SKILL.md',
+      digest: 'd1',
+      level: 'agent',
+      tracked: true,
+      changed: false,
+      changedCause: '',
+      pending: 0,
+      pendingStale: 0,
+      ...over,
+    });
+    const catalog = {
+      data: [
+        row({ name: 'quiet', level: 'user', changed: false, changedCause: '' }),
+        row({ name: 'noted', level: 'user', changed: true, changedCause: wrote, description: 'The loop wrote the file' }),
+        row({ name: 'drifted', level: 'agent', changed: true, changedCause: drifted, description: 'The file changed after the row' }),
+      ],
+      diagnostics: [],
+      pending: 0,
+      pendingStale: 0,
+    };
+    window.fetch = async (url) => {
+      const u = String(url);
+      const data = u.includes('/api/skill-proposals') ? { data: [] } : catalog;
+      return { ok: true, status: 200, text: async () => JSON.stringify(data) };
+    };
+    state.projects = { items: [], status: 'ready', error: null };
+    render(html`<${Skills} />`, document.getElementById('root'));
+    document.body.dataset.ready = '1';
+  </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ package repoconversation
 import (
 	"context"
 
+	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
@@ -34,6 +35,7 @@ func (r *ConversationRepository) Info(ctx context.Context, convID string) (drepo
 		Workspace:      meta.Workspace,
 		Environment:    enum.Environment(meta.Environment),
 		AgentID:        meta.AgentID,
+		Runtime:        aggregate.RuntimeOfBinding(meta.AgentID),
 		ProjectID:      meta.ProjectID,
 		Pinned:         meta.Pinned,
 		MemoryOff:      meta.MemoryOff,

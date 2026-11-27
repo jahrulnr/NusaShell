@@ -39,7 +39,7 @@ func (r *ConversationRepository) Load(ctx context.Context, convID string) (*aggr
 	// provider/model/effort/upstream is meant for real switches — run it
 	// before those fields are restored, or hydration wipes the room's own
 	// picks and the next Save writes the wipe back.
-	if meta.AgentID != "" {
+	if meta.AgentID != "" { // binding-constructor
 		if err := c.BindAgent(meta.AgentID); err != nil {
 			return nil, err
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	dtransport "github.com/jahrulnr/nusashell/infrastructure/delivery/transport"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
 // Problem is the contract's RFC 9457 body, shared with the WS delivery.
@@ -27,5 +28,11 @@ func WriteProblem(c *gin.Context, status int, code, detail string) {
 // closed code set and renders the problem body.
 func RespondError(c *gin.Context, err error) {
 	status, code, detail := dtransport.ClassifyError(err)
-	WriteProblem(c, status, code, detail)
+	body := dtransport.NewProblem(status, code, detail)
+	if n, ok := apperror.OverageOf(err); ok {
+		body.Overage = &n
+	}
+	c.Header("Content-Type", "application/problem+json")
+	c.Abort()
+	c.JSON(status, body)
 }

@@ -576,6 +576,9 @@ func TestDecideOverBudget(t *testing.T) {
 	if apperror.As(err).StatusCode() != 409 || !strings.Contains(err.Error(), "budget") {
 		t.Errorf("over budget: %v; want a 409 naming the budget", err)
 	}
+	if n, ok := apperror.OverageOf(err); !ok || n != len(p.Name())+len(p.Description())-1 {
+		t.Errorf("overage = %d, %v; want total - budget", n, ok)
+	}
 	if len(w.files) != 0 {
 		t.Error("an over-budget accept wrote a file")
 	}
@@ -596,8 +599,25 @@ func TestDecideOverBudgetNamesTheOverage(t *testing.T) {
 	if apperror.As(err).StatusCode() != 409 || err.Error() != want {
 		t.Errorf("over budget: %v; want a 409 saying %q", err, want)
 	}
+	if n, ok := apperror.OverageOf(err); !ok || n != 1234 {
+		t.Errorf("overage = %d, %v; want 1234", n, ok)
+	}
 	if len(w.files) != 0 {
 		t.Error("an over-budget accept wrote a file")
+	}
+}
+
+func TestDecideUnsetBudgetOmitsOverage(t *testing.T) {
+	w, deps := decideSetup()
+	deps.Budget = 0
+	p := decideProposal(t, enum.SkillProposalCreate)
+	w.proposals[p.ID()] = p
+	err := Decide(context.Background(), deps, decideInput(p.ID(), "accept"))
+	if apperror.As(err).StatusCode() != 409 || !strings.Contains(err.Error(), "no catalog budget") {
+		t.Fatalf("unset budget: %v; want a 409 that says none is set", err)
+	}
+	if _, ok := apperror.OverageOf(err); ok {
+		t.Fatal("an unset budget carried an overage")
 	}
 }
 
@@ -616,6 +636,9 @@ func TestDecidePatchChangedTarget(t *testing.T) {
 	err = Decide(context.Background(), deps, decideInput(p.ID(), "accept"))
 	if apperror.As(err).StatusCode() != 409 {
 		t.Errorf("a patch whose target changed: %v; want a 409", err)
+	}
+	if _, ok := apperror.OverageOf(err); ok {
+		t.Fatal("a changed target carried a catalog overage")
 	}
 	if len(w.calls) != 0 {
 		t.Errorf("a changed target must never reach the write: %v", w.calls)
@@ -1018,6 +1041,9 @@ func TestPatchStaleCauseNamesTheLoopOnlyForItsOwnFailedCommit(t *testing.T) {
 	if got := cause(t); got != loopWrote {
 		t.Errorf("the leftover's cause %q, want %q", got, loopWrote)
 	}
+	if changed, got := skillRowCause(t, deps); !changed || got != loopWrote {
+		t.Errorf("the skill row's changedCause = %q (changed %v), want the loop sentence", got, changed)
+	}
 
 	// The row now describes the bytes on disk: the decision was recorded for them.
 	recorded, err := aggregate.NewSkillOwnership(enum.SkillRootNusashell, "release-notes", enum.SkillLevelAgent, skillDigestString(leftover))
@@ -1027,6 +1053,9 @@ func TestPatchStaleCauseNamesTheLoopOnlyForItsOwnFailedCommit(t *testing.T) {
 	w.rows["nusashell/release-notes"] = recorded
 	if got := cause(t); got != changed {
 		t.Errorf("a recorded decision's cause %q, want %q", got, changed)
+	}
+	if on, got := skillRowCause(t, deps); on || got != "" {
+		t.Errorf("a row that describes the file: changed %v cause %q, want unchanged and empty", on, got)
 	}
 
 	// The row is back on the file the patch read, and the file holds other bytes.
@@ -1039,6 +1068,27 @@ func TestPatchStaleCauseNamesTheLoopOnlyForItsOwnFailedCommit(t *testing.T) {
 	if got := cause(t); got != changed {
 		t.Errorf("a file moved to other bytes: cause %q, want %q", got, changed)
 	}
+	const rowChanged = "the skill's file changed since its row was written"
+	if on, got := skillRowCause(t, deps); !on || got != rowChanged {
+		t.Errorf("a file moved to other bytes: skill changedCause %q (changed %v), want %q", got, on, rowChanged)
+	}
+}
+
+func skillRowCause(t *testing.T, deps DecideDeps) (bool, string) {
+	t.Helper()
+	page, err := List(context.Background(), ListDeps{
+		Catalog: deps.Catalog, Ownership: deps.Ownership, Proposals: deps.Proposals, Writer: deps.Writer,
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range page.Rows {
+		if row.Name == "release-notes" {
+			return row.Changed, row.ChangedCause
+		}
+	}
+	t.Fatal("the page has no release-notes row")
+	return false, ""
 }
 
 // A pass that retires a patch's leftover closes it through the same release as a

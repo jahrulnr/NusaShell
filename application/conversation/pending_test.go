@@ -16,6 +16,24 @@ import (
 	toolsummary "github.com/jahrulnr/nusashell/infrastructure/service/tool/summary"
 )
 
+func agentBinding(t *testing.T, id, model string) *appjob.RuntimeBinding {
+	t.Helper()
+	b, err := valueobject.NewAgentBinding(id, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &b
+}
+
+func harnessBinding(t *testing.T, provider, model string) *appjob.RuntimeBinding {
+	t.Helper()
+	b, err := valueobject.NewHarnessBinding(provider, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &b
+}
+
 // busyTurn starts a real turn and holds it inside the agent call: the room's
 // claim is the one the send job took, not one a test placed. It returns the
 // function that releases the turn.
@@ -123,7 +141,7 @@ func TestIdleRoomAppliesAPickAtOnce(t *testing.T) {
 	if _, err := app.Send(ctx, "c_idle", "", "", "look", nil, appjob.SendOptions{Agent: "fake"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	parked, err := app.Annotate(ctx, "c_idle", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+	parked, err := app.Annotate(ctx, "c_idle", Annotation{Runtime: agentBinding(t, "fake", "swe-2-1")})
 	if err != nil || parked {
 		t.Fatalf("idle pick = parked %v, %v — an idle room has nothing to wait for", parked, err)
 	}
@@ -149,13 +167,13 @@ func TestPendingModelWaitsForTheNextTurn(t *testing.T) {
 	defer release()
 
 	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
-		return app.Annotate(ctx, "c_pend", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+		return app.Annotate(ctx, "c_pend", Annotation{Runtime: agentBinding(t, "fake", "swe-2-1")})
 	})
 	if err != nil || !parked {
 		t.Fatalf("pick = parked %v, %v — want it taken for the next turn", parked, err)
 	}
 	sel, ok, err := app.Pending(ctx, "c_pend")
-	if err != nil || !ok || sel.AgentID != "fake" || sel.AgentModel != "swe-2-1" {
+	if err != nil || !ok || sel.AgentID() != "fake" || sel.AgentModel() != "swe-2-1" {
 		t.Fatalf("pending = %+v, %v, %v", sel, ok, err)
 	}
 	// A 202 is not "applied": the record still holds what it held.
@@ -196,7 +214,7 @@ func TestIdlePickSupersedesTheParkedGeneration(t *testing.T) {
 	}
 	release := busyTurn(t, app, rt, "c_sup")
 	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
-		return app.Annotate(ctx, "c_sup", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "stale-model"}})
+		return app.Annotate(ctx, "c_sup", Annotation{Runtime: agentBinding(t, "fake", "stale-model")})
 	})
 	if err != nil || !parked {
 		t.Fatalf("busy pick = parked %v, %v", parked, err)
@@ -205,7 +223,7 @@ func TestIdlePickSupersedesTheParkedGeneration(t *testing.T) {
 	waitIdle(t, app, "c_sup")
 
 	// Idle now: the explicit pick must land on the record immediately.
-	parked, err = app.Annotate(ctx, "c_sup", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+	parked, err = app.Annotate(ctx, "c_sup", Annotation{Runtime: agentBinding(t, "fake", "swe-2-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,14 +269,14 @@ func TestIdleRuntimePickLeavesParkedOptionsAlone(t *testing.T) {
 	release()
 	waitIdle(t, app, "c_cov")
 
-	if _, err := app.Annotate(ctx, "c_cov", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}}); err != nil {
+	if _, err := app.Annotate(ctx, "c_cov", Annotation{Runtime: agentBinding(t, "fake", "swe-2-1")}); err != nil {
 		t.Fatal(err)
 	}
 	sel, ok, err := app.Pending(ctx, "c_cov")
 	if err != nil || !ok || sel.Options["mode"] != "ask" {
 		t.Fatalf("pending = %+v, %v, %v — the parked option is not the runtime pick's business and must survive it", sel, ok, err)
 	}
-	if sel.AgentModel == "swe-2-1" || sel.AgentModel != "" {
+	if sel.AgentModel() == "swe-2-1" || sel.AgentModel() != "" {
 		t.Fatalf("the runtime fields must be superseded, not re-parked: %+v", sel)
 	}
 }
@@ -459,7 +477,7 @@ func TestPendingIsHiddenWhileItsTurnRuns(t *testing.T) {
 	}
 	release := busyTurn(t, app, rt, "c_consume")
 	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
-		return app.Annotate(ctx, "c_consume", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+		return app.Annotate(ctx, "c_consume", Annotation{Runtime: agentBinding(t, "fake", "swe-2-1")})
 	})
 	if err != nil || !parked {
 		t.Fatalf("park = %v, %v", parked, err)
@@ -513,7 +531,7 @@ func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
 	// Park a pick, and let the next turn consume it while we watch.
 	release := busyTurn(t, app, rt, "c_gen")
 	if parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
-		return app.Annotate(ctx, "c_gen", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+		return app.Annotate(ctx, "c_gen", Annotation{Runtime: agentBinding(t, "fake", "swe-2-1")})
 	}); err != nil || !parked {
 		t.Fatalf("park = %v, %v", parked, err)
 	}
@@ -574,7 +592,7 @@ func TestPendingNewPickStaysVisibleDuringTheTurn(t *testing.T) {
 	}
 	// The surviving file merged the pick this turn took with the new one, so the
 	// next turn applies both — G1 again (idempotent) and G2 for the first time.
-	if after.AgentModel != "swe-2-1" {
+	if after.AgentModel() != "swe-2-1" {
 		t.Fatalf("pending lost the applied pick it must re-apply: %+v", after)
 	}
 	// The next turn applies both, and only then do they go.

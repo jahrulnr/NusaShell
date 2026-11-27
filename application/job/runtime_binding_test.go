@@ -6,6 +6,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 	repoagent "github.com/jahrulnr/nusashell/infrastructure/repository/agent"
 	repoprovider "github.com/jahrulnr/nusashell/infrastructure/repository/provider"
@@ -43,6 +44,24 @@ func bindDeps(t *testing.T) (Deps, *aggregate.Conversation) {
 	return Deps{Providers: providers, Agents: agents}, conv
 }
 
+func mustAgent(t *testing.T, id, model string) RuntimeBinding {
+	t.Helper()
+	b, err := valueobject.NewAgentBinding(id, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func mustHarness(t *testing.T, provider, model string) RuntimeBinding {
+	t.Helper()
+	b, err := valueobject.NewHarnessBinding(provider, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 // The picker's selection has to reach the room itself: a turn started from
 // a chat never carries one, so a choice that only lives in the browser
 // leaves a WhatsApp or Telegram message running the model the room was
@@ -50,7 +69,7 @@ func bindDeps(t *testing.T) (Deps, *aggregate.Conversation) {
 func TestBindRuntimeMovesBetweenRuntimes(t *testing.T) {
 	d, conv := bindDeps(t)
 
-	if err := BindRuntime(t.Context(), d, conv, RuntimeBinding{AgentID: "claude"}); err != nil {
+	if err := BindRuntime(t.Context(), d, conv, mustAgent(t, "claude", "")); err != nil {
 		t.Fatal(err)
 	}
 	if conv.Runtime() != enum.RuntimeAgent || conv.AgentID() != "claude" {
@@ -59,11 +78,11 @@ func TestBindRuntimeMovesBetweenRuntimes(t *testing.T) {
 
 	// Naming a provider route releases the agent; the agent's session and
 	// options belong to it and must not survive the move.
-	if err := BindRuntime(t.Context(), d, conv, RuntimeBinding{ProviderID: "deepseek", ModelID: "deepseek-v4.1-flash"}); err != nil {
+	if err := BindRuntime(t.Context(), d, conv, mustHarness(t, "deepseek", "deepseek-v4.1-flash")); err != nil {
 		t.Fatal(err)
 	}
-	if conv.Runtime() != enum.RuntimeModel {
-		t.Fatalf("runtime = %v, want model", conv.Runtime())
+	if conv.Runtime() != enum.RuntimeHarness {
+		t.Fatalf("runtime = %v, want harness", conv.Runtime())
 	}
 	if conv.AgentID() != "" {
 		t.Fatalf("agent %q survived the move to a provider", conv.AgentID())
@@ -73,7 +92,7 @@ func TestBindRuntimeMovesBetweenRuntimes(t *testing.T) {
 	}
 
 	// And back: an agent binding clears the provider pair it replaced.
-	if err := BindRuntime(t.Context(), d, conv, RuntimeBinding{AgentID: "claude", AgentModel: "opus"}); err != nil {
+	if err := BindRuntime(t.Context(), d, conv, mustAgent(t, "claude", "opus")); err != nil {
 		t.Fatal(err)
 	}
 	if conv.Runtime() != enum.RuntimeAgent || conv.AgentID() != "claude" {
@@ -91,16 +110,23 @@ func TestBindRuntimeMovesBetweenRuntimes(t *testing.T) {
 // at the picker, not left to fail on the next turn from a chat.
 func TestBindRuntimeRefusesUnknownTargets(t *testing.T) {
 	d, conv := bindDeps(t)
+	if _, err := valueobject.NewHarnessBinding("deepseek", ""); err == nil {
+		t.Fatal("a provider binding without a model was built")
+	}
+	if _, err := valueobject.NewAgentBinding("", ""); err == nil {
+		t.Fatal("an empty agent binding was built")
+	}
+	if err := BindRuntime(t.Context(), d, conv, RuntimeBinding{}); apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("empty binding = %v, want 400", err)
+	}
 	for _, tc := range []struct {
 		name    string
 		binding RuntimeBinding
 		want    int
 	}{
-		{"unknown agent", RuntimeBinding{AgentID: "nope"}, 400},
-		{"unknown provider", RuntimeBinding{ProviderID: "nope", ModelID: "deepseek-v4.1-flash"}, 400},
-		{"unknown model", RuntimeBinding{ProviderID: "deepseek", ModelID: "nope"}, 400},
-		{"provider without model", RuntimeBinding{ProviderID: "deepseek"}, 400},
-		{"empty binding", RuntimeBinding{}, 400},
+		{"unknown agent", mustAgent(t, "nope", ""), 400},
+		{"unknown provider", mustHarness(t, "nope", "deepseek-v4.1-flash"), 400},
+		{"unknown model", mustHarness(t, "deepseek", "nope"), 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := BindRuntime(t.Context(), d, conv, tc.binding)
@@ -123,7 +149,7 @@ func TestBindRuntimeRefusesAgentOutsideLocalEnvironment(t *testing.T) {
 	if err := conv.SetEnvironment(enum.Environment("docker")); err != nil {
 		t.Fatalf("environment %q: %v", "docker", err)
 	}
-	err := BindRuntime(t.Context(), d, conv, RuntimeBinding{AgentID: "claude"})
+	err := BindRuntime(t.Context(), d, conv, mustAgent(t, "claude", ""))
 	if got := apperror.As(err).StatusCode(); got != 400 {
 		t.Fatalf("status = %d (%v), want 400", got, err)
 	}

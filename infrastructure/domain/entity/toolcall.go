@@ -259,6 +259,42 @@ func (t *ToolCall) SetOptionalContent(key, value string) {
 	t.optionalContent[key] = value
 }
 
+// subagentKeyFamily is the only optionalContent a client may see for a
+// Devin subagent. cognition.ai keys and every other artifact stay internal.
+var subagentKeyFamily = []string{
+	"acp.subagent.id",
+	"acp.subagent.parent",
+	"acp.subagent.profile",
+	"acp.subagent.model",
+	"acp.subagent.depth",
+	"acp.subagent.background",
+	"acp.subagent.success",
+	"acp.subagent.summary",
+}
+
+// SubagentKeys is that family, and nothing else. success is specified only
+// as true; any other value is omitted rather than drawn as a failed card.
+func SubagentKeys(all map[string]string) map[string]string {
+	if len(all) == 0 {
+		return nil
+	}
+	var keys map[string]string
+	for _, key := range subagentKeyFamily {
+		value, ok := all[key]
+		if !ok || value == "" {
+			continue
+		}
+		if key == "acp.subagent.success" && value != "true" {
+			continue
+		}
+		if keys == nil {
+			keys = map[string]string{}
+		}
+		keys[key] = value
+	}
+	return keys
+}
+
 // SetCallAt restores the persisted invocation timestamp. Repository
 // hydration only — runtime calls keep the constructor's time.Now().
 func (t *ToolCall) SetCallAt(v time.Time) { t.callAt = v }

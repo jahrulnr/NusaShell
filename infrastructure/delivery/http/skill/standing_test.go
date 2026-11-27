@@ -57,9 +57,15 @@ func TestSkillsPageReportsAHandEditWithoutWriting(t *testing.T) {
 	if edited["level"] != "user" || edited["changed"] != true || edited["tracked"] != true {
 		t.Errorf("an edited agent skill reads %v, want the owner's level, changed and tracked", edited)
 	}
+	if _, ok := edited["changedCause"]; !ok || edited["changedCause"] != "the skill's file changed since its row was written" {
+		t.Errorf("a hand edit's changedCause = %v, want the row sentence and the key present", edited["changedCause"])
+	}
 	intact := rowByName(t, rows, "deploy-day")
 	if intact["level"] != "agent" || intact["changed"] != false || intact["tracked"] != true {
 		t.Errorf("an intact agent skill reads %v, want agent, unchanged and tracked", intact)
+	}
+	if cause, ok := intact["changedCause"]; !ok || cause != "" {
+		t.Errorf("an intact row's changedCause = %v (present %v), want the key and an empty string", cause, ok)
 	}
 	// The page's counts are keys of their own: a count that is absent would read
 	// as zero, so the pointer says whether the key came at all.

@@ -197,6 +197,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	// The queued notice names the worker's own queue depth, read when the
 	// frame is emitted.
 	hub.UseQueueDepth(eng.conversations.QueueDepth)
+	hub.UseAgentRoom(eng.conversations.AgentRoom)
 	eng.conversations.OnQueueChanged(hub.QueueChanged)
 	hub.UsePlanEvents(eng.planEvents)
 	eng.conversations.UseShells(shell.Local{})
@@ -370,7 +371,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 	// saved environment; a model thread has none.
 	browsers := appbrowser.New(browserMgr, func(ctx context.Context, convID string) (map[string]string, error) {
 		info, err := eng.conversations.Info(ctx, convID)
-		if err != nil || info.AgentID == "" {
+		if err != nil || !info.Kind().ReadsAgentLaunchEnvironment() {
 			return nil, err
 		}
 		a, err := eng.agentRepo.Load(ctx, info.AgentID)

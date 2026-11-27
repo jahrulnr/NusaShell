@@ -19,6 +19,9 @@ type Problem struct {
 	Status int    `json:"status"`
 	Code   string `json:"code"`
 	Detail string `json:"detail,omitempty"`
+	// Overage is the catalog-budget 409's integer, total minus budget, at
+	// least 1. Every other problem omits the key.
+	Overage *int `json:"overage,omitempty"`
 }
 
 // NewProblem builds the problem body for a status/code/detail triple.

@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -47,7 +48,7 @@ func (j *Compact) Execute(execCtx context.Context) (err error) {
 			return err // 404 — no room, nothing to fold
 		}
 		keepTail := d.Config.CompactKeepTail
-		if conv.Runtime() == enum.RuntimeAgent {
+		if !conv.Runtime().HarnessOwnsContext() {
 			return apperror.New(409, "agent conversations manage their own context", nil)
 		}
 		if !conv.CanManualCompact(keepTail) {
@@ -106,77 +107,60 @@ type Annotate struct {
 }
 
 // RuntimeBinding is the picker's selection applied to a room on its own,
-// without a turn: an external agent (with the model it reports), or a
-// provider and one of its models.
-//
-// It exists because a room's runtime is otherwise only ever written by a
-// turn. A picker that kept its choice in the browser therefore changed
-// nothing a chat-driven turn could see: switch the model on the web, send
-// the next message from WhatsApp, and the room answered on what it was
-// bound to last.
-type RuntimeBinding struct {
-	AgentID string
-	// AgentModel is the model the agent reports; agents pick their own,
-	// so it is optional and only meaningful with AgentID.
-	AgentModel string
-	ProviderID string
-	ModelID    string
-}
+// without a turn. The value object refuses an empty, partial, or mixed
+// target, so a caller cannot assemble one by filling fields.
+type RuntimeBinding = valueobject.RuntimeBinding
 
-// BindRuntime applies a binding with the same rules a turn applies: an agent wins
-// over a provider, and naming a provider route releases the agent. Both
-// BindAgent and UnbindAgent clear the provider/model pair, so the pair is set
-// after them, never before. It is exported because the parked selection is
-// validated against it when it arrives and applied through it when a turn starts
-// — one rule for both moments.
+// BindRuntime applies a binding the constructors already made whole. The
+// kind says which existence check and which room method run. It is the
+// one applier: a parked pick is validated through it when it arrives and
+// applied through it when a turn starts.
 func BindRuntime(ctx context.Context, d Deps, conv *aggregate.Conversation, b RuntimeBinding) error {
-	switch {
-	case b.AgentID != "":
+	if b.IsZero() {
+		return apperror.New(400, "a runtime binding needs an agentId, or a providerId and modelId", nil)
+	}
+	if b.Kind().RequiresLocalExecution() {
 		if d.Agents == nil {
 			return apperror.New(503, "agents unavailable", nil)
 		}
-		// The picker may name an agent that was deleted meanwhile; a stale
-		// id must be refused here rather than fail on the next turn.
-		if _, err := d.Agents.Load(ctx, b.AgentID); err != nil {
+		if _, err := d.Agents.Load(ctx, b.AgentID()); err != nil {
 			if apperror.As(err).StatusCode() == apperror.StatusNotFound {
 				return apperror.New(400, "unknown agent", err)
 			}
 			return err
 		}
-		if conv.Environment() != enum.EnvironmentLocal {
-			return apperror.New(400, "agents run only in the local environment", nil)
-		}
-		if err := conv.BindAgent(b.AgentID); err != nil {
+		if err := conv.BindAgent(b.AgentID()); err != nil {
+			if errors.Is(err, aggregate.ErrAgentNeedsLocal) {
+				return apperror.New(400, err.Error(), err)
+			}
 			return apperror.New(400, "invalid agent", err)
 		}
-		if b.AgentModel != "" {
-			conv.SetModelID(b.AgentModel)
+		if b.AgentModel() != "" {
+			conv.SetModelID(b.AgentModel())
 		}
-	case b.ProviderID != "" || b.ModelID != "":
-		if b.ProviderID == "" || b.ModelID == "" {
-			return apperror.New(400, "a provider binding needs both providerId and modelId", nil)
-		}
+		return nil
+	}
+	if b.Kind().UsesProviderRoute() {
 		if d.Providers == nil {
 			return apperror.New(503, "providers unavailable", nil)
 		}
-		prov, err := d.Providers.Load(ctx, b.ProviderID)
+		prov, err := d.Providers.Load(ctx, b.ProviderID())
 		if err != nil {
 			if apperror.As(err).StatusCode() == apperror.StatusNotFound {
 				return apperror.New(400, "unknown provider", err)
 			}
 			return err
 		}
-		if _, ok := prov.Model(b.ModelID); !ok {
+		if _, ok := prov.Model(b.ModelID()); !ok {
 			return apperror.New(400, "unknown model",
-				fmt.Errorf("provider %s catalog has no model %s", b.ProviderID, b.ModelID))
+				fmt.Errorf("provider %s catalog has no model %s", b.ProviderID(), b.ModelID()))
 		}
 		conv.UnbindAgent()
-		conv.SetProviderID(b.ProviderID)
-		conv.SetModelID(b.ModelID)
-	default:
-		return apperror.New(400, "a runtime binding needs an agentId, or a providerId and modelId", nil)
+		conv.SetProviderID(b.ProviderID())
+		conv.SetModelID(b.ModelID())
+		return nil
 	}
-	return nil
+	return apperror.New(500, "unknown runtime", fmt.Errorf("%s", b.Kind()))
 }
 
 // Execute applies the changes on the worker's goroutine.
@@ -252,7 +236,7 @@ func (j *Annotate) Execute(execCtx context.Context) (err error) {
 		// this PATCH leaves the room on: after its own rebind, so a switch to a
 		// provider keeps them, and a switch to an agent refuses them. The refusal
 		// comes before anything is saved, so a refused PATCH changes nothing.
-		if err := AgentPickRefusal(conv.Runtime() == enum.RuntimeAgent, j.Effort, j.Upstream); err != nil {
+		if err := AgentPickRefusal(conv.Runtime(), j.Effort, j.Upstream); err != nil {
 			return err
 		}
 		if j.Effort != nil {

@@ -1,8 +1,9 @@
 // Labels for the Skills page, and the one sentence a level move gets when
-// the skill is gone. The four labels are the states the page may show.
-// A builtin, global, or workspace skill is Locked even when a row says
-// otherwise: the loop never writes those files. A source the page does not
-// know is shown as the server sent it, and it cannot be moved.
+// the skill is gone. A non-empty changedCause is the row's label, on every
+// source. The words are the field. An empty cause is not a label. A
+// builtin, global, or workspace skill is then Locked: the loop never writes
+// those files. A source the page does not know is shown as the server sent
+// it, and it cannot be moved.
 import { ApiError, api, errorText } from './api.js';
 
 export const SKILL_GONE = 'This skill changed since this page loaded. Reload the list to see its current state.';
@@ -73,8 +74,11 @@ export function sourceLabel(source) {
 }
 
 export function skillLabel(row) {
+  // changedCause is the label wherever it is set. The field is the sentence.
+  // An empty cause is not a label.
+  const cause = typeof row?.changedCause === 'string' ? row.changedCause : '';
+  if (cause.trim()) return cause;
   if (LOCKED_SOURCES.has(row?.source)) return 'Locked';
-  if (row?.changed) return 'Edited by hand';
   if (row?.level === 'agent') return 'Loop may propose';
   if (row?.level === 'user') return 'Only you';
   return row?.level || '';

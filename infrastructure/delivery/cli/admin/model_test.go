@@ -21,7 +21,7 @@ func runModel(t *testing.T, srv *httptest.Server, args ...string) (int, string, 
 
 func TestModelShowBinding(t *testing.T) {
 	t.Setenv("CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
-	f := &fakeServer{reply: `{"id":"t1","providerId":"gw","modelId":"m1"}`}
+	f := &fakeServer{reply: `{"id":"t1","runtime":"harness","providerId":"gw","modelId":"m1"}`}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 
@@ -33,7 +33,7 @@ func TestModelShowBinding(t *testing.T) {
 		t.Fatalf("show out = %q", out)
 	}
 
-	f.reply = `{"id":"t2","agentId":"codex","modelId":"smart"}`
+	f.reply = `{"id":"t2","runtime":"agent","agentId":"codex","modelId":"smart"}`
 	code, out, _ = runModel(t, srv, "t2")
 	if code != 0 || !strings.Contains(out, "agent:    codex") || !strings.Contains(out, "model:    smart") {
 		t.Fatalf("agent show: %d %q", code, out)
@@ -52,7 +52,7 @@ func TestModelShowBinding(t *testing.T) {
 
 func TestModelSelectors(t *testing.T) {
 	t.Setenv("CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
-	f := &fakeServer{reply: `{"id":"t1","providerId":"gw","modelId":"m1"}`}
+	f := &fakeServer{reply: `{"id":"t1","runtime":"harness","providerId":"gw","modelId":"m1"}`}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 

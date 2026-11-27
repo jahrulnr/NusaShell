@@ -434,8 +434,10 @@ and the journal **before** any later frame of that turn can be emitted —
 each socket's writes go through one serialized writer with a bounded
 buffer. The payload carries `startedAt`, the server's admission
 wall-clock in unix milliseconds — a watcher that replays or reattaches
-adopts it, so a working timer shows the turn's real age, not the tab's
-attach time. It also carries `steerable`, the server's steering
+adopts it. `startedAt` is admission only. The clock is `clock`,
+`promptedAt`, and `lastUpdateAt` per
+[contract.md § Agent honesty](./contract.md#agent-honesty).
+It also carries `steerable`, the server's steering
 capability declaration for this exact turn: `true` when the turn takes
 `turn.steer` — whichever fold path then applies, the hub's own mailbox
 or forwarding to the worker that owns the job — and `false` when it
@@ -455,7 +457,7 @@ the input rather than steering it. `false` queues the same way. Only
   "conversationId": "c_k4j9xm2p8q1vz7w0t6nb5r3yhd",
   "turnId": "t_3kd9xm2p8q1vz7w0t6nb5r4yhf",
   "seq": 0,
-  "payload": { "startedAt": 1763851200000, "steerable": true }
+  "payload": { "startedAt": 1763851200000, "steerable": true, "clock": "preparing" }
 }
 ```
 
@@ -517,7 +519,10 @@ lost reconciles submitted inputs against it and against history —
 never by resending an unknown outcome.
 
 For an `"active"` turn the payload also carries the live snapshot:
-`startedAt` (unix ms, same clock `turn.opened` reports), `steerable`
+`startedAt` (unix ms, admission only — same stamp `turn.opened`
+reports), `clock` (`preparing` | `waiting` | `working`), `promptedAt`
+and `lastUpdateAt` when present (omitted when absent; never `0` or
+`null` — Agent honesty), `steerable`
 (the same `true` or `false` `turn.opened` wrote, still present when
 false — reattachment never weakens it and never drops a declared no),
 `phase` (the last reported phase, when one is
@@ -549,6 +554,9 @@ input to the draft". An input absent from an active snapshot is
   "payload": {
     "turn": "active",
     "startedAt": 1763851200000,
+    "clock": "working",
+    "promptedAt": 1763851201800,
+    "lastUpdateAt": 1763851204200,
     "steering": [
       { "inputId": "req-06", "state": "pending" },
       { "inputId": "req-08", "state": "persisted" }
@@ -667,10 +675,13 @@ One turn's frames, in order. Every stream frame carries `conversationId`,
 model produces reasoning: one marker per reasoning stretch, no matter how
 many chunks the provider streams. It is `"retry_wait"` while the harness
 pauses before retrying a transient provider failure (rate limit or upstream
-5xx), and `"compacting"` while the harness folds history to fit the context
-window before a model call. A `retry_wait` marker carries `retryAfterMs`,
-the pause length; the other phases carry none. Any stream frame that follows
-ends the wait.
+5xx), and the same `"retry_wait"` while an agent room retries `rate_limited`
+before the first agent update (Agent honesty). It is `"compacting"` while
+the harness folds history to fit the context window before a model call,
+and `"clock"` when an agent turn's `clock` word changes (payload also
+carries `clock`, and `promptedAt` once the prompt is written). A
+`retry_wait` marker carries `retryAfterMs`, the pause length; the other
+phases carry none of that. Any stream frame that follows ends the wait.
 
 ```json
 {
@@ -713,10 +724,14 @@ untrusted display content — render it escaped, never as markup:
 
 `turn.tool_call` — the model requested a tool. This frame carries only
 call metadata, so oversized arguments can never turn the request itself
-into an oversized frame. When the call is activity of an ACP subagent,
-`keys` carries the adapter-neutral key family verbatim (currently
-`acp.subagent.parent`); ordinary tools omit `keys`. Later input, output,
-and result frames do not repeat it — they correlate by `callId`:
+into an oversized frame. When the call is a Devin subagent run or one
+of its members, `keys` carries the `acp.subagent` family
+([ACP subagent](./contract.md#acp-subagent)); ordinary tools omit
+`keys`. A later `turn.tool_call` with the same `callId` replaces
+`keys` when a lifecycle fact arrives and does not add a row. Its
+`callId` is always the parent tool-call id, never the subagent
+`agentId`. Input, output, and result frames do not carry `keys` —
+they correlate by `callId`:
 
 ```json
 {
@@ -988,6 +1003,9 @@ only the job's return ends the turn.
   "seq": 9,
   "payload": {
     "userMessagePersisted": true,
+    "clock": "working",
+    "promptedAt": 1763851201800,
+    "lastUpdateAt": 1763851209000,
     "steering": [
       { "inputId": "req-06", "state": "persisted" },
       { "inputId": "req-08", "state": "pending" }
@@ -999,7 +1017,9 @@ only the job's return ends the turn.
 
 - `userMessagePersisted` — present on send turns, always `true` at
   `turn.completed` (a send cannot complete without committing the user
-  line). Absent on edit turns.
+  line). Absent on edit and resume turns.
+- `clock`, `promptedAt`, `lastUpdateAt` — agent turns only; stamps
+  omitted when absent (Agent honesty). Provider turns omit them.
 - `steering` — on send turns, the bounded terminal receipt snapshot:
   every input submitted to this turn's mailbox with its final state —
   `persisted` (folded and committed), `claimed` (drained but never
@@ -1037,22 +1057,32 @@ allocation gets `error`, not this frame — there is no turn to fail.)
 ```
 
 - `status` — the same HTTP-shaped status the REST surface would return
-  for the failure: `400` invalid, `404` missing, `408` canceled,
-  `410` deleted-underneath, `413` provider context overflow, `429` room
-  queue full (or upstream rate-limit, `code` `upstream_error`), `500`
-  internal, `502`/`504` upstream, `503` shutting down.
+  for the failure: `400` invalid, `402` agent quota, `404` missing,
+  `408` canceled, `410` deleted-underneath, `413` provider context
+  overflow, `429` room queue full (or upstream / agent rate-limit,
+  `code` `upstream_error`), `500` internal, `502`/`504` upstream,
+  `503` shutting down. Agent honesty maps each `agentClass` to its
+  status and code.
 - `code` — the same stable code strings as the HTTP problem catalog
   (`invalid_argument`, `not_found`, `interrupted`, `gone`,
   `input_too_large`, `queue_full`, `internal`, `upstream_error`,
-  `unavailable`, `upstream_timeout`). Command-level `error` frames may
-  additionally carry `unimplemented` for a recognized command whose
-  phase has not landed yet (none today — reserved for future commands)
-  and `queue_full` for turn admission, not just room mailboxes.
+  `quota_exhausted`, `agent_credential`, `unavailable`,
+  `upstream_timeout`). Command-level `error` frames may additionally
+  carry `unimplemented` for a recognized command whose phase has not
+  landed yet (none today — reserved for future commands) and
+  `queue_full` for turn admission, not just room mailboxes.
 - `message` — display-safe only; **internal causes are never exposed**.
 - `userMessagePersisted` — on send turns, whether the user line
   committed before the failure (`true` = it is in history even though
-  the turn died — the failed-send receipt). On edit turns it is absent
-  or `false`, never claimed.
+  the turn died — the failed-send receipt, A17 / B-113 / D-18). That
+  is the saved-or-not flag; no other field. On edit and resume turns
+  it is absent, never claimed. No `turn.failed` means no receipt; the
+  client does not say the line was saved.
+- `agentClass`, `retry`, `retryAt`, `agentMessage` — on an agent
+  failure that holds the room, the same four fields as the list and
+  detail rows (Agent honesty). Omitted when no hold applies.
+- `clock`, `promptedAt`, `lastUpdateAt` — agent turns only; stamps
+  omitted when absent (Agent honesty).
 - `steering` — on send turns, the same terminal receipt snapshot as
   `turn.completed`: a `claimed` or `pending` state here means the input
   never committed — the text is the client's to restore or requeue.

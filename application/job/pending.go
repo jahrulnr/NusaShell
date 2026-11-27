@@ -29,7 +29,7 @@ func PendingOptionPicks(ctx context.Context, d Deps, conv *aggregate.Conversatio
 	if len(picks) == 0 {
 		return kept, dropped, nil
 	}
-	if conv.AgentID() == "" {
+	if !conv.Runtime().QueriesAgentSessionOptions() {
 		for id := range picks {
 			dropped[id] = "the room runs no agent"
 		}
@@ -97,9 +97,8 @@ func ApplyPendingSelection(ctx context.Context, d Deps, conv *aggregate.Conversa
 			onEvent(event.NewNoticeEvent(enum.NoticeInfo, "Pick not applied", text))
 		}
 	}
-	if sel.AgentID != "" || sel.ProviderID != "" || sel.ModelID != "" {
-		b := RuntimeBinding{AgentID: sel.AgentID, AgentModel: sel.AgentModel, ProviderID: sel.ProviderID, ModelID: sel.ModelID}
-		if err := BindRuntime(ctx, d, conv, b); err != nil {
+	if sel.Binding != nil && !sel.Binding.IsZero() {
+		if err := BindRuntime(ctx, d, conv, *sel.Binding); err != nil {
 			notice("the runtime you picked is no longer available: " + userReason(err))
 		}
 	}
@@ -109,7 +108,7 @@ func ApplyPendingSelection(ctx context.Context, d Deps, conv *aggregate.Conversa
 	// pick with the notice a refused pick gets — applying it would store a value
 	// nothing honours, and dropping it silently would hide the refusal from the
 	// owner. An unset marker is no pick and is stored as the room's own.
-	dropped := agentPickFields(conv.Runtime() == enum.RuntimeAgent, sel.Effort, sel.Upstream)
+	dropped := agentPickFields(conv.Runtime(), sel.Effort, sel.Upstream)
 	if len(dropped) > 0 {
 		notice(agentPickMessage(dropped) + ", so it is not applied")
 	}
@@ -160,12 +159,15 @@ func upstreamPick(u *string) bool {
 
 // agentPickFields names the provider picks an agent room cannot take, in the
 // order the owner reads them. A provider room refuses none.
-func agentPickFields(agent bool, effort *enum.Effort, upstream *string) []string {
+func agentPickFields(kind enum.Runtime, effort *enum.Effort, upstream *string) []string {
+	if kind.AcceptsProviderPicks() {
+		return nil
+	}
 	var what []string
-	if agent && effortPick(effort) {
+	if effortPick(effort) {
 		what = append(what, "effort")
 	}
-	if agent && upstreamPick(upstream) {
+	if upstreamPick(upstream) {
 		what = append(what, "upstream")
 	}
 	return what
@@ -181,8 +183,8 @@ func agentPickMessage(what []string) string {
 // no turn reads it. Every write path that can carry a pick asks here, before it
 // stores anything. The unset markers pass, because they store nothing an agent
 // room lacks.
-func AgentPickRefusal(agent bool, effort *enum.Effort, upstream *string) error {
-	what := agentPickFields(agent, effort, upstream)
+func AgentPickRefusal(kind enum.Runtime, effort *enum.Effort, upstream *string) error {
+	what := agentPickFields(kind, effort, upstream)
 	if len(what) == 0 {
 		return nil
 	}

@@ -29,37 +29,54 @@ func (app *ConversationApp) Info(ctx context.Context, id string) (drepo.Conversa
 	if err != nil {
 		return info, err
 	}
-	if providerID, modelID, ok := app.activeModel(id); ok {
-		info.ProviderID, info.ModelID = providerID, modelID
+	info.Runtime = aggregate.RuntimeOfBinding(info.AgentID)
+	if active, ok := app.activeBinding(id); ok {
+		info.Runtime = active.Kind
+		info.AgentID = active.AgentID
+		info.ProviderID = active.ProviderID
+		info.ModelID = active.ModelID
 	}
 	return info, nil
 }
 
-// activeModelBinding is the small contract a running job satisfies when it
-// knows the binding it runs on. A job that does not satisfy it simply answers
-// nothing — no job type grows a method for a reader it has no use for.
-type activeModelBinding interface {
-	ActiveModel() (providerID, modelID string, ok bool)
+// AgentRoom reports whether the stored room runs an agent. A missing room
+// is not one. Admission uses this so an agent turn opens as preparing.
+func (app *ConversationApp) AgentRoom(convID string) bool {
+	if convID == "" {
+		return false
+	}
+	info, err := app.Info(context.Background(), convID)
+	if err != nil {
+		return false
+	}
+	return info.Kind().QueriesAgentSessionOptions()
 }
 
-// activeModel reads the running job's own binding. ok=false when no turn runs
+// activeRuntime is the snapshot a running turn exposes: the kind and the
+// identifiers it is actually using. A job that does not satisfy it answers
+// nothing.
+type activeRuntime interface {
+	Active() (appjob.ActiveBinding, bool)
+}
+
+// activeBinding reads the running job's snapshot. ok=false when no turn runs
 // or it already cleared the binding at its end.
-func (app *ConversationApp) activeModel(convID string) (string, string, bool) {
+func (app *ConversationApp) activeBinding(convID string) (appjob.ActiveBinding, bool) {
 	app.mu.Lock()
 	w := app.workers[convID]
 	app.mu.Unlock()
 	if w == nil {
-		return "", "", false
+		return appjob.ActiveBinding{}, false
 	}
 	job := w.Running()
 	if job == nil {
-		return "", "", false
+		return appjob.ActiveBinding{}, false
 	}
-	binding, ok := job.(activeModelBinding)
+	binding, ok := job.(activeRuntime)
 	if !ok {
-		return "", "", false
+		return appjob.ActiveBinding{}, false
 	}
-	return binding.ActiveModel()
+	return binding.Active()
 }
 
 // CanCompact reports whether manual compaction would fold new live history.
@@ -198,9 +215,9 @@ func pickOf(a Annotation) (drepo.PendingSelection, bool) {
 		return drepo.PendingSelection{}, false
 	}
 	sel := drepo.PendingSelection{}
-	if a.Runtime != nil {
-		sel.AgentID, sel.AgentModel = a.Runtime.AgentID, a.Runtime.AgentModel
-		sel.ProviderID, sel.ModelID = a.Runtime.ProviderID, a.Runtime.ModelID
+	if a.Runtime != nil && !a.Runtime.IsZero() {
+		b := *a.Runtime
+		sel.Binding = &b
 	}
 	if a.Effort != nil {
 		effort := *a.Effort
@@ -241,11 +258,11 @@ func (app *ConversationApp) parkSelection(ctx context.Context, convID string, a 
 		if a.Effort != nil || a.Upstream != nil {
 			// The turn that applies a parked pick drops an effort or upstream it
 			// cannot take, so the refusal comes here, while the owner is present.
-			agent, err := parkedAgent(ctx, deps, conv, a.Runtime != nil)
+			kind, err := parkedKind(ctx, deps, conv, a.Runtime != nil)
 			if err != nil {
 				return err
 			}
-			if err := appjob.AgentPickRefusal(agent, a.Effort, a.Upstream); err != nil {
+			if err := appjob.AgentPickRefusal(kind, a.Effort, a.Upstream); err != nil {
 				return err
 			}
 		}
@@ -254,22 +271,22 @@ func (app *ConversationApp) parkSelection(ctx context.Context, convID string, a 
 	return deps.Convs.SavePendingSelection(ctx, convID, sel)
 }
 
-// parkedAgent reports whether the next turn runs on an agent once a pick parks.
-// bound says the pick's own binding is already applied to conv, and then conv
-// answers. Otherwise a binding that already waits decides, the same way the turn
-// will apply it, and the room's own runtime answers when nothing waits.
-func parkedAgent(ctx context.Context, deps appjob.Deps, conv *aggregate.Conversation, bound bool) (bool, error) {
+// parkedKind is the kind the next turn runs once a pick parks. bound says
+// the pick's own binding is already applied to conv, and then conv answers.
+// Otherwise a binding that already waits decides, and the room's own kind
+// answers when nothing waits. The parked binding's kind owns the pick.
+func parkedKind(ctx context.Context, deps appjob.Deps, conv *aggregate.Conversation, bound bool) (enum.Runtime, error) {
 	if bound {
-		return conv.Runtime() == enum.RuntimeAgent, nil
+		return conv.Runtime(), nil
 	}
 	waiting, ok, err := deps.Convs.PendingSelection(ctx, conv.ID())
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	if ok && (waiting.AgentID != "" || waiting.ProviderID != "") {
-		return waiting.AgentID != "", nil
+	if ok && waiting.Binding != nil && !waiting.Binding.IsZero() {
+		return waiting.Binding.Kind(), nil
 	}
-	return conv.Runtime() == enum.RuntimeAgent, nil
+	return conv.Runtime(), nil
 }
 
 // Pending answers what the room waits to apply on its next turn.
@@ -306,7 +323,7 @@ func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]
 	if err != nil {
 		return nil, state, source, err
 	}
-	if info.AgentID == "" {
+	if !info.Kind().QueriesAgentSessionOptions() {
 		// A room that runs no agent has no options to report.
 		return []dservice.AgentOption{}, dservice.OptionsReady, dservice.OptionsSourceNone, nil
 	}
@@ -352,7 +369,7 @@ func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]
 // answers nil, nil when the room runs no agent, and 503 when a room that does
 // cannot be asked: a caller must not treat "cannot tell" as "anything goes".
 func (app *ConversationApp) optionReport(ctx context.Context, deps appjob.Deps, info drepo.ConversationInfo) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
-	if info.AgentID == "" {
+	if !info.Kind().QueriesAgentSessionOptions() {
 		return nil, dservice.OptionsReady, dservice.OptionsSourceNone, nil
 	}
 	if deps.AgentRuntime == nil || deps.Agents == nil {
@@ -431,7 +448,7 @@ func (app *ConversationApp) AgentCommands(ctx context.Context, convID string) []
 		return []dservice.AgentCommand{}
 	}
 	info, err := deps.Convs.Info(ctx, convID)
-	if err != nil || info.AgentID == "" {
+	if err != nil || !info.Kind().MirrorsAgentCommands() {
 		return []dservice.AgentCommand{}
 	}
 	return deps.AgentRuntime.Commands(ctx, convID, info.AgentID)

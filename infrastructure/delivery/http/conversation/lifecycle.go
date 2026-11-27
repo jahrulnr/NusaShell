@@ -4,6 +4,7 @@ import (
 	"context"
 
 	appconversation "github.com/jahrulnr/nusashell/application/conversation"
+	appjob "github.com/jahrulnr/nusashell/application/job"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 )
 
@@ -25,6 +26,15 @@ func (s *server) applyLifecycle(ctx context.Context, info drepo.ConversationInfo
 	}
 	terminal, readable := s.readTerminal(ctx, info)
 	dto.Lifecycle = appconversation.Lifecycle(live, waiting, readable, terminal)
+	if hold, ok := appjob.CurrentAgentHold(info.ID); ok {
+		dto.AgentClass = hold.Class
+		dto.Retry = hold.Retry
+		dto.AgentMessage = hold.Message
+		if hold.RetryAt > 0 {
+			at := hold.RetryAt
+			dto.RetryAt = &at
+		}
+	}
 }
 
 func (s *server) readTerminal(ctx context.Context, info drepo.ConversationInfo) (string, bool) {

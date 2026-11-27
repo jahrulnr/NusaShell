@@ -741,7 +741,7 @@ func (st learnedState) supersedeCause(p *aggregate.SkillProposal) string {
 		// is not left to think they edited it. Any other change to the file gets
 		// the neutral sentence.
 		if st.own[p.ID()] {
-			return "the loop wrote this skill's file, but the decision was not recorded"
+			return changedCauseLoop
 		}
 		return "the skill's file changed since this proposal read it"
 	}

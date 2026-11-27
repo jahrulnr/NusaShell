@@ -3,12 +3,10 @@ package job
 import (
 	"context"
 	"errors"
-	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
-	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/event"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
@@ -141,87 +139,14 @@ func (j *Edit) Execute(execCtx context.Context) (err error) {
 			return err
 		}
 		// Refused before the rewrite below is stored, the same rule Send applies.
-		if err := AgentPickRefusal(conv.Runtime() == enum.RuntimeAgent, &j.Opts.Effort, &j.Opts.Upstream); err != nil {
-			return err
-		}
-		if conv.Runtime() == enum.RuntimeAgent {
-			// The agent forgets its session with the dropped turns and
-			// answers the edited line in a fresh one, with a recap.
-			if err := d.Convs.RewriteFrom(ctx, convID, j.MsgID, j.Content); err != nil {
-				return err
-			}
-			if sealed {
-				if conv, err = d.Convs.Load(ctx, convID); err != nil {
-					return err
-				}
-				conv.ForgetAgentSession()
-				// The reload starts from the record, which does not carry the
-				// parked pick: applying it again is the same rule, and the file
-				// is still there (it is cleared only after the turn's save).
-				if _, _, err := applyPendingSelection(ctx, d, conv, onEvent); err != nil {
-					return err
-				}
-			}
-			err := d.runAgentTurn(ctx, convID, conv, driver, *conv.Last(), onEvent, &j.steers, j.Opts.Origin, "")
-			// Even a failed turn: the room's record forgot the old session
-			// when the rewrite was stored, and the turn saves the new one.
-			d.retireAgentSession(convID, prevAgent, prevSession, conv)
-			if err != nil {
-				return err
-			}
-			return d.Convs.Save(ctx, conv)
-		}
-		prov, model, svc, err := d.resolveProvider(ctx, convID, conv, driver, j.ProviderID, j.ModelID)
+		ex, err := executorFor(conv.Runtime())
 		if err != nil {
 			return err
 		}
-		providerID, modelID := prov.ID(), model.ID()
-		// Per-turn selections override the catalog entry in memory —
-		// the same contract Send applies, so a retry can switch the
-		// model that just failed. An override workspace is validated
-		// here but bound after the rewrite: the sealed reload swaps in
-		// a fresh aggregate, and the room's workspace rebinds the same
-		// way providerID/modelID do below.
-		useSelection(&model, conv, j.Opts)
-		workspace := ""
-		if j.Opts.Workspace != "" {
-			if driver.Workspace() == nil {
-				return apperror.New(500, "environment workspace unavailable", nil)
-			}
-			root, err := driver.Workspace().CheckRoot(j.Opts.Workspace)
-			if err != nil {
-				return apperror.New(400, "invalid conversation workspace", err)
-			}
-			workspace = root
-		}
-		if err := d.Convs.RewriteFrom(ctx, convID, j.MsgID, j.Content); err != nil {
+		if err := ex.refuse(&j.Opts.Effort, &j.Opts.Upstream); err != nil {
 			return err
 		}
-		if sealed {
-			conv, err = d.Convs.Load(ctx, convID)
-			if err != nil {
-				return err
-			}
-			if conv.SystemPrompt() == "" {
-				conv.SetSystemPrompt(prompt.SystemPrompt("conversation"))
-			}
-		}
-		if workspace != "" {
-			conv.SetWorkspace(workspace)
-		}
-		extra, err := d.applyProject(ctx, conv)
-		if err != nil {
-			return err
-		}
-		// File tools reach the project's other folders by absolute path.
-		ctx = dservice.WithExtraFolders(ctx, extra)
-		if err := d.runTurn(ctx, convID, conv, driver, prov, model, svc, onEvent, &j.steers, j.Opts.Origin); err != nil {
-			return err
-		}
-		conv.SetProviderID(providerID) // existing rooms re-bind only on success —
-		conv.SetModelID(modelID)       // a failed override keeps the old binding
-		rememberSelection(conv, j.Opts)
-		return d.Convs.Save(ctx, conv)
+		return ex.edit(ctx, d, j, conv, driver, sealed, prevAgent, prevSession, onEvent)
 	}()
 	if err != nil && recorded {
 		d.EditEvidence.DiscardEdit(convID, j.MsgID)

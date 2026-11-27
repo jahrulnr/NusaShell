@@ -232,12 +232,12 @@ type fakeCatalog struct{ runtime Runtime }
 
 func (c fakeCatalog) Default(context.Context) (Runtime, error) {
 	if c.runtime.empty() {
-		return Runtime{ProviderID: "or", ModelID: "auto"}, nil
+		return Runtime{Kind: enum.RuntimeHarness, ProviderID: "or", ModelID: "auto"}, nil
 	}
 	return c.runtime, nil
 }
 func (fakeCatalog) Choices(context.Context) ([]Choice, error) {
-	return []Choice{{Runtime{ProviderID: "or", ModelID: "auto"}, "OpenRouter Auto"}, {Runtime{AgentID: "claude"}, "Claude Agent"}}, nil
+	return []Choice{{Runtime{Kind: enum.RuntimeHarness, ProviderID: "or", ModelID: "auto"}, "OpenRouter Auto"}, {Runtime{Kind: enum.RuntimeAgent, AgentID: "claude"}, "Claude Agent"}}, nil
 }
 
 func setup(t *testing.T) (*App, *fakeChannel, *fakeRunner, *fakeRooms, *repochannel.Repository) {
@@ -808,7 +808,7 @@ func TestReplyQuoteReachesTheRoom(t *testing.T) {
 // The chat role's effort rides the turn's options, so a room the channel
 // opens starts on the effort the owner chose for chat channels.
 func TestChatRoleEffortReachesTheTurn(t *testing.T) {
-	app, _, runner, _, _ := setupCatalog(t, fakeCatalog{runtime: Runtime{ProviderID: "or", ModelID: "auto", Effort: enum.EffortMax}})
+	app, _, runner, _, _ := setupCatalog(t, fakeCatalog{runtime: Runtime{Kind: enum.RuntimeHarness, ProviderID: "or", ModelID: "auto", Effort: enum.EffortMax}})
 	app.process(context.Background(), msg("42", "1", "hello"))
 	if len(runner.calls) != 1 || runner.calls[0].effort != enum.EffortMax {
 		t.Fatalf("runs = %+v", runner.calls)

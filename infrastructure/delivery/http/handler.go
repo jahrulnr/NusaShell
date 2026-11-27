@@ -15,6 +15,7 @@ import (
 	"context"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -215,7 +216,14 @@ func NewHandler(d Deps) *gin.Engine {
 		if webui.Shell(c, d.WebAssets) {
 			return
 		}
-		transport.WriteProblem(c, http.StatusNotFound, "not_found", "no such route")
+		// An /api path that matched no mounted route names that fact. A
+		// missing skill or proposal on a route that is mounted stays
+		// not_found, written by that handler. Detail stays the same words.
+		code := "not_found"
+		if c.Request.URL.Path == "/api" || strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			code = "route_not_mounted"
+		}
+		transport.WriteProblem(c, http.StatusNotFound, code, "no such route")
 	})
 	return r
 }

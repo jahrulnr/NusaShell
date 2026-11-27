@@ -558,6 +558,12 @@ func (s *server) prompt(id json.RawMessage, sessionID string, prompt []struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 }, cancel chan struct{}) {
+	if msg := strings.TrimSpace(os.Getenv("FAKE_ACP_PROMPT_ERROR")); msg != "" {
+		s.write(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{
+			"code": -32603, "message": msg,
+		}})
+		return
+	}
 	var text strings.Builder
 	for _, p := range prompt {
 		if p.Text != "" {

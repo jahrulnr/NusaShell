@@ -55,6 +55,23 @@ type Command struct {
 // nativeCommands is the whole native catalog, in the order the composer shows
 // it. Every row is one action the application owns; none of them writes a
 // message or reaches a model.
+// Command classes. Compact is context: an agent room offers it only when
+// the agent reports it. Clear and fork are thread commands and stay ours.
+const (
+	commandContext = "context"
+	commandThread  = "thread"
+)
+
+func commandClass(name string) string {
+	switch name {
+	case CommandCompact:
+		return commandContext
+	case CommandClear, CommandFork:
+		return commandThread
+	}
+	return ""
+}
+
 func nativeCommands() []Command {
 	return []Command{
 		{Name: CommandCompact, Description: "Summarize older history into a checkpoint", Source: CommandSourceNative},
@@ -164,7 +181,7 @@ func (app *ConversationApp) Commands(ctx context.Context, convID string) ([]Comm
 	}
 	busy := app.busy(convID)
 	agentCommands := app.AgentCommands(ctx, convID)
-	if info.AgentID != "" {
+	if info.Kind().MirrorsAgentCommands() {
 		// In an agent room NusaShell proxies the agent's command surface.
 		// Context operations are never invented natively, and a name the agent
 		// claims belongs to the agent — even when it collides with a thread
@@ -177,13 +194,13 @@ func (app *ConversationApp) Commands(ctx context.Context, convID string) ([]Comm
 			}
 		}
 		rows = slices.DeleteFunc(rows, func(c Command) bool {
-			return c.Name == CommandCompact || claimed[c.Name]
+			return commandClass(c.Name) == commandContext || claimed[c.Name]
 		})
 	}
 	// Foldability is the aggregate's decision; ask it once, unless the room
-	// cannot fold at all (a live turn, an agent room).
+	// cannot fold at all (a live turn, or a kind that does not own context).
 	canFold := false
-	if !busy && info.AgentID == "" {
+	if !busy && info.Kind().HarnessOwnsContext() {
 		if canFold, err = app.CanCompact(ctx, convID); err != nil {
 			return nil, err
 		}
@@ -289,7 +306,7 @@ func (app *ConversationApp) RunCommand(ctx context.Context, convID string, in Co
 	}
 	switch name {
 	case CommandCompact:
-		if info.AgentID != "" {
+		if !info.Kind().HarnessOwnsContext() {
 			return CommandResult{}, apperror.NewCoded(409, "unavailable", "native compaction belongs to harness rooms; use the agent's own compact command when it reports one", nil)
 		}
 		canFold, err := app.CanCompact(ctx, convID)

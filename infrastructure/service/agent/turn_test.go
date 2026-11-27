@@ -357,3 +357,96 @@ func TestFinishDoesNotForceAMemberFailed(t *testing.T) {
 		t.Fatalf("member outcome events: results=%d outputs=%d, want none", memberResults, memberOutputs)
 	}
 }
+
+// A lifecycle fact after the opening frame is another turn.tool_call for
+// the same parent id. It does not mint the agentId, does not replace the
+// report, and does not write success when the completion said false.
+func TestSubagentLifecycleReplacesKeysWithoutASecondRow(t *testing.T) {
+	var events []event.TurnEvent
+	sink := newTurnSink(context.Background(), func(ev event.TurnEvent) { events = append(events, ev) }, nil)
+	input, _ := json.Marshal(map[string]string{"title": "Beta", "task": "second task"})
+	meta, _ := json.Marshal(map[string]string{"cognition.ai/inferenceToolName": "run_subagent"})
+	sink.update(acp.SessionUpdate{
+		SessionUpdate: "tool_call", ToolCallID: "run-b", Title: "Ran explore subagent Beta",
+		Status: "in_progress", RawInput: input, Meta: meta,
+		Content: json.RawMessage(`[{"type":"content","content":{"type":"text","text":"the report"}}]`),
+	})
+	opened := toolCallEvents(events, "run-b")
+	if len(opened) != 1 {
+		t.Fatalf("opening frames = %d, want 1", len(opened))
+	}
+	if _, ok := opened[0].ToolCall().OptionalContent()["acp.subagent.id"]; ok {
+		t.Fatal("the opening frame invented an id before the lifecycle")
+	}
+
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call_update","toolCallId":"agent-beta","status":"in_progress","_meta":{"cognition.ai/subagent_started":{"agentId":"agent-beta","title":"Beta","task":"second task","profile":"subagent_explore","depth":2,"isBackground":false,"model":"devin"},"cognition.ai/timestamp":"2026-11-28T00:00:00Z"}}`))
+	replaced := toolCallEvents(events, "run-b")
+	if len(replaced) != 2 {
+		t.Fatalf("frames after start = %d, want the opening plus one replacement", len(replaced))
+	}
+	if replaced[1].ToolCall().ID() != "run-b" {
+		t.Fatalf("replacement id = %q, want the parent call", replaced[1].ToolCall().ID())
+	}
+	keys := replaced[1].ToolCall().OptionalContent()
+	for key, value := range map[string]string{
+		"acp.subagent.id": "agent-beta", "acp.subagent.profile": "subagent_explore",
+		"acp.subagent.model": "devin", "acp.subagent.depth": "2", "acp.subagent.background": "false",
+	} {
+		if keys[key] != value {
+			t.Fatalf("%s = %q, want %q", key, keys[key], value)
+		}
+	}
+	for key := range keys {
+		if strings.HasPrefix(key, "cognition.ai/") || !strings.HasPrefix(key, "acp.subagent.") {
+			t.Fatalf("key outside the family: %q", key)
+		}
+	}
+	sink.mu.Lock()
+	if _, minted := sink.calls["agent-beta"]; minted {
+		t.Fatal("the lifecycle id minted a tool record")
+	}
+	if sink.calls["run-b"].output != "the report" {
+		t.Fatalf("report = %q", sink.calls["run-b"].output)
+	}
+	sink.mu.Unlock()
+
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call_update","toolCallId":"agent-beta","status":"completed","_meta":{"cognition.ai/subagent_completed":{"agentId":"agent-beta","success":false,"summary":"nope"}}}`))
+	if n := len(toolCallEvents(events, "run-b")); n != 2 {
+		t.Fatalf("frames after success false = %d, want no new frame", n)
+	}
+	sink.mu.Lock()
+	if _, ok := sink.calls["run-b"].keys["acp.subagent.success"]; ok {
+		t.Fatalf("success false was written: %+v", sink.calls["run-b"].keys)
+	}
+	if _, ok := sink.calls["run-b"].keys["acp.subagent.summary"]; ok {
+		t.Fatal("a summary rode a success false completion")
+	}
+	sink.mu.Unlock()
+
+	sink.update(usageUpdate(t, `{"sessionUpdate":"tool_call_update","toolCallId":"agent-beta","status":"completed","_meta":{"cognition.ai/subagent_completed":{"agentId":"agent-beta","success":true,"summary":"done"}}}`))
+	done := toolCallEvents(events, "run-b")
+	if len(done) != 3 {
+		t.Fatalf("frames after success = %d, want a replacement", len(done))
+	}
+	if done[2].ToolCall().OptionalContent()["acp.subagent.success"] != "true" || done[2].ToolCall().OptionalContent()["acp.subagent.summary"] != "done" {
+		t.Fatalf("success keys = %+v", done[2].ToolCall().OptionalContent())
+	}
+	sink.mu.Lock()
+	if sink.calls["run-b"].output != "the report" {
+		t.Fatalf("the summary replaced the report: %q", sink.calls["run-b"].output)
+	}
+	if len(sink.order) != 1 {
+		t.Fatalf("rows = %v, want the one parent call", sink.order)
+	}
+	sink.mu.Unlock()
+}
+
+func toolCallEvents(events []event.TurnEvent, id string) []event.TurnEvent {
+	var out []event.TurnEvent
+	for _, ev := range events {
+		if ev.Kind() == enum.TurnEventToolCall && ev.ToolCall().ID() == id {
+			out = append(out, ev)
+		}
+	}
+	return out
+}

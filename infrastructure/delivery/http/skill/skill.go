@@ -82,9 +82,13 @@ type row struct {
 	Level string `json:"level"`
 	// Tracked reports that an ownership row exists for the skill.
 	Tracked bool `json:"tracked"`
-	// Changed reports that the file was edited outside the loop since its
-	// row was written; the level above is then the owner's.
+	// Changed is true exactly when ChangedCause is not empty. The level
+	// above is then the owner's.
 	Changed bool `json:"changed"`
+	// ChangedCause is written on every row, empty when the file is still
+	// the one the row describes. When Changed is true it is one of the two
+	// contract sentences.
+	ChangedCause string `json:"changedCause"`
 	// Pending counts every proposal waiting on the owner for this skill;
 	// PendingStale counts those the owner can no longer accept.
 	Pending      int `json:"pending"`
@@ -114,6 +118,7 @@ func (s *server) list(c *gin.Context) {
 			Level:        r.Level,
 			Tracked:      r.Tracked,
 			Changed:      r.Changed,
+			ChangedCause: r.ChangedCause,
 			Pending:      r.Pending,
 			PendingStale: r.PendingStale,
 		}

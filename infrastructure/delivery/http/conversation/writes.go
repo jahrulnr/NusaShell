@@ -43,20 +43,30 @@ func (s *server) annotate(c *gin.Context) {
 	}
 	a := appconversation.Annotation{Title: body.Title, ProjectID: body.ProjectID, Pinned: body.Pinned, MemoryOff: body.MemoryOff, Label: body.Label}
 	if body.AgentID != nil || body.ProviderID != nil || body.ModelID != nil {
-		b := appconversation.RuntimeBinding{}
+		agentID, providerID, modelID := "", "", ""
 		if body.AgentID != nil {
-			b.AgentID = *body.AgentID
+			agentID = *body.AgentID
 		}
 		if body.ProviderID != nil {
-			b.ProviderID = *body.ProviderID
+			providerID = *body.ProviderID
 		}
 		if body.ModelID != nil {
-			b.ModelID = *body.ModelID
-			if body.AgentID != nil {
-				// For an agent the id is the model it reports, not a
-				// provider catalog entry.
-				b.AgentModel, b.ModelID = b.ModelID, ""
-			}
+			modelID = *body.ModelID
+		}
+		var b valueobject.RuntimeBinding
+		var err error
+		switch {
+		case agentID != "" && providerID != "":
+			transport.WriteProblem(c, 400, "invalid_argument", "a room runs on an agent or a provider, not both")
+			return
+		case agentID != "":
+			b, err = valueobject.NewAgentBinding(agentID, modelID)
+		default:
+			b, err = valueobject.NewHarnessBinding(providerID, modelID)
+		}
+		if err != nil {
+			transport.WriteProblem(c, 400, "invalid_argument", err.Error())
+			return
 		}
 		a.Runtime = &b
 	}

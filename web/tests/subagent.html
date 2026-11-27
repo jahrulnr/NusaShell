@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles/app.css">
+  <script src="/vendor/tailwind/tailwind.browser.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: var(--bg);
+      --color-panel: var(--panel);
+      --color-raised: var(--raised);
+      --color-hover: var(--hover);
+      --color-line: var(--line);
+      --color-fg: var(--fg);
+      --color-muted: var(--muted);
+      --color-faint: var(--faint);
+      --color-accent: var(--accent);
+      --color-accent-fg: var(--accent-fg);
+      --color-bad: var(--bad);
+    }
+  </style>
+</head>
+<body class="bg-bg text-fg">
+  <div id="root" class="p-4 max-w-3xl"></div>
+  <script type="module">
+    import { html, render } from '/vendor/preact/htm-preact.mjs';
+    import { Transcript } from '/components/transcript.js';
+
+    const user = (id) => ({ id, role: 'user', content: 'go' });
+    const room = (id, assistant, info) => ({
+      id,
+      infoStatus: 'ready',
+      info: { runtime: 'agent', ...(info || {}) },
+      messages: [user(id + 'u'), assistant],
+      hist: { status: 'ready', error: null, more: false, loadingEarlier: false },
+      queue: [], steers: [], pendingOpen: null, settling: false, failed: null, live: null,
+      sel: {}, quotes: [], files: [], refs: [],
+    });
+    const run = (over) => ({
+      id: 'p', name: 'run_subagent', status: 'completed', output: '', ...over,
+    });
+    const input = (title, task) => JSON.stringify({ title, task, profile: 'fast' });
+
+    const running = room('run', {
+      id: 'a', role: 'assistant', content: '',
+      toolCalls: [
+        run({ input: input('Look around', 'Read the tree'), output: 'Background subagent started.', keys: { 'acp.subagent.id': 'run-1', 'acp.subagent.background': 'true', 'acp.subagent.model': 'devin' } }),
+        { id: 'm', name: 'read_file', kind: 'read', title: 'notes', input: 'a.go', status: 'completed', keys: { 'acp.subagent.parent': 'run-1' } },
+      ],
+    });
+    const done = room('done', {
+      id: 'a', role: 'assistant', finishReason: 'stop', content: 'The parent said it too.',
+      toolCalls: [
+        run({ input: input('Look around', 'Read the tree'), output: 'the report itself', keys: { 'acp.subagent.id': 'run-1', 'acp.subagent.success': 'true', 'acp.subagent.summary': 'one short line' } }),
+      ],
+    });
+    const incomplete = room('miss', {
+      id: 'a', role: 'assistant', finishReason: 'stop', content: '',
+      toolCalls: [run({ input: input('Look around', 'Read the tree'), keys: { 'acp.subagent.id': 'run-1' } })],
+    });
+    const refused = room('no', {
+      id: 'a', role: 'assistant', finishReason: 'stop', content: '',
+      toolCalls: [run({ input: input('Look around', 'Read the tree'), status: 'failed', keys: { 'acp.subagent.id': 'run-1', 'acp.subagent.success': 'false' } })],
+    });
+    const stopped = room('stop', {
+      id: 'a', role: 'assistant', finishReason: 'interrupted', content: '',
+      toolCalls: [run({ input: input('Look around', 'Read the tree'), keys: { 'acp.subagent.id': 'run-1' } })],
+    });
+    const nested = room('nest', {
+      id: 'a', role: 'assistant', finishReason: 'stop', content: '',
+      toolCalls: [
+        run({ id: 'outer', input: input('Outer', 'The parent task'), keys: { 'acp.subagent.id': 'run-1', 'acp.subagent.success': 'true' } }),
+        run({ id: 'inner', input: JSON.stringify({ title: 'Deeper', task: 'Look again' }), keys: { 'acp.subagent.id': 'run-2', 'acp.subagent.parent': 'run-1', 'acp.subagent.depth': '2' } }),
+        { id: 'm', name: 'exec', kind: 'execute', title: 'ls', input: 'ls', status: 'completed', keys: { 'acp.subagent.parent': 'run-2' } },
+      ],
+    });
+    const delegated = room('del', {
+      id: 'a', role: 'assistant', finishReason: 'stop', content: '',
+      toolCalls: [{ id: 'm', name: 'read_file', title: 'notes', input: 'a.go', status: 'completed', keys: { 'acp.subagent.parent': 'missing' } }],
+    });
+    const plain = room('plain', {
+      id: 'a', role: 'assistant', finishReason: 'stop', content: '',
+      toolCalls: [run({ input: input('Look around', 'Read the tree') })],
+    });
+    const blind = room('blind', {
+      id: 'a', role: 'assistant', content: '',
+      toolCalls: [run({ input: input('Look around', 'Read the tree'), keys: { 'acp.subagent.id': 'run-1', 'acp.subagent.background': 'true' } })],
+    }, { turnActive: true });
+
+    const scroller = { current: null };
+    const panel = (title, r) => html`<section class="mb-8">
+      <h2 class="text-xs text-faint mb-2">${title}</h2>
+      <div class="rounded-xl border border-line p-3"><${Transcript} room=${r} scroller=${scroller} /></div>
+    </section>`;
+    render(html`<div>
+      ${panel('Running', running)}
+      ${panel('Done', done)}
+      ${panel('Incomplete', incomplete)}
+      ${panel('Success false', refused)}
+      ${panel('Stopped', stopped)}
+      ${panel('Nested', nested)}
+      ${panel('Delegated', delegated)}
+      ${panel('No keys', plain)}
+      ${panel('Blind', blind)}
+    </div>`, document.getElementById('root'));
+    document.body.dataset.ready = '1';
+  </script>
+</body>
+</html>

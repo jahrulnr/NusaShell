@@ -30,13 +30,14 @@ type conversationDTO struct {
 	// provider's own.
 	Effort   string `json:"effort,omitempty"`
 	Upstream string `json:"upstream,omitempty"`
-	// Agent names the external agent running this room; empty means the
-	// room runs on the provider route.
-	AgentID   string `json:"agentId,omitempty"`
-	ProjectID string `json:"projectId,omitempty"`
-	Pinned    bool   `json:"pinned,omitempty"`
-	MemoryOff bool   `json:"memoryOff,omitempty"`
-	Label     string `json:"label,omitempty"`
+	// Runtime is the kind the server decided. Clients read it. They do
+	// not infer a kind from agentId. AgentID is that kind's identifier.
+	Runtime   enum.Runtime `json:"runtime"`
+	AgentID   string       `json:"agentId,omitempty"`
+	ProjectID string       `json:"projectId,omitempty"`
+	Pinned    bool         `json:"pinned,omitempty"`
+	MemoryOff bool         `json:"memoryOff,omitempty"`
+	Label     string       `json:"label,omitempty"`
 	// Routing is the room's reply routing override; absent = the default.
 	Routing        *valueobject.Routing   `json:"routing,omitempty"`
 	Workspace      string                 `json:"workspace,omitempty"`
@@ -91,6 +92,15 @@ type conversationDTO struct {
 	// Lifecycle is the thread's state. The server always writes one of the
 	// six words. It is not derived from busy.
 	Lifecycle string `json:"lifecycle"`
+	// AgentClass is written while an agent failure holds the room, and
+	// omitted when it does not. Retry is auto during a retry and none
+	// once the turn has ended in that class. RetryAt is the unix
+	// millisecond time the agent named, and only then. AgentMessage is
+	// the agent's words. Runtime stays the kind, beside this quartet.
+	AgentClass   string `json:"agentClass,omitempty"`
+	Retry        string `json:"retry,omitempty"`
+	RetryAt      *int64 `json:"retryAt,omitempty"`
+	AgentMessage string `json:"agentMessage,omitempty"`
 }
 
 // agentOptionsDTO is an agent room's session options as the agent answered: the
@@ -129,6 +139,7 @@ func toAgentOptions(opts []dservice.AgentOption) []agentOptionDTO {
 type pendingDTO struct {
 	// One runtime only: an agent pick names the model the agent reports, a
 	// provider pick names its catalog entry.
+	Runtime    string `json:"runtime,omitempty"`
 	AgentID    string `json:"agentId,omitempty"`
 	ModelID    string `json:"modelId,omitempty"`
 	ProviderID string `json:"providerId,omitempty"`
@@ -149,15 +160,20 @@ type pendingOption struct {
 // beside the agent id; on the wire both runtimes use modelId.
 func toPending(sel drepo.PendingSelection) *pendingDTO {
 	out := &pendingDTO{
-		AgentID: sel.AgentID, ProviderID: sel.ProviderID,
 		Upstream: deref(sel.Upstream), AcceptedAt: sel.AcceptedAt,
 	}
 	if sel.Effort != nil {
 		out.Effort = sel.Effort.String()
 	}
-	out.ModelID = sel.ModelID
-	if sel.AgentID != "" {
-		out.ModelID = sel.AgentModel
+	if sel.Binding != nil {
+		out.Runtime = sel.Binding.Kind().String()
+		if sel.Binding.Kind().UsesProviderRoute() {
+			out.ProviderID = sel.Binding.ProviderID()
+			out.ModelID = sel.Binding.ModelID()
+		} else {
+			out.AgentID = sel.Binding.AgentID()
+			out.ModelID = sel.Binding.AgentModel()
+		}
 	}
 	ids := make([]string, 0, len(sel.Options))
 	for id := range sel.Options {
@@ -185,6 +201,7 @@ func toConversation(i drepo.ConversationInfo) conversationDTO {
 		ModelID:        i.ModelID,
 		Effort:         i.Effort,
 		Upstream:       i.Upstream,
+		Runtime:        i.Kind(),
 		AgentID:        i.AgentID,
 		ProjectID:      i.ProjectID,
 		Pinned:         i.Pinned,
@@ -210,18 +227,20 @@ func toConversation(i drepo.ConversationInfo) conversationDTO {
 // input string the model produced, when the call was
 // recorded, the plain result text when one exists, and any
 // media the tool produced. Tool I/O intentionally crosses to the local
-// owner UI; optionalContent and key material never do. Output and
-// calledAt are pointers so absent facts omit the key rather than
-// inventing a result or the zero time.
+// owner UI. optionalContent stays internal except the acp.subagent
+// family, which history serves as keys. Output and calledAt are
+// pointers so absent facts omit the key rather than inventing a
+// result or the zero time.
 type toolCallDTO struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Type        string          `json:"type"`   // "origin" | "injection"
-	Status      string          `json:"status"` // "pending" | "completed" | "failed"
-	Input       string          `json:"input"`
-	CalledAt    *time.Time      `json:"calledAt,omitempty"`
-	Output      *string         `json:"output,omitempty"`
-	Attachments []attachmentDTO `json:"attachments,omitempty"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`   // "origin" | "injection"
+	Status      string            `json:"status"` // "pending" | "completed" | "failed"
+	Input       string            `json:"input"`
+	CalledAt    *time.Time        `json:"calledAt,omitempty"`
+	Output      *string           `json:"output,omitempty"`
+	Attachments []attachmentDTO   `json:"attachments,omitempty"`
+	Keys        map[string]string `json:"keys,omitempty"`
 }
 
 func toToolCall(t entity.ToolCall) toolCallDTO {
@@ -247,6 +266,7 @@ func toToolCall(t entity.ToolCall) toolCallDTO {
 	for _, a := range t.OutputAttachments() {
 		d.Attachments = append(d.Attachments, toAttachment(a))
 	}
+	d.Keys = entity.SubagentKeys(t.OptionalContent())
 	return d
 }
 

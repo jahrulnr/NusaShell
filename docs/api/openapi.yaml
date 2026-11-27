@@ -287,7 +287,11 @@ paths:
         fact — the result is **not a snapshot**: writes between page
         requests shift offsets, so a client paging a live list may see
         duplicates or gaps. Each item carries `lifecycle`, the same
-        closed value as the detail and as `conversation_list`.
+        closed value as the detail and as `conversation_list`. Each item
+        also carries `runtime` (`harness` or `agent`); clients read it
+        and do not infer the kind from `agentId`. An agent hold also
+        carries `agentClass`, `retry`, `retryAt`, and `agentMessage` on
+        those same rows.
       parameters:
         - name: offset
           in: query
@@ -1440,25 +1444,20 @@ paths:
       tags: [agents]
       summary: The models an agent offers
       description: |
-        The agent's model catalog, from the server's cache. A cache miss
-        starts the agent once inside the server and keeps the answer
-        until the agent's definition changes. A caller does not start
-        an agent process of its own.
+        The agent's model catalog, read from the stored catalog. This
+        route does not start the agent. A missing catalog, or one that
+        never reported a model list, stays `unknown`.
 
         `status` is `known` or `unknown` and is always written.
-        `known`: `data` is the list the picker shows, and `current`
-        marks the model the agent is on. An empty `data` means the
-        agent stated that it offers no models.
-        `unknown`: the session did not report a model list. `data` is
-        absent — an empty array is not this answer. `default.by` is
-        `agent`. `default.id` is the current id when the session named
-        one, and `""` when it did not (the agent picks, and the id is
-        not known). `reason` says why.
+        `known`: `data` is the stored list, and `current` marks the
+        model the agent is on. An empty `data` means that stored list
+        is empty.
+        `unknown`: `data` is absent — an empty array is not this
+        answer. `default.by` is `agent`. `default.id` is the stored
+        current id, or `""` when none was stored. `reason` says why.
 
-        A failure is not a catalog. Sign-in required is `401`, a
-        session that could not open is `502`, and no runtime is `503`.
-        The problem's `detail` names the cause. None of these is `200`
-        with `data: []`.
+        An unknown agent is `404`. The catalog store being unavailable
+        is `503`. Neither is `200` with `data: []`.
       responses:
         "200":
           description: |
@@ -1485,16 +1484,14 @@ paths:
                     default: { id: "", by: agent }
                     reason: "the agent reported no model list"
         "400": { $ref: "#/components/responses/BadRequest" }
-        "401":
-          description: The agent needs a sign-in. `detail` names that cause.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/Problem" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/Internal" }
-        "502": { $ref: "#/components/responses/UpstreamError" }
-        "503": { $ref: "#/components/responses/Unavailable" }
+        "503":
+          description: "The catalog store is unavailable. Not a 200 with data: []."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /api/agents/{agentId}/options:
     parameters:
@@ -3352,12 +3349,20 @@ paths:
       description: |
         Every live catalog row, joined with who may change it and what waits on
         the owner. `level` is the row's level while the row describes the file on
-        disk, and `user` otherwise. `changed` says the file was edited outside the
-        loop since its row was written. `digest` is the whole file on disk: a level
-        move sends it back unchanged. Reading writes nothing. The page is not
-        paged, because the catalog is bounded by the byte budget the loop enforces.
-        Both skill paths are mounted only when the server wires every skill port;
-        a build without them answers `404`.
+        disk, and `user` otherwise. `changed` is true exactly when
+        `changedCause` is not empty. `changedCause` is that cause, the same
+        kind of sentence as `staleCause`: empty when the row describes the
+        file, `the loop wrote this skill's file, but the decision was not
+        recorded` when those bytes are a loop write whose decision was not
+        recorded, and `the skill's file changed since its row was written`
+        for any other mismatch. It does not say who edited the file.
+        `digest` is the whole file on disk: a level move sends it back
+        unchanged. Reading writes nothing. The page is not paged, because
+        the catalog is bounded by the byte budget the loop enforces.
+        Both skill paths are mounted only when the server wires every skill
+        port; a build without them answers `404` with code `route_not_mounted`.
+        A client matches that code. Matching the detail text `no such route`
+        is wrong.
       parameters:
         - name: workspace
           in: query
@@ -3369,6 +3374,19 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SkillPage" }
+        "404":
+          description: |
+            These routes are not mounted. `code` is `route_not_mounted`.
+            A missing skill on a mounted route is `not_found`, not this.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: "urn:nusashell:problem:route_not_mounted"
+                title: "Not Found"
+                status: 404
+                code: "route_not_mounted"
+                detail: "no such route"
         "500": { $ref: "#/components/responses/Internal" }
   /api/skills/{name}/level:
     post:
@@ -3448,7 +3466,9 @@ paths:
         A proposal that was already decided answers `409`. So does one the owner can
         no longer accept: that answer names the state it found, and the proposal
         stays pending until the owner dismisses it. An accept that would take the
-        catalog over its byte budget answers `409` with the overage.
+        catalog over its byte budget answers `409` with `overage`, the integer
+        number of bytes it would go over. `detail` may still say the sentence.
+        The number is the field. A client does not parse `detail` for it.
 
         When the file is written but the decision cannot be recorded, the answer is
         `500` and the failure is logged; a row that refuses the decision after the
@@ -3477,7 +3497,21 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "409":
+          description: |
+            The proposal was already decided, no longer applies, or the
+            accept would pass the catalog byte budget. Only the budget
+            case carries `overage`. Every other 409 omits it.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: "urn:nusashell:problem:conflict"
+                title: "Conflict"
+                status: 409
+                code: "conflict"
+                detail: "the catalog would be over its byte budget by 1,234 bytes; make room before accepting"
+                overage: 1234
         "500": { $ref: "#/components/responses/Internal" }
 
 components:
@@ -3538,7 +3572,7 @@ components:
   schemas:
     SkillRow:
       type: object
-      required: [name, description, source, path, digest, level, tracked, changed, pending, pendingStale]
+      required: [name, description, source, path, digest, level, tracked, changed, changedCause, pending, pendingStale]
       properties:
         name:
           type: string
@@ -3562,7 +3596,14 @@ components:
           description: An ownership row exists for the skill.
         changed:
           type: boolean
-          description: The file was edited outside the loop since its row was written, so the level is the owner's.
+          description: True exactly when changedCause is not empty. The file on disk is not the one the row was written for, so the level is the owner's.
+        changedCause:
+          type: string
+          description: |
+            Why `changed` is true. Empty when it is false. Otherwise one of
+            `the loop wrote this skill's file, but the decision was not recorded`
+            or `the skill's file changed since its row was written`. The label
+            is this sentence. It does not say who edited the file.
         pending:
           type: integer
           description: Proposals waiting on the owner for this skill.
@@ -3718,12 +3759,20 @@ components:
         status: { type: integer, example: 404 }
         code:
           type: string
-          enum: [invalid_argument, nothing_to_compact, nothing_to_clear, nothing_to_fork, forbidden_origin, unauthenticated, csrf, too_many_attempts, not_found, interrupted, busy, confirmation_required, gone, input_too_large, queue_full, internal, upstream_error, unavailable, upstream_timeout]
+          enum: [invalid_argument, nothing_to_compact, nothing_to_clear, nothing_to_fork, forbidden_origin, unauthenticated, csrf, too_many_attempts, not_found, route_not_mounted, interrupted, busy, confirmation_required, conflict, gone, input_too_large, queue_full, internal, upstream_error, quota_exhausted, agent_credential, unavailable, upstream_timeout]
           description: Stable machine code for programmatic routing.
         detail:
           type: string
           description: Display-safe explanation. Never contains internal causes, file paths, or upstream bodies.
           example: "conversation not found"
+        overage:
+          type: integer
+          minimum: 1
+          description: |
+            Present only on the catalog-budget 409 from deciding a skill
+            proposal. Bytes the accept would exceed `skills.catalog_max_bytes`
+            by (`total - budget`). Absent on every other problem. A client
+            reads this field and does not parse `detail` for the number.
         instance: { type: string, description: "Optional request-scoped reference." }
       additionalProperties: false
 
@@ -3750,7 +3799,7 @@ components:
 
     Conversation:
       type: object
-      required: [id, providerId, modelId, environment, usage, createdAt, updatedAt, messageCount, activeCount, sealedSegments, lifecycle]
+      required: [id, providerId, modelId, runtime, environment, usage, createdAt, updatedAt, messageCount, activeCount, sealedSegments, lifecycle]
       properties:
         id: { type: string, example: "c_k4j9xm2p8q1vz7w0t6nb5r3yhd" }
         title:
@@ -3762,6 +3811,17 @@ components:
         modelId:
           type: string
           description: Model id within the provider's catalog (or the agent's model in an agent room); empty when unbound.
+        runtime:
+          type: string
+          enum: [harness, agent]
+          description: |
+            Who runs this room's turns. Always written. Clients read
+            `runtime` and never infer the kind from `agentId` (B-107,
+            D-17). Spawn's unadmitted row may show `none`; list and
+            detail projections of a real room do not.
+        agentId:
+          type: string
+          description: Bound agent id when `runtime` is `agent`. Omitted on a harness room. Not a substitute for `runtime`.
         effort:
           type: string
           description: The reasoning effort the owner picked for the room; absent means the model's configured effort.
@@ -3805,6 +3865,23 @@ components:
           minimum: 0
           description: Jobs queued behind the room's running turn — the same number the conversation.queued notice carries. Present on detail and on list items so a tab that missed that notice still opens on the real count; omitted when nothing waits and never part of persisted state. A count, not a lifecycle. A running room may be waiting.
         lifecycle: { $ref: "#/components/schemas/ThreadLifecycle" }
+        agentClass: { $ref: "#/components/schemas/AgentClass" }
+        retry:
+          type: string
+          enum: [auto, none]
+          description: |
+            Present only with agentClass. auto means the server is still
+            retrying a rate_limited hold (only while lastUpdateAt is
+            absent; D-16). none means no automatic retry — including a
+            spent rate_limited bound that still carries agentClass
+            rate_limited. Normative rule in contract.md § Agent honesty.
+        retryAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds when a rate_limited hold ends. Present only when the agent named a delay. Absent means no time was named.
+        agentMessage:
+          type: string
+          description: The agent's words for this hold, truncated and redacted. Present only with agentClass. Never the stock line "unknown error".
         pending:
           $ref: "#/components/schemas/Pending"
       additionalProperties: false
@@ -3820,6 +3897,15 @@ components:
         hasMore: { type: boolean }
       additionalProperties: false
 
+    AgentClass:
+      type: string
+      enum: [rate_limited, quota_exhausted, credential, process, unknown]
+      description: |
+        Why an agent holds this room. Omitted when nothing holds it.
+        Absent is not the class `unknown`. `unknown` is written only
+        for an agent failure that fits no other class, and that row
+        still carries `agentMessage`. Not a lifecycle word. Status and
+        code for each class are in contract.md § Agent honesty.
     ThreadLifecycle:
       type: string
       enum: [running, approval, interrupted, failed, idle, unknown]
@@ -3837,7 +3923,9 @@ components:
         replaced it; `failed` — the last terminal failed and was not
         an interruption; `idle` — the last terminal completed.
         `waiting` stays a count and is not one of these words.
-        Normative rules are in contract.md under Thread lifecycle.
+        `agentClass` is not one of these words.
+        Normative rules are in contract.md under Thread lifecycle and
+        Agent honesty.
     ConversationPage:
       type: object
       required: [data, page]
@@ -3990,6 +4078,37 @@ components:
           type: array
           items: { $ref: "#/components/schemas/AttachmentRef" }
           description: Media references the tool produced alongside its output — stored references only, resolved bytes are never served.
+        keys:
+          type: object
+          additionalProperties: false
+          description: |
+            Devin subagent facts only. Omitted on an ordinary tool.
+            The lifecycle update's toolCallId is `acp.subagent.id`, never
+            this call's `id`. Normative rules are in contract.md under
+            ACP subagent.
+          properties:
+            "acp.subagent.id":
+              type: string
+              description: Subagent agentId, written on the parent run call.
+            "acp.subagent.parent":
+              type: string
+              description: On a nested call, the parent agentId it groups under.
+            "acp.subagent.profile":
+              type: string
+            "acp.subagent.model":
+              type: string
+            "acp.subagent.depth":
+              type: string
+              description: Reported depth. Depth of 2 or more still renders flat.
+            "acp.subagent.background":
+              type: string
+              description: "`true` or `false` when the start update named it."
+            "acp.subagent.success":
+              type: string
+              description: Specified only as `true` on the success path. Any other value is unspecified and renders incomplete.
+            "acp.subagent.summary":
+              type: string
+              description: Short line from a success completion. Not a replacement for the parent output.
       additionalProperties: false
 
     AttachmentRef:
@@ -4606,7 +4725,7 @@ components:
         source:
           type: string
           enum: [cache, config]
-          description: "`cache` is the server's agent-model cache. `config` is the stored provider record. This route answers `cache`."
+          description: "`cache` is the stored agent catalog. `config` is the stored provider record. This route answers `cache`."
         data:
           type: array
           items: { $ref: "#/components/schemas/AgentModel" }

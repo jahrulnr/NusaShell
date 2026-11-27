@@ -81,7 +81,7 @@ func (a *App) status(ctx context.Context, chat valueobject.ChatRef, convID strin
 		a.reply(ctx, chat, "This chat's thread is not there anymore. Send a message to start a new one, or /new.")
 		return
 	}
-	rt := Runtime{AgentID: info.AgentID, ProviderID: info.ProviderID, ModelID: info.ModelID}
+	rt := Runtime{Kind: info.Kind(), AgentID: info.AgentID, ProviderID: info.ProviderID, ModelID: info.ModelID}
 	state := "idle"
 	if a.runner.Busy(convID) {
 		state = "working"
@@ -161,7 +161,7 @@ func (a *App) use(ctx context.Context, chat valueobject.ChatRef, convID string, 
 	}
 	want := strings.ToLower(args[0])
 	for _, c := range choices {
-		if strings.ToLower(useName(c.Runtime)) != want && !(c.Runtime.AgentID != "" && strings.ToLower(c.Runtime.AgentID) == want) {
+		if strings.ToLower(useName(c.Runtime)) != want && !(c.Runtime.Kind.MirrorsAgentCommands() && strings.ToLower(c.Runtime.AgentID) == want) {
 			continue
 		}
 		key := convID
@@ -180,10 +180,10 @@ func (a *App) use(ctx context.Context, chat valueobject.ChatRef, convID string, 
 // useName is how a runtime is typed after /use: the agent id, the agent id
 // and model, or provider/model.
 func useName(r Runtime) string {
-	switch {
-	case r.AgentID != "" && r.ModelID != "":
-		return r.AgentID + "/" + r.ModelID
-	case r.AgentID != "":
+	if r.Kind.MirrorsAgentCommands() {
+		if r.ModelID != "" {
+			return r.AgentID + "/" + r.ModelID
+		}
 		return r.AgentID
 	}
 	return r.ProviderID + "/" + r.ModelID

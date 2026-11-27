@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -57,5 +58,81 @@ func TestMediaPartIsServedWithoutItsPin(t *testing.T) {
 	want := `{"mediaType":"image/png","modality":"image","uri":"file:///data/uploads/u_1/chart.png","name":"chart.png"}`
 	if got.Text != want {
 		t.Fatalf("media part = %s\nwant        %s", got.Text, want)
+	}
+}
+
+// History toolCalls carry the acp.subagent family and nothing else.
+// success false is omitted. An ordinary call omits keys.
+func TestHistoryToolCallsCarryOnlyTheSubagentFamily(t *testing.T) {
+	run, err := entity.NewToolCall("run-b", "Ran explore", `{"title":"Beta"}`, enum.TooltypeDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.SetOutput("the report")
+	run.SetOptionalContent("acp.subagent.id", "agent-beta")
+	run.SetOptionalContent("acp.subagent.success", "false")
+	run.SetOptionalContent("acp.subagent.summary", "done")
+	run.SetOptionalContent("acp.subagent.extra", "nope")
+	run.SetOptionalContent("cognition.ai/subagent_started", "nope")
+	member, err := entity.NewToolCall("member-1", "Read file", `{}`, enum.TooltypeDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member.SetOptionalContent("acp.subagent.parent", "agent-beta")
+	ordinary, err := entity.NewToolCall("ordinary", "exec", `{}`, enum.TooltypeOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := entity.NewMessage(enum.RoleAssistant, "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []entity.ToolCall{run, member, ordinary} {
+		if err := msg.AddToolCall(tc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := json.Marshal(toMessage(msg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		ToolCalls []map[string]json.RawMessage `json:"toolCalls"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]map[string]json.RawMessage{}
+	for _, row := range body.ToolCalls {
+		var id string
+		_ = json.Unmarshal(row["id"], &id)
+		byID[id] = row
+	}
+	var keys map[string]string
+	if json.Unmarshal(byID["run-b"]["keys"], &keys) != nil {
+		t.Fatalf("run keys = %s", byID["run-b"]["keys"])
+	}
+	if keys["acp.subagent.id"] != "agent-beta" || keys["acp.subagent.summary"] != "done" {
+		t.Fatalf("keys = %+v", keys)
+	}
+	if _, ok := keys["acp.subagent.success"]; ok {
+		t.Fatalf("success false crossed: %+v", keys)
+	}
+	if _, ok := keys["acp.subagent.extra"]; ok {
+		t.Fatalf("a key outside the family crossed: %+v", keys)
+	}
+	if _, ok := keys["cognition.ai/subagent_started"]; ok {
+		t.Fatal("cognition.ai crossed")
+	}
+	var output string
+	if json.Unmarshal(byID["run-b"]["output"], &output) != nil || output != "the report" {
+		t.Fatalf("output = %s", byID["run-b"]["output"])
+	}
+	var parent map[string]string
+	if json.Unmarshal(byID["member-1"]["keys"], &parent) != nil || parent["acp.subagent.parent"] != "agent-beta" {
+		t.Fatalf("member keys = %s", byID["member-1"]["keys"])
+	}
+	if _, ok := byID["ordinary"]["keys"]; ok {
+		t.Fatalf("ordinary call wrote keys: %s", byID["ordinary"]["keys"])
 	}
 }

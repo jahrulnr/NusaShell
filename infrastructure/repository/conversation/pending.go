@@ -132,7 +132,7 @@ func (r *ConversationRepository) SupersedePendingSelection(ctx context.Context, 
 		return err
 	}
 	if cover.Runtime {
-		stored.AgentID, stored.AgentModel, stored.ProviderID, stored.ModelID = "", "", "", ""
+		stored.Binding = nil
 	}
 	if cover.Effort {
 		stored.Effort = nil
@@ -183,13 +183,11 @@ func mergeSelection(stored, next repo.PendingSelection) repo.PendingSelection {
 	if !next.AcceptedAt.IsZero() {
 		out.AcceptedAt = next.AcceptedAt
 	}
-	switch {
-	case next.AgentID != "":
-		out.AgentID, out.AgentModel = next.AgentID, next.AgentModel
-		out.ProviderID, out.ModelID = "", ""
-	case next.ProviderID != "" || next.ModelID != "":
-		out.ProviderID, out.ModelID = next.ProviderID, next.ModelID
-		out.AgentID, out.AgentModel = "", ""
+	if next.Binding != nil && !next.Binding.IsZero() {
+		// One target replaces the other whole. The constructors already
+		// refused a mix, so the merge does not inspect identifiers.
+		b := *next.Binding
+		out.Binding = &b
 	}
 	if next.Effort != nil {
 		out.Effort = next.Effort

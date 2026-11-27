@@ -552,7 +552,7 @@ func TestRescueLogsAFailedFollowUp(t *testing.T) {
 	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "verdict from PA", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, &rec); err != nil {
 		t.Fatal(err)
 	}
-	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return applied }}, agentRoom: true}
+	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return applied }}, exec: agentExec{}}
 	j.Opts.Steering = s
 	j.Bind("c_log", nil)
 	j.rescueSteers()
@@ -579,7 +579,7 @@ func TestRescueLogsNothingWhenItSucceeds(t *testing.T) {
 	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "arrived", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, &rec); err != nil {
 		t.Fatal(err)
 	}
-	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return nil }}, agentRoom: true}
+	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return nil }}, exec: agentExec{}}
 	j.Opts.Steering = s
 	j.Bind("c_quiet", nil)
 	j.rescueSteers()
@@ -592,15 +592,15 @@ func TestRescueLogsNothingWhenItSucceeds(t *testing.T) {
 // naming a binding after the turn that used it ended.
 func TestActiveModelLivesOnlyAsLongAsTheTurn(t *testing.T) {
 	j := &Send{}
-	if _, _, ok := j.ActiveModel(); ok {
+	if _, ok := j.Active(); ok {
 		t.Fatal("a turn that never resolved a binding reports one")
 	}
-	j.setActive("gw1", "m1")
-	if p, m, ok := j.ActiveModel(); !ok || p != "gw1" || m != "m1" {
-		t.Fatalf("active = %s/%s,%v", p, m, ok)
+	j.setActive(ActiveBinding{Kind: enum.RuntimeHarness, ProviderID: "gw1", ModelID: "m1"})
+	if b, ok := j.Active(); !ok || b.Kind != enum.RuntimeHarness || b.ProviderID != "gw1" || b.ModelID != "m1" {
+		t.Fatalf("active = %+v,%v", b, ok)
 	}
 	j.clearActive()
-	if _, _, ok := j.ActiveModel(); ok {
+	if _, ok := j.Active(); ok {
 		t.Fatal("the active binding outlived the turn")
 	}
 }

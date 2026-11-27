@@ -191,6 +191,9 @@ type openedPayload struct {
 	// never an omitted field: a missing value is what an older peer looks
 	// like, and the client treats that as unknown.
 	Steerable bool `json:"steerable"`
+	// Clock is preparing on an agent turn's admission. Provider turns
+	// omit it. It is never a zero or a null.
+	Clock string `json:"clock,omitempty"`
 }
 
 // resyncPayload is the turn.resync_required body. Turn is "active"
@@ -215,6 +218,12 @@ type resyncPayload struct {
 	Parts   []*livePart   `json:"parts,omitempty"`
 	Dropped int           `json:"dropped,omitempty"`
 	Phase   *phasePayload `json:"phase,omitempty"`
+	// Clock, PromptedAt, and LastUpdateAt are the agent turn's active
+	// snapshot. Absent means the stamp was never written. Zero and null
+	// are not written. Provider turns omit them.
+	Clock        string `json:"clock,omitempty"`
+	PromptedAt   *int64 `json:"promptedAt,omitempty"`
+	LastUpdateAt *int64 `json:"lastUpdateAt,omitempty"`
 }
 
 // resyncFrame answers a turn.watch that can't be satisfied from the
@@ -296,6 +305,10 @@ type phasePayload struct {
 	// RetryAfterMs is the pause length of a retry_wait phase. Phases with
 	// no pause omit it.
 	RetryAfterMs int64 `json:"retryAfterMs,omitempty"`
+	// Clock is set when phase is "clock": preparing, waiting, or working.
+	// PromptedAt rides with it once the prompt has been written.
+	Clock      string `json:"clock,omitempty"`
+	PromptedAt *int64 `json:"promptedAt,omitempty"`
 }
 
 // reasoningPayload is one bounded chunk of provider reasoning text.
@@ -393,6 +406,16 @@ type terminalPayload struct {
 	UserMessagePersisted *bool               `json:"userMessagePersisted,omitempty"`
 	Steering             []steerStatePayload `json:"steering,omitempty"`
 	ResyncRequired       bool                `json:"resyncRequired"`
+	// AgentClass, Retry, RetryAt, and AgentMessage are the hold. They are
+	// omitted when the agent is not holding the room. RetryAt is present
+	// only when the agent named a delay. PromptedAt and LastUpdateAt are
+	// omitted when they were never written, never as 0 or null.
+	AgentClass   string `json:"agentClass,omitempty"`
+	Retry        string `json:"retry,omitempty"`
+	RetryAt      *int64 `json:"retryAt,omitempty"`
+	AgentMessage string `json:"agentMessage,omitempty"`
+	PromptedAt   *int64 `json:"promptedAt,omitempty"`
+	LastUpdateAt *int64 `json:"lastUpdateAt,omitempty"`
 }
 
 // marshalFrame serializes a frame and enforces the outbound size cap —

@@ -110,6 +110,7 @@ func Model(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	var conv struct {
+		Runtime    string `json:"runtime"`
 		AgentID    string `json:"agentId"`
 		ProviderID string `json:"providerId"`
 		ModelID    string `json:"modelId"`
@@ -124,7 +125,7 @@ func Model(args []string, stdout, stderr io.Writer) int {
 		}
 		return s
 	}
-	if conv.AgentID != "" {
+	if conv.Runtime == "agent" {
 		fmt.Fprintf(stdout, "agent:    %s\nmodel:    %s\n", conv.AgentID, dash(conv.ModelID))
 	} else {
 		fmt.Fprintf(stdout, "provider: %s\nmodel:    %s\n", dash(conv.ProviderID), dash(conv.ModelID))

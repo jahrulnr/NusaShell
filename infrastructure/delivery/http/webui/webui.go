@@ -27,10 +27,12 @@ func Register(r *gin.Engine, assets fs.FS) {
 	if assets == nil {
 		return
 	}
-	// etags caches each asset's strong validator. The files are embedded, so
-	// a name's bytes never change for the life of the process: one hash per
-	// file turns a reload into a 304 instead of a re-download, which is what
-	// makes the no-cache contract on the scripts affordable.
+	// etags caches each asset's strong validator for the size and mtime that
+	// were hashed. Embedded files never move those, so one hash lasts the
+	// process and a reload is a 304, which is what makes the no-cache
+	// contract on the scripts affordable. A directory served from disk does
+	// move them: a changed file is hashed again, and the previous ETag stops
+	// matching.
 	var etags sync.Map
 	serve := func(c *gin.Context) {
 		headers(c)
@@ -79,11 +81,29 @@ func Register(r *gin.Engine, assets fs.FS) {
 // few hours, so a new icon reaches an open tab the same day.
 const iconMaxAge = 4 * 60 * 60
 
-// assetETag answers name's strong ETag, hashing its bytes once and keeping
-// the result for the life of the process.
+// assetTag is one hashed file. mod and size are the stat that produced tag,
+// so a later stat that differs is a different file and must be hashed again.
+type assetTag struct {
+	tag  string
+	mod  int64
+	size int64
+}
+
+// assetETag answers name's strong ETag. The hash is reused while the file's
+// size and modification time are the ones that were hashed. That holds for
+// the life of the process when the files are embedded, and it ends when a
+// directory on disk replaces the bytes.
 func assetETag(assets fs.FS, etags *sync.Map, name string) (string, bool) {
-	if tag, ok := etags.Load(name); ok {
-		return tag.(string), true
+	info, err := fs.Stat(assets, name)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	mod, size := info.ModTime().UnixNano(), info.Size()
+	if v, ok := etags.Load(name); ok {
+		cached := v.(assetTag)
+		if cached.mod == mod && cached.size == size {
+			return cached.tag, true
+		}
 	}
 	data, err := fs.ReadFile(assets, name)
 	if err != nil {
@@ -91,7 +111,7 @@ func assetETag(assets fs.FS, etags *sync.Map, name string) (string, bool) {
 	}
 	sum := sha256.Sum256(data)
 	tag := `"` + hex.EncodeToString(sum[:16]) + `"`
-	etags.Store(name, tag)
+	etags.Store(name, assetTag{tag: tag, mod: mod, size: size})
 	return tag, true
 }
 

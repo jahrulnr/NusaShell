@@ -335,6 +335,11 @@
 .agent-pointer .ring { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 9999px;
   border: 2px solid var(--accent); opacity: 0; animation: agent-click .6s ease-out .28s; }
 @keyframes agent-click { from { opacity: .9; transform: scale(.3); } to { opacity: 0; transform: scale(1.4); } }
+/* The subagent card is a native disclosure. The marker is the chevron in
+   the summary, so the browser's own triangle is not a second control. */
+.subagent-card > summary { list-style: none; }
+.subagent-card > summary::-webkit-details-marker { display: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .agent-pointer { transition: opacity .4s ease; }
   .agent-pointer .ring { animation: none; }

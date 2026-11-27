@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -137,16 +138,15 @@ type SendOptions struct {
 // stops asking for tools or the step cap is hit. Ctx is the caller's —
 // a queued send abandons itself via it; Interrupt cancels the run.
 type Send struct {
-	// agentRoom is the runtime the turn ran on, read when the room loads: the
-	// rescue needs it after the turn, when the aggregate is out of scope.
-	agentRoom bool
+	// exec is the runtime this turn resolved. The rescue reads it after the
+	// aggregate is out of scope, and after the active snapshot is cleared.
+	exec turnExecutor
 	// active is the binding this turn actually runs on, once it resolved one.
 	// A projection reads it to answer "what is answering me now"; it is cleared
 	// when the turn ends, at the same defer that releases the room.
-	activeMu       sync.Mutex
-	activeProvider string
-	activeModel    string
-	active         bool
+	activeMu      sync.Mutex
+	activeBinding ActiveBinding
+	active        bool
 	Base
 	Deps    Deps
 	Ctx     context.Context
@@ -196,7 +196,7 @@ func (j *Send) rescueSteers() {
 			// is delivered to a following turn — carrying this very line, never a
 			// second one. One attempt: the follow-up job carries the record, so
 			// its own rescue stays out of the loop.
-			if j.agentRoom && j.Deps.FollowUp != nil && j.Opts.AcceptedRecord == nil {
+			if j.exec != nil && j.exec.followUpRelay() && j.Deps.FollowUp != nil && j.Opts.AcceptedRecord == nil {
 				if err := j.Deps.FollowUp(j.ConvID(), *e.record); err != nil {
 					j.rescueFailed("follow-up", e.record.ID(), err)
 				}
@@ -216,23 +216,23 @@ func (j *Send) rescueSteers() {
 // Steer buffers user input for the running turn — the worker's
 // out-of-band control path. The turn loop folds it at the next safe
 // point; it never interrupts the in-flight provider call.
-// ActiveModel answers the binding this turn is using, false when the turn has
-// not resolved one or has already ended.
-func (j *Send) ActiveModel() (providerID, modelID string, ok bool) {
+// Active answers the kind and identifiers this turn is using, false when
+// the turn has not resolved one or has already ended.
+func (j *Send) Active() (ActiveBinding, bool) {
 	j.activeMu.Lock()
 	defer j.activeMu.Unlock()
-	return j.activeProvider, j.activeModel, j.active
+	return j.activeBinding, j.active
 }
 
-func (j *Send) setActive(providerID, modelID string) {
+func (j *Send) setActive(b ActiveBinding) {
 	j.activeMu.Lock()
-	j.activeProvider, j.activeModel, j.active = providerID, modelID, true
+	j.activeBinding, j.active = b, true
 	j.activeMu.Unlock()
 }
 
 func (j *Send) clearActive() {
 	j.activeMu.Lock()
-	j.activeProvider, j.activeModel, j.active = "", "", false
+	j.activeBinding, j.active = ActiveBinding{}, false
 	j.activeMu.Unlock()
 }
 
@@ -318,21 +318,6 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 
 		// A room that moves to another agent, or back to a provider, leaves
 		// its old agent's session behind; remember it to remove afterwards.
-		// What this turn answers with, from the moment it resolved its binding
-		// until it ends: a projection reads this, never the stored binding a
-		// later turn will use.
-		// The binding this turn was ASKED for answers "what is answering me now":
-		// the room's stored pair still names the previous turn until this one
-		// succeeds, and a projection must not read the future.
-		activeProvider, activeModel := j.ProviderID, j.ModelID
-		if activeProvider == "" {
-			activeProvider = conv.ProviderID()
-		}
-		if activeModel == "" {
-			activeModel = conv.ModelID()
-		}
-		j.setActive(activeProvider, activeModel)
-		defer j.clearActive()
 		prevAgent, prevSession := conv.AgentID(), conv.AgentSession()
 		prevEnv := conv.Environment()
 		prevWorkspace := conv.Workspace()
@@ -354,6 +339,9 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		switch {
 		case j.Opts.Agent != "":
 			if err := conv.BindAgent(j.Opts.Agent); err != nil {
+				if errors.Is(err, aggregate.ErrAgentNeedsLocal) {
+					return apperror.New(400, err.Error(), err)
+				}
 				return apperror.New(400, "invalid agent", err)
 			}
 		case j.ProviderID != "":
@@ -363,7 +351,7 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		// now, ahead of the first turn: a mode chosen here is what the
 		// agent should start in, not something to correct afterwards.
 		if len(j.Opts.AgentOptions) > 0 {
-			if conv.Runtime() != enum.RuntimeAgent {
+			if !conv.Runtime().QueriesAgentSessionOptions() {
 				return apperror.New(400, "agent options need a room bound to an agent", nil)
 			}
 			for _, pick := range j.Opts.AgentOptions {
@@ -372,44 +360,25 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 				}
 			}
 		}
-		agentRoom := conv.Runtime() == enum.RuntimeAgent
-		j.agentRoom = agentRoom
-		// The runtime is the one this turn runs on, after the parked pick above
-		// was applied in memory. Refused here, nothing has been saved: the parked
-		// pick stays in its file for the next turn that can take it.
-		if err := AgentPickRefusal(agentRoom, &j.Opts.Effort, &j.Opts.Upstream); err != nil {
+		ex, err := executorFor(conv.Runtime())
+		if err != nil {
 			return err
 		}
-		if agentRoom && conv.Environment() != enum.EnvironmentLocal {
-			return apperror.New(400, "agents run only in the local environment", nil)
+		j.exec = ex
+		// The kind this turn runs, from the moment it resolved one until it
+		// ends. A projection reads the snapshot, never the stored binding a
+		// later turn will use.
+		j.setActive(ex.snapshot(conv, j.ProviderID, j.ModelID))
+		defer j.clearActive()
+		if err := ex.refuse(&j.Opts.Effort, &j.Opts.Upstream); err != nil {
+			return err
 		}
-		// An agent room has no provider route: the agent picks its own
-		// model, so provider and model selections do not apply.
-		var (
-			prov                *aggregate.Provider
-			model               entity.Model
-			svc                 dservice.TextModelService
-			providerID, modelID string
-		)
-		if !agentRoom {
-			prov, model, svc, err = d.resolveProvider(ctx, convID, conv, driver, j.ProviderID, j.ModelID)
-			if err != nil {
-				return err
-			}
-			providerID, modelID = prov.ID(), model.ID()
-			// A room's first provider turn starts from Settings → Models →
-			// "New threads" when nothing else names an effort: a spawn, an
-			// automation run, or any caller without a picker sends none, and
-			// the room stores none yet. Setting the turn's option — not only
-			// the model — stores it as the room's own, so the thread starts on
-			// that value and keeps it when the setting changes later. WebUI
-			// and channel turns still win: they always send their choice.
-			if len(conv.Messages()) == 0 && j.Opts.Effort == "" && conv.Effort() == "" && !d.ThreadsEffort.IsUnset() {
-				j.Opts.Effort = d.ThreadsEffort
-			}
-			// Per-turn selections override the catalog entry in memory; the
-			// room's workspace rebinds the same way providerID/modelID do below.
-			useSelection(&model, conv, j.Opts)
+		if err := ex.rejectEnvironment(conv); err != nil {
+			return err
+		}
+		rt, err := ex.resolve(ctx, d, convID, conv, driver, j.ProviderID, j.ModelID, &j.Opts)
+		if err != nil {
+			return err
 		}
 		if j.Opts.Workspace != "" {
 			if driver.Workspace() == nil {
@@ -495,15 +464,12 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 		}
 		if fresh {
 			// Bind before the first write — a failed send still leaves a
-			// room that can retry with providerID/modelID "".
-			conv.SetProviderID(providerID)
-			conv.SetModelID(modelID)
-			// An agent room has no provider call to apply an effort or an
-			// upstream to: the picker's or a channel's value is dropped
-			// here, the same way an existing room's is below.
-			if !agentRoom {
-				rememberSelection(conv, j.Opts)
-			}
+			// room that can retry with providerID/modelID "". An agent
+			// target stores no provider route; the executor drops the picks
+			// a provider call would have kept.
+			conv.SetProviderID(rt.providerID)
+			conv.SetModelID(rt.modelID)
+			ex.rememberFresh(conv, j.Opts)
 			// An explicit creation title names the room from its first
 			// save; otherwise the first message's head does — SetTitle
 			// normalizes either to one bounded line.
@@ -547,11 +513,9 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 			return appendErr
 		}
 
-		if agentRoom {
-			err = d.runAgentTurn(ctx, convID, conv, driver, user, onEvent, j.mailbox(), j.Opts.Origin, j.ModelID)
-			d.retireAgentSession(convID, prevAgent, prevSession, conv)
-		} else {
-			err = d.runTurn(ctx, convID, conv, driver, prov, model, svc, onEvent, j.mailbox(), j.Opts.Origin)
+		err = ex.run(ctx, d, convID, conv, driver, user, rt, onEvent, j.mailbox(), j.Opts.Origin, j.ModelID)
+		if ex.retireUnconditionally() {
+			ex.retire(d, convID, prevAgent, prevSession, conv)
 		}
 		if err != nil {
 			// Route and model rebind only after success. Workspace and
@@ -566,19 +530,15 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 			}
 			return err
 		}
-		if !agentRoom {
-			conv.SetProviderID(providerID) // existing rooms re-bind only on success —
-			conv.SetModelID(modelID)       // a failed override keeps the old binding
-			rememberSelection(conv, j.Opts)
-		}
+		ex.commit(conv, rt, j.Opts)
 		if err := d.Convs.Save(ctx, conv); err != nil {
 			return err
 		}
 		// The pick rode this turn's own save; the claim release runs after this
 		// clear, so a failed save leaves both the file and the projection honest.
 		clearConsumedPending(ctx, d, convID, consumedAt, appliedPending)
-		if !agentRoom {
-			d.retireAgentSession(convID, prevAgent, prevSession, conv)
+		if !ex.retireUnconditionally() {
+			ex.retire(d, convID, prevAgent, prevSession, conv)
 		}
 		return nil
 	}()

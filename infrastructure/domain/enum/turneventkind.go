@@ -56,6 +56,9 @@ const (
 	// TurnEventMedia carries a picture, sound, or file the agent put in
 	// its reply; the attachment says where it is kept.
 	TurnEventMedia TurnEventKind = "media"
+	// TurnEventClock carries an agent turn's clock word. PromptedAt and
+	// LastUpdateAt on the event are unix milliseconds, zero when absent.
+	TurnEventClock TurnEventKind = "clock"
 )
 
 func (k TurnEventKind) String() string {
@@ -64,7 +67,7 @@ func (k TurnEventKind) String() string {
 
 func ParseTurnEventKind(v string) (TurnEventKind, bool) {
 	switch k := TurnEventKind(v); k {
-	case TurnEventDelta, TurnEventReasoning, TurnEventReasoningSummary, TurnEventToolCall, TurnEventToolOutput, TurnEventToolResult, TurnEventSteer, TurnEventFinished, TurnEventError, TurnEventStatus, TurnEventApproval, TurnEventApprovalResolved, TurnEventPlan, TurnEventElicitation, TurnEventElicitationResolved, TurnEventContext, TurnEventNotice, TurnEventTitle, TurnEventMedia:
+	case TurnEventDelta, TurnEventReasoning, TurnEventReasoningSummary, TurnEventToolCall, TurnEventToolOutput, TurnEventToolResult, TurnEventSteer, TurnEventFinished, TurnEventError, TurnEventStatus, TurnEventApproval, TurnEventApprovalResolved, TurnEventPlan, TurnEventElicitation, TurnEventElicitationResolved, TurnEventContext, TurnEventNotice, TurnEventTitle, TurnEventMedia, TurnEventClock:
 		return k, true
 	}
 	return "", false

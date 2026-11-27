@@ -89,6 +89,17 @@ func (h *Hub) resyncForLocked(t *turn) resyncPayload {
 		p.Turn = "active"
 		p.StartedAt = t.startedAt.UnixMilli()
 		p.Steerable = h.steerableLocked(t)
+		if t.clock != "" {
+			p.Clock = t.clock
+		}
+		if t.promptedAt > 0 {
+			at := t.promptedAt
+			p.PromptedAt = &at
+		}
+		if t.lastUpdateAt > 0 {
+			at := t.lastUpdateAt
+			p.LastUpdateAt = &at
+		}
 		if t.live != nil {
 			p.Parts = append([]*livePart{}, t.live.parts...)
 			p.Dropped = t.live.dropped

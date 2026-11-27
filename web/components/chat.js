@@ -1,6 +1,6 @@
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, state, emit, toast } from '../lib/store.js';
-import { room, freshRoom, rename, removeRoom, runCommand, isBusy, openRoom, navigate, annotateRoom, watching } from '../lib/chat.js';
+import { room, freshRoom, rename, removeRoom, runCommand, isBusy, openRoom, navigate, annotateRoom, watching, rowWorkTitle, rowStatus } from '../lib/chat.js';
 import { useCommands } from '../lib/commands.js';
 import { Icon, Logo } from './icons.js';
 import { Popover, IconButton, Dialog, Button, ErrorBlock, Spinner } from './ui.js';
@@ -200,11 +200,18 @@ export function HomeView() {
         ${recent.length > 0 && html`<div class="mt-8 px-1">
           <div class="text-xs text-faint mb-2">Recent</div>
           <div class="grid sm:grid-cols-2 gap-2">
-            ${recent.map((c) => html`<a key=${c.id} href=${'#/c/' + encodeURIComponent(c.id)}
+            ${recent.map((c) => {
+              const work = rowWorkTitle(c);
+              const status = rowStatus(c);
+              return html`<a key=${c.id} href=${'#/c/' + encodeURIComponent(c.id)}
               class="flex items-center gap-2 rounded-xl border border-line px-3 py-2.5 text-[13px] hover:bg-hover min-w-0">
-              ${watching(c) ? html`<span class="orb live" title="Working"></span>` : c.turnActive ? html`<span class="orb idle" title="Working — no live view yet"></span>` : html`<${Icon} name="chevronRight" size=${14} class="text-faint" />`}
-              <span class="truncate">${c.title || 'Untitled thread'}</span>
-            </a>`)}
+              ${watching(c) ? html`<span class="orb live" title="Working"></span>` : work ? html`<span class="orb idle" title=${work}></span>` : html`<${Icon} name="chevronRight" size=${14} class="text-faint" />`}
+              <span class="min-w-0 flex-1">
+                <span class="block truncate">${c.title || 'Untitled thread'}</span>
+                ${status && html`<span class="block truncate text-[11px] text-faint">${status}</span>`}
+              </span>
+            </a>`;
+            })}
           </div>
         </div>`}
         </div>`}

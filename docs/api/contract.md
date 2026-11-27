@@ -139,8 +139,10 @@ Exposing the field on the API remains future work.
   page. A path-style thread link (`/c/<id>`) is taken over on boot and
   rewritten to `/#/c/<id>`, so a shared address still opens its thread.
   `/api` paths, missing assets (`/components/…`, `/vendor/…`), and
-  requests that did not ask for HTML keep the `404` problem+json
-  (`not_found`).
+  requests that did not ask for HTML keep the `404` problem+json.
+  An `/api` path that matched no mounted route is `route_not_mounted`.
+  A resource that is missing on a route that is mounted stays
+  `not_found`. The words in `detail` are not that distinction.
 
 - Swagger UI is served by the same server on loopback only, alongside
   the JSON/YAML form of the spec. It documents the HTTP surface; it does
@@ -199,7 +201,10 @@ following never leave the server on any endpoint or frame:
   `output` (live chunks over WS; plain result text over HTTP) are part of
   the contract. Each `toolCalls[]` entry carries `type`: `origin` for a
   model-issued call, `injection` for an application-inserted context
-  record (e.g. the workspace line). The provider still receives the
+  record (e.g. the workspace line), and `keys` for the `acp.subagent`
+  family when the call is a Devin subagent run or one of its members
+  ([ACP subagent](#acp-subagent)). Other `optionalContent` stays internal.
+  The provider still receives the
   stored untrusted-evidence envelope; its delimiter and latency tag are
   not sent to the UI.
   They are untrusted data — can contain paths, commands, secrets — and
@@ -232,7 +237,7 @@ Full schemas, typed errors, and examples live in
 | `GET /api/agents` · `GET /api/agents/{id}` | Agent projections: `id`, `name`, `command`, `args`, `env` (`[{name, ref}]`, never values), `policy`. |
 | `PUT /api/agents/{id}` · `DELETE /api/agents/{id}` | Full-replace upsert (body `{name, command, args, env, policy}`; an env value that is a stored ref is kept, anything else is vaulted) and removal. |
 | `GET /api/agents/detect` · `POST /api/agents/import` | Known agent CLIs found on `PATH`, and registering the ones not configured yet. |
-| `GET /api/agents/{id}/models` | The agent's model catalog from the server's cache (`ModelCatalog`). `status` is `known` or `unknown` and is always written. `known` carries `data` (empty means the agent stated that it offers no models; `current` marks the one it is on). `unknown` omits `data` and carries `default` (`by: agent`, `id` the current id or `""` when the agent did not name one) plus `reason`. A cache miss starts the agent once inside the server. Sign-in required is `401`, a session that could not open is `502`, no runtime is `503`; the problem `detail` names the cause. None of those is `200` with `data: []`. |
+| `GET /api/agents/{id}/models` | The agent's stored model catalog (`ModelCatalog`). The route reads that record and does not start the agent. `status` is `known` or `unknown` and is always written. `known` carries `data` (empty means the stored list is empty; `current` marks the one the agent is on). `unknown` omits `data` and carries `default` (`by: agent`, `id` the stored current id or `""` when none was stored) plus `reason`. A missing catalog, or one that never reported a model list, stays `unknown`. An unknown agent is `404`; the catalog store being unavailable is `503`. Neither is `200` with `data: []`. |
 | `GET /api/agents/{id}/options` | The agent's own session options before any room exists — `{ "data": […], "status", "source" }` in the same shape and `status`/`source` contract as a room's agent-options. Because no room session is being read, `source` is `catalog` or `agent-default`, never `session`; the values are the agent's, and a thread's overrides are read from its own agent-options. Starts the agent on first use, which can take a while. |
 | `GET /api/agents/{id}/status` | The agent's process without starting it: `state` (`stopped`, `running`, `error`), `pid`, `uptimeMs`, `lastError`, `authNeeded`, `canLogout`, `logs` (its latest 400 stderr lines, kept across restarts), and `authMethods` (`[{id, name, description, type, command}]`; a `terminal` method carries its command line, for a terminal of the owner's own). |
 | `POST /api/agents/{id}/authenticate` · `POST /api/agents/{id}/logout` · `POST /api/agents/{id}/restart` | Sign the agent in with body `{methodId}` (starts it when needed; a `terminal` method is `400` — it runs through `sign-in`), sign it out and stop it (`400` when it does not support that), or stop its process so the next turn starts it again. Each answers `204`. A turn on an agent that needs a sign-in fails with `502 upstream_error`. |
@@ -241,8 +246,8 @@ Full schemas, typed errors, and examples live in
 | `GET /api/conversations/{id}/elicitations` · `POST /api/conversations/{id}/elicitations/{elicitationId}` | Open requests for input from the room's agent (`[{id, mode, message, schema, url, expiresAt}]`, `mode` is `form` or `url`), and answering one with body `{action, content}`: `action` is `accept`, `decline`, or `cancel`; `content` (accept only) must match the form's schema — a missing required field, an unknown field, or a wrong type, length, range, pattern, or choice is `400` and the request stays open. `204`; `404` when nothing waits under that id. An open request carries a deadline — fifteen minutes — and one that runs out resolves itself as `cancel` marked `expired`, not as a refusal by the owner; `expiresAt` is absent when a request has no deadline. |
 | `GET /api/conversations/{id}/agent-options` · `PUT /api/conversations/{id}/agent-options` | The agent's session options for the room — `{ "data": [{ id, name, description, category, type, current, choices: [{value, name, description}] }], "status": "ready" | "empty", "source": "session" | "catalog" | "agent-default" }` — and setting one with body `{id, value}`: `200` when the pick applies now, `202` with the same list plus `pending` when a turn is running and the pick waits for the next one. `source` says where the list came from: only `session` is the room's live session and may be presented as the options in force now; `catalog` is the stored list a real session last reported, and `agent-default` is the agent's probe/default answer. The latter two are fallback evidence for an idle room and must be labelled as such, never as the live session's options. `status` says what the list means: `ready` is definitive (an empty list is the agent truly offering no session options) while `empty` is transient — the agent reports nothing right now and a later read may fill it, so a client offers a refresh and never writes the permanent "no options" line; a failure answers the HTTP error, never a `status` value. The room keeps its picks and applies them before each turn. |
 | `GET /api/commands?conversationId=` | The composer's slash-command catalog — `{ "data": [{ name, description, hint, source, enabled, reason }] }`. A harness room carries the native commands (`compact`, `clear`, `fork`). An agent room carries the thread commands NusaShell owns (`clear`, `fork`) plus exactly the commands its agent session reports; context operations are never invented for it, so `compact` exists there only as an agent-reported row, and an agent-reported name wins a collision with a native thread command. `enabled`/`reason` are the server's verdict for this room; a live turn turns rows off with `reason: "Wait for the turn to finish"`. Without `conversationId` it answers the native set with every row off and `reason: "Send a message first"`. |
-| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Every item carries `lifecycle` (`ThreadLifecycle`, the same value `conversation_list` uses). Items also include `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` while jobs queue behind it, and `pending` while a pick waits for the next turn. `limit` default 30, max 100. |
-| `GET /api/conversations/{id}` | One projection, with the same `lifecycle`. Detail adds `canCompact`, `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` for the jobs queued behind it, and `pending` while a pick waits for the next turn. |
+| `GET /api/conversations?offset&limit` | List projections, `updatedAt` desc (best-effort). Every item carries `lifecycle` (`ThreadLifecycle`, the same value `conversation_list` uses) and `runtime` (`harness` or `agent`; clients read `runtime`, never infer it from `agentId`). When an agent hold applies, the same item also carries `agentClass`, `retry`, `retryAt`, and `agentMessage` (Agent honesty). Items also include `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` while jobs queue behind it, and `pending` while a pick waits for the next turn. `limit` default 30, max 100. |
+| `GET /api/conversations/{id}` | One projection, with the same `lifecycle`, the same `runtime`, and — when a hold applies — the same `agentClass`, `retry`, `retryAt`, and `agentMessage`. Detail adds `canCompact`, `activeTurnId` / `activeTurnKind` while a transport turn is in progress, `waiting` for the jobs queued behind it, and `pending` while a pick waits for the next turn. |
 | `GET /api/conversations/{id}/messages?start&limit` | Ranged history; `start >= 0` absolute, negative counts back from the end. `limit` max 100. |
 | `PATCH /api/conversations/{id}` | Any of `title`, `projectId` (`""` takes the room out of its project; an unknown id is `400`), `pinned`, `label` (the room's `@handle`: 1–24 of `a-z0-9` with inner hyphens, a leading `@` dropped; `""` clears; invalid `400`, taken by another room `409`), and `routing` (`{replyToOrigin, mirrorFinal, notifyApprovals}`; `null` returns to the defaults); absent fields keep their value. Queued on the room's worker, so it lands after a running turn. Answers the updated projection, which carries `label` and `routing` when set. |
 | `GET /api/conversations/{id}/export` | The whole thread as one JSON download (`Content-Disposition: attachment; filename=nusashell-<id>.json`): `{ exportedAt, conversation, messages }`, in the shapes the projection and messages routes serve. |
@@ -320,10 +325,10 @@ Full schemas, typed errors, and examples live in
 | `POST /api/update/check` | Forces a fresh release lookup and answers the same picture. |
 | `POST /api/update/install` | Starts the in-app install of the latest release as one background job: download, verify against `SHA256SUMS`, stage beside the binary, replace it, restart. Answers `202` with the first progress state. Only one install runs at a time; refusals are `409` (see the error model). |
 | `GET /api/update/install` | Progress of the current or most recent install: `{ state, phase, version, bytesDone, bytesTotal, restart, error }`. `state` is `idle`, `running`, `succeeded`, or `failed`; `succeeded` means the restart is queued, and the new version answers once it is up. |
-| `GET /api/skills?workspace=` | The Skills page — `{ data: [row…], diagnostics, pending, pendingStale }`. Each row carries `level` (who may change the skill now: `user` unless the row describes the file on disk), `changed`, and `digest`, the whole file to send back on a move. Reading writes nothing. |
+| `GET /api/skills?workspace=` | The Skills page — `{ data: [row…], diagnostics, pending, pendingStale }`. Each row carries `level` (who may change the skill now: `user` unless the row describes the file on disk), `changed`, `changedCause`, and `digest`, the whole file to send back on a move. Reading writes nothing. When the skills routes are not mounted, this path is `404` `route_not_mounted`. |
 | `POST /api/skills/{name}/level?workspace=` | Body `{level, digest}`: the owner hands a learned skill to the loop (`agent`) or takes it back (`user`); `digest` is the file the page showed. `204`; `400` for a builtin or an owner file; `404` when the skill is no longer live or has no ownership row; `409` when the file or the row moved since. The skill file is never written. |
 | `GET /api/skill-proposals?workspace=` | Pending proposals — `{ data: [proposal…] }`, each with `open` and `staleCause` (empty while open). Reading writes nothing. |
-| `POST /api/skill-proposals/{id}/decide?workspace=` | Body `{action, level?, reason?}`: `accept` writes the skill file and records the decision; `dismiss` records it with the owner's `reason`. `204`; `409` when the proposal was already decided, no longer applies, or the catalog would be over its byte budget; `500` when the file was written but the decision was not recorded. |
+| `POST /api/skill-proposals/{id}/decide?workspace=` | Body `{action, level?, reason?}`: `accept` writes the skill file and records the decision; `dismiss` records it with the owner's `reason`. `204`; `409` when the proposal was already decided, no longer applies, or the catalog would be over its byte budget (`overage` carries that number); `500` when the file was written but the decision was not recorded. |
 | `GET /api/ws` | WebSocket upgrade — `101`; frames defined in [`websocket.md`](./websocket.md). |
 
 There is intentionally **no `POST /api/conversations`** and **no
@@ -446,7 +451,8 @@ not imply the running process has already applied the value.
 All 4xx/5xx error responses are `application/problem+json` (RFC 9457
 shape) with a stable machine `code`, the HTTP `status`, a
 human-readable `detail` safe for display, and nothing else — no
-`Cause`, no stack, no internal identifiers. (The `101` WS upgrade is a
+`Cause`, no stack, no internal identifiers. The one exception is
+`overage` on the catalog-budget `409`, below. (The `101` WS upgrade is a
 successful non-2xx and has no body.)
 
 | `status` | `code` | Meaning |
@@ -455,9 +461,13 @@ successful non-2xx and has no body.)
 | 400 | `nothing_to_compact` | The room has no new foldable history (or none at all). |
 | 400 | `nothing_to_clear` | The room is already empty. |
 | 400 | `nothing_to_fork` | The room has nothing to copy. |
+| 402 | `quota_exhausted` | The agent reports its quota or billing is exhausted. Not a `429`. Agent honesty. |
 | 403 | `forbidden_origin` | `Host`/`Origin` check failed. |
-| 404 | `not_found` | Conversation, provider, model-in-catalog, message id, or running turn does not exist. |
+| 403 | `agent_credential` | The agent's own sign-in was refused. Not the owner's login and not `forbidden_origin`. Agent honesty. A `401` with the same code is the same class. |
+| 404 | `not_found` | A resource on a mounted route does not exist: conversation, provider, model-in-catalog, message id, running turn, skill, or proposal. |
+| 404 | `route_not_mounted` | The `/api` path matched no mounted route. Skills answers this when those routes were not wired. `detail` is display text and is not the code; matching the words `no such route` is wrong. |
 | 408 | `interrupted` | The request or turn was canceled (client cancel, shutdown race). |
+| 409 | `conflict` | The action conflicts with the current state. On `POST /api/skill-proposals/{id}/decide`, the catalog-budget case also carries `overage` (Skills wire). Every other `409` omits it. |
 | 409 | `busy` | A transport turn is live in the room; a native command waits for it to finish. |
 | 409 | `confirmation_required` | A destructive command (`clear`) was called without `confirm`. |
 | 409 | `unavailable` | The command does not apply to this room kind (compaction in an agent room). |
@@ -567,10 +577,12 @@ Non-zero for a usage error or an HTTP error, printing the problem
 `detail` and not a catalog.
 
 **Agent.** `GET /api/agents/{id}/models`, and print that body. The
-server must not turn a session that reported no model list into
-`data: []`. Human lines are `<id>  <name>`, with `current` on the
-current row. A known empty catalog prints `no models`. Unknown prints
-`unknown`, the default, and the reason, and prints no rows.
+route reads the stored catalog and does not start the agent. A
+missing catalog, or one that never reported a model list, stays
+`unknown`; the server must not turn that into `data: []`. Human
+lines are `<id>  <name>`, with `current` on the current row. A known
+empty catalog prints `no models`. Unknown prints `unknown`, the
+default, and the reason, and prints no rows.
 
 **Provider.** `GET /api/providers/{id}`, then the same object. `404`
 prints the problem `detail` and no catalog. A decoded record
@@ -617,6 +629,67 @@ First match:
 A restart that leaves `finishReason: interrupted` shows `interrupted` on the list call. The caller does not open the room to learn that. Mapping `interrupted` to `idle`, or an unreadable terminal to `idle`, is wrong.
 
 `conversation_spawn` answers only after the first turn is admitted or the start has failed. Success carries `started: true` next to `threadId`, `afterSeq`, and `thread`. `thread.lifecycle` is the thread at that moment: `running` or `approval` while the turn is live, `failed` or `interrupted` when it has already ended that way, or `idle` when it has already completed. It is never `unknown` on that success, and the success is never the unadmitted row (`runtime: "none"`, `busy: false`, `messages: 0`). A start that does not admit is an error whose detail names the cause. There is no successful row with `started: false`.
+
+## Agent honesty
+
+One contract for an agent failure and for the two clock stamps. `lifecycle` stays the six words in Thread lifecycle. `agentClass` is not one of them. A client reads both. `conversation_list` carries the same `agentClass`, `retry`, `retryAt`, and `agentMessage` as `GET /api/conversations`.
+
+`agentClass` is omitted when this agent is not holding the room. Omitted means no class. It is never guessed from `lifecycle`, and `interrupted` is not `idle`. When it is written it is one of `rate_limited`, `quota_exhausted`, `credential`, `process`, `unknown`.
+
+The failure frame is `turn.failed`. That frame, and the list and detail rows while the hold applies, carry:
+
+- `rate_limited` — status `429`, code `upstream_error`, not the room queue. Automatic retry runs only while `lastUpdateAt` is absent (D-16, Q-5 (b)): after the agent has already sent an update, the turn does not retry automatically. At most two retries on the existing provider backoff (`750 ms`, then `1500 ms`). A named delay inside 60 s replaces the pause. A longer named delay ends the turn with `retry` `none`. No delay named: the backoff. While the server is still retrying, `retry` is `auto` and a `turn.phase` `retry_wait` announces each pause. When the turn ends still rate-limited, `retry` is `none` and `agentClass` stays `rate_limited`. `retry` `none` means no automatic retry. It does not mean the owner cannot Retry. A named wait is shown. `retryAt` is unix milliseconds and stays present only when one was named. No named wait: the client shows `agentMessage`, the native ACP or API words. It does not invent a wait. An explicit Retry is not held by the pause. A send after this room's model or upstream changed is not held by the pause. The hold remembers the model and upstream it was limited on. OpenRouter can limit one upstream, so a different model or upstream is a different attempt. Other rooms on that agent still do not start on their own during the pause.
+- `quota_exhausted` — status `402`, code `quota_exhausted`. Not a `429`. `retry` is `none`. Never automatic.
+- `credential` — status `401` or `403`, code `agent_credential`. This is the agent's credential, not the owner's login and not `forbidden_origin`. `retry` is `none`. Never automatic.
+- `process` — the agent process exited. Status `502`, code `upstream_error`. `retry` is `none`. Never automatic.
+- `unknown` — status `502`, code `upstream_error`. `retry` is `none`. Never automatic. `agentMessage` is the agent's words.
+
+`agentMessage` is those words, truncated and redacted. It is present whenever `agentClass` is present. It is never replaced by `unknown error` or by a class-less `agent turn failed`. A class-less `502` for an agent failure is wrong.
+
+A lost session is not a class. The runtime opens a new session, as it does today.
+
+On a send turn, `turn.failed` carries `userMessagePersisted` (A17, B-113): whether the user line committed before the failure. That is the saved-or-not receipt. No other field. Edit and resume terminals never claim it. No `turn.failed` means no receipt; the client does not say the line was saved.
+
+`startedAt` is admission only. It stays on `turn.opened` and on the active snapshot. It is not the clock the screen uses for agent work.
+
+`promptedAt` is the unix millisecond stamp when the prompt is written. `lastUpdateAt` is the stamp of the last agent update. Neither is copied from `startedAt`. The agent's duration is `lastUpdateAt - promptedAt`. Both stamps ride the active snapshot on `turn.resync_required`, and the terminals `turn.completed` and `turn.failed`. Omitted when absent. Never written as `0` or `null`. A late attach reads them from that snapshot.
+
+`clock` is `preparing`, `waiting`, or `working`. It is on `turn.opened` (`preparing`), on the active snapshot, and on a journaled `turn.phase` with `phase: "clock"` at each change. `preparing` runs from admission until `promptedAt`, including the room queue, cold start, `session/load`, and resume. The screen does not say the agent is working in that stretch. A discarded load replay stays `preparing`: not a blank gap, and not `working`. After `promptedAt`, silence is `waiting`. It is not invented progress. `working` starts only when an agent update is in progress, and it ends when that update ends. `clock: working` while `promptedAt` is absent is wrong. This clock is for agent turns. Provider turns keep the sentences they already use.
+
+There is no ping and no heartbeat. A mid-turn liveness signal is only what the protocol already requires: a permission or elicitation request, and the answer to `session/cancel`.
+
+Messages queued behind a failed turn stay queued. `waiting` still counts them. They are not reported sent.
+
+## ACP subagent
+
+Devin only, until another agent is captured with the same three mechanisms. `cognition.ai` keys never cross to the client.
+
+The card is the parent `run_subagent` tool call. Its `input` is the raw object. The card reads `title` and `task` from that object, and `profile` from it when present, otherwise from `keys["acp.subagent.profile"]`.
+
+Lifecycle is an ACP `tool_call_update` whose meta is `cognition.ai/subagent_started` or `cognition.ai/subagent_completed`. That update's `toolCallId` is the subagent's `agentId`, not the parent tool-call id. The server does not mint a tool row for it. It writes `keys["acp.subagent.id"]` on the parent call. Started also writes `profile`, `model`, `depth`, and `background` when the update carries them. A success completion writes `keys["acp.subagent.success"]` as `true` and `keys["acp.subagent.summary"]` when a summary was sent.
+
+A nested tool call is an ordinary tool call. Its meta `cognition.ai/subagent_context.parentAgentId` is projected as `keys["acp.subagent.parent"]`. The client groups that call under the card whose `acp.subagent.id` equals that parent. No parent key means an ordinary tool.
+
+`keys` is that family only: `acp.subagent.id`, `parent`, `profile`, `model`, `depth`, `background`, `success`, `summary`. It rides the opening `turn.tool_call`, a later `turn.tool_call` with the same `callId` when a lifecycle fact arrives (the same row; keys replaced; not a second call), and each history `toolCalls[]` entry. `turn.tool_input`, `turn.tool_output`, and `turn.tool_result` do not carry `keys`.
+
+The parent call's `output` is the final report. The card does not replace it. A member is an activity line: name and title only. Member output and a subagent reasoning stream are not promised. There is no ping.
+
+The success path is `acp.subagent.success` `true` once the turn has finished. The incomplete path is a finished turn whose run has no success `true`: not failed, and not still running. A completion with `success` false has not been captured, so it is not a specified state — the client uses the incomplete path and does not draw a failed card. Depth of 2 or more renders flat, one card per `parentAgentId`, not a tree.
+
+## Skills wire
+
+Three fields the Skills page reads. Each is written by the server. A client does not invent the label, the route check, or the byte count from prose.
+
+`changedCause` is on every skills row, the same kind of sentence as `staleCause`. It is `""` when `changed` is false. When `changed` is true it is one of these two sentences, and no other:
+
+- `the loop wrote this skill's file, but the decision was not recorded` — the bytes on disk are a loop write whose decision was not recorded, the same fact `staleCause` uses for that case.
+- `the skill's file changed since its row was written` — the file is not the one the row describes, and the sentence above does not apply. It does not say who edited the file.
+
+`changed` stays the boolean, and it is true exactly when `changedCause` is not empty. The label is `changedCause`. "Edited by hand" and "edited outside the loop" are not this field.
+
+`route_not_mounted` is the `404` code for an `/api` path that matched no mounted route, including `GET /api/skills` and `GET /api/skill-proposals` when those routes were not wired. A missing skill or proposal on a route that is mounted stays `not_found`. A client matches the code. Matching the `detail` text `no such route` is wrong, including while that text is still the detail.
+
+`overage` is an integer on the `409` from `POST /api/skill-proposals/{id}/decide` when the accept would pass `skills.catalog_max_bytes`. It is `total - budget`, at least 1, with no thousands separators. `detail` may still say `by 1,234 bytes`; the number is `overage` (`1234`). A client does not parse `detail` for it. The `409` for an unset budget, and every other `409`, omits `overage`.
 
 ## Implementation work required
 

@@ -6,6 +6,7 @@ import (
 
 	appagent "github.com/jahrulnr/nusashell/application/agent"
 	appprovider "github.com/jahrulnr/nusashell/application/provider"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 )
 
 // Agents lists configured agents. *appagent.AgentApp satisfies it.
@@ -57,7 +58,7 @@ func (c ConfiguredCatalog) Choices(ctx context.Context) ([]Choice, error) {
 			return nil, err
 		}
 		for _, a := range agents {
-			out = append(out, Choice{Runtime: Runtime{AgentID: a.ID}, Name: a.Name + " (ACP)"})
+			out = append(out, Choice{Runtime: Runtime{Kind: enum.RuntimeAgent, AgentID: a.ID}, Name: a.Name + " (ACP)"})
 		}
 	}
 	if c.Providers != nil {
@@ -74,7 +75,7 @@ func (c ConfiguredCatalog) Choices(ctx context.Context) ([]Choice, error) {
 				if label == "" {
 					label = m.ID()
 				}
-				out = append(out, Choice{Runtime: Runtime{ProviderID: p.ID, ModelID: m.ID()}, Name: label + " (API)"})
+				out = append(out, Choice{Runtime: Runtime{Kind: enum.RuntimeHarness, ProviderID: p.ID, ModelID: m.ID()}, Name: label + " (API)"})
 			}
 		}
 	}

@@ -558,7 +558,8 @@ func builtinSkillsNote(dir string) string {
 }
 
 // Prompt runs one agent turn and appends its assistant message.
-func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent event.TurnEventHandler, approve dservice.Approver) error {
+func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent event.TurnEventHandler, approve dservice.Approver) (err error) {
+	defer func() { err = classifyPromptError(err) }()
 	if in.Agent == nil || in.Conversation == nil {
 		return apperror.NewInternalError("agent prompt is incomplete", nil)
 	}
@@ -693,9 +694,15 @@ func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent e
 	})
 	defer stopAfter()
 
-	if in.OnStarted != nil {
-		callCtx = acp.WithRequestSent(callCtx, in.OnStarted)
-	}
+	started := in.OnStarted
+	callCtx = acp.WithRequestSent(callCtx, func() {
+		if started != nil {
+			started()
+		}
+		// The prompt is on the wire. Silence after this is waiting, not
+		// preparing, and not working.
+		sink.markPrompted(time.Now().UnixMilli())
+	})
 	res, err := p.client.Prompt(callCtx, s.acpID, blocks)
 	if err != nil && ctx.Err() == nil {
 		// The agent never took the input: what it was to be told first is

@@ -3,7 +3,7 @@
 // Search filters both by name.
 import { html, useEffect, useState } from '/vendor/preact/htm-preact.mjs';
 import { useStore, setPref } from '../lib/store.js';
-import { loadConversations, loadProjects, loadProjectThreads, PROJECT_THREADS, newThreadIn, annotateRoom, removeRoomById, watching } from '../lib/chat.js';
+import { loadConversations, loadProjects, loadProjectThreads, PROJECT_THREADS, newThreadIn, annotateRoom, removeRoomById, watching, rowWorkTitle, rowStatus } from '../lib/chat.js';
 import { api, errorText } from '../lib/api.js';
 import { toast } from '../lib/store.js';
 import { Icon, Logo } from './icons.js';
@@ -187,13 +187,18 @@ function ThreadRow({ thread: x, active, compact, projects, onDelete }) {
   const [moving, setMoving] = useState(false);
   const close = () => { setMenu(false); setMoving(false); };
   const deleting = s.deleting.includes(x.id);
+  const work = rowWorkTitle(x);
+  const status = rowStatus(x);
   return html`<div class=${cx('group relative flex items-center rounded-lg', active ? 'bg-hover' : 'hover:bg-hover', deleting && 'opacity-50 pointer-events-none')}
     aria-busy=${deleting || undefined}>
     <a href=${'#/c/' + encodeURIComponent(x.id)} aria-current=${active ? 'page' : undefined}
-      class=${cx('flex-1 min-w-0 flex items-center gap-2 pl-2.5 pr-1 text-[13px]', compact ? 'h-7' : 'h-8', active ? 'text-fg' : 'text-muted hover:text-fg')}>
-      ${watching(x) ? html`<span class="orb live" title="Working"></span>` : x.turnActive ? html`<span class="orb idle" title="Working — no live view yet"></span>` : compact ? null : html`<span class="size-2 shrink-0"></span>`}
+      class=${cx('flex-1 min-w-0 flex items-center gap-2 pl-2.5 pr-1 text-[13px]', status ? 'min-h-8 py-1' : compact ? 'h-7' : 'h-8', active ? 'text-fg' : 'text-muted hover:text-fg')}>
+      ${watching(x) ? html`<span class="orb live" title="Working"></span>` : work ? html`<span class="orb idle" title=${work}></span>` : compact ? null : html`<span class="size-2 shrink-0"></span>`}
       ${x.agentId && html`<${Icon} name="bot" size=${13} class="text-faint" />`}
-      <span class="flex-1 truncate">${x.title || 'Untitled thread'}</span>
+      <span class="min-w-0 flex-1 flex flex-col">
+        <span class="truncate">${x.title || 'Untitled thread'}</span>
+        ${status && html`<span class="truncate text-[11px] text-faint">${status}</span>`}
+      </span>
       ${x.pinned && compact && html`<${Icon} name="pin" size=${12} class="text-faint" />`}
       ${deleting
         ? html`<span class="flex items-center gap-1 text-[11px] text-faint shrink-0"><${Spinner} size=${11} /> Deleting</span>`

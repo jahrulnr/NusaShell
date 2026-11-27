@@ -12,7 +12,11 @@ package apperror
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/jahrulnr/nusashell/infrastructure/redact"
 )
 
 // HTTP status codes used across the codebase.
@@ -125,6 +129,122 @@ func NewNotFoundError(resource string, causedBy error) IAppError {
 
 func NewInternalError(message string, causedBy error) IAppError {
 	return new(StatusInternalServerError, message, causedBy)
+}
+
+// catalogOverage is the catalog-budget 409. The integer is total - budget
+// and is at least 1; every other 409 leaves it off the problem body.
+type catalogOverage struct {
+	*AppError
+	n int
+}
+
+// NewCatalogOverage builds the catalog-budget refusal. overage is the number
+// of bytes past the budget. The message stays the sentence the owner reads.
+func NewCatalogOverage(message string, overage int) IAppError {
+	return &catalogOverage{AppError: new(StatusConflict, message, nil), n: overage}
+}
+
+func (e *catalogOverage) Overage() int { return e.n }
+
+// OverageOf reports the catalog-budget integer when err carries one of at
+// least 1. Every other error, including an unset budget, reports false.
+func OverageOf(err error) (int, bool) {
+	type numbered interface{ Overage() int }
+	var o numbered
+	if !errors.As(err, &o) {
+		return 0, false
+	}
+	if o.Overage() < 1 {
+		return 0, false
+	}
+	return o.Overage(), true
+}
+
+// Agent failure classes. Absent is not unknown: a value is written only
+// while the agent is holding the room.
+const (
+	AgentClassRateLimited    = "rate_limited"
+	AgentClassQuotaExhausted = "quota_exhausted"
+	AgentClassCredential     = "credential"
+	AgentClassProcess        = "process"
+	AgentClassUnknown        = "unknown"
+)
+
+// agentFailure is an agent turn that is holding the room. The class is the
+// wire word. RetryDelay is set only when the agent named a delay.
+type agentFailure struct {
+	*AppError
+	class string
+}
+
+// NewAgentFailure builds a classified agent failure. message is the agent's
+// words; a stock stand-in is dropped in favor of the cause, then redacted
+// and truncated. delay is the named wait, zero when the agent named none.
+func NewAgentFailure(class string, status int, code, message string, cause error, delay time.Duration) IAppError {
+	switch class {
+	case AgentClassRateLimited, AgentClassQuotaExhausted, AgentClassCredential, AgentClassProcess, AgentClassUnknown:
+	default:
+		class = AgentClassUnknown
+	}
+	words := agentWords(message, cause)
+	if words == "" && class == AgentClassProcess {
+		words = "the agent process exited"
+	}
+	if words == "" {
+		words = "the agent stopped without a reason"
+	}
+	e := new(status, words, cause)
+	e.CodeName = code
+	e.Upstream = true
+	if delay > 0 {
+		e.RetryDelay = delay
+	}
+	return &agentFailure{AppError: e, class: class}
+}
+
+func (e *agentFailure) AgentClass() string {
+	if e == nil {
+		return ""
+	}
+	return e.class
+}
+
+// AgentClass reports the hold class when err is an agent failure.
+func AgentClass(err error) (string, bool) {
+	var c interface{ AgentClass() string }
+	if !errors.As(err, &c) {
+		return "", false
+	}
+	class := c.AgentClass()
+	switch class {
+	case AgentClassRateLimited, AgentClassQuotaExhausted, AgentClassCredential, AgentClassProcess, AgentClassUnknown:
+		return class, true
+	default:
+		return "", false
+	}
+}
+
+func agentWords(message string, cause error) string {
+	if words := cleanAgentWords(message); words != "" {
+		return words
+	}
+	if cause == nil {
+		return ""
+	}
+	return cleanAgentWords(cause.Error())
+}
+
+func cleanAgentWords(s string) string {
+	s = strings.TrimSpace(redact.String(s))
+	switch strings.ToLower(s) {
+	case "", "agent turn failed", "unknown error", "internal error", "agent process exited":
+		return ""
+	}
+	const max = 500
+	if utf8.RuneCountInString(s) > max {
+		s = string([]rune(s)[:max]) + "…"
+	}
+	return s
 }
 
 // As unwraps err into an IAppError via errors.As. Non-AppError causes fall

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/styles/app.css">
+  <script src="/vendor/tailwind/tailwind.browser.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: var(--bg);
+      --color-panel: var(--panel);
+      --color-raised: var(--raised);
+      --color-hover: var(--hover);
+      --color-line: var(--line);
+      --color-fg: var(--fg);
+      --color-muted: var(--muted);
+      --color-faint: var(--faint);
+      --color-accent: var(--accent);
+      --color-accent-fg: var(--accent-fg);
+      --color-bad: var(--bad);
+    }
+  </style>
+</head>
+<body class="bg-bg text-fg">
+  <div id="root" class="flex h-screen"></div>
+  <script type="module">
+    import { html, render } from '/vendor/preact/htm-preact.mjs';
+    import { state } from '/lib/store.js';
+    import { Sidebar } from '/components/sidebar.js';
+    import { Transcript, RoomLine } from '/components/transcript.js';
+    import { setQueued } from '/lib/queued.js';
+
+    const now = new Date().toISOString();
+    const thread = (over) => ({ title: 'Thread', updatedAt: now, messageCount: 1, ...over });
+    state.projects = { items: [], status: 'ready', error: null };
+    state.projectThreads = {};
+    state.deleting = [];
+    state.route = { view: 'home' };
+    state.convs = {
+      status: 'ready', error: null, hasMore: false, total: 4,
+      items: [
+        thread({ id: 'agent', title: 'Agent room', turnActive: true, runtime: 'agent', lifecycle: 'running' }),
+        thread({ id: 'provider', title: 'Provider room', turnActive: true, runtime: 'harness', lifecycle: 'running' }),
+        thread({ id: 'blank', title: 'Unknown runtime', turnActive: true, runtime: '', lifecycle: 'running' }),
+        thread({ id: 'held', title: 'Held room', runtime: 'agent', lifecycle: 'idle', agentClass: 'quota_exhausted', messageCount: 2 }),
+      ],
+    };
+
+    const base = {
+      infoStatus: 'ready',
+      messages: [{ id: 'm1', role: 'user', content: 'hello' }],
+      hist: { status: 'ready', error: null, more: false, loadingEarlier: false },
+      queue: [], steers: [], pendingOpen: null, settling: false, failed: null, live: null,
+      sel: {}, quotes: [], files: [], refs: [],
+    };
+    const blindAgent = { ...base, id: 'ba', info: { runtime: 'agent', turnActive: true } };
+    const blindHarness = { ...base, id: 'bh', info: { runtime: 'harness', turnActive: true } };
+    const preparing = {
+      ...base, id: 'prep',
+      info: { runtime: 'agent' },
+      live: { turnId: 't', clock: 'preparing', startedAt: Date.now() - 65000, segments: [] },
+    };
+    const card = {
+      ...base, id: 'card',
+      info: { runtime: 'agent', lifecycle: 'failed', waiting: 2 },
+      failed: { agentClass: 'credential', retry: 'none', agentMessage: 'token <b>rejected</b>', userMessagePersisted: true },
+    };
+    const wait = Date.now() + 600_000;
+    const rate = (id, failed) => ({
+      ...base, id,
+      info: { runtime: 'agent', lifecycle: 'failed' },
+      failed: { retry: 'none', agentClass: 'rate_limited', userMessagePersisted: true, ...failed },
+    });
+    const named = rate('named', { retryAt: wait, agentMessage: 'slow down' });
+    const native = rate('native', { agentMessage: '429 too many' });
+    const updated = rate('updated', { retryAt: wait, lastUpdateAt: Date.now() - 1000, agentMessage: 'slow down' });
+
+    setQueued('ba', 99);
+    setQueued('bh', 99);
+    const scroller = { current: null };
+    const panel = (title, room) => html`<section class="mb-8">
+      <h2 class="text-xs text-faint mb-2">${title}</h2>
+      <div class="rounded-xl border border-line p-3">
+        <${Transcript} room=${room} scroller=${scroller} />
+        <${RoomLine} room=${room} />
+      </div>
+    </section>`;
+
+    render(html`<div class="flex h-screen w-full">
+      <div class="w-[280px] shrink-0 border-r border-line"><${Sidebar} /></div>
+      <div id="main" class="flex-1 overflow-y-auto p-4 max-w-3xl">
+        ${panel('Preparing', preparing)}
+        ${panel('Credential card', card)}
+        ${panel('Named wait', named)}
+        ${panel('No named wait', native)}
+        ${panel('After an update', updated)}
+        <section class="mb-8">
+          <h2 class="text-xs text-faint mb-2">Blind lines</h2>
+          <div id="lines" class="rounded-xl border border-line">
+            <${RoomLine} room=${blindAgent} />
+            <${RoomLine} room=${blindHarness} />
+          </div>
+        </section>
+      </div>
+    </div>`, document.getElementById('root'));
+    document.body.dataset.ready = '1';
+  </script>
+</body>
+</html>

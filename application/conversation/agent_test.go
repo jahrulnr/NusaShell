@@ -366,7 +366,7 @@ func TestAgentTurnWaitsForOwnerApproval(t *testing.T) {
 	if rt.prompts[0].Model != "fake-smart" {
 		t.Fatalf("prompt model = %q", rt.prompts[0].Model)
 	}
-	want := []enum.TurnEventKind{enum.TurnEventToolCall, enum.TurnEventApproval, enum.TurnEventApprovalResolved, enum.TurnEventDelta, enum.TurnEventFinished}
+	want := []enum.TurnEventKind{enum.TurnEventClock, enum.TurnEventToolCall, enum.TurnEventApproval, enum.TurnEventApprovalResolved, enum.TurnEventDelta, enum.TurnEventFinished}
 	if strings.Join(kindStrings(kinds), ",") != strings.Join(kindStrings(want), ",") {
 		t.Fatalf("events = %v", kinds)
 	}
@@ -753,7 +753,7 @@ func TestAProviderPickCarriesItsEffortPastAnAgentRoom(t *testing.T) {
 	release := busyTurn(t, app, rt, "c_pp")
 	defer release()
 	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
-		return app.Annotate(ctx, "c_pp", Annotation{Runtime: &RuntimeBinding{ProviderID: "gw1", ModelID: "m1"}, Effort: &effort})
+		return app.Annotate(ctx, "c_pp", Annotation{Runtime: harnessBinding(t, "gw1", "m1"), Effort: &effort})
 	})
 	if err != nil || !parked {
 		t.Fatalf("provider pick with its effort = %v, %v; want parked", parked, err)
@@ -765,7 +765,7 @@ func TestAProviderPickCarriesItsEffortPastAnAgentRoom(t *testing.T) {
 		t.Fatalf("effort alone under a waiting provider = %v, %v; want parked", parked, err)
 	}
 	if _, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
-		return app.Annotate(ctx, "c_pp", Annotation{Runtime: &RuntimeBinding{AgentID: "fake", AgentModel: "swe-2-1"}})
+		return app.Annotate(ctx, "c_pp", Annotation{Runtime: agentBinding(t, "fake", "swe-2-1")})
 	}); err != nil {
 		t.Fatalf("agent binding = %v; want parked", err)
 	}
@@ -773,6 +773,43 @@ func TestAProviderPickCarriesItsEffortPastAnAgentRoom(t *testing.T) {
 		return app.Annotate(ctx, "c_pp", Annotation{Effort: &effort})
 	}); apperror.As(err).StatusCode() != 400 {
 		t.Fatalf("effort under a waiting agent = %v, want a 400 refusal", err)
+	}
+}
+
+// A harness room that has an agent pick waiting refuses a provider pick.
+// The stored room is still a harness; the waiting binding owns the decision.
+func TestParkedAgentOnAHarnessRoomOwnsProviderPicks(t *testing.T) {
+	app, rt, _ := agentFixture(t, enum.ApprovalPolicyAutoAll)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_kind", "gw1", "m1", "hi", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	release := busyTurn(t, app, rt, "c_kind")
+	defer release()
+	effort := enum.EffortMax
+	parked, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_kind", Annotation{Runtime: agentBinding(t, "fake", "")})
+	})
+	if err != nil || !parked {
+		t.Fatalf("agent pick = parked %v, %v; want it waiting", parked, err)
+	}
+	if _, err := pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_kind", Annotation{Effort: &effort})
+	}); apperror.As(err).StatusCode() != 400 {
+		t.Fatalf("effort under a parked agent = %v, want 400", err)
+	}
+	info, err := app.deps.Convs.Info(ctx, "c_kind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Kind() != enum.RuntimeHarness {
+		t.Fatalf("stored room = %s, want harness", info.Kind())
+	}
+	parked, err = pickWhileBusy(t, "a turn ran", func() (bool, error) {
+		return app.Annotate(ctx, "c_kind", Annotation{Runtime: harnessBinding(t, "gw1", "m1"), Effort: &effort})
+	})
+	if err != nil || !parked {
+		t.Fatalf("harness pick with its effort = parked %v, %v", parked, err)
 	}
 }
 

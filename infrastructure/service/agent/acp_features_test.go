@@ -438,12 +438,19 @@ func TestCommandsSurviveIdleStop(t *testing.T) {
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID())) == 0 {
-		t.Fatal("the session never reported its commands")
+	if got := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID()); len(got) != 1 || got[0].Name != "compact" {
+		t.Fatalf("live commands = %+v, want the reported compact", got)
+	}
+	stored, err := store.CommandCatalog(ctx, in.Conversation.ID())
+	if err != nil || len(stored.Commands) != 1 || stored.Commands[0].Name != "compact" || stored.AgentID != in.Agent.ID() {
+		t.Fatalf("stored catalog = %+v, %v — want this agent's compact", stored, err)
 	}
 	rt.ReapIdle(0)
-	if len(rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID())) == 0 {
-		t.Fatal("reported commands disappeared with the idle process")
+	if rt.sessions[in.Conversation.ID()] != nil || rt.procs[in.Agent.ID()] != nil {
+		t.Fatal("the idle process is still running; the catalog would not be read from the store")
+	}
+	if got := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID()); len(got) != 1 || got[0].Name != "compact" {
+		t.Fatalf("commands after idle-stop = %+v, want the stored compact", got)
 	}
 }
 
@@ -461,6 +468,10 @@ func TestCommandsStayAbsentWhenTheAgentNeverReportsAny(t *testing.T) {
 	}
 	if got := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID()); len(got) != 0 {
 		t.Fatalf("commands = %+v, want none", got)
+	}
+	stored, err := store.CommandCatalog(ctx, in.Conversation.ID())
+	if err != nil || stored.AgentID != "" || len(stored.Commands) != 0 {
+		t.Fatalf("a room that never reported wrote a catalog: %+v, %v", stored, err)
 	}
 	rt.ReapIdle(0)
 	if got := rt.Commands(ctx, in.Conversation.ID(), in.Agent.ID()); len(got) != 0 {
@@ -494,6 +505,17 @@ func TestCommandsAreReplacedByTheNextLiveSession(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "review,explain" {
 		t.Fatalf("stored commands = %v, want exactly [review explain] — no merge with compact", names)
+	}
+	stored, err := store.CommandCatalog(ctx, in.Conversation.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedNames := make([]string, 0, len(stored.Commands))
+	for _, cmd := range stored.Commands {
+		storedNames = append(storedNames, cmd.Name)
+	}
+	if strings.Join(storedNames, ",") != "review,explain" {
+		t.Fatalf("the file still holds %v, want the newer report to have replaced compact", storedNames)
 	}
 }
 

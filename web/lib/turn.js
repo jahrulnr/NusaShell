@@ -40,6 +40,10 @@ function toolParent(p) {
   return typeof linked === 'string' && linked !== '' ? linked : '';
 }
 
+function toolKeys(p) {
+  return p?.keys && typeof p.keys === 'object' ? p.keys : null;
+}
+
 function settleTools(t, why, definitive = false) {
   for (const s of t.segments) {
     // A member is skipped for every settle, definitive or not: its run outlives
@@ -118,12 +122,29 @@ export function applyFrame(t, f) {
       if (p.phase === 'retry_wait') dropUnpersisted(t);
       break;
     }
-    case 'turn.tool_call':
-      // at is when this tab saw the call start: the row's clock reads from it,
-      // and the frame carries no clock of its own.
-      t.segments.push({ id: `${t.turnId}:${++t.n}`, kind: 'tool', callId: p.callId, name: p.name, input: '', output: '', status: 'requested', parent: toolParent(p), at: Date.now() });
+    case 'turn.tool_call': {
+      // A later frame for the same call replaces its keys and does not add a
+      // row. at stays the moment this tab first saw the call.
+      const existing = t.segments.findLast((x) => x.kind === 'tool' && x.callId === p.callId);
+      const keys = toolKeys(p);
+      if (existing) {
+        if (keys) {
+          existing.keys = keys;
+          existing.parent = toolParent({ keys });
+        }
+        if (typeof p.title === 'string' && p.title) existing.title = p.title;
+        if (typeof p.kind === 'string' && p.kind) existing.toolKind = p.kind;
+        if (typeof p.name === 'string' && p.name) existing.name = p.name;
+      } else {
+        t.segments.push({
+          id: `${t.turnId}:${++t.n}`, kind: 'tool', callId: p.callId, name: p.name, input: '', output: '',
+          status: 'requested', parent: toolParent(p), keys, title: typeof p.title === 'string' ? p.title : '',
+          toolKind: typeof p.kind === 'string' ? p.kind : '', at: Date.now(),
+        });
+      }
       if (t.phase?.phase === 'reasoning') t.phase = null;
       break;
+    }
     case 'turn.tool_input': {
       const s = t.segments.findLast((x) => x.kind === 'tool' && x.callId === p.callId);
       if (s) s.input += p.text || '';
@@ -244,7 +265,11 @@ export function snapshotSegments(t, parts) {
         t.segments.push({ id, kind: 'reasoning', text: p.text || '' });
         break;
       case 'tool':
-        t.segments.push({ id, kind: 'tool', callId: p.callId, name: p.name, input: p.input || '', output: p.output || '', status: p.status || 'requested' });
+        t.segments.push({
+          id, kind: 'tool', callId: p.callId, name: p.name, input: p.input || '', output: p.output || '',
+          status: p.status || 'requested', parent: toolParent(p), keys: toolKeys(p),
+          title: typeof p.title === 'string' ? p.title : '', toolKind: typeof p.kind === 'string' ? p.kind : '',
+        });
         break;
       case 'steer':
         t.segments.push({ id, kind: 'steer', inputId: p.inputId, text: p.text || '', final: !!p.final, attachments: p.attachments || [] });
@@ -473,9 +498,20 @@ export function liveSegments(live, items) {
   if (!segments.length) return segments;
   const calls = new Set();
   const rows = new Map();
+  const byCall = new Map();
   for (const x of items || []) {
-    if (x.kind === 'tool' && x.callId) calls.add(x.callId);
+    if (x.kind === 'tool' && x.callId) { calls.add(x.callId); byCall.set(x.callId, x); }
     if (x.kind === 'user' && x.steerInput) rows.set(x.steerInput, x);
+  }
+  // The history row is the one on screen once this prefix is dropped, so a
+  // later key frame has to land on it or the card would keep the old keys.
+  for (const s of segments) {
+    const h = s.kind === 'tool' && s.callId ? byCall.get(s.callId) : null;
+    if (!h || !s.keys) continue;
+    h.keys = s.keys;
+    h.parent = s.parent || '';
+    if (s.title) h.title = s.title;
+    if (s.toolKind) h.toolKind = s.toolKind;
   }
   if (!calls.size && !rows.size) return segments;
   let cut = -1;
@@ -581,6 +617,10 @@ export function historyItems(messages, cwd = '') {
           id: `${m.id}:${c.id}`, kind: 'tool', callId: c.id, name: c.name, input: c.input || '', output: c.output || '',
           status: c.status === 'pending' ? 'pending' : c.status === 'failed' ? 'failed' : 'settled',
           calledAt: c.calledAt, stored: true, cwd, attachments: c.attachments || [],
+          parent: toolParent(c), keys: toolKeys(c),
+          title: typeof c.title === 'string' ? c.title : '',
+          toolKind: typeof c.kind === 'string' ? c.kind : '',
+          turnEnd: m.finishReason === 'interrupted' ? 'stopped' : m.finishReason ? 'finished' : '',
         });
       }
     }
@@ -671,6 +711,167 @@ export function group(items) {
       cur = null;
       out.push(it);
     }
+  }
+  return out;
+}
+
+const SUB_ID = 'acp.subagent.id';
+const SUB_PROFILE = 'acp.subagent.profile';
+const SUB_MODEL = 'acp.subagent.model';
+const SUB_BACKGROUND = 'acp.subagent.background';
+const SUB_SUCCESS = 'acp.subagent.success';
+const SUB_SUMMARY = 'acp.subagent.summary';
+
+export function subagentId(it) {
+  const id = it?.keys?.[SUB_ID];
+  return typeof id === 'string' && id !== '' ? id : '';
+}
+
+function inputObject(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch { return null; }
+}
+
+function shownText(v) {
+  return typeof v === 'string' && v.trim() ? v : '';
+}
+
+function flagTrue(v) {
+  return v === true || v === 'true';
+}
+
+function flagFalse(v) {
+  return v === false || v === 'false';
+}
+
+// subagentStatus is the card word. It reads the success key and how the turn
+// ended. It never reads the tool row, the output, or a clock.
+export function subagentStatus(keys, end = {}) {
+  const success = keys?.[SUB_SUCCESS];
+  if (flagTrue(success)) return { status: 'Done', note: '' };
+  if (flagFalse(success) || end.ended === 'finished') {
+    return { status: 'Incomplete', note: 'No report was recorded for this subagent.' };
+  }
+  if (end.ended === 'stopped') {
+    return {
+      status: 'Incomplete',
+      note: end.ownerStop
+        ? 'You stopped the turn before this subagent reported.'
+        : 'The turn ended before this subagent reported.',
+    };
+  }
+  if (end.blind) return { status: 'Running — no live view', note: '' };
+  return { status: 'Running', note: '' };
+}
+
+// memberLine is one activity line: kind, title, and the first line of input.
+// A missing part is left out. Nothing is invented after it.
+export function memberLine(it) {
+  const raw = typeof it?.input === 'string' ? it.input : '';
+  const line = raw.split('\n')[0].trim();
+  const kind = typeof it?.toolKind === 'string' ? it.toolKind.trim() : '';
+  const title = typeof it?.title === 'string' ? it.title.trim() : '';
+  return [kind, title, line].filter(Boolean);
+}
+
+// subagentView is the card the screen draws. The parent output stays the
+// output. The summary is a short line only after Done, and it is not the output.
+export function subagentView(item) {
+  const keys = item?.keys || {};
+  const input = inputObject(item?.input);
+  const profile = shownText(input?.profile) || shownText(keys[SUB_PROFILE]);
+  const model = shownText(keys[SUB_MODEL]);
+  const badges = [];
+  if (profile) badges.push(profile);
+  if (model) badges.push(model);
+  if (flagTrue(keys[SUB_BACKGROUND])) badges.push('Background');
+  const state = subagentStatus(keys, item?.subagentEnd || {});
+  return {
+    title: shownText(input?.title),
+    task: shownText(input?.task),
+    badges,
+    status: state.status,
+    note: state.note,
+    summary: state.status === 'Done' ? shownText(keys[SUB_SUMMARY]) : '',
+    members: (item?.members || []).map(memberLine),
+    output: typeof item?.output === 'string' ? item.output : '',
+  };
+}
+
+// applyLiveEnd stamps history rows of a turn this tab just saw end, so a
+// card drawn from the stored row does not stay Running after the terminal.
+export function applyLiveEnd(items, live) {
+  const term = live?.terminal;
+  if (!term || !items?.length) return items;
+  const ids = new Set();
+  for (const s of live.segments || []) if (s.kind === 'tool' && s.callId) ids.add(s.callId);
+  if (!ids.size) return items;
+  const ended = term.type === 'turn.completed' ? 'finished' : 'stopped';
+  const ownerStop = ended === 'stopped' && !!live.canceling;
+  for (const it of items) {
+    if (it.kind === 'tool' && ids.has(it.callId)) {
+      it.turnEnd = ended;
+      it.ownerStop = ownerStop;
+    }
+  }
+  return items;
+}
+
+// placeSubagents lifts each run that carries acp.subagent.id into its own
+// card, inline where that call sits. Members join by parent id. A member
+// whose card is absent stays an ordinary row until the turn ends, and then
+// a flat delegated row. A call with no keys is left untouched.
+export function placeSubagents(items, end = {}) {
+  if (!items?.some((it) => it.kind === 'tool' && (subagentId(it) || it.parent))) return items || [];
+  const out = [];
+  let turn = [];
+  const flush = () => {
+    if (!turn.length) return;
+    out.push(...placeTurn(turn, endOfTurn(turn, end)));
+    turn = [];
+  };
+  for (const it of items) {
+    if (TURN_EDGE.has(it.kind)) { flush(); out.push(it); continue; }
+    turn.push(it);
+  }
+  flush();
+  return out;
+}
+
+function endOfTurn(turn, fallback) {
+  const marked = turn.find((it) => it.kind === 'tool' && it.turnEnd);
+  if (!marked) return fallback || {};
+  return { ended: marked.turnEnd, ownerStop: !!marked.ownerStop, blind: false };
+}
+
+function placeTurn(turn, end) {
+  const cards = new Map();
+  for (const it of turn) {
+    const id = it.kind === 'tool' ? subagentId(it) : '';
+    if (id && !cards.has(id)) cards.set(id, { ...it, kind: 'subagent', members: [], subagentEnd: end });
+  }
+  const out = [];
+  const seen = new Set();
+  for (const it of turn) {
+    const id = it.kind === 'tool' ? subagentId(it) : '';
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(cards.get(id));
+      continue;
+    }
+    if (it.kind === 'tool' && it.parent) {
+      const card = cards.get(it.parent);
+      if (card) { card.members.push(it); continue; }
+      if (end.ended) {
+        out.push({ id: 'delegated:' + it.id, kind: 'delegated', name: it.name || '', title: it.title || '' });
+        continue;
+      }
+    }
+    out.push(it);
   }
   return out;
 }

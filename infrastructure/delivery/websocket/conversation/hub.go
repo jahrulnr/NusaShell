@@ -158,6 +158,13 @@ type turn struct {
 	// already cut.
 	startedAt time.Time
 	live      *liveDoc
+	// agent marks a turn whose room runs an agent. clock is preparing,
+	// waiting, or working. promptedAt and lastUpdateAt are unix
+	// milliseconds, zero when that stamp has not been written.
+	agent        bool
+	clock        string
+	promptedAt   int64
+	lastUpdateAt int64
 	// overflowed marks a turn whose own stream frames exceeded the
 	// outbound bound — its context is canceled, further events are
 	// suppressed, and runTurn emits the sanitized 413 terminal carrying
@@ -239,6 +246,10 @@ type Hub struct {
 	// every turn event (see OnEvent).
 	finished []func(convID, kind string, origin valueobject.TurnOrigin, external bool, err error)
 	events   []func(convID string, ev event.TurnEvent)
+	// agentRoom reports whether a stored room runs an agent. Nil leaves
+	// the clock off until a turn event says so. A named agent on the
+	// command is enough on its own.
+	agentRoom func(convID string) bool
 }
 
 // NewHub binds a sender under the given server-lifecycle context —
@@ -289,8 +300,37 @@ func (h *Hub) steerableLocked(t *turn) bool {
 	return t.steering != nil
 }
 
+// UseAgentRoom tells admission which stored rooms run an agent, so
+// turn.opened can say preparing before the job loads the room.
+func (h *Hub) UseAgentRoom(fn func(convID string) bool) {
+	h.mu.Lock()
+	h.agentRoom = fn
+	h.mu.Unlock()
+}
+
+// noteAgentLocked marks an agent turn and starts its clock at preparing.
+// Callers hold h.mu.
+func (h *Hub) noteAgentLocked(t *turn) {
+	if t == nil || t.agent {
+		return
+	}
+	if t.opts.Agent != "" || (h.agentRoom != nil && t.conversationID != "" && h.agentRoom(t.conversationID)) {
+		t.agent = true
+		if t.clock == "" {
+			t.clock = "preparing"
+		}
+	}
+}
+
 func (h *Hub) openedBody(t *turn) openedPayload {
-	return openedPayload{StartedAt: t.startedAt.UnixMilli(), Steerable: h.steerableLocked(t)}
+	p := openedPayload{StartedAt: t.startedAt.UnixMilli(), Steerable: h.steerableLocked(t)}
+	if t.agent {
+		if t.clock == "" {
+			t.clock = "preparing"
+		}
+		p.Clock = t.clock
+	}
+	return p
 }
 
 // UsePlanEvents sets the registry update_plan resolves the room's live
@@ -663,6 +703,7 @@ func (h *Hub) admitAndRun(c *conn, requestID, convID string, job turn) {
 	// worker before its Add. `opened` is journaled while still locked
 	// so seq 0 provably precedes every stream frame.
 	h.wg.Add(1)
+	h.noteAgentLocked(t)
 	h.emitLocked(t, "turn.opened", h.openedBody(t), true)
 	// The room-activity notice enqueues on every socket under the same
 	// lock — it provably follows seq 0 on each wire.
@@ -784,6 +825,30 @@ func (h *Hub) sealTurn(t *turn, persisted bool, err error) {
 	}
 	if t.kind == turnSend {
 		p.UserMessagePersisted = &persisted
+	}
+	// ClassifyError folds a 401/403 into a 502. An agent credential keeps
+	// the status the class names, and the quartet rides this terminal.
+	if err != nil && !t.overflowed && !(h.shutting && shutdownCasualty(err)) {
+		if hold, ok := appjob.HoldFrom(err); ok {
+			p.Status = hold.Status
+			p.Code = hold.Code
+			p.Message = clipTerminalMessage(hold.Message)
+			p.AgentClass = hold.Class
+			p.Retry = hold.Retry
+			p.AgentMessage = hold.Message
+			if hold.RetryAt > 0 {
+				at := hold.RetryAt
+				p.RetryAt = &at
+			}
+		}
+	}
+	if t.promptedAt > 0 {
+		at := t.promptedAt
+		p.PromptedAt = &at
+	}
+	if t.lastUpdateAt > 0 {
+		at := t.lastUpdateAt
+		p.LastUpdateAt = &at
 	}
 	// The bounded receipt snapshot rides every terminal — accepted was
 	// never consumed, so the client reconciles each submitted input by

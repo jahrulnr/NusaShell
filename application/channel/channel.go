@@ -67,16 +67,17 @@ type Rooms interface {
 // Runtime is what a turn runs on: an agent, or a provider and model with
 // the reasoning effort its role starts on.
 type Runtime struct {
+	Kind       enum.Runtime
 	AgentID    string
 	ProviderID string
 	ModelID    string
 	Effort     enum.Effort
 }
 
-func (r Runtime) empty() bool { return r.AgentID == "" && r.ProviderID == "" }
+func (r Runtime) empty() bool { return r.Kind == "" }
 
 func (r Runtime) String() string {
-	if r.AgentID != "" {
+	if r.Kind.MirrorsAgentCommands() {
 		if r.ModelID != "" {
 			return r.AgentID + "/" + r.ModelID + " (ACP)"
 		}

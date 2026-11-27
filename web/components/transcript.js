@@ -3,13 +3,13 @@
 // calls fold into collapsible "work" groups between prose.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import { renderInto, renderUserInto, disposeTree, handleCopyClick } from '../lib/markdown.js';
-import { historyItems, liveHistory, liveSegments, joinText, group, foldGhosts, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds, turnSeconds } from '../lib/turn.js';
+import { historyItems, liveHistory, liveSegments, joinText, group, foldGhosts, placeSubagents, applyLiveEnd, toolEnding, userLayout, relayName, splitReplyQuote, turnEnds, turnSeconds } from '../lib/turn.js';
 import { queuedFor, watchQueued } from '../lib/queued.js';
-import { ToolRow } from './toolcard.js';
+import { ToolRow, SubagentCard, DelegatedRow } from './toolcard.js';
 import { Attachments, ToolMedia } from './media.js';
 import { ElicitationCard } from './elicitation.js';
 import { referencesFromStored } from '../lib/references.js';
-import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate, waitingPrompt, roomLine } from '../lib/chat.js';
+import { editMessage, isBusy, retry, selection, loadEarlier, loadHistory, answerApproval, annotationLabel, navigate, waitingPrompt, roomLine, liveStatus, honestyCard, workingBlind } from '../lib/chat.js';
 import { emit, state } from '../lib/store.js';
 import { openPreview } from './preview.js';
 import { fileURL } from '../lib/api.js';
@@ -152,7 +152,7 @@ function UserMessage({ room, msg, text, refs, files, annotations, recording, pen
   // folded into the turn that already consumed it, and the bubble drawn from
   // the journal never offers an edit.
   const canEdit = msg && !steer && own && !isBusy(room);
-  const agentRoom = !!(room.info?.agentId || selection(room).agentId);
+  const agentRoom = selection(room).runtime === 'agent';
   if (editing) {
     const save = () => { if (editMessage(room, msg.id, draft)) setEditing(false); };
     return html`<div class="flex justify-end">
@@ -320,6 +320,17 @@ function PlanCard({ entries }) {
 function Status({ room }) {
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
+  const view = liveStatus(room);
+  if (!view) return null;
+  if (!view.provider) {
+    return html`<div class="flex items-center gap-2 text-[13px] text-muted py-1" role="status">
+      <span class="orb live"></span>
+      <span class="shimmer">${view.text}</span>
+      ${view.note && html`<span class="text-faint text-xs">${view.note}</span>`}
+      ${view.counter > 0 && html`<span class="text-faint text-xs">${view.counter}s</span>`}
+      ${view.slow && html`<span class="text-faint text-xs">Stop ends this turn.</span>`}
+    </div>`;
+  }
   const live = room.live;
   let text = 'Working';
   if (room.pendingOpen) text = 'Sending';
@@ -332,9 +343,28 @@ function Status({ room }) {
   else if (live?.phase?.phase === 'reasoning') text = 'Thinking';
   const secs = live ? turnSeconds(live) : 0;
   return html`<div class="flex items-center gap-2 text-[13px] text-muted py-1" role="status">
-    <span class=${live?.phase?.phase === 'retry_wait' ? 'orb live' : 'orb live'} style=${live?.phase?.phase === 'retry_wait' ? 'background:var(--bad)' : ''}></span>
+    <span class="orb live" style=${live?.phase?.phase === 'retry_wait' ? 'background:var(--bad)' : ''}></span>
     <span class="shimmer">${text}…</span>
     ${secs === null ? html`<span class="text-faint text-xs">—</span>` : secs > 2 && html`<span class="text-faint text-xs">${secs >= 60 ? Math.floor(secs / 60) + 'm ' : ''}${secs % 60}s</span>`}
+  </div>`;
+}
+
+function HonestyCard({ room }) {
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
+  const card = honestyCard(room);
+  if (!card) return null;
+  const dismiss = () => { room.hideHonesty = true; room.failed = null; emit(); };
+  return html`<div role="alert" class="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-[13px]">
+    <div class="font-medium break-words">${card.title}</div>
+    ${card.body && html`<p class="text-muted mt-1 break-words">${card.body}</p>`}
+    ${card.message && html`<p class="mt-1 break-words">${card.message}</p>`}
+    ${card.retryOff && html`<p class="text-muted mt-1">${card.retryOff}</p>`}
+    ${card.queue > 0 && html`<p class="text-faint mt-1">${card.queue} queued messages stay queued. None is reported sent.</p>`}
+    <div class="flex justify-end gap-2 mt-2">
+      <${Button} kind="ghost" onClick=${dismiss}>Dismiss</${Button}>
+      ${card.retry && html`<${Button} onClick=${() => retry(room)}><${Icon} name="refresh" size=${14} /> Retry</${Button}>`}
+    </div>
   </div>`;
 }
 
@@ -405,8 +435,15 @@ export function Transcript({ room, scroller }) {
   // copy button's text identical to what was written.
   // Empty failed rows from before members were recognized become one quiet
   // count per turn. Folding before group() keeps that line out of the cards.
-  const items = group(joinText(foldGhosts(hist)));
-  const liveGroups = group(joinText(foldGhosts(liveItems)));
+  const liveEnd = (() => {
+    const term = r.live?.terminal;
+    if (!term) return {};
+    return term.type === 'turn.completed'
+      ? { ended: 'finished' }
+      : { ended: 'stopped', ownerStop: !!r.live.canceling };
+  })();
+  const items = group(joinText(foldGhosts(placeSubagents(applyLiveEnd(hist, r.live), { blind: workingBlind(r) }))));
+  const liveGroups = group(joinText(foldGhosts(placeSubagents(liveItems, liveEnd))));
   // A finished turn ends with a button that copies what it said, as the
   // Markdown it was written in; a running turn gets one once it ends.
   const histEnds = turnEnds(items);
@@ -492,6 +529,8 @@ export function Transcript({ room, scroller }) {
       </details>`;
       case 'text': return html`<${Markdown} key=${it.id} text=${it.text} room=${r} quote />`;
       case 'activity': return html`<${Activity} key=${it.id} room=${r} item=${it} live=${live} cwd=${cwd} />`;
+      case 'subagent': return html`<${SubagentCard} key=${it.id} item=${it} />`;
+      case 'delegated': return html`<${DelegatedRow} key=${it.id} item=${it} />`;
       case 'interrupted': return html`<div key=${it.id} class="text-xs text-faint">— interrupted</div>`;
       case 'ghosts': return html`<p key=${it.id} class="text-xs text-faint">${it.text}</p>`;
       case 'resync': return html`<div key=${it.id} class="text-xs text-faint">${it.text}</div>`;
@@ -524,6 +563,7 @@ export function Transcript({ room, scroller }) {
     ${!!(r.live?.userText || r.live?.userFiles?.length || r.live?.userRecording) && html`<${UserMessage} room=${r} text=${r.live.userText} refs=${r.live.userRefs} files=${r.live.userFiles} recording=${r.live.userRecording} pending=${!r.live.terminal} />`}
     ${liveGroups.map((it, i) => withCopy(liveEnds)(it, i, !r.live.terminal && i === liveGroups.length - 1))}
     ${(r.live && !r.live.terminal) || r.pendingOpen || r.settling ? html`<${Status} room=${r} />` : null}
-    ${r.failed && !isBusy(r) && (waitingPrompt(r) || !r.messages.length) && html`<${FailedCard} room=${r} />`}
+    ${typeof r.agentTime === 'number' && !r.live && r.info?.runtime === 'agent' && html`<p class="text-xs text-faint">Agent time ${r.agentTime}s</p>`}
+    ${honestyCard(r) ? html`<${HonestyCard} room=${r} />` : r.failed && !r.failed.agentClass && !isBusy(r) && (waitingPrompt(r) || !r.messages.length) && html`<${FailedCard} room=${r} />`}
   </div>`;
 }

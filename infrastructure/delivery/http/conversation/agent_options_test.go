@@ -257,7 +257,7 @@ func TestUnavailableStateNeverReachesTheWire(t *testing.T) {
 func TestWaitingPickIsNotReportedAsAnOptionInUse(t *testing.T) {
 	reads := roomReads{
 		info:    drepo.ConversationInfo{ID: "c_room", AgentID: "fake"},
-		pending: &drepo.PendingSelection{AgentID: "fake", Options: map[string]string{"mode": "plan"}},
+		pending: &drepo.PendingSelection{Binding: mustParkAgent("fake", ""), Options: map[string]string{"mode": "plan"}},
 	}
 	agent := &roomAgent{opts: []dservice.AgentOption{{ID: "mode", Name: "Mode", Type: "select", Current: "build"}}}
 	body := getRoom(t, reads, agent)

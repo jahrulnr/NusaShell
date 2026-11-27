@@ -26,6 +26,7 @@ const skill = (over = {}) => ({
   level: 'agent',
   tracked: true,
   changed: false,
+  changedCause: '',
   pending: 0,
   pendingStale: 0,
   ...over,
@@ -93,9 +94,12 @@ function mount() {
 test('the four labels, and a locked source stays locked', () => {
   assert.equal(skillLabel(skill()), 'Loop may propose');
   assert.equal(skillLabel(skill({ level: 'user' })), 'Only you');
-  assert.equal(skillLabel(skill({ changed: true, level: 'user' })), 'Edited by hand');
+  assert.equal(skillLabel(skill({ changed: true, level: 'user', changedCause: "the skill's file changed since its row was written" })), "the skill's file changed since its row was written");
+  assert.equal(skillLabel(skill({ changed: true, level: 'user', changedCause: '' })), 'Only you');
+  assert.equal(skillLabel(skill({ changed: false, level: 'user', changedCause: '' })), 'Only you');
   assert.equal(skillLabel(skill({ source: 'builtin', level: 'agent', tracked: true })), 'Locked');
   assert.equal(skillLabel(skill({ source: 'global', changed: true })), 'Locked');
+  assert.equal(skillLabel(skill({ source: 'global', changed: true, changedCause: "the skill's file changed since its row was written" })), "the skill's file changed since its row was written");
   assert.equal(skillLabel(skill({ source: 'workspace', level: 'agent' })), 'Locked');
   assert.equal(skillLabel(skill({ source: 'other', level: 'agent' })), 'Loop may propose');
   assert.equal(skillMovable(skill()), true);
@@ -140,7 +144,7 @@ test('the list shows each state, the path, the counts, and no proposal action', 
   mockApi({
     'GET /api/skills': page([
       skill({ pending: 2, pendingStale: 1 }),
-      skill({ name: 'hand-edit', description: 'Edited locally', path: '/data/skills/hand-edit/SKILL.md', level: 'user', changed: true }),
+      skill({ name: 'hand-edit', description: 'Edited locally', path: '/data/skills/hand-edit/SKILL.md', level: 'user', changed: true, changedCause: "the loop wrote this skill's file, but the decision was not recorded" }),
       skill({ name: 'coding-workflow', description: 'Shipped with the app', source: 'builtin', path: '/data/builtin-skills/coding-workflow/SKILL.md', level: 'user', tracked: false }),
       skill({ name: 'shared', description: 'In the home library', source: 'global', path: '/home/.agents/skills/shared/SKILL.md', level: 'user', tracked: false }),
       skill({ name: 'ws-skill', description: 'For this project', source: 'workspace', path: '/w/proj/.agents/skills/ws-skill/SKILL.md', level: 'agent', tracked: true }),
@@ -156,7 +160,9 @@ test('the list shows each state, the path, the counts, and no proposal action', 
 
   const body = doc.body.textContent;
   assert.match(body, /Loop may propose/);
-  assert.match(body, /Edited by hand/);
+  assert.match(body, /the loop wrote this skill's file, but the decision was not recorded/);
+  assert.equal(body.includes('Edited by hand'), false);
+  assert.equal(body.includes('edited outside the loop'), false);
   assert.match(body, /Only you/);
   assert.match(body, /Locked/);
   assert.match(body, /\/data\/skills\/hand-edit\/SKILL\.md/);
@@ -172,6 +178,35 @@ test('the list shows each state, the path, the counts, and no proposal action', 
   assert.ok(button(rowOf('hand-edit'), 'Change'));
   const controls = [...doc.querySelectorAll('button, a')].map((el) => (el.textContent || '') + (el.getAttribute('href') || ''));
   assert.equal(controls.some((text) => /accept|dismiss|reject|proposal/i.test(text)), false);
+});
+
+test('a changed row shows changedCause, and an empty cause adds no label', async () => {
+  const wrote = "the loop wrote this skill's file, but the decision was not recorded";
+  const drifted = "the skill's file changed since its row was written";
+  mockApi({
+    'GET /api/skills': page([
+      skill({ name: 'quiet', level: 'user', changed: false, changedCause: '' }),
+      skill({ name: 'blank', level: 'agent', changed: true, changedCause: '   ' }),
+      skill({ name: 'noted', level: 'user', changed: true, changedCause: wrote }),
+      skill({ name: 'drifted', level: 'agent', changed: true, changedCause: drifted }),
+    ]),
+  });
+  mount();
+  await until(() => doc.body.textContent.includes('drifted'), 'the list did not render');
+
+  const badges = (name) => [...rowOf(name).querySelectorAll('span.rounded-md')].map((el) => el.textContent);
+  assert.deepEqual(badges('quiet'), ['Only you']);
+  assert.deepEqual(badges('blank'), ['Loop may propose']);
+  assert.deepEqual(badges('noted'), [wrote]);
+  assert.deepEqual(badges('drifted'), [drifted]);
+  const body = doc.body.textContent;
+  assert.equal(body.includes('Edited by hand'), false);
+  assert.equal(body.includes('edited outside the loop'), false);
+
+  button(rowOf('noted'), 'Change').click();
+  await until(() => doc.querySelector('[id="skill-hand-back"]'), 'the cause did not open with the dialog');
+  assert.equal(doc.querySelector('[id="skill-hand-back"]').textContent, wrote);
+  assert.equal(doc.body.textContent.includes('Edited by hand'), false);
 });
 
 test('a level move sends the digest the page showed', async () => {

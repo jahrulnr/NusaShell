@@ -92,17 +92,8 @@ func (c Conversation) Fork() (*Conversation, error) {
 	if c.title != "" && !c.TitleIsDefault() {
 		fork.title = forkTitle(c.title)
 	}
-	if c.agentID != "" {
-		// BindAgent owns the agent state: it clears the provider route, the
-		// session handle, and the owner's option picks, so the picks are
-		// copied after it.
-		if err := fork.BindAgent(c.agentID); err != nil {
-			return nil, err
-		}
-		fork.agentOptions = slices.Clone(c.agentOptions)
-	} else {
-		fork.SetProviderID(c.providerID)
-		fork.SetModelID(c.modelID)
+	if err := fork.copyBinding(c); err != nil {
+		return nil, err
 	}
 	fork.effort = c.effort
 	fork.upstream = c.upstream
@@ -127,6 +118,21 @@ func forkTitle(source string) string {
 		title = strings.TrimSpace(string(r[:room])) + "…"
 	}
 	return title + marker
+}
+
+// copyBinding copies one binding onto a fresh room. The kind decides which
+// constructor runs. Callers do not.
+func (c *Conversation) copyBinding(src Conversation) error {
+	if src.Runtime().UsesProviderRoute() {
+		c.SetProviderID(src.providerID)
+		c.SetModelID(src.modelID)
+		return nil
+	}
+	if err := c.BindAgent(src.agentID); err != nil {
+		return err
+	}
+	c.agentOptions = slices.Clone(src.agentOptions)
+	return nil
 }
 
 // Append adds a message to the conversation history.
@@ -179,7 +185,7 @@ func sameMessageIDs(live, retained []entity.Message) bool {
 // A tail that is only a previous checkpoint plus the kept messages is
 // still longer than keepTail, so another explicit fold is allowed.
 func (c *Conversation) CanManualCompact(keepTail int) bool {
-	if c.Runtime() == enum.RuntimeAgent {
+	if !c.Runtime().HarnessOwnsContext() {
 		return false
 	}
 	if keepTail < 0 {
@@ -327,7 +333,7 @@ func (c *Conversation) AdoptAgentTitle(title string) bool {
 	if r := []rune(title); len(r) > maxTitleRunes {
 		title = strings.TrimSpace(string(r[:maxTitleRunes-1])) + "…"
 	}
-	if c.agentID == "" || title == "" || title == c.title {
+	if !c.Runtime().QueriesAgentSessionOptions() || title == "" || title == c.title {
 		return false
 	}
 	if c.title != "" && !c.TitleIsDefault() && c.title != c.agentTitle {
@@ -429,6 +435,10 @@ func (c *Conversation) AllowSymbolMap() {
 // SetEnvironment binds this room to one execution environment. A registered
 // driver is checked by the application before work starts; the domain only
 // validates the known identity.
+// ErrAgentNeedsLocal is the binding rule that an agent runs only in the
+// local environment. A provider route has no such limit.
+var ErrAgentNeedsLocal = errors.New("agents run only in the local environment")
+
 func (c *Conversation) SetEnvironment(environment enum.Environment) error {
 	if _, ok := enum.ParseEnvironment(environment.String()); !ok {
 		return fmt.Errorf("unknown environment %q", environment)
@@ -445,6 +455,9 @@ func (c *Conversation) SetEnvironment(environment enum.Environment) error {
 func (c *Conversation) BindAgent(agentID string) error {
 	if err := valueobject.ValidID(agentID); err != nil {
 		return fmt.Errorf("agent id: %w", err)
+	}
+	if c.environment != enum.EnvironmentLocal {
+		return ErrAgentNeedsLocal
 	}
 	if agentID == c.agentID {
 		return nil
@@ -465,7 +478,7 @@ func (c *Conversation) BindAgent(agentID string) error {
 // handle is dropped: turns that run elsewhere are turns that agent never
 // saw, so resuming its old session later would hide them from it.
 func (c *Conversation) UnbindAgent() {
-	if c.agentID == "" {
+	if !c.Runtime().QueriesAgentSessionOptions() {
 		return
 	}
 	c.agentID = ""
@@ -479,7 +492,7 @@ func (c *Conversation) UnbindAgent() {
 // runtime applies picks before each turn. Option ids and values are the
 // agent's own.
 func (c *Conversation) SetAgentOption(id, value string) error {
-	if c.agentID == "" {
+	if !c.Runtime().QueriesAgentSessionOptions() {
 		return fmt.Errorf("agent options need a room bound to an agent")
 	}
 	id = strings.TrimSpace(id)
@@ -568,7 +581,7 @@ func (c *Conversation) SetAgentSession(session string) {
 // session's context. It replaces the previous report; a room with no agent
 // has no such session, so the report is ignored.
 func (c *Conversation) ReportAgentContext(a valueobject.AgentContext) {
-	if c.agentID != "" {
+	if c.Runtime().QueriesAgentSessionOptions() {
 		c.agentContext = a
 	}
 }
@@ -588,12 +601,20 @@ func (c Conversation) ModelReplay() []entity.Message {
 	return out
 }
 
-// Runtime reports who runs this room's turns.
+// Runtime reports who runs this room's turns. The kind is derived in one
+// place; callers read the matrix instead of the identifier.
 func (c Conversation) Runtime() enum.Runtime {
-	if c.agentID != "" {
+	return RuntimeOfBinding(c.agentID)
+}
+
+// RuntimeOfBinding is the only derivation of a kind from the current
+// binary binding. A stored agent id is an agent room. Anything else is
+// the harness. A new kind changes this function, not its callers.
+func RuntimeOfBinding(agentID string) enum.Runtime {
+	if agentID != "" { // binding-constructor
 		return enum.RuntimeAgent
 	}
-	return enum.RuntimeModel
+	return enum.RuntimeHarness
 }
 
 // AddUsage accumulates the token accounting reported for one request —

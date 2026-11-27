@@ -276,7 +276,7 @@ func TestAnEffortPickOnAnAgentEditIsRefused(t *testing.T) {
 	j.Result = make(chan error, 1)
 	j.Bind("room", nil)
 	err = j.Execute(t.Context())
-	if want := AgentPickRefusal(true, &effort, nil); err == nil || err.Error() != want.Error() {
+	if want := AgentPickRefusal(enum.RuntimeAgent, &effort, nil); err == nil || err.Error() != want.Error() {
 		t.Fatalf("edit = %v, want the refusal %q", err, want.Error())
 	}
 	after, err := d.Convs.Load(t.Context(), "room")
@@ -306,7 +306,7 @@ func TestAnEffortPickOnAnAgentResumeIsRefused(t *testing.T) {
 	j.Result = make(chan error, 1)
 	j.Bind("room", nil)
 	err = j.Execute(t.Context())
-	if want := AgentPickRefusal(true, &effort, nil); err == nil || err.Error() != want.Error() {
+	if want := AgentPickRefusal(enum.RuntimeAgent, &effort, nil); err == nil || err.Error() != want.Error() {
 		t.Fatalf("resume = %v, want the refusal %q", err, want.Error())
 	}
 	if len(spy.efforts) != 0 {

@@ -49,6 +49,11 @@ func (oneWorkspace) Folders(context.Context) ([]string, error) { return nil, nil
 
 func skillsRouter(t *testing.T, home, nusashell, builtin string) (*gin.Engine, *sql.DB) {
 	t.Helper()
+	return skillsRouterBudget(t, home, nusashell, builtin, 32768)
+}
+
+func skillsRouterBudget(t *testing.T, home, nusashell, builtin string, budget int) (*gin.Engine, *sql.DB) {
+	t.Helper()
 	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "n.db"), migration.Files)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +67,7 @@ func skillsRouter(t *testing.T, home, nusashell, builtin string) (*gin.Engine, *
 		Proposals: reposkill.NewProposals(db),
 		Decisions: reposkill.NewDecisions(db),
 		Writer:    catalog,
-		Budget:    32768,
+		Budget:    budget,
 		Folders:   oneWorkspace{},
 	})
 	return r, db

@@ -171,7 +171,8 @@ func Decide(ctx context.Context, deps DecideDeps, in DecideInput) error {
 	case deps.Budget <= 0:
 		return apperror.New(409, "no catalog budget is set; the owner sets it", nil)
 	case total > deps.Budget:
-		return apperror.New(409, fmt.Sprintf("the catalog would be over its byte budget by %s bytes; make room before accepting", withCommas(total-deps.Budget)), nil)
+		over := total - deps.Budget
+		return apperror.NewCatalogOverage(fmt.Sprintf("the catalog would be over its byte budget by %s bytes; make room before accepting", withCommas(over)), over)
 	}
 
 	expectDigest := ""

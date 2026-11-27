@@ -123,7 +123,7 @@ func (s *server) project(ctx context.Context, info drepo.ConversationInfo) (conv
 	// two cannot disagree. A read that fails does not fail the room, which the
 	// owner still needs: the room says it is unreadable instead, and the
 	// agent-options route answers the reason.
-	if info.AgentID != "" {
+	if info.Kind().QueriesAgentSessionOptions() {
 		out.AgentOptions = s.agentOptionsOf(ctx, info.ID)
 		out.AgentOptionsUnreadable = out.AgentOptions == nil
 	}

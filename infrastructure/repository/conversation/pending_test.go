@@ -10,7 +10,26 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
+
+func parkAgent(t *testing.T, id, model string) *valueobject.RuntimeBinding {
+	t.Helper()
+	b, err := valueobject.NewAgentBinding(id, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &b
+}
+
+func parkHarness(t *testing.T, provider, model string) *valueobject.RuntimeBinding {
+	t.Helper()
+	b, err := valueobject.NewHarnessBinding(provider, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &b
+}
 
 // parkedRoom stores one room with a pick waiting for its next turn.
 func parkedRoom(t *testing.T) (*ConversationRepository, string) {
@@ -26,7 +45,7 @@ func parkedRoom(t *testing.T) (*ConversationRepository, string) {
 	}
 	upstream := "Alpha"
 	if err := r.SavePendingSelection(t.Context(), "c_park", drepo.PendingSelection{
-		AgentID: "dewey", AgentModel: "swe-2-1", Upstream: &upstream,
+		Binding: parkAgent(t, "dewey", "swe-2-1"), Upstream: &upstream,
 		Options: map[string]string{"mode": "accept-edits"}, AcceptedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -50,7 +69,7 @@ func TestPendingSelectionSurvivesARecordSave(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("pending = %+v, %v, %v", sel, ok, err)
 	}
-	if sel.AgentID != "dewey" || sel.AgentModel != "swe-2-1" || sel.Options["mode"] != "accept-edits" {
+	if sel.AgentID() != "dewey" || sel.AgentModel() != "swe-2-1" || sel.Options["mode"] != "accept-edits" {
 		t.Fatalf("a record save lost the pick: %+v", sel)
 	}
 	if _, err := os.Stat(filepath.Join(root, "c_park", pendingFile)); err != nil {
@@ -64,7 +83,7 @@ func TestPendingSelectionMergesLastPickWins(t *testing.T) {
 	r, _ := parkedRoom(t)
 	effort := enum.EffortMax
 	if err := r.SavePendingSelection(t.Context(), "c_park", drepo.PendingSelection{
-		ProviderID: "openrouter", ModelID: "swe-2", Effort: &effort, AcceptedAt: time.Now().UTC(),
+		Binding: parkHarness(t, "openrouter", "swe-2"), Effort: &effort, AcceptedAt: time.Now().UTC(),
 		Options: map[string]string{"mode": "ask", "strict": "true"},
 	}); err != nil {
 		t.Fatal(err)
@@ -75,7 +94,7 @@ func TestPendingSelectionMergesLastPickWins(t *testing.T) {
 	}
 	// A provider pick replaces the agent runtime whole; effort from the older
 	// pick survives its field, and options merge by id.
-	if sel.AgentID != "" || sel.AgentModel != "" || sel.ProviderID != "openrouter" || sel.ModelID != "swe-2" {
+	if sel.AgentID() != "" || sel.AgentModel() != "" || sel.ProviderID() != "openrouter" || sel.ModelID() != "swe-2" {
 		t.Fatalf("runtime merged two picks: %+v", sel)
 	}
 	if sel.Effort == nil || sel.Effort.String() != "max" || sel.Upstream == nil || *sel.Upstream != "Alpha" {
@@ -104,7 +123,7 @@ func TestPendingSelectionLeavesWithTheRoom(t *testing.T) {
 // directory of its own.
 func TestPendingSelectionNeedsTheRoom(t *testing.T) {
 	r := NewConversationRepository(t.TempDir())
-	if err := r.SavePendingSelection(t.Context(), "c_missing", drepo.PendingSelection{AgentID: "dewey"}); err == nil {
+	if err := r.SavePendingSelection(t.Context(), "c_missing", drepo.PendingSelection{Binding: parkAgent(t, "dewey", "")}); err == nil {
 		t.Fatal("a pick for a missing room was written")
 	}
 }

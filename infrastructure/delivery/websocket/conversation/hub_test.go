@@ -1826,3 +1826,97 @@ func TestToolCallFrameCarriesOnlyScopedSubagentKeysOnce(t *testing.T) {
 		}
 	}
 }
+
+// A lifecycle fact is a second turn.tool_call for the same callId. The
+// live row is the same one, input is not streamed again, and input,
+// output, and result frames still carry no keys.
+func TestLaterToolCallReplacesSubagentKeys(t *testing.T) {
+	first, err := entity.NewToolCall("run-b", "Ran explore", `{"title":"Beta"}`, enum.TooltypeDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := entity.NewToolCall("run-b", "Ran explore", `{"title":"Beta"}`, enum.TooltypeDelegated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.SetOptionalContent("acp.subagent.id", "agent-beta")
+	second.SetOptionalContent("acp.subagent.profile", "explore")
+	second.SetOptionalContent("acp.subagent.success", "false")
+	second.SetOptionalContent("acp.subagent.extra", "nope")
+	second.SetOptionalContent("cognition.ai/subagent_started", "nope")
+
+	h := newHub(t, stubSender{fn: func(_ context.Context, convID, _, _, _ string, onEvent event.TurnEventHandler) (appconversation.SendResult, error) {
+		onEvent(event.NewToolCallEvent(first))
+		onEvent(event.NewToolOutputEvent(first, "the report"))
+		onEvent(event.NewToolResultEvent(first, false))
+		onEvent(event.NewToolCallEvent(second))
+		return appconversation.SendResult{ConversationID: convID, UserMessagePersisted: true}, nil
+	}})
+	ws := dial(t, h)
+	sendCommand(t, ws, `{"type":"turn.send","requestId":"keys","payload":{"providerId":"gw1","modelId":"m1","content":"hi"}}`)
+	var calls, inputs []map[string]any
+	for {
+		f := readFrame(t, ws)
+		var payload map[string]any
+		if len(f.Payload) > 0 {
+			if err := json.Unmarshal(f.Payload, &payload); err != nil {
+				t.Fatalf("%s payload: %v", f.Type, err)
+			}
+		}
+		switch f.Type {
+		case "turn.tool_call":
+			calls = append(calls, payload)
+		case "turn.tool_input":
+			inputs = append(inputs, payload)
+		case "turn.tool_output", "turn.tool_result":
+			if _, ok := payload["keys"]; ok {
+				t.Fatalf("%s carried keys: %#v", f.Type, payload)
+			}
+		}
+		if f.Type == "turn.completed" || f.Type == "turn.failed" {
+			break
+		}
+	}
+	if len(calls) != 2 || calls[0]["callId"] != "run-b" || calls[1]["callId"] != "run-b" {
+		t.Fatalf("tool_call frames = %#v", calls)
+	}
+	if _, ok := calls[0]["keys"]; ok {
+		t.Fatalf("opening frame invented keys: %#v", calls[0])
+	}
+	keys, ok := calls[1]["keys"].(map[string]any)
+	if !ok || keys["acp.subagent.id"] != "agent-beta" || keys["acp.subagent.profile"] != "explore" {
+		t.Fatalf("replacement keys = %#v", calls[1]["keys"])
+	}
+	if _, ok := keys["acp.subagent.success"]; ok {
+		t.Fatalf("success false crossed: %#v", keys)
+	}
+	if _, ok := keys["acp.subagent.extra"]; ok || keys["cognition.ai/subagent_started"] != nil {
+		t.Fatalf("a key outside the family crossed: %#v", keys)
+	}
+	if len(inputs) != 1 {
+		t.Fatalf("tool_input frames = %d, want the opening input only", len(inputs))
+	}
+
+	row := &turn{
+		id: "t_keys", conversationID: "c_keys", kind: turnSend,
+		live: newLiveDoc(), subscribed: map[*conn]struct{}{},
+	}
+	h.onEvent(row, event.NewToolCallEvent(first))
+	h.onEvent(row, event.NewToolCallEvent(second))
+	var tools int
+	for _, p := range row.live.parts {
+		if p.Kind != "tool" {
+			continue
+		}
+		tools++
+		if p.CallID != "run-b" || p.Keys["acp.subagent.id"] != "agent-beta" {
+			t.Fatalf("row = %+v", p)
+		}
+		if strings.Count(p.Input, "Beta") != 1 {
+			t.Fatalf("input was streamed again: %q", p.Input)
+		}
+	}
+	if tools != 1 {
+		t.Fatalf("tool rows = %d, want the same row", tools)
+	}
+}

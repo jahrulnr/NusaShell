@@ -31,8 +31,8 @@ function serveRoom(id, { current = 'code', put = null, info = {}, get = null, op
       return [200, { data: LIST(mode) }];
     },
     [`GET /api/conversations/${id}/messages`]: { messages: [{ id: 'm1', role: 'user', content: 'hi' }], effectiveStart: 0, total: 1 },
-    [`PATCH /api/conversations/${id}`]: (call) => ({ id, title: 'Agent room', workspace: '', agentId: 'claude', ...info, ...call.body }),
-    [`GET /api/conversations/${id}`]: get || { id, title: 'Agent room', workspace: '', agentId: 'claude', ...info },
+    [`PATCH /api/conversations/${id}`]: (call) => ({ id, title: 'Agent room', workspace: '', runtime: 'agent', agentId: 'claude', ...info, ...call.body }),
+    [`GET /api/conversations/${id}`]: get || { id, title: 'Agent room', workspace: '', runtime: 'agent', agentId: 'claude', ...info },
     'GET /api/approval-rules': { data: [] },
   });
 }
@@ -335,7 +335,7 @@ test('a thread that does not exist yet stages the pick and carries it on its fir
     'GET /api/agents': { items: [{ id: 'claude', name: 'Claude' }], page: { total: 1 } },
   });
   const home = chat.freshRoom();
-  chat.setSelection(home, { agentId: 'claude' });
+  chat.setSelection(home, { runtime: 'agent', agentId: 'claude' });
   await chat.loadAgentOptions(home);
   assert.equal(home.agentOptions.list.length, 2, 'the agent probe stands in for the room');
 
@@ -362,7 +362,7 @@ test('staged picks ride the first turn as the ordered array the picker shows', a
     'GET /api/agents': { items: [{ id: 'claude', name: 'Claude' }], page: { total: 1 } },
   });
   const home = chat.freshRoom();
-  chat.setSelection(home, { agentId: 'claude' });
+  chat.setSelection(home, { runtime: 'agent', agentId: 'claude' });
   await chat.loadAgentOptions(home);
 
   // picked in reverse of the display order on purpose: the map's own order
@@ -385,7 +385,7 @@ test('a stored pick list reads the same in array form and in object form', async
     'GET /api/agents': { items: [{ id: 'claude', name: 'Claude' }], page: { total: 1 } },
   });
   const home = chat.freshRoom();
-  chat.setSelection(home, { agentId: 'claude' });
+  chat.setSelection(home, { runtime: 'agent', agentId: 'claude' });
   await chat.loadAgentOptions(home);
   const mode = home.agentOptions.list.find((o) => o.id === 'mode');
 
@@ -567,7 +567,7 @@ test('a model pick inside the same agent keeps the options list mounted', async 
 
   // same agent, another model: the options belong to the agent, not the
   // model — nothing about them changes, so nothing may be reset
-  chat.setSelection(r, { agentId: 'claude', providerId: '', modelId: 'opus', effort: 'default', upstream: '' });
+  chat.setSelection(r, { runtime: 'agent', agentId: 'claude', providerId: '', modelId: 'opus', effort: 'default', upstream: '' });
   assert.equal(r.agentOptions.status, 'ready', 'no reset inside the agent the room is bound to');
   assert.equal(r.agentOptions.list.length, 2, 'the list the controls draw survives the pick');
 });
@@ -579,7 +579,7 @@ test('a pick that lands on a different agent still resets the options', async ()
   const r = state.rooms.c_ao_swap;
   assert.equal(r.agentOptions.list.length, 2);
 
-  chat.setSelection(r, { agentId: 'other', providerId: '', modelId: 'm', effort: 'default', upstream: '' });
+  chat.setSelection(r, { runtime: 'agent', agentId: 'other', providerId: '', modelId: 'm', effort: 'default', upstream: '' });
   assert.equal(r.agentOptions.status !== 'ready' || r.agentOptions.list.length === 0, true,
     'another agent offers another list: nothing of this one may show');
 });

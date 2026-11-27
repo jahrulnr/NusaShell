@@ -199,11 +199,30 @@ func TestGetNeedsNoOrigin(t *testing.T) {
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("CORS allow-origin must not be emitted")
 	}
-	// A trailing-slash request is not a silent 301 — it routes through
-	// the guarded 404 like any unmatched path.
+	// A trailing slash matches no mounted route. An /api path that matched
+	// none is route_not_mounted; the detail stays the same words.
 	rec = do(t, h, "GET", "/api/health/", "", "")
-	if rec.Code != 404 || decodeBody(t, rec)["code"] != "not_found" {
-		t.Fatalf("want 404 problem for trailing slash, got %d", rec.Code)
+	if rec.Code != 404 || decodeBody(t, rec)["code"] != "route_not_mounted" || decodeBody(t, rec)["detail"] != "no such route" {
+		t.Fatalf("trailing slash = %d %s, want 404 route_not_mounted", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUnmountedAPIPathIsRouteNotMounted(t *testing.T) {
+	h := newTestHandler(t, Deps{})
+	for _, path := range []string{"/api/skills", "/api/skill-proposals", "/api/no-such-route"} {
+		rec := do(t, h, "GET", path, "", "")
+		doc := decodeBody(t, rec)
+		if rec.Code != 404 || doc["code"] != "route_not_mounted" || doc["detail"] != "no such route" {
+			t.Fatalf("%s = %d %v, want 404 route_not_mounted and the same detail", path, rec.Code, doc)
+		}
+	}
+	rec := do(t, h, "GET", "/nope", "", "")
+	doc := decodeBody(t, rec)
+	if rec.Code != 404 || doc["code"] != "not_found" {
+		t.Fatalf("a non-api miss = %d %v, want 404 not_found", rec.Code, doc["code"])
+	}
+	if _, ok := doc["overage"]; ok {
+		t.Fatal("a 404 carried overage")
 	}
 }
 

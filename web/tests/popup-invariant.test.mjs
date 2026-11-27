@@ -77,7 +77,7 @@ const serveModelRoom = (agentOptions = async () => { await sleep(40); return { d
   'PUT /api/conversations/c_inv/agent-options': { data: OPTS, status: 'ready' },
   [`PATCH /api/conversations/c_inv`]: (call) => ({ id: 'c_inv', title: 'Room', workspace: '', ...call.body }),
   'GET /api/conversations/c_inv/messages': { messages: [], effectiveStart: 0, total: 0 },
-  'GET /api/conversations/c_inv': { id: 'c_inv', title: 'Room', workspace: '', agentId: 'devin', modelId: 'adaptive' },
+  'GET /api/conversations/c_inv': { id: 'c_inv', title: 'Room', workspace: '', runtime: 'agent', agentId: 'devin', modelId: 'adaptive' },
   'GET /api/approval-rules': { data: [] },
   // longer prefixes first: mockApi matches prefixes, so the agent's own
   // routes must come before the bare list route or it swallows them
@@ -180,7 +180,7 @@ const agentChipFlow = async () => {
   mockApi({
     'GET /api/conversations/c_chip/agent-options': () => [200, answer],
     'GET /api/conversations/c_chip/messages': { messages: [], effectiveStart: 0, total: 0 },
-    'GET /api/conversations/c_chip': { id: 'c_chip', title: 'Room', workspace: '', agentId: 'devin', modelId: 'adaptive' },
+    'GET /api/conversations/c_chip': { id: 'c_chip', title: 'Room', workspace: '', runtime: 'agent', agentId: 'devin', modelId: 'adaptive' },
     'GET /api/approval-rules': { data: [] },
     'GET /api/context': { estimate: 0, total: 0 },
   });
@@ -226,7 +226,7 @@ const agentHintFollowsRecord = async () => {
     'GET /api/conversations/c_hint/agent-options': () => [200, { data: [option(mode)] }],
     'PUT /api/conversations/c_hint/agent-options': (call) => { mode = call.body.value; parked = null; return [200, { data: [option(mode)] }]; },
     'GET /api/conversations/c_hint/messages': { messages: [], effectiveStart: 0, total: 0 },
-    'GET /api/conversations/c_hint': () => ({ id: 'c_hint', title: 'Room', workspace: '', agentId: 'devin', ...(parked ? { pending: parked } : {}) }),
+    'GET /api/conversations/c_hint': () => ({ id: 'c_hint', title: 'Room', workspace: '', runtime: 'agent', agentId: 'devin', ...(parked ? { pending: parked } : {}) }),
     'GET /api/approval-rules': { data: [] },
     'GET /api/context': { estimate: 0, total: 0 },
   });
@@ -272,7 +272,7 @@ const agentPanelAnswers = async () => {
   mockApi({
     'GET /api/conversations/c_panel/agent-options': () => { reads++; return answer; },
     'GET /api/conversations/c_panel/messages': { messages: [], effectiveStart: 0, total: 0 },
-    'GET /api/conversations/c_panel': { id: 'c_panel', title: 'Room', workspace: '', agentId: 'devin' },
+    'GET /api/conversations/c_panel': { id: 'c_panel', title: 'Room', workspace: '', runtime: 'agent', agentId: 'devin' },
     'GET /api/approval-rules': { data: [] },
     'GET /api/context': { estimate: 0, total: 0 },
   });
@@ -335,7 +335,7 @@ const registersAtMount = async () => {
   mockApi({
     'GET /api/conversations/c_mount/agent-options': [200, { data: [{ id: 'thinking', name: 'Thinking', type: 'boolean', current: 'false' }] }],
     'GET /api/conversations/c_mount/messages': { messages: [], effectiveStart: 0, total: 0 },
-    'GET /api/conversations/c_mount': { id: 'c_mount', title: 'Room', workspace: '', agentId: 'devin' },
+    'GET /api/conversations/c_mount': { id: 'c_mount', title: 'Room', workspace: '', runtime: 'agent', agentId: 'devin' },
     'GET /api/approval-rules': { data: [] },
     'GET /api/context': { estimate: 0, total: 0 },
   });
@@ -365,7 +365,7 @@ const outageInPanel = async () => {
   mockApi({
     'GET /api/conversations/c_outage/agent-options': () => { reads++; return answer; },
     'GET /api/conversations/c_outage/messages': { messages: [], effectiveStart: 0, total: 0 },
-    'GET /api/conversations/c_outage': { id: 'c_outage', title: 'Room', workspace: '', agentId: 'devin' },
+    'GET /api/conversations/c_outage': { id: 'c_outage', title: 'Room', workspace: '', runtime: 'agent', agentId: 'devin' },
     'GET /api/approval-rules': { data: [] },
     'GET /api/context': { estimate: 0, total: 0 },
   });
@@ -480,7 +480,7 @@ const effortStaysWithTheList = async () => {
     'GET /api/agents': { data: [] },
     'GET /api/conversations/c_eff/agent-options': { data: [], status: 'empty' },
     'GET /api/conversations/c_eff/messages': { messages: [], effectiveStart: 0, total: 0 },
-    'GET /api/conversations/c_eff': { id: 'c_eff', title: 'Room', workspace: '', providerId: 'or', modelId: 'm1', effort: 'low' },
+    'GET /api/conversations/c_eff': { id: 'c_eff', title: 'Room', workspace: '', runtime: 'harness', providerId: 'or', modelId: 'm1', effort: 'low' },
     'GET /api/approval-rules': { data: [] },
     'GET /api/context': { estimate: 0, total: 0 },
   });

@@ -44,9 +44,13 @@ type SkillRow struct {
 	Level string
 	// Tracked reports that an ownership row exists for the skill.
 	Tracked bool
-	// Changed reports that the file was edited outside the loop since its
-	// row was written, so the row's level no longer applies.
+	// Changed is true exactly when ChangedCause is not empty: the file is
+	// not the one the row describes, so the row's level no longer applies.
 	Changed bool
+	// ChangedCause is empty when Changed is false. When Changed is true it
+	// is one of the two contract sentences: the loop wrote the file and the
+	// decision was not recorded, or the file changed since the row was written.
+	ChangedCause string
 	// Pending counts the proposals waiting on the owner for this skill.
 	Pending int
 	// PendingStale counts those of Pending the owner can no longer accept — the
@@ -114,6 +118,7 @@ func List(ctx context.Context, deps ListDeps, workspace string) (SkillPage, erro
 			Level:        string(standing.Level),
 			Tracked:      standing.Tracked,
 			Changed:      standing.Changed,
+			ChangedCause: skillChangedCause(standing, s.Name, pending, state.own),
 			Pending:      counts[s.Name],
 			PendingStale: staleCounts[s.Name],
 		})
@@ -137,6 +142,28 @@ func List(ctx context.Context, deps ListDeps, workspace string) (SkillPage, erro
 	// one anyway.
 	sort.Slice(page.Rows, func(i, j int) bool { return page.Rows[i].Name < page.Rows[j].Name })
 	return page, nil
+}
+
+// The two sentences a skills row may write in changedCause. The loop sentence
+// is the same fact staleCause uses when the file is the loop's own leftover.
+const (
+	changedCauseLoop = "the loop wrote this skill's file, but the decision was not recorded"
+	changedCauseRow  = "the skill's file changed since its row was written"
+)
+
+// skillChangedCause is empty exactly when the row still describes the file.
+// A changed file that is the loop's unrecorded write takes that sentence;
+// every other change takes the row sentence and does not say who edited it.
+func skillChangedCause(standing aggregate.SkillStanding, name string, pending []*aggregate.SkillProposal, own map[string]bool) string {
+	if !standing.Changed {
+		return ""
+	}
+	for _, p := range pending {
+		if p.Name() == name && own[p.ID()] {
+			return changedCauseLoop
+		}
+	}
+	return changedCauseRow
 }
 
 // PendingProposal is one proposal still waiting on the owner. Open is

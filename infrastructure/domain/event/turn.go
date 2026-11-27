@@ -31,12 +31,24 @@ type TurnEvent struct {
 	// one exists: the identity that lets a frontend draw the live steer and the
 	// row as one.
 	steerRecordID string
+	// clock is an agent turn's clock word. promptedAt and lastUpdateAt are
+	// unix milliseconds; zero means the stamp has not been written.
+	clock        string
+	promptedAt   int64
+	lastUpdateAt int64
 }
 
 // NewStatusEvent reports a harness-side wait while no provider output is
 // moving. wait is the pause length, zero when the status has no deadline.
 func NewStatusEvent(status enum.TurnStatus, wait time.Duration) TurnEvent {
 	return TurnEvent{kind: enum.TurnEventStatus, status: status, wait: wait}
+}
+
+// NewClockEvent reports an agent turn's clock. promptedAt and lastUpdateAt
+// are unix milliseconds; zero means that stamp is absent and must not be
+// written as 0.
+func NewClockEvent(clock string, promptedAt, lastUpdateAt int64) TurnEvent {
+	return TurnEvent{kind: enum.TurnEventClock, clock: clock, promptedAt: promptedAt, lastUpdateAt: lastUpdateAt}
 }
 
 func NewDeltaEvent(delta string) TurnEvent {
@@ -179,6 +191,9 @@ func (e TurnEvent) Usage() valueobject.Usage        { return e.usage }
 func (e TurnEvent) Err() error                      { return e.err }
 func (e TurnEvent) Status() enum.TurnStatus         { return e.status }
 func (e TurnEvent) Wait() time.Duration             { return e.wait }
+func (e TurnEvent) Clock() string                   { return e.clock }
+func (e TurnEvent) PromptedAt() int64               { return e.promptedAt }
+func (e TurnEvent) LastUpdateAt() int64             { return e.lastUpdateAt }
 func (e TurnEvent) Approval() valueobject.ApprovalRequest {
 	return e.approval
 }

@@ -37,7 +37,7 @@ beforeEach(() => {
 
 test('submit sends the attached recording as recordingId, text or none', () => {
   const home = chat.freshRoom();
-  home.sel = { providerId: 'p', modelId: 'm' };
+  home.sel = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   home.recording = { id: 'rec_1', status: 'completed', label: 'Recording noon' };
   assert.equal(chat.submit(home, 'what happened'), true);
   let cmd = sentTurns().at(-1);
@@ -55,7 +55,7 @@ test('submit sends the attached recording as recordingId, text or none', () => {
 
 test('the pending user bubble keeps the recording chip', () => {
   const home = chat.freshRoom();
-  home.sel = { providerId: 'p', modelId: 'm' };
+  home.sel = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   home.recording = { id: 'rec_3', status: 'interrupted' };
   assert.equal(chat.submit(home, 'see this'), true);
   assert.equal(home.pendingOpen?.recording?.id, 'rec_3');
@@ -68,7 +68,7 @@ test('a queued message carries its recording into the eventual send', () => {
   serveThread('c_1');
   const r = chat.room('c_1');
   r.id = 'c_1';
-  r.sel = { providerId: 'p', modelId: 'm' };
+  r.sel = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   r.live = { turnId: 't1', kind: 'send', terminal: false }; // busy
   r.recording = { id: 'rec_4', status: 'completed' };
   assert.equal(chat.submit(r, 'queued'), true);
@@ -103,7 +103,7 @@ test('a recording cannot steer — the draft and chip stay put', () => {
 
 test('a rejected send restores the recording chip with the draft', async () => {
   const home = chat.freshRoom();
-  home.sel = { providerId: 'p', modelId: 'm' };
+  home.sel = { runtime: 'harness', providerId: 'p', modelId: 'm' };
   home.recording = { id: 'rec_7', status: 'completed' };
   assert.equal(chat.submit(home, 'take it'), true);
   const cmd = sentTurns().at(-1);

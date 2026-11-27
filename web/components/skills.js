@@ -192,6 +192,8 @@ function MoveDialog({ session, live, fault, unknown, busy, onClose, onSave, onRe
   const faultRef = useRef(null);
   const stale = !live || live.digest !== session.digest;
   const unchanged = !!live && choice === live.level;
+  const cause = typeof live?.changedCause === 'string' ? live.changedCause : '';
+  const causeShown = !stale && cause.trim() !== '';
   useEffect(() => { if (fault) faultRef.current?.focus(); }, [fault]);
   const submit = (e) => {
     e.preventDefault();
@@ -203,12 +205,12 @@ function MoveDialog({ session, live, fault, unknown, busy, onClose, onSave, onRe
     <form id="skill-move" method="post" noValidate onSubmit=${submit}>
       ${live?.description && html`<p class="text-[13px] text-muted break-words">${live.description}</p>`}
       ${live?.path && html`<p class="mt-1 text-xs text-faint break-all">${live.path}</p>`}
-      ${live?.changed && !stale && html`<p id="skill-hand-back" class="mt-3 text-[13px]">Edited by hand. The loop will not propose a change until you hand this skill back.</p>`}
+      ${causeShown && html`<p id="skill-hand-back" class="mt-3 text-[13px]">${cause}</p>`}
       ${fault && html`<p ref=${faultRef} tabIndex=${-1} role="alert" class="mt-3 text-[13px]">${fault}</p>`}
       ${fault && unknown && html`<div class="mt-2"><${Button} kind="ghost" disabled=${busy} onClick=${onReload}>Reload list</${Button}></div>`}
       ${!fault && !live && html`<p role="alert" class="mt-3 text-[13px]">${SKILL_GONE}</p>`}
       ${!fault && live && stale && html`<p role="status" class="mt-3 text-[13px]">This file changed after you opened it. Close this and open it again to decide on the current file.</p>`}
-      ${live && html`<fieldset class="mt-4 border-0 p-0 m-0" disabled=${stale || busy} aria-describedby=${live.changed && !stale ? 'skill-hand-back' : undefined}>
+      ${live && html`<fieldset class="mt-4 border-0 p-0 m-0" disabled=${stale || busy} aria-describedby=${causeShown ? 'skill-hand-back' : undefined}>
         <legend class="text-[13px] font-medium mb-1">Who may change it</legend>
         ${[['user', 'Only you'], ['agent', 'Loop may propose']].map(([value, text]) => html`<label key=${value} class="flex items-center gap-2 min-h-12">
           <input type="radio" name="skill-level" value=${value} checked=${choice === value} disabled=${stale || busy}

@@ -15,8 +15,17 @@ import (
 	appprovider "github.com/jahrulnr/nusashell/application/provider"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
+
+func mustParkAgent(id, model string) *valueobject.RuntimeBinding {
+	b, err := valueobject.NewAgentBinding(id, model)
+	if err != nil {
+		panic(err)
+	}
+	return &b
+}
 
 // --- write fakes ---
 
@@ -186,7 +195,7 @@ func TestPatchAnswers202WithThePendingPick(t *testing.T) {
 	fc := &fakeConversations{
 		infos: []drepo.ConversationInfo{mkInfo("c_1")},
 		pending: map[string]drepo.PendingSelection{"c_1": {
-			AgentID: "dewey", AgentModel: "swe-2-1", AcceptedAt: time.Now().UTC(),
+			Binding: mustParkAgent("dewey", "swe-2-1"), AcceptedAt: time.Now().UTC(),
 			Options: map[string]string{"mode": "accept-edits"},
 		}},
 	}

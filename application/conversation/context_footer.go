@@ -33,7 +33,7 @@ func (app *ConversationApp) ContextFooterStats(ctx context.Context, convID, prov
 			if apperror.As(err).StatusCode() != apperror.StatusNotFound {
 				return stats, err
 			}
-		} else if conv.AgentID() != "" && providerID == "" {
+		} else if !conv.Runtime().HarnessOwnsContext() && providerID == "" {
 			stats.Agent = conv.AgentContext()
 			stats.Total = stats.Agent.Size()
 			return stats, nil

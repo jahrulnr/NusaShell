@@ -29,6 +29,9 @@ type livePart struct {
 	OptionID    string              `json:"optionId,omitempty"`
 	Action      string              `json:"action,omitempty"`
 	Attachments []attachmentPayload `json:"attachments,omitempty"`
+	// Keys is the acp.subagent family. A later tool_call replaces it
+	// on this same part. Ordinary tools omit it.
+	Keys map[string]string `json:"keys,omitempty"`
 }
 
 // liveDoc is a turn's compact live record: ordered parts plus the
@@ -158,7 +161,24 @@ func partBytes(p *livePart) int {
 	for _, a := range p.Attachments {
 		n += len(a.MediaType) + len(a.Modality) + len(a.URI) + len(a.Name)
 	}
+	for k, v := range p.Keys {
+		n += len(k) + len(v)
+	}
 	return n
+}
+
+// replaceKeys writes the subagent family onto the existing tool row.
+func (d *liveDoc) replaceKeys(callID string, keys map[string]string) {
+	p := d.tools[callID]
+	if p == nil {
+		return
+	}
+	before := partBytes(p)
+	p.Keys = keys
+	d.bytes += partBytes(p) - before
+	if d.bytes < 0 {
+		d.bytes = 0
+	}
 }
 
 // push appends one part and accounts its full serialized content.

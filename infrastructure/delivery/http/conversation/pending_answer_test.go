@@ -16,8 +16,17 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	drepo "github.com/jahrulnr/nusashell/infrastructure/domain/repository"
 	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
+
+func mustParkAgent(id, model string) *valueobject.RuntimeBinding {
+	b, err := valueobject.NewAgentBinding(id, model)
+	if err != nil {
+		panic(err)
+	}
+	return &b
+}
 
 // liveRoom is a room the write routes act on. A pick taken while a turn runs
 // parks; a pick taken while the room is idle applies at once and supersedes the
@@ -128,11 +137,14 @@ func (r *liveRoom) Annotate(_ context.Context, _ string, a appconversation.Annot
 		return false, nil
 	}
 	if r.busy {
-		r.park(func(p *drepo.PendingSelection) { p.AgentID, p.AgentModel = a.Runtime.AgentID, a.Runtime.AgentModel })
+		r.park(func(p *drepo.PendingSelection) {
+			b := *a.Runtime
+			p.Binding = &b
+		})
 		return true, nil
 	}
 	if r.pending != nil {
-		r.pending.AgentID, r.pending.AgentModel = "", ""
+		r.pending.Binding = nil
 		r.settle()
 	}
 	return false, nil
@@ -275,7 +287,7 @@ func TestPatchAnswersThePendingStateAfterTheWrite(t *testing.T) {
 	const body = `{"agentId":"fake","modelId":"swe-2-1"}`
 	idle := &liveRoom{
 		info:    drepo.ConversationInfo{ID: "c_room", AgentID: "fake"},
-		pending: &drepo.PendingSelection{AgentID: "fake", AgentModel: "stale-model"},
+		pending: &drepo.PendingSelection{Binding: mustParkAgent("fake", "stale-model")},
 	}
 	rec := serveRoom(t, idle, http.MethodPatch, "/api/conversations/c_room", body)
 	if rec.Code != http.StatusOK {

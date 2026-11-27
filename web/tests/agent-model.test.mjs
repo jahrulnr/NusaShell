@@ -26,7 +26,7 @@ function serveThread(id, { info = {} } = {}, extra = {}) {
     ...extra,
     [`GET /api/conversations/${id}/messages`]: { messages: [], effectiveStart: 0, total: 0 },
     [`GET /api/conversations/${id}`]: { id, title: 'Agent room', workspace: '', ...info },
-    [`PATCH /api/conversations/${id}`]: (call) => ({ id, title: 'Agent room', workspace: '', ...call.body }),
+    [`PATCH /api/conversations/${id}`]: (call) => ({ id, title: 'Agent room', workspace: '', runtime: call.body.agentId ? 'agent' : 'harness', ...call.body }),
     'GET /api/context': { estimate: 0, total: 0 },
   });
 }
@@ -64,13 +64,13 @@ test('until the list can name a model the button says agent and state, not agent
 });
 
 test('a model picked from the list is still written to the room', async () => {
-  serveThread('c_am', { info: { agentId: 'devin' } });
+  serveThread('c_am', { info: { runtime: 'agent', agentId: 'devin' } });
   chat.navigate('#/c/c_am');
   await sleep(40);
   const r = state.rooms.c_am;
   calls.length = 0;
 
-  chat.setSelection(r, { agentId: 'devin', providerId: '', modelId: 'swe-2-1-medium', effort: 'default', upstream: '' });
+  chat.setSelection(r, { runtime: 'agent', agentId: 'devin', providerId: '', modelId: 'swe-2-1-medium', effort: 'default', upstream: '' });
   await sleep(40);
   const patches = calls.filter((c) => c.method === 'PATCH');
   assert.equal(patches.length, 1);

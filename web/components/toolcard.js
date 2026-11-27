@@ -3,7 +3,7 @@
 // output (tail first), each clipped with a fade and expandable in place.
 import { html, useEffect, useRef, useState } from '/vendor/preact/htm-preact.mjs';
 import hljs from '/vendor/highlight/highlight.min.mjs';
-import { toolSummary, toolRoom, closeStatus, toolEnding, formatDuration, toolClock } from '../lib/turn.js';
+import { toolSummary, toolRoom, closeStatus, toolEnding, formatDuration, toolClock, subagentView } from '../lib/turn.js';
 import { knownRoom } from '../lib/chat.js';
 import { useFollow } from '../lib/follow.js';
 import { Icon } from './icons.js';
@@ -181,5 +181,49 @@ export function ToolRow({ room, item, cwd }) {
       </section>`}
       ${footer && html`<footer class="card-foot flex items-center gap-2 px-3 py-2 border-t border-line text-xs">${footer}</footer>`}
     </div>`}
+  </div>`;
+}
+
+// SubagentCard is the parent run_subagent call. Expand and collapse are its
+// only controls. The status is the keys, and the parent output stays output.
+export function SubagentCard({ item }) {
+  const view = subagentView(item);
+  const [open, setOpen] = useOpen(item.id);
+  const panelId = `${item.id}:sub`;
+  return html`<details class="subagent-card rounded-xl border border-line bg-raised my-1" open=${open}
+    onToggle=${(e) => setOpen(e.currentTarget.open)}>
+    <summary class="cursor-pointer px-3 py-2">
+      <span class="flex items-start gap-2 min-w-0">
+        <${Icon} name=${open ? 'chevronDown' : 'chevronRight'} size=${14} class="shrink-0 text-faint mt-0.5" aria-hidden="true" />
+        <span class="min-w-0 flex-1">
+          ${view.title && html`<span class="block font-medium text-[13px] break-words">${view.title}</span>`}
+          ${view.task && html`<span class=${cx('block text-[13px] text-muted', open ? 'break-words whitespace-pre-wrap' : 'truncate')}>${view.task}</span>`}
+          ${view.badges.length > 0 && html`<span class="mt-1 flex flex-wrap gap-1">
+            ${view.badges.map((b) => html`<span key=${b} class="inline-flex items-center rounded-md border border-line px-1.5 text-[11px] text-muted">${b}</span>`)}
+          </span>`}
+          <span class="mt-1 block text-[13px]">${view.status}</span>
+          ${view.summary && html`<span class="mt-1 block text-[13px] text-muted break-words">${view.summary}</span>`}
+          ${view.note && html`<span class="mt-1 block text-[13px] text-muted break-words">${view.note}</span>`}
+        </span>
+      </span>
+    </summary>
+    <div id=${panelId} class="border-t border-line px-3 py-2">
+      ${view.members.length > 0 && html`<ul class="m-0 p-0 list-none flex flex-col gap-1">
+        ${view.members.map((parts, i) => html`<li key=${i} class="truncate text-[13px] text-muted">${parts.join(' · ')}</li>`)}
+      </ul>`}
+      ${view.output && html`<section class=${view.members.length ? 'mt-2 pt-2 border-t border-line' : ''}>
+        <div class="text-xs text-faint mb-1.5">Output</div>
+        <pre class="m-0 font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap break-words max-h-[40vh] overflow-y-auto">${view.output}</pre>
+      </section>`}
+    </div>
+  </div>`;
+}
+
+// DelegatedRow is a member whose card never appeared. It stays one flat line.
+export function DelegatedRow({ item }) {
+  return html`<div class="flex items-baseline gap-2 py-1 text-[13px] text-muted min-w-0">
+    <span class="shrink-0">Delegated</span>
+    ${item.name && html`<span class="min-w-0 truncate">${item.name}</span>`}
+    ${item.title && html`<span class="min-w-0 truncate">${item.title}</span>`}
   </div>`;
 }
