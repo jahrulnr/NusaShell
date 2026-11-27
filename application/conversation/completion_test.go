@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -101,6 +102,47 @@ func TestCompletionDoesNotWakeABusyRoom(t *testing.T) {
 	waitIdle(t, app, "c_busy")
 }
 
+// One record is claimed by one wake: callers that race for it — a completion
+// arriving from another goroutine and the room going idle — spend a single turn,
+// not one each. A second claim used to charge the budget for a wake that read
+// nothing, and the record behind it waited for a turn that never came.
+func TestOneRecordIsClaimedByOneWake(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_claim", "gw1", "m1", "hi", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, app, "c_claim")
+	// The record is parked in the store, not reported through OnCompletion: the
+	// test wants several callers racing for a record that is already waiting.
+	recorded, err := app.depsSnapshot().Convs.SaveCompletions(ctx, "c_claim",
+		[]dservice.Completion{{Source: "session", ID: "1", Status: "exited", Detail: "exit 0"}})
+	if err != nil || !recorded {
+		t.Fatalf("parking the record = %v, %v", recorded, err)
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			app.wake("c_claim", true)
+		}()
+	}
+	wg.Wait()
+	app.mu.Lock()
+	claimed := app.machineTurns["c_claim"]
+	app.mu.Unlock()
+	if claimed != 1 {
+		t.Fatalf("one record claimed %d wake turns, want 1", claimed)
+	}
+	waitFor(t, "the claimed wake reading its record", func() bool {
+		return len(app.PendingCompletions("c_claim")) == 0
+	})
+	if n := recordsInHistory(t, app, "c_claim"); n != 1 {
+		t.Fatalf("the record was read in %d wake messages, want 1", n)
+	}
+}
+
 // The wake budget is three consecutive machine turns: the fourth completion keeps
 // its record and spends no turn.
 func TestCompletionStopsWakingAtTheCap(t *testing.T) {
@@ -139,12 +181,13 @@ func TestCompletionStopsWakingAtTheCap(t *testing.T) {
 		t.Fatalf("the owner turn did not read the capped record: %+v", pending)
 	}
 	app.OnCompletion("c_cap", dservice.Completion{Source: "session", ID: "5", Status: "exited", Detail: "exit 0"})
-	waitFor(t, "the wake after the owner turn", func() bool {
-		return recordsInHistory(t, app, "c_cap") == maxMachineTurns+1
+	// The line reaches history first: the wake clears the record it rendered only
+	// after that turn saved, so a failed turn can retry it. Waiting on the message
+	// alone would read the book mid-turn and call a good wake unread.
+	waitFor(t, "the wake after the owner turn reading its record", func() bool {
+		return recordsInHistory(t, app, "c_cap") == maxMachineTurns+1 &&
+			len(app.PendingCompletions("c_cap")) == 0
 	})
-	if pending := app.PendingCompletions("c_cap"); len(pending) != 0 {
-		t.Fatalf("the wake left a record unread: %+v", pending)
-	}
 }
 
 // A deleted room takes its records and dedup keys with it.

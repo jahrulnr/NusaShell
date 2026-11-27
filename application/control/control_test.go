@@ -128,6 +128,7 @@ type fakeTurns struct {
 	mu    sync.Mutex
 	runs  chan run
 	busy  map[string]bool
+	held  map[string]bool
 	rooms *fakeRooms
 	gate  chan struct{}
 	// fail ends the turn before a room exists.
@@ -185,7 +186,20 @@ func (f *fakeTurns) Cancel(convID string) bool { return f.Busy(convID) }
 func (f *fakeTurns) Busy(convID string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.busy[convID]
+	return f.busy[convID] || f.held[convID]
+}
+
+// setBusy stages a room as one whose turn is still running. The hold is the
+// test's, not the turn's: the fake queue starts a turn on its own goroutine, and
+// that goroutine clears the run it started — a test that wrote the map directly
+// raced it, and a mark that could be cleared under the test was no stage at all.
+func (f *fakeTurns) setBusy(convID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.held == nil {
+		f.held = map[string]bool{}
+	}
+	f.held[convID] = true
 }
 
 // fakeQueue stands in for the room worker's FIFO: it accepts while the room is
@@ -424,7 +438,7 @@ func TestSendStopAndSpawn(t *testing.T) {
 
 	// A busy thread takes the message into its queue, never into the running
 	// turn: the relay provenance only exists on a stored user-role message.
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "also this"})
 	if err != nil || out["delivery"] != "queued" {
 		t.Fatalf("send to busy = %v, %v, want queued", out, err)
@@ -525,7 +539,7 @@ func TestSendQueuesOnABusyThread(t *testing.T) {
 	q := &fakeQueue{}
 	app, _, turns := setupWith(t, q, nil)
 	ctx := context.Background()
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 
 	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "and this"})
 	if err != nil {
@@ -571,7 +585,7 @@ func TestSendRefusesAWaitingApproval(t *testing.T) {
 func TestSendRefusesAFullQueue(t *testing.T) {
 	q := &fakeQueue{full: true, depth: 7}
 	app, _, turns := setupWith(t, q, nil)
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if code := apperror.As(err).StatusCode(); code != 429 {
 		t.Fatalf("full queue = %v (status %d), want 429", err, code)
@@ -587,7 +601,7 @@ func TestSendRefusesAFullQueue(t *testing.T) {
 // A stopping server refuses instead of accepting a message it cannot keep.
 func TestSendRefusesWhileStopping(t *testing.T) {
 	app, _, turns := setupWith(t, &fakeQueue{stopping: true}, nil)
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	_, err := app.Send(context.Background(), "c_self", SendInput{Thread: "c_other", Text: "hello"})
 	if code := apperror.As(err).StatusCode(); code != 503 {
 		t.Fatalf("stopping = %v (status %d), want 503", err, code)
@@ -599,7 +613,7 @@ func TestSendRefusesWhileStopping(t *testing.T) {
 func TestStopKeepsTheQueueAndReportsIt(t *testing.T) {
 	q := &fakeQueue{depth: 3}
 	app, _, turns := setupWith(t, q, nil)
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	out, err := app.Stop(context.Background(), "c_self", StopInput{Thread: "c_other"})
 	if err != nil {
 		t.Fatal(err)
@@ -688,7 +702,7 @@ func TestSendToBusyRoomSteers(t *testing.T) {
 	steers := &fakeSteers{taken: true}
 	q := &fakeQueue{}
 	app, _, turns := setupSteer(t, q, nil, steers)
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	out, err := app.Send(t.Context(), "c_self", SendInput{Thread: "c_other", Text: "status please"})
 	if err != nil || out["delivery"] != "steer" {
 		t.Fatalf("send to a busy room = %v, %v, want a steer", out, err)
@@ -707,7 +721,7 @@ func TestSendToBusyRoomWithAFullMailboxRefuses(t *testing.T) {
 	steers := &fakeSteers{err: apperror.New(429, "that thread's steering mailbox is full", nil)}
 	q := &fakeQueue{}
 	app, rooms, turns := setupSteer(t, q, nil, steers)
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	before, err := rooms.History(t.Context(), "c_other", 0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -738,7 +752,7 @@ func TestSteerFallbackCarriesTheSameAcceptanceRecord(t *testing.T) {
 	steers := &fakeSteers{record: &rec}
 	q := &fakeQueue{}
 	app, _, turns := setupSteer(t, q, nil, steers)
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	out, err := app.Send(t.Context(), "c_self", SendInput{Thread: "c_other", Text: "status please"})
 	if err != nil || out["delivery"] != "queued" {
 		t.Fatalf("fallback = %v, %v, want queued", out, err)
@@ -754,7 +768,7 @@ func TestSendFallsBackToTheQueueWhenNoTurnTakesIt(t *testing.T) {
 	steers := &fakeSteers{}
 	q := &fakeQueue{}
 	app, _, turns := setupSteer(t, q, nil, steers)
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	out, err := app.Send(t.Context(), "c_self", SendInput{Thread: "c_other", Text: "and this"})
 	if err != nil || out["delivery"] != "queued" {
 		t.Fatalf("no live turn took it: %v, %v, want queued", out, err)
@@ -857,7 +871,7 @@ func TestLifecycleNeverMapsInterruptedOrUnreadableToIdle(t *testing.T) {
 	rooms.msgs["c_cut"] = []entity.Message{cut}
 	rooms.msgs["c_dark"] = []entity.Message{cut}
 	rooms.histErr = map[string]error{"c_dark": apperror.New(500, "history unreadable", nil)}
-	turns.busy["c_live"] = true
+	turns.setBusy("c_live")
 	rooms.approvals = map[string][]valueobject.ApprovalRequest{"c_live": {{}}}
 
 	out, err := app.List(context.Background(), "c_self", ListInput{})

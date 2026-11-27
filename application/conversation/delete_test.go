@@ -196,14 +196,27 @@ func TestDeleteRetiresWorkerBeforeReturning(t *testing.T) {
 }
 
 // failDeleteRepo answers 500 for one room's Delete — a survivor whose
-// shared artifacts must outlive the purge.
+// shared artifacts must outlive the purge. The room is named after the app is
+// built, when its workers already read this store, so the name is taken under
+// a lock like every other field a background turn can see.
 type failDeleteRepo struct {
 	drepo.Conversation
+	mu  sync.Mutex
 	bad string
 }
 
+// failOn names the room that refuses to go.
+func (r *failDeleteRepo) failOn(convID string) {
+	r.mu.Lock()
+	r.bad = convID
+	r.mu.Unlock()
+}
+
 func (r *failDeleteRepo) Delete(ctx context.Context, convID string) error {
-	if convID == r.bad {
+	r.mu.Lock()
+	bad := r.bad
+	r.mu.Unlock()
+	if convID == bad {
 		return apperror.New(500, "storage refused", nil)
 	}
 	return r.Conversation.Delete(ctx, convID)
@@ -327,7 +340,14 @@ func TestDeleteAllPurgesArtifacts(t *testing.T) {
 // survivors' uploads and views may not vanish with the purge, and the
 // error names the ids it could not remove.
 func TestDeleteAllFailureKeepsArtifacts(t *testing.T) {
-	app, _ := fixture(t, okHandler)
+	// The refusing store is installed at construction, the way the app is wired in
+	// production: the room workers read their collaborators through app.deps, so a
+	// store swapped in beside that lock would be read mid-write.
+	var failing *failDeleteRepo
+	app, _ := fixtureWith(t, okHandler, func(c drepo.Conversation) drepo.Conversation {
+		failing = &failDeleteRepo{Conversation: c}
+		return failing
+	})
 	ctx := t.Context()
 	if _, err := app.Send(ctx, "r1", "gw1", "m1", "hi", nil, appjob.SendOptions{}, nil); err != nil {
 		t.Fatal(err)
@@ -335,7 +355,7 @@ func TestDeleteAllFailureKeepsArtifacts(t *testing.T) {
 	if _, err := app.Send(ctx, "r2", "gw1", "m1", "hi", nil, appjob.SendOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	app.deps.Convs = &failDeleteRepo{Conversation: app.deps.Convs, bad: "r2"}
+	failing.failOn("r2")
 
 	uploadRoot := t.TempDir()
 	uploads, err := repoupload.New(uploadRoot)

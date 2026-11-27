@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A finish reported while the room's wake turn was still finishing no longer spends two of the three machine turns: one record is claimed by one wake, so the record behind it is read instead of waiting for the owner's next turn.
 - A queued or cross-room send no longer fails falsely with `send completed without a persistence receipt`: the job-owned live journal now seals with the same persistence receipt the send job committed, while the guard itself remains in place.
 - Agent slash-command catalogs now mirror the agent instead of inventing rows: an agent room has no native `compact` row unless its session reports one, an agent-reported command wins a name collision with a native thread command, and an agent that reports nothing leaves only `clear` and `fork`.
 - An agent-reported slash-command list is kept as conversation state after the agent process idle-stops or NusaShell restarts: the room serves the last list that same agent reported, a newer live report replaces it instead of merging, and an agent that never reported commands still shows none.

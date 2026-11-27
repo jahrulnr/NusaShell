@@ -266,7 +266,7 @@ func TestQueuedSendKeepsItsAttachment(t *testing.T) {
 	rooms.mu.Lock()
 	rooms.approvals = nil
 	rooms.mu.Unlock()
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	ctx := service.WithWorkspaceDir(context.Background(), dir)
 
 	out, err := app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "later", Attachments: []string{"notes.txt"}})
@@ -300,7 +300,7 @@ func TestRefusedSendTakesItsUploadCopiesBack(t *testing.T) {
 	q := &fakeQueue{full: true, depth: 7}
 	app, rooms, turns := setupWith(t, q, uploads)
 	rooms.env = enum.EnvironmentDocker
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	dir := t.TempDir()
 	fileWith(t, dir, "shot.png", 64)
 	ctx := service.WithWorkspaceDir(context.Background(), dir)
@@ -436,7 +436,7 @@ func TestNewWiresTheQueueAndTheUploadStore(t *testing.T) {
 		q := &fakeQueue{}
 		app, rooms, turns := setupWith(t, q, uploads)
 		rooms.env = enum.EnvironmentDocker
-		turns.busy["c_other"] = true
+		turns.setBusy("c_other")
 		dir := t.TempDir()
 		fileWith(t, dir, "shot.png", 32)
 		ctx := service.WithWorkspaceDir(t.Context(), dir)
@@ -467,7 +467,7 @@ func TestNewWiresTheQueueAndTheUploadStore(t *testing.T) {
 		q := &fakeQueue{full: true, depth: 7}
 		app, rooms, turns := setupWith(t, q, uploads)
 		rooms.env = enum.EnvironmentDocker
-		turns.busy["c_other"] = true
+		turns.setBusy("c_other")
 		dir := t.TempDir()
 		fileWith(t, dir, "shot.png", 32)
 		ctx := service.WithWorkspaceDir(t.Context(), dir)
@@ -503,7 +503,7 @@ func TestSendAndStopCarryTheThread(t *testing.T) {
 	assertThreadField(t, out, "c_other", "crow", "Builder", false)
 
 	// A busy room's two other outcomes carry it too.
-	turns.busy["c_other"] = true
+	turns.setBusy("c_other")
 	out, err = app.Send(ctx, "c_self", SendInput{Thread: "c_other", Text: "also"})
 	if err != nil || out["delivery"] != "queued" {
 		t.Fatalf("queued = %v, %v", out, err)

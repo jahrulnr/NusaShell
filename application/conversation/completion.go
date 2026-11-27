@@ -69,13 +69,26 @@ func (app *ConversationApp) wake(convID string, settled bool) {
 		return
 	}
 	app.mu.Lock()
+	// The claim is the decision: the cap and the in-flight mark are read once more
+	// under the lock that takes them, so a completion arriving from another
+	// goroutine and the room going idle cannot both spend a turn on one record. A
+	// second claim used to charge the budget for a wake that read nothing, which
+	// starved the record behind it.
+	if app.wakeQueued[convID] || app.machineTurns[convID] >= maxMachineTurns {
+		app.mu.Unlock()
+		return
+	}
 	app.machineTurns[convID]++
 	app.wakeQueued[convID] = true
 	app.mu.Unlock()
 	if _, err := app.post(convID, &appjob.Wake{Ctx: context.Background(), Deps: app.depsSnapshot()}); err != nil {
-		// Nothing was queued: the record waits for the next natural turn.
+		// Nothing was queued, so nothing was spent: the slot and the turn both go
+		// back, and the record waits for the next natural turn.
 		app.mu.Lock()
 		delete(app.wakeQueued, convID)
+		if app.machineTurns[convID] > 0 {
+			app.machineTurns[convID]--
+		}
 		app.mu.Unlock()
 	}
 }

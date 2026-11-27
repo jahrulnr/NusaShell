@@ -572,8 +572,10 @@ test('a slow queue shows its skeleton while the skills list is already on the pa
   await until(() => doc.body.textContent.includes('release-notes'), 'the catalog waited for the queue');
   assert.equal(queueOf().querySelector('.skeleton'), null, 'the queue drew a skeleton before its 200ms');
   assert.equal(queueOf().textContent.includes(DISMISS_READS), false);
-  await sleep(260);
-  assert.ok(queueOf().querySelector('.skeleton'), 'the skeleton did not appear once the wait was perceptible');
+  // The threshold is the pure phase function's, asserted above; this test owns
+  // the wiring. Waited for rather than slept past: a busy runner can fire the
+  // 200ms tick after a fixed 260ms sleep has already elapsed.
+  await until(() => queueOf().querySelector('.skeleton'), 'the skeleton did not appear once the wait was perceptible', 2000);
   assert.equal(queueOf().textContent.includes(QUEUE_STILL_READING), false, 'the four-second note showed with the skeleton');
   assert.equal(doc.body.textContent.includes('release-notes'), true);
 });
