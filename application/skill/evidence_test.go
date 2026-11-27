@@ -52,15 +52,13 @@ func TestEvidenceTakeConsumesOnce(t *testing.T) {
 	var mu sync.Mutex
 	taken := 0
 	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, ok := ev.Take("room", "m1"); ok {
 				mu.Lock()
 				taken++
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if taken != 1 {
@@ -72,11 +70,9 @@ func TestEvidenceRecordsManyRoomsConcurrently(t *testing.T) {
 	ev := NewEvidence()
 	var wg sync.WaitGroup
 	for i := range 32 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ev.RecordEdit(fmt.Sprintf("room-%d", i), "m", "text", nil)
-		}()
+		})
 	}
 	wg.Wait()
 	for i := range 32 {

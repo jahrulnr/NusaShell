@@ -77,27 +77,43 @@ test('a command is the draft\'s first line; a path or prose is not', () => {
   assert.equal(isNativeCommand(room, 'review'), false);
   // A native command the server adds later is reserved without a client change.
   assert.equal(isNativeCommand({ catalog: { items: [native('rewind')] } }, 'rewind'), true);
+  // clear and fork stay reserved until the catalog lists them. compact does not:
+  // putting it back on a client list would make the empty-catalog line true.
+  assert.equal(isNativeCommand({ catalog: { items: [] } }, 'clear'), true);
+  assert.equal(isNativeCommand({ catalog: { items: [] } }, 'fork'), true);
+  assert.equal(isNativeCommand({ catalog: { items: [] } }, 'compact'), false);
+  // The catalog's first row decides. A later native row does not override it,
+  // and an agent that claims a thread command wins.
+  assert.equal(isNativeCommand({ catalog: { items: [agent('compact'), native('compact')] } }, 'compact'), false);
+  assert.equal(isNativeCommand({ catalog: { items: [agent('clear')] } }, 'clear'), false);
 });
 
-test('the catalog lists native commands first, one row per name, native winning a collision', () => {
+test('the menu follows the catalog, and a native row does not replace an agent row', () => {
   state.agents.items = [{ id: 'claude', name: 'Claude' }];
   const room = {
     info: { agentId: 'claude' },
-    catalog: { status: 'ready', items: [agent('review'), agent('compact'), native('compact'), native('fork', { enabled: false, reason: 'Nothing to fork yet' })] },
+    catalog: { status: 'ready', items: [agent('compact'), native('clear'), native('fork', { enabled: false, reason: 'Nothing to fork yet' })] },
   };
   const rows = commandChoices(room);
-  assert.deepEqual(rows.map((c) => [c.name, c.source, c.enabled]), [
-    ['compact', 'NusaShell', true],
-    ['fork', 'NusaShell', false],
-    ['review', 'Claude', true],
+  assert.deepEqual(rows.map((c) => [c.name, c.source, c.enabled, c.icon]), [
+    ['compact', 'Claude', true, 'bot'],
+    ['clear', 'NusaShell', true, 'slash'],
+    ['fork', 'NusaShell', false, 'slash'],
   ]);
-  assert.equal(rows[1].reason, 'Nothing to fork yet');
-  assert.equal(rows[1].icon, 'branch');
-  assert.equal(rows[0].native, true);
-  assert.equal(rows[2].native, false);
+  assert.equal(rows[2].reason, 'Nothing to fork yet');
+  assert.equal(rows[0].native, false);
+  const both = commandChoices({
+    info: { agentId: 'claude' },
+    catalog: { items: [agent('compact'), native('compact'), native('fork')] },
+  });
+  assert.deepEqual(both.map((c) => [c.name, c.native]), [
+    ['compact', false],
+    ['compact', true],
+    ['fork', true],
+  ]);
   assert.deepEqual(commandChoices(room, 'fo').map((c) => c.name), ['fork']);
   assert.deepEqual(commandChoices(room, 'zz').map((c) => c.name), []);
-  assert.equal(catalogRow(room, 'compact').source, 'native');
+  assert.equal(catalogRow(room, 'compact').source, 'agent');
 });
 
 test('the keyboard walks past a row that cannot run', () => {
@@ -115,6 +131,17 @@ test('the room\'s catalog is read by conversation', async () => {
   await openThread('c_1');
   const read = catalogReads().at(-1);
   assert.equal(read.url, '/api/commands?conversationId=c_1');
+});
+
+test('an agent-reported compact is a turn, and a hardcoded compact would send it to runCommand', async () => {
+  const r = await openThread('c_1', {}, [agent('compact'), native('clear'), native('fork')]);
+  assert.equal(isNativeCommand(r, 'compact'), false);
+  assert.equal(isNativeCommand(r, 'clear'), true);
+  r.draft = '/compact';
+  assert.equal(chat.submit(r, '/compact'), true, 'the agent receives /compact as a turn');
+  await sleep(30);
+  assert.equal(commandPosts().length, 0, 'it must not call the native command endpoint');
+  assert.equal(sentTurns().at(-1).payload.content, '/compact');
 });
 
 test('Enter on /compact runs the command and never sends a turn', async () => {
@@ -259,6 +286,12 @@ test('a server without the command endpoint answers, and the draft survives it',
 test('a command in the composer needs a thread first', async () => {
   mockApi({});
   const home = chat.freshRoom();
+  // No room yet: the catalog the server answers without a conversation id,
+  // every native row off. compact is reserved because that row says so.
+  home.catalog = {
+    status: 'ready',
+    items: [native('compact', { enabled: false, reason: 'Send a message first.' }), native('clear'), native('fork')],
+  };
   home.draft = '/compact';
   chat.submit(home, '/compact');
   await sleep(20);

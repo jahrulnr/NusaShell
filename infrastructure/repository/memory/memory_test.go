@@ -36,8 +36,7 @@ func memory(t *testing.T, scope valueobject.MemoryScope, typ enum.MemoryType, na
 }
 
 func status(err error) int {
-	var ae *apperror.AppError
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[*apperror.AppError](err); ok {
 		return ae.StatusCode()
 	}
 	return 0

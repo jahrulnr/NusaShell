@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"image/jpeg"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,11 +62,14 @@ func events() (*[]event.TurnEvent, event.TurnEventHandler) {
 
 func TestUnaryRoundtrip(t *testing.T) {
 	var captured RequestBody
+	var raw map[string]json.RawMessage
 	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer sk-test" {
 			t.Error("missing auth header")
 		}
-		json.NewDecoder(r.Body).Decode(&captured)
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &captured)
+		json.Unmarshal(body, &raw)
 		w.Header().Set("x-request-id", "req-1")
 		json.NewEncoder(w).Encode(map[string]any{
 			"model": "m", "choices": []any{map[string]any{
@@ -97,8 +102,11 @@ func TestUnaryRoundtrip(t *testing.T) {
 	if captured.Model != "m" || captured.Temperature == nil || *captured.Temperature != 0.5 {
 		t.Fatalf("params: %+v", captured)
 	}
-	if captured.PromptCacheKey != conv.ID() || captured.PromptCacheOption.TTL != "30m" {
-		t.Fatalf("prompt cache params: %+v", captured)
+	if captured.PromptCacheKey != conv.ID() {
+		t.Fatalf("prompt cache key: %+v", captured)
+	}
+	if _, sent := raw["prompt_cache_options"]; sent {
+		t.Fatalf("prompt_cache_options must stay absent until TTL is configurable and provider capability is known: %s", raw["prompt_cache_options"])
 	}
 	if captured.Messages[0].Role != "system" || captured.Messages[1].Role != "user" {
 		t.Fatalf("message order: %+v", captured.Messages)
@@ -1487,9 +1495,9 @@ func (l *statsLog) Close() error { return nil }
 
 func (l *statsLog) last(t *testing.T, kind string) map[string]any {
 	t.Helper()
-	for i := len(l.recs) - 1; i >= 0; i-- {
-		if l.recs[i].kind == kind {
-			return l.recs[i].entry
+	for _, v := range slices.Backward(l.recs) {
+		if v.kind == kind {
+			return v.entry
 		}
 	}
 	t.Fatalf("no %s record logged", kind)
@@ -1748,6 +1756,100 @@ func TestReadMediaDescriptionReplaysAsAToolResult(t *testing.T) {
 			if body, _ := m.Content.(string); strings.Contains(body, description) {
 				t.Fatalf("the description posed as a %s line: %q", m.Role, body)
 			}
+		}
+	}
+}
+
+// A markdown report is words a model reads: it reaches the wire as text under the
+// prompt, never as a "file" part — DeepSeek rejects those for the whole turn
+// (`file content parts are not supported here`), so one relayed report used to
+// kill the turn it arrived in.
+func TestMarkdownAttachmentArrivesAsText(t *testing.T) {
+	root := t.TempDir()
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	})
+	svc.fileRoot = root
+
+	report := []byte("[REPORT] B-090 — implementation done.\n")
+	path := filepath.Join(root, "b090-report.md")
+	if err := os.WriteFile(path, report, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "read this report")
+	a, _ := valueobject.NewAttachment("file://"+path, "text/markdown")
+	a.SetName("b090-report.md")
+	m.AddAttachment(a)
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("a markdown attachment must not fail the request: %v", err)
+	}
+	parts, ok := captured.Messages[0].Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("want the prompt plus one text block, got %#v", captured.Messages[0].Content)
+	}
+	for _, raw := range parts {
+		part, _ := raw.(map[string]any)
+		if part["type"] == "file" {
+			t.Fatalf("a file part reached the wire: %#v", part)
+		}
+	}
+	text, _ := parts[1].(map[string]any)["text"].(string)
+	if !strings.HasPrefix(text, `<attachment name="b090-report.md"`) ||
+		!strings.Contains(text, "[REPORT] B-090") || !strings.HasSuffix(text, "</attachment>") {
+		t.Fatalf("the report did not arrive inline: %q", text)
+	}
+}
+
+// A file a model cannot read inline is named, not dropped and not sent as a
+// part the wire cannot carry.
+func TestUnreadableAttachmentIsNamed(t *testing.T) {
+	root := t.TempDir()
+	var captured RequestBody
+	svc, prov, _ := newService(t, false, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"index": 0,
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	})
+	svc.fileRoot = root
+	path := filepath.Join(root, "scan.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.7\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conv := newConv(t)
+	m, _ := entity.NewMessage(enum.RoleUser, "see attached")
+	a, _ := valueobject.NewAttachment("file://"+path, "application/pdf")
+	a.SetName("scan.pdf")
+	m.AddAttachment(a)
+	conv.Append(m)
+	model, _ := entity.NewModel("m")
+
+	if err := svc.Send(t.Context(), conv, prov, model, nil); err != nil {
+		t.Fatalf("an unreadable attachment must not fail the request: %v", err)
+	}
+	parts, _ := captured.Messages[0].Content.([]any)
+	for _, raw := range parts {
+		part, _ := raw.(map[string]any)
+		if part["type"] == "file" {
+			t.Fatalf("a file part reached the wire: %#v", part)
 		}
 	}
 }

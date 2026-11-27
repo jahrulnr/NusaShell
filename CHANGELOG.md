@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Agent slash-command catalogs now mirror the agent instead of inventing rows: an agent room has no native `compact` row unless its session reports one, an agent-reported command wins a name collision with a native thread command, and an agent that reports nothing leaves only `clear` and `fork`.
+- Chat-completions requests no longer send an unconditional prompt-cache TTL. Providers that support the extension accept different TTL vocabularies (and some reject the request outright), so the option stays absent until provider capability and TTL configuration are explicit.
 - A pick the agent does not offer yet is kept as deferred and reported as such, instead of being counted as applied and silently ignored — the turn still runs.
 - A file an agent hands over with no type (a voice note as `application/octet-stream`) is named by its bytes and file name, so it reaches the tool that can transcribe it instead of being stored as an opaque blob.
 

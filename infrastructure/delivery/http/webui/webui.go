@@ -98,7 +98,7 @@ func assetETag(assets fs.FS, etags *sync.Map, name string) (string, bool) {
 // ifNoneMatch answers whether an If-None-Match header names tag: a list, the
 // wildcard, or the weak form a browser may echo back.
 func ifNoneMatch(header, tag string) bool {
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		part = strings.TrimSpace(part)
 		if part == "*" || part == tag || part == "W/"+tag {
 			return true
@@ -141,7 +141,7 @@ func Shell(c *gin.Context, assets fs.FS) bool {
 // wantsHTML reports a page load: a form or fetch asks for JSON or */*,
 // while a navigation names text/html.
 func wantsHTML(accept string) bool {
-	for _, part := range strings.Split(accept, ",") {
+	for part := range strings.SplitSeq(accept, ",") {
 		media, _, _ := strings.Cut(part, ";")
 		if strings.EqualFold(strings.TrimSpace(media), "text/html") {
 			return true

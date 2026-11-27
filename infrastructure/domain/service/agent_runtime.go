@@ -148,6 +148,18 @@ const (
 	OptionsUnavailable OptionsState = "unavailable"
 )
 
+// OptionsSource says where an offered option list came from. Only
+// OptionsSourceSession is the room's live session; catalog and default answers
+// are fallback evidence for an idle room, never the options in force now.
+type OptionsSource string
+
+const (
+	OptionsSourceSession      OptionsSource = "session"
+	OptionsSourceCatalog      OptionsSource = "catalog"
+	OptionsSourceAgentDefault OptionsSource = "agent-default"
+	OptionsSourceNone         OptionsSource = ""
+)
+
 // AgentRuntime runs turns on external agents — the agent-side counterpart
 // of TextModelService. One Prompt is one agent turn: the agent runs its own
 // tool loop, streams progress through onEvent, asks approve for permission
@@ -162,9 +174,9 @@ type AgentRuntime interface {
 	// does not let clients choose.
 	Models(ctx context.Context, agent *aggregate.Agent) ([]AgentModel, error)
 	// Options lists the agent's session options for a room: its live
-	// session's when one runs, else the agent's defaults. The state says
-	// what the answer means — see OptionsState.
-	Options(ctx context.Context, agent *aggregate.Agent, conversationID string) ([]AgentOption, OptionsState, error)
+	// session's when one runs, else the best fallback evidence available. State
+	// says what the answer means and source says where it came from.
+	Options(ctx context.Context, agent *aggregate.Agent, conversationID string) ([]AgentOption, OptionsState, OptionsSource, error)
 	// SetOption applies one option to the room's live session, if any.
 	SetOption(ctx context.Context, conversationID, id, value string) error
 	// Commands lists the slash commands the room's live session offers;
@@ -175,7 +187,7 @@ type AgentRuntime interface {
 	// just before the input is recorded in the turn and announced, so the
 	// caller can settle its receipt first. False leaves the input with the
 	// caller, which sends it after the turn.
-	Steer(ctx context.Context, conversationID string, input valueobject.UserInput, delivered func()) bool
+	Steer(ctx context.Context, conversationID string, input valueobject.UserInput, recordID string, delivered func()) bool
 	// Status reports the agent's process: whether it runs, its recent
 	// stderr, and how it can be signed in to. It never starts the agent.
 	Status(agentID string) AgentStatus

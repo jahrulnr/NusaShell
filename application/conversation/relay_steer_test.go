@@ -178,7 +178,7 @@ func TestRelaySteerFoldsOneRecordTheModelReads(t *testing.T) {
 	p := newProbeTurn(t, 1)
 	app, _ := fixture(t, p.handler)
 	done := startTurn(t, app, p, "c_relay", "owner question")
-	taken, err := app.SteerInput(t.Context(), "c_relay", valueobject.UserInput{
+	taken, _, err := app.SteerInput(t.Context(), "c_relay", valueobject.UserInput{
 		Text:  "status please",
 		Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote", Title: "PA"},
 	})
@@ -213,7 +213,7 @@ func TestRelaySteersKeepArrivalOrder(t *testing.T) {
 	app, _ := fixture(t, p.handler)
 	done := startTurn(t, app, p, "c_three", "owner question")
 	for _, text := range []string{"first", "second", "third"} {
-		taken, err := app.SteerInput(t.Context(), "c_three", valueobject.UserInput{
+		taken, _, err := app.SteerInput(t.Context(), "c_three", valueobject.UserInput{
 			Text:  text,
 			Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote"},
 		})
@@ -241,7 +241,7 @@ func TestRelaySteerSurvivesATurnThatNeverFoldsIt(t *testing.T) {
 	done := startTurn(t, app, p, "c_late", "owner question")
 	// The second call is already blocked: the prompt arrives after the turn's
 	// last fold point, so this turn can never put it in history itself.
-	taken, err := app.SteerInput(t.Context(), "c_late", valueobject.UserInput{
+	taken, _, err := app.SteerInput(t.Context(), "c_late", valueobject.UserInput{
 		Text:  "arrived too late",
 		Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote"},
 	})
@@ -282,7 +282,7 @@ func TestRelaySteerInAnAgentRoomStaysOneLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := busyTurn(t, app, rt, "c_agent")
-	taken, err := app.SteerInput(t.Context(), "c_agent", valueobject.UserInput{
+	taken, _, err := app.SteerInput(t.Context(), "c_agent", valueobject.UserInput{
 		Text:  "status from PA",
 		Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote"},
 	})
@@ -363,7 +363,7 @@ func TestRelaySteerTakenByTheAgentWritesOneLine(t *testing.T) {
 		defer rt.mu.Unlock()
 		return len(rt.prompts) == 1
 	})
-	taken, err := app.SteerInput(t.Context(), "c_taken", valueobject.UserInput{
+	taken, _, err := app.SteerInput(t.Context(), "c_taken", valueobject.UserInput{
 		Text:  "status from PA",
 		Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote"},
 	})
@@ -426,7 +426,7 @@ func TestFoldedRelaySteerNamesItsLine(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the turn never reached the provider")
 	}
-	if taken, err := app.SteerInput(t.Context(), "c_pair", valueobject.UserInput{
+	if taken, _, err := app.SteerInput(t.Context(), "c_pair", valueobject.UserInput{
 		Text: "verdict", Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote"},
 	}); err != nil || !taken {
 		t.Fatalf("steer = %v, %v", taken, err)

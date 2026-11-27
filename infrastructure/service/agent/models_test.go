@@ -53,7 +53,7 @@ func TestModelSwitchKeepsTheCatalogAPartialResponseOmits(t *testing.T) {
 	rt, in := setup(t, "hello")
 	ctx := t.Context()
 	liveMode(t, ctx, rt, in) // open the session
-	before, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	before, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestModelSwitchKeepsTheCatalogAPartialResponseOmits(t *testing.T) {
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	after, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	after, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestSetOptionKeepsTheCatalogAPartialResponseOmits(t *testing.T) {
 	rt, in := setup(t, "hello")
 	ctx := t.Context()
 	mode := liveMode(t, ctx, rt, in)
-	before, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	before, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestSetOptionKeepsTheCatalogAPartialResponseOmits(t *testing.T) {
 	if err := rt.SetOption(ctx, in.Conversation.ID(), mode.ID, next); err != nil {
 		t.Fatal(err)
 	}
-	after, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	after, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}

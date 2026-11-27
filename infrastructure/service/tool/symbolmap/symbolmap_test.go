@@ -112,7 +112,7 @@ func TestExecuteRejectsUnboundPath(t *testing.T) {
 // the build like the on-demand path does.
 func TestExecuteSystemCallNeverBlocks(t *testing.T) {
 	dir := t.TempDir()
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		writeFile(t, dir, fmt.Sprintf("f%02d.go", i), "package x\n")
 	}
 	tool := testTool(t, dir)
@@ -229,8 +229,8 @@ func TestProbeLatency(t *testing.T) {
 }
 
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }

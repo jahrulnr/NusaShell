@@ -289,7 +289,7 @@ func (app *ConversationApp) depsSnapshot() appjob.Deps {
 // post enqueues a job on the room's worker and answers the refusal, if any:
 // nil means the worker accepted it. A job accepted here may still fail later —
 // post only reports admission, never the turn's outcome.
-func (app *ConversationApp) post(convID string, j queuedJob) error {
+func (app *ConversationApp) post(convID string, j queuedJob) (int, error) {
 	for {
 		app.mu.Lock()
 		// Live config rides each post — a settings change reaches the
@@ -331,7 +331,7 @@ func (app *ConversationApp) post(convID string, j queuedJob) error {
 			app.mu.Unlock()
 			refusal := apperror.New(503, "conversation application is shutting down", nil)
 			j.Reply(refusal)
-			return refusal
+			return 0, refusal
 		}
 		w := app.workers[convID]
 		if w == nil || w.Dead() {
@@ -382,15 +382,16 @@ func (app *ConversationApp) post(convID string, j queuedJob) error {
 			app.mu.Unlock()
 			refusal := apperror.New(409, "cannot post to a conversation from inside its own turn", fmt.Errorf("reentrant same-room post on %s", convID))
 			j.Reply(refusal)
-			return refusal
+			return 0, refusal
 		}
 
 		j.Bind(convID, w)
 		var err error
+		position := 0
 		if j.IsPreempt() {
 			err = w.Preempt(j)
 		} else {
-			err = w.Submit(j)
+			position, err = w.SubmitWithPosition(j)
 		}
 		app.mu.Unlock()
 
@@ -400,9 +401,9 @@ func (app *ConversationApp) post(convID string, j queuedJob) error {
 		case errors.Is(err, worker.ErrFull):
 			refusal := apperror.New(429, "conversation queue full", fmt.Errorf("mailbox capacity %d", cfg.MailboxCap))
 			j.Reply(refusal)
-			return refusal
+			return 0, refusal
 		}
-		return nil
+		return position, nil
 	}
 }
 

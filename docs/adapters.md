@@ -514,11 +514,13 @@ tool catalog: their session instructions name the installed builtin-skills
 directory, and they read those `SKILL.md` files with their own file tools.
 
 Composition embeds and atomically installs `skill-creator`, `tool-creator`,
-`nusashell`, and `coding-workflow` into the application-owned builtin root.
+`nusashell`, `coding-workflow`, and `playrole` into the application-owned
+builtin root.
 Shipped files are refreshed from the binary on startup; user customizations
 belong in global or workspace roots. The source trees are
 `assets/skills/skill-creator/`, `assets/skills/tool-creator/`,
-`assets/skills/nusashell/`, and `assets/skills/coding-workflow/`; nested
+`assets/skills/nusashell/`, `assets/skills/coding-workflow/`, and
+`assets/skills/playrole/`; nested
 scripts, references, templates, icons, and licenses are embedded and
 materialized with each skill.
 The terminal environment provides custom executable paths and a lazy Python

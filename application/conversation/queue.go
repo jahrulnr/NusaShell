@@ -2,11 +2,11 @@ package appconversation
 
 import (
 	"context"
-	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
-	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 
 	appjob "github.com/jahrulnr/nusashell/application/job"
+	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
 // QueueDepth is how many jobs wait on the room's worker — a queued
@@ -40,18 +40,25 @@ func (app *ConversationApp) Enqueue(ctx context.Context, convID, providerID, mod
 	if opts.Origin.Kind != enum.TurnOriginCompletion {
 		app.noteOwnerTurn(convID)
 	}
+	// Capacity is preflighted before provenance is written: an uncontended full
+	// queue is a clean refusal with no row. The atomic submit still makes the
+	// final decision; a race after the write is the degraded case the durable
+	// record-first rule accepts rather than losing the prompt silently.
+	if cap := app.cfg.MailboxCap; cap > 0 && app.QueueDepth(convID) >= cap {
+		return 0, apperror.New(429, "conversation queue full", nil)
+	}
 	// The line is written before the sender is told the message waits: a queue
 	// that lives only in memory must never be the only copy of a prompt another
 	// room already handed over. The job uses this record instead of writing a
 	// second one when it runs.
 	if opts.Relay != nil && opts.AcceptedRecord == nil {
-		record := app.persistRelayLine(ctx, convID, valueobject.UserInput{
+		record, err := app.persistRelayLine(ctx, convID, valueobject.UserInput{
 			Text:        text,
 			Attachments: attachments,
 			Relay:       opts.Relay,
 		})
-		if record == nil {
-			return 0, apperror.New(500, "could not record the accepted message", nil)
+		if err != nil {
+			return 0, err
 		}
 		opts.AcceptedRecord = record
 	}
@@ -68,15 +75,11 @@ func (app *ConversationApp) Enqueue(ctx context.Context, convID, providerID, mod
 		Opts:        opts,
 	}
 	j.Result = make(chan error, 1)
-	if err := app.post(convID, j); err != nil {
+	position, err := app.post(convID, j)
+	if err != nil {
 		return 0, err
 	}
 	app.notifyQueue(convID)
-	position := app.QueueDepth(convID)
-	if position == 0 {
-		// The worker picked it up at once: it is a turn, not a queued message.
-		return 0, nil
-	}
 	return position, nil
 }
 

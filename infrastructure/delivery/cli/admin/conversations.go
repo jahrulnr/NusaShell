@@ -171,7 +171,7 @@ func Conversations(args []string, stdout, stderr io.Writer) int {
 		}
 		if kinds != "" {
 			var ks []string
-			for _, k := range strings.Split(kinds, ",") {
+			for k := range strings.SplitSeq(kinds, ",") {
 				if k = strings.TrimSpace(k); k != "" {
 					ks = append(ks, k)
 				}

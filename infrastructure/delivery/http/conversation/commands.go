@@ -135,9 +135,9 @@ func (s *server) agentOptionsOf(ctx context.Context, convID string) *agentOption
 	if s.agent == nil {
 		return nil
 	}
-	opts, state, err := s.agent.AgentOptions(ctx, convID)
+	opts, state, source, err := s.agent.AgentOptions(ctx, convID)
 	if err != nil || (state != dservice.OptionsReady && state != dservice.OptionsEmpty) {
 		return nil
 	}
-	return &agentOptionsDTO{Status: string(state), Data: toAgentOptions(opts)}
+	return &agentOptionsDTO{Status: string(state), Source: string(source), Data: toAgentOptions(opts)}
 }

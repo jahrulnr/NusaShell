@@ -222,3 +222,17 @@ func TestMoveLevelDoesNotOverwriteADecisionMadeMeanwhile(t *testing.T) {
 		t.Errorf("the move overwrote the concurrent decision: %s/%q", row.Level(), row.Digest())
 	}
 }
+
+func TestMoveLevelSaveSurvivesClientCancellation(t *testing.T) {
+	w, deps := moveSetup()
+	w.catalog = []repository.Skill{moveEntry("release-notes", "nusashell", "disk-1")}
+	moveRow(t, w, "release-notes", enum.SkillLevelAgent, "disk-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	w.afterOwnershipGet = cancel
+	if err := MoveLevel(ctx, deps, moveIn("release-notes", "user", "disk-1")); err != nil {
+		t.Fatalf("move with a client that disconnected before the row save: %v", err)
+	}
+	if row := storedRow(t, w, "release-notes"); row.Level() != enum.SkillLevelUser {
+		t.Fatalf("level = %s after the client disconnected; the move must still commit", row.Level())
+	}
+}

@@ -399,7 +399,7 @@ func hasKillFlag(args []string) bool {
 // hasKillSignal reports whether a kill invocation asks for KILL rather than a
 // polite signal: -9, -KILL, -SIGKILL, -s KILL, -s 9, -n 9.
 func hasKillSignal(args []string) bool {
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		a := args[i]
 		switch {
 		case a == "-9" || a == "--signal=9" || a == "--signal=KILL" || a == "--signal=SIGKILL":

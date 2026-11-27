@@ -16,7 +16,7 @@
 // programmatic scrollTop lands even on overflow:hidden. The scroll contract is
 // read from the overflow the panel declares, and the browser check stays the
 // proof for the rendered CSS.
-import { mockApi, sleep, sockets } from './env.mjs';
+import { calls, mockApi, sleep, sockets } from './env.mjs';
 import { installDOM, doc, MutationObserver, Ev } from './dom.mjs';
 installDOM();
 import { before, beforeEach, test } from 'node:test';
@@ -63,6 +63,9 @@ const until = async (ok, message, ms = 1000) => {
 // without a browser.
 const OVERFLOW_UTILS = { 'overflow-hidden': 'hidden', 'overflow-auto': 'auto', 'overflow-y-auto': 'auto' };
 const computedOverflowY = (el) => (el.className || '').split(/\s+/).map((c) => OVERFLOW_UTILS[c]).find(Boolean) ?? 'visible';
+const scrollOwners = (dialog) => [dialog, ...dialog.querySelectorAll('*')].filter((n) => n !== dialog && /(^| )overflow-(y-)?auto( |$)/.test(n.className || ''));
+const listScroller = (dialog) => dialog.querySelector('[data-scroll="list"]');
+const controlBand = (dialog) => dialog.querySelector('[data-scroll="controls"]');
 
 // serveModelRoom answers everything the model picker's panel reads for c_inv.
 // The agent-options answer comes late on purpose: with an instant mock the
@@ -120,19 +123,22 @@ const modelPickKeepsPanel = async () => {
     await sleep(120);
     const dialog = doc.querySelector('[role="dialog"]');
     assert.ok(dialog, 'the panel is open');
-    // The panel is overflow:hidden: only the body between the chrome scrolls.
+    // The panel is overflow:hidden. The model list scrolls, and the session
+    // options sit in a second band so they do not leave with the list. Search
+    // and the Providers / Agents footer stay outside both.
     assert.equal(computedOverflowY(dialog), 'hidden', 'the panel declares overflow:hidden, so a regression to auto is caught');
-    // one scroll owner: the body between the chrome. The panel itself never
-    // scrolls — if it did, the search field and the Providers / Agents footer
-    // would ride the scroll out of the frame, which is the bug this pins.
-    const owners = [dialog, ...dialog.querySelectorAll('*')].filter((n) => /(^| )overflow-(y-)?auto( |$)/.test(n.className || ''));
-    assert.equal(owners.length, 1, `one scroll owner, but ${owners.length} scroll inside the panel`);
-    assert.notEqual(owners[0], dialog, 'the panel must not scroll: its chrome would leave the frame');
-    const body = owners[0];
+    const owners = scrollOwners(dialog);
+    assert.equal(owners.length, 2, `the list and the controls band scroll, but ${owners.length} scroll inside the panel`);
+    const body = listScroller(dialog);
+    const band = controlBand(dialog);
+    assert.ok(body && band, 'the model rows and the controls are separate scroll owners');
+    assert.equal(owners.includes(body) && owners.includes(band), true);
+    assert.equal(body.textContent.includes('no options') || body.textContent.includes('Asking the agent'), false);
+    assert.equal(band.textContent.includes('no options') || band.textContent.includes('Asking the agent'), true);
     const input = dialog.querySelector('input');
-    assert.ok(input && !body.contains(input), 'the search field is chrome: it stays out of the scroll');
+    assert.ok(input && !body.contains(input) && !band.contains(input), 'the search field is chrome: it stays out of both scrolls');
     const links = [...dialog.querySelectorAll('a')].filter((a) => /^(Providers|Agents)$/.test(a.textContent.trim()));
-    assert.ok(links.length >= 2 && links.every((a) => !body.contains(a)), 'the Providers / Agents footer is chrome: it stays out of the scroll');
+    assert.ok(links.length >= 2 && links.every((a) => !body.contains(a) && !band.contains(a)), 'the Providers / Agents footer is chrome: it stays out of both scrolls');
 
     // focus inside the panel, scroll the body, then act inside it
     if (input) input.focus();
@@ -442,7 +448,7 @@ const searchStartsAtTop = async () => {
   const { host, dialog } = await openModelPanel();
   try {
     assert.ok(dialog, 'the panel is open');
-    const body = [dialog, ...dialog.querySelectorAll('*')].find((n) => /(^| )overflow-(y-)?auto( |$)/.test(n.className || '') && n !== dialog);
+    const body = dialog.querySelector('[data-scroll="list"]');
     assert.ok(body, 'the scroll body exists');
     const input = dialog.querySelector('input');
     input.focus();
@@ -450,7 +456,9 @@ const searchStartsAtTop = async () => {
     input.value = 'swe';
     input.dispatchEvent(new Ev('input', { bubbles: true }));
     await sleep(30);
-    assert.equal(body.scrollTop, 0, 'a changed filter starts the body at its top');
+    const live = doc.querySelector('[role="dialog"] [data-scroll="list"]');
+    assert.equal(live, body, 'a filter must not rebuild the list scroller');
+    assert.equal(live.scrollTop, 0, 'a changed filter starts the body at its top');
     assert.equal(doc.activeElement, input, 'typing never moves the focus');
   } finally {
     render(null, host);
@@ -458,6 +466,103 @@ const searchStartsAtTop = async () => {
   }
 };
 
+// Reasoning effort is chrome for the chosen model. Scrolling the catalog
+// must not take it with the rows: it lives in the band, and that band is a
+// different scroll node from the list.
+const effortStaysWithTheList = async () => {
+  const models = [
+    { id: 'm1', name: 'Alpha', listed: true, supportedEfforts: ['low', 'high'] },
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `m${i + 2}`, name: `Model ${i + 2}`, listed: true })),
+  ];
+  mockApi({
+    'GET /api/providers/or/upstreams': { data: [{ slug: 'fast', name: 'Fastlane' }] },
+    'GET /api/providers': { data: [{ id: 'or', name: 'OpenRouter', models }] },
+    'GET /api/agents': { data: [] },
+    'GET /api/conversations/c_eff/agent-options': { data: [], status: 'empty' },
+    'GET /api/conversations/c_eff/messages': { messages: [], effectiveStart: 0, total: 0 },
+    'GET /api/conversations/c_eff': { id: 'c_eff', title: 'Room', workspace: '', providerId: 'or', modelId: 'm1', effort: 'low' },
+    'GET /api/approval-rules': { data: [] },
+    'GET /api/context': { estimate: 0, total: 0 },
+  });
+  chat.navigate('#/c/c_eff');
+  await sleep(50);
+  const r = state.rooms.c_eff;
+  const host = doc.createElement('div');
+  doc.body.appendChild(host);
+  try {
+    render(html`<${ModelPicker} room=${r} />`, host);
+    await chat.loadProviders();
+    await sleep(20);
+    host.querySelector('button[aria-haspopup="dialog"]').click();
+    await until(() => doc.body.textContent.includes('Reasoning effort'), 'the effort control did not render');
+    const dialog = doc.querySelector('[role="dialog"]');
+    const list = listScroller(dialog);
+    const effort = [...dialog.querySelectorAll('span')].find((el) => el.textContent.trim() === 'Reasoning effort');
+    assert.ok(list && effort, 'the list and the effort control both rendered');
+    assert.equal(list.contains(effort), false, 'the effort control rides the model list');
+    const band = controlBand(dialog);
+    assert.ok(band && band.contains(effort), 'the effort control has no band of its own');
+    assert.match(band.className, /overflow-y-auto/);
+    assert.equal(band.style.maxHeight, 'calc(var(--panel-room) * 0.4)');
+    list.scrollTop = 200;
+    assert.equal(list.scrollTop, 200);
+    assert.equal(band.scrollTop, 0, 'scrolling the list also scrolled the controls');
+    assert.equal(list.contains(effort), false);
+  } finally {
+    render(null, host);
+    host.remove();
+  }
+};
+
+// A new room has no id. Its session options are the agent's own list, and
+// they stay in the band: there is no thread yet, so this picker is the only
+// place those controls exist.
+const freshRoomOptionsStay = async () => {
+  const saved = state.threadDefault;
+  const options = [
+    { id: 'mode', name: 'Session Mode', category: 'mode', type: 'select', current: 'agent', choices: [{ value: 'agent', name: 'Agent' }, { value: 'plan', name: 'Plan' }] },
+    { id: 'effort', name: 'Effort', type: 'select', current: 'high', choices: [{ value: 'high', name: 'Extra High' }] },
+  ];
+  mockApi({
+    'GET /api/agents/cursor/options': { data: options, status: 'ready' },
+    'GET /api/agents/cursor/models': { data: [{ id: 'opus', name: 'Opus', current: true }, { id: 'sonnet', name: 'Sonnet' }] },
+    'GET /api/agents': { data: [{ id: 'cursor', name: 'Cursor' }] },
+    'GET /api/providers': { data: [] },
+    'GET /api/context': { estimate: 0, total: 0 },
+  });
+  state.threadDefault = { agent: 'cursor', provider: '', model: 'opus' };
+  const r = chat.freshRoom();
+  const host = doc.createElement('div');
+  doc.body.appendChild(host);
+  // A label is matched whole: "Model 2" contains "Mode" as a substring.
+  const labelled = (node, text) => [...node.querySelectorAll('span')].some((el) => el.textContent.trim() === text);
+  try {
+    assert.equal(r.id, null);
+    await chat.loadProviders();
+    render(html`<${ModelPicker} room=${r} />`, host);
+    await chat.loadAgents();
+    host.querySelector('button[aria-haspopup="dialog"]').click();
+    await until(() => {
+      const band = doc.querySelector('[role="dialog"]') && controlBand(doc.querySelector('[role="dialog"]'));
+      return !!band && labelled(band, 'Session Mode') && labelled(band, 'Effort');
+    }, 'the new room did not show the agent options in the controls band');
+    const dialog = doc.querySelector('[role="dialog"]');
+    const list = listScroller(dialog);
+    const band = controlBand(dialog);
+    assert.ok(list && band, 'the new room splits the list from the controls');
+    assert.equal(labelled(list, 'Session Mode'), false, 'the agent option rides the model list');
+    assert.equal(labelled(list, 'Effort'), false, 'the agent effort rides the model list');
+    assert.ok(calls.some((call) => call.url === '/api/agents/cursor/options'), 'a new room reads the agent options, not a thread');
+    assert.equal(calls.some((call) => call.url.includes('/conversations/')), false);
+  } finally {
+    render(null, host);
+    host.remove();
+    state.threadDefault = saved;
+  }
+};
+
+test('reasoning effort stays put while the model list scrolls', effortStaysWithTheList);
+test('a new room keeps the agent options out of the model list', freshRoomOptionsStay);
 test('the panel says a pick applies next turn only while the record parks it', agentHintFollowsRecord);
 test('the options panel answers a read, an empty answer, and a failure, and a failure offers Retry', agentPanelAnswers);
 test('the model picker offers Retry for a failed options read, and the retry reads again', pickerAgentFailure);

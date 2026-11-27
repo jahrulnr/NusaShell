@@ -1275,7 +1275,7 @@ func TestWatchGapReplaysLiveSnapshot(t *testing.T) {
 		<-openedRead
 		// Overrun the journal's frame bound so a late watcher gaps; the
 		// flood is signalled before the block so the watch never races it.
-		for i := 0; i < journalMaxFrames+64; i++ {
+		for range journalMaxFrames + 64 {
 			onEvent(event.NewDeltaEvent("body"))
 		}
 		toolCall, _ := entity.NewToolCall("call_1", "exec", `{"command":"ls"}`, enum.TooltypeOrigin)

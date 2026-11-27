@@ -224,7 +224,7 @@ func TestManagerSkipsUnsupportedFiles(t *testing.T) {
 		"a.go":        "package a\n\nfunc A() {}\n",
 		"notes.weird": "not a source file\n",
 	}}
-	idx := &scopedIndex{countingIndex: countingIndex{done: make(chan struct{}), syms: []svc.Symbol{{Path: "a.go", Lang: "go", Kind: "function", Name: "A", Line: 3}}}}
+	idx := &scopedIndex{done: make(chan struct{}), syms: []svc.Symbol{{Path: "a.go", Lang: "go", Kind: "function", Name: "A", Line: 3}}}
 	m := testManager(idx, nil)
 	m.Map(context.Background(), "ws", "/ws", opener(root))
 	waitBuild(t, &idx.countingIndex)

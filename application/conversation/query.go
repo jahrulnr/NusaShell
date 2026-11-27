@@ -296,19 +296,19 @@ func (app *ConversationApp) Pending(ctx context.Context, convID string) (drepo.P
 // AgentOptions lists the session options of the room's agent, with the
 // owner's picks as their current values — a stored pick the option no longer
 // offers is not one it can call current.
-func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, dservice.OptionsState, error) {
+func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
 	deps := app.depsSnapshot()
 	info, err := deps.Convs.Info(ctx, convID)
 	if err != nil {
-		return nil, dservice.OptionsUnavailable, err
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, err
 	}
-	opts, state, err := app.optionReport(ctx, deps, info)
+	opts, state, source, err := app.optionReport(ctx, deps, info)
 	if err != nil {
-		return nil, state, err
+		return nil, state, source, err
 	}
 	if info.AgentID == "" {
 		// A room that runs no agent has no options to report.
-		return []dservice.AgentOption{}, dservice.OptionsReady, nil
+		return []dservice.AgentOption{}, dservice.OptionsReady, dservice.OptionsSourceNone, nil
 	}
 	for i, o := range opts {
 		// A stored value this option does not offer is not a current one: the
@@ -344,23 +344,23 @@ func (app *ConversationApp) AgentOptions(ctx context.Context, convID string) ([]
 	if out == nil {
 		out = []dservice.AgentOption{}
 	}
-	return out, state, nil
+	return out, state, source, nil
 }
 
 // optionReport reads the room's option catalog — the report the picker draws:
 // the live session's when one runs, the agent's own defaults otherwise. It
 // answers nil, nil when the room runs no agent, and 503 when a room that does
 // cannot be asked: a caller must not treat "cannot tell" as "anything goes".
-func (app *ConversationApp) optionReport(ctx context.Context, deps appjob.Deps, info drepo.ConversationInfo) ([]dservice.AgentOption, dservice.OptionsState, error) {
+func (app *ConversationApp) optionReport(ctx context.Context, deps appjob.Deps, info drepo.ConversationInfo) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
 	if info.AgentID == "" {
-		return nil, dservice.OptionsReady, nil
+		return nil, dservice.OptionsReady, dservice.OptionsSourceNone, nil
 	}
 	if deps.AgentRuntime == nil || deps.Agents == nil {
-		return nil, dservice.OptionsUnavailable, apperror.New(503, "agent options are unavailable", nil)
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, apperror.New(503, "agent options are unavailable", nil)
 	}
 	agent, err := deps.Agents.Load(ctx, info.AgentID)
 	if err != nil {
-		return nil, dservice.OptionsUnavailable, err
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, err
 	}
 	return deps.AgentRuntime.Options(ctx, agent, info.ID)
 }
@@ -379,7 +379,7 @@ func (app *ConversationApp) SetAgentOption(ctx context.Context, convID, id, valu
 		if err != nil {
 			return false, err
 		}
-		opts, _, err := app.optionReport(ctx, deps, info)
+		opts, _, _, err := app.optionReport(ctx, deps, info)
 		if err != nil {
 			return false, err
 		}

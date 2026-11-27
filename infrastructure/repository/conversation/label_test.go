@@ -29,7 +29,7 @@ func TestConcurrentCreatesGetDistinctLabels(t *testing.T) {
 	errs := make([]error, rooms)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := 0; i < rooms; i++ {
+	for i := range rooms {
 		convs[i] = unsavedRoom(t)
 		wg.Add(1)
 		go func(i int) {
@@ -93,7 +93,7 @@ func TestSaveKeepsItsOwnLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := repo.Save(context.Background(), stored); err != nil {
 			t.Fatalf("save %d: %v", i, err)
 		}

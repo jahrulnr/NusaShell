@@ -48,7 +48,7 @@ func PendingOptionPicks(ctx context.Context, d Deps, conv *aggregate.Conversatio
 		}
 		return nil, nil, err
 	}
-	opts, _, err := d.AgentRuntime.Options(ctx, agent, conv.ID())
+	opts, _, _, err := d.AgentRuntime.Options(ctx, agent, conv.ID())
 	if err != nil {
 		return nil, nil, apperror.New(503, "agent options are unavailable", err)
 	}

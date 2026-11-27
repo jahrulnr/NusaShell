@@ -7,7 +7,7 @@ import { Marked } from '/vendor/marked/marked.esm.js';
 import DOMPurify from '/vendor/dompurify/purify.es.mjs';
 import hljs from '/vendor/highlight/highlight.min.mjs';
 import { mountDiagram, validateDiagramSource } from './diagram.js';
-import { markedUser, withRefSentinels, applyRefHighlights } from './usermark.js';
+import { lexUser, userMarked, withRefSentinels, applyRefHighlights } from './usermark.js';
 import { renderImage, localTarget, baseName } from './mdlinks.js';
 import { CHROME_ATTRS, CHROME_CLASSES, NONCE_ATTR, newNonce, stripForeignChrome, diagramParts } from './mdchrome.js';
 import { fileURL } from './api.js';
@@ -345,13 +345,17 @@ export function renderInto(root, source, { conversationId = '' } = {}) {
 // and reference selections ride the parse as sentinels so the same
 // sanitized block cache can reconcile them before they become spans.
 export function renderUserInto(root, source, refs, { conversationId = '' } = {}) {
-  let tokens;
   nonce = newNonce();
   fileHref = fileHrefFor(conversationId);
   const src = cleanFences(withRefSentinels(source, refs));
-  try { tokens = markedUser.lexer(src); } catch { tokens = [{ type: 'paragraph', raw: src, text: src, tokens: [{ type: 'text', raw: src, text: src }] }]; }
+  const { tokens, fallback } = lexUser(src);
+  // A message that fell back to plain text carries a marker, so the failure is visible in the DOM.
+  root.classList.toggle('md-fallback', fallback);
   const blocks = tokens.filter((t) => t.type !== 'space');
-  reconcile(root, blocks, conversationId, (t) => renderBlock(t, tokens.links, markedUser));
+  // The profile is built for this pass: its chrome must carry this pass's
+  // nonce, the one renderBlock strips against.
+  const profile = userMarked(nonce);
+  reconcile(root, blocks, conversationId, (t) => renderBlock(t, tokens.links, profile));
   applyRefHighlights(root, refs);
 }
 

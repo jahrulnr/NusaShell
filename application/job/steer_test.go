@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/config"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -511,32 +510,32 @@ func TestSteeringMailboxRefusesBeyondItsBound(t *testing.T) {
 	}
 }
 
-// The before hook runs before the turn is told the input arrived: a record the
-// delivery depends on is never written after the text went out.
-func TestSteeringBeforeHookRunsBeforeDelivery(t *testing.T) {
+// A relayed input enters the mailbox already joined to its acceptance record:
+// no interleaving can let a fold meet the text before the provenance exists.
+func TestSteeringSubmissionCarriesItsRecordFromTheStart(t *testing.T) {
 	s := NewSteeringInput()
-	var order []string
-	var mu sync.Mutex
-	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "relay"}, 0, func() *entity.Message {
-		mu.Lock()
-		order = append(order, "record")
-		mu.Unlock()
-		return nil
-	}); err != nil {
+	rec, err := entity.NewUserMessage(valueobject.UserInput{Text: "relay"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-s.arrived():
-		mu.Lock()
-		order = append(order, "delivery")
-		mu.Unlock()
-	case <-time.After(time.Second):
-		t.Fatal("the mailbox never signalled")
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "relay", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, &rec); err != nil {
+		t.Fatal(err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(order) != 2 || order[0] != "record" || order[1] != "delivery" {
-		t.Fatalf("order = %v, want the record before delivery", order)
+	entries := s.claim()
+	if len(entries) != 1 || entries[0].record == nil || entries[0].record.ID() != rec.ID() {
+		t.Fatalf("claimed entry = %+v, want the acceptance record from the start", entries)
+	}
+}
+
+// A relayed input without its acceptance record is a broken acceptance: the
+// mailbox refuses it rather than delivering text the room cannot attribute.
+func TestSteeringRejectsARelayWithoutItsRecord(t *testing.T) {
+	s := NewSteeringInput()
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "relay", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, nil); !errors.Is(err, ErrRelayRecordMissing) {
+		t.Fatalf("recordless relay = %v, want ErrRelayRecordMissing", err)
+	}
+	if entries := s.claim(); len(entries) != 0 {
+		t.Fatalf("a recordless relay entered the mailbox: %+v", entries)
 	}
 }
 
@@ -550,9 +549,7 @@ func TestRescueLogsAFailedFollowUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "verdict from PA", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, func() *entity.Message {
-		return &rec
-	}); err != nil {
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "verdict from PA", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, &rec); err != nil {
 		t.Fatal(err)
 	}
 	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return applied }}, agentRoom: true}
@@ -579,9 +576,7 @@ func TestRescueLogsNothingWhenItSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "arrived", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, func() *entity.Message {
-		return &rec
-	}); err != nil {
+	if _, err := s.SubmitBefore(valueobject.UserInput{Text: "arrived", Relay: &valueobject.Relay{ID: "c_pa"}}, 0, &rec); err != nil {
 		t.Fatal(err)
 	}
 	j := &Send{Deps: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil)), FollowUp: func(string, entity.Message) error { return nil }}, agentRoom: true}

@@ -70,11 +70,13 @@ func Decide(ctx context.Context, deps DecideDeps, in DecideInput) error {
 		if err := p.Dismiss(in.Reason, in.Now, st.open(p)); err != nil {
 			return apperror.New(400, err.Error(), nil)
 		}
-		if err := releaseOwnFile(ctx, deps.Writer, st, p); err != nil {
+		release, err := releaseOwnFile(ctx, deps.Writer, st, p)
+		if err != nil {
 			return err
 		}
-		if err := deps.Decisions.Commit(ctx, p, nil); err != nil {
-			return err
+		if err := deps.Decisions.Commit(context.WithoutCancel(ctx), p, nil); err != nil {
+			decideLog(ctx, deps, "skill-decide-dismiss-commit-failed", p, err)
+			return apperror.New(500, dismissCommitFailedText(p, release), err)
 		}
 		return nil
 	case "accept":
@@ -191,12 +193,12 @@ func Decide(ctx context.Context, deps DecideDeps, in DecideInput) error {
 	}
 	newRow, err := aggregate.ApplySkillOwnership(row, p, written.Digest)
 	if err != nil {
-		// The file is already written; the observation pass will flip the row
-		// to the owner, and nothing here may pretend the write did not happen.
+		// The file is already written, so this is a partial write, not a
+		// refusal. Nothing flips the row by itself; only an owner move does.
 		decideLog(ctx, deps, "skill-decide-row-refused", p, err)
-		return apperror.New(409, err.Error(), nil)
+		return apperror.New(500, commitFailedText(p), err)
 	}
-	if err := deps.Decisions.Commit(ctx, p, newRow); err != nil {
+	if err := deps.Decisions.Commit(context.WithoutCancel(ctx), p, newRow); err != nil {
 		decideLog(ctx, deps, "skill-decide-commit-failed", p, err)
 		return apperror.New(500, commitFailedText(p), err)
 	}
@@ -215,6 +217,32 @@ func commitFailedText(p *aggregate.SkillProposal) string {
 	return "the skill file is written but the decision was not recorded; accepting the proposal again finishes it"
 }
 
+// dismissCommitFailedText says exactly what happened to the file before the
+// failed commit. The archive is conditional: only bytes still exactly as the
+// loop wrote them move; owner-edited bytes stay where they are.
+func dismissCommitFailedText(p *aggregate.SkillProposal, release ownFileRelease) string {
+	const retry = "the decision was not recorded; trying the dismissal again is safe"
+	switch release {
+	case ownFileArchived:
+		return "the skill file was archived because it was still exactly as the loop wrote it, but " + retry
+	case ownFileAlreadyGone:
+		return "the skill file was already gone, so nothing was archived; " + retry
+	}
+	if p.Op() == enum.SkillProposalPatch {
+		return "the skill file was left in place because a patch did not create it; " + retry
+	}
+	return "the skill file was left in place because it was not still exactly as the loop wrote it; " + retry
+}
+
+// ownFileRelease is what closing a proposal did to the file on disk.
+type ownFileRelease int
+
+const (
+	ownFileLeft ownFileRelease = iota
+	ownFileArchived
+	ownFileAlreadyGone
+)
+
 // releaseOwnFile archives the loop's own leftover of a create before the create
 // is closed. An accept whose commit failed leaves the file with no ownership row,
 // and once the proposal is closed nothing would ever remove it: a live nusashell
@@ -223,15 +251,24 @@ func commitFailedText(p *aggregate.SkillProposal) string {
 // settles its level on the Skills page. The archive is guarded by the digest the
 // decision read, so a file edited since is refused, not moved. A file already
 // gone is what closing wanted, so it is not an error.
-func releaseOwnFile(ctx context.Context, writer repository.SkillWriter, st learnedState, p *aggregate.SkillProposal) error {
-	if p.Op() != enum.SkillProposalCreate || !st.own[p.ID()] {
-		return nil
+func releaseOwnFile(ctx context.Context, writer repository.SkillWriter, st learnedState, p *aggregate.SkillProposal) (ownFileRelease, error) {
+	if p.Op() != enum.SkillProposalCreate {
+		return ownFileLeft, nil
+	}
+	if !st.own[p.ID()] {
+		if _, present := st.onDisk[p.Name()]; !present {
+			return ownFileAlreadyGone, nil
+		}
+		return ownFileLeft, nil
 	}
 	err := writer.Archive(ctx, enum.SkillRootNusashell, p.Name(), st.onDisk[p.Name()])
 	if err != nil && apperror.As(err).StatusCode() == 404 {
-		return nil
+		return ownFileAlreadyGone, nil
 	}
-	return err
+	if err != nil {
+		return ownFileLeft, err
+	}
+	return ownFileArchived, nil
 }
 
 // withCommas writes a byte count with thousands separators, the way the owner

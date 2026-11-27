@@ -160,7 +160,7 @@ func TestFsRootSkipsOSDirs(t *testing.T) {
 
 func TestGateSkipsUnmarkedBigRoot(t *testing.T) {
 	root := &memRoot{files: map[string]string{}}
-	for i := 0; i < GateFileLimit+100; i++ {
+	for i := range GateFileLimit + 100 {
 		root.files[fmt.Sprintf("src/f%04d.go", i)] = "package x\n\nfunc F() {}\n"
 	}
 	idx := &countingIndex{done: make(chan struct{})}
@@ -204,7 +204,7 @@ func TestGateMarkerAllowsIndex(t *testing.T) {
 
 func TestFileCapFooter(t *testing.T) {
 	root := &memRoot{files: map[string]string{"go.mod": "module x\n"}}
-	for i := 0; i < MaxIndexedFiles+3; i++ {
+	for i := range MaxIndexedFiles + 3 {
 		root.files[fmt.Sprintf("f%05d.go", i)] = "package x\n"
 	}
 	idx := &countingIndex{done: make(chan struct{})}
@@ -270,7 +270,7 @@ func (i *slowIndex) Index(ctx context.Context, _ svc.SymbolRoot) ([]svc.Symbol, 
 
 func TestIndexTimeCapKeepsPartial(t *testing.T) {
 	root := &memRoot{files: map[string]string{"go.mod": "module x\n", "a.go": "package a\n\nfunc A() {}\n"}}
-	idx := &slowIndex{countingIndex: countingIndex{done: make(chan struct{}), syms: []svc.Symbol{{Path: "a.go", Lang: "go", Kind: "function", Name: "A", Line: 3}}}, delay: time.Second}
+	idx := &slowIndex{done: make(chan struct{}), syms: []svc.Symbol{{Path: "a.go", Lang: "go", Kind: "function", Name: "A", Line: 3}}, delay: time.Second}
 	m := testManager(idx, nil)
 	m.indexTimeout = 50 * time.Millisecond
 	m.Map(context.Background(), "ws", "/ws", opener(root))
@@ -294,7 +294,7 @@ func TestIndexTimeCapKeepsPartial(t *testing.T) {
 
 func TestSkipVerdictExpires(t *testing.T) {
 	root := &memRoot{files: map[string]string{}}
-	for i := 0; i < GateFileLimit+10; i++ {
+	for i := range GateFileLimit + 10 {
 		root.files[fmt.Sprintf("f%04d.go", i)] = "package x\n"
 	}
 	idx := &countingIndex{done: make(chan struct{})}

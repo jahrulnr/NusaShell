@@ -4,7 +4,8 @@
     "app.js",
     "tests/**/*.test.mjs",
     "tests/register.mjs",
-    "tests/loader.mjs"
+    "tests/loader.mjs",
+    "tests/slimselect-double.mjs"
   ],
   "project": [
     "lib/**/*.js",

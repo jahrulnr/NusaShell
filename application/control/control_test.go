@@ -153,6 +153,13 @@ type fakeQueue struct {
 	kept [][]valueobject.Attachment
 	// relays is the provenance each accepted message carried.
 	relays []*valueobject.Relay
+	// accepted is the already-written acceptance row each message carried.
+	accepted []*entity.Message
+	// onIdle starts what a real worker starts when nothing waits. It keeps this
+	// fake honest about the production contract: position zero means the turn
+	// was posted, not that it is sitting in a queue.
+	onIdle   func(convID, text string, attachments []valueobject.Attachment, opts appjob.SendOptions)
+	canStart func(convID string) bool
 }
 
 func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, attachments []valueobject.Attachment, opts appjob.SendOptions) (int, error) {
@@ -167,6 +174,13 @@ func (q *fakeQueue) Enqueue(_ context.Context, convID, _, _, text string, attach
 	q.enqueued = append(q.enqueued, convID+": "+text)
 	q.kept = append(q.kept, attachments)
 	q.relays = append(q.relays, opts.Relay)
+	q.accepted = append(q.accepted, opts.AcceptedRecord)
+	if q.depth == 0 && q.onIdle != nil && (q.canStart == nil || q.canStart(convID)) {
+		// An idle worker takes the first accepted message immediately; it is a
+		// running turn, not FIFO position one, and the waiting depth stays zero.
+		go q.onIdle(convID, text, attachments, opts)
+		return 0, nil
+	}
 	q.depth++
 	return q.depth, nil
 }
@@ -227,6 +241,12 @@ func setupSteer(t *testing.T, queue Queue, uploads drepo.Uploads, steers Steers)
 	turns := &fakeTurns{runs: make(chan run, 4), busy: map[string]bool{}, rooms: rooms}
 	if queue == nil {
 		queue = &fakeQueue{}
+	}
+	if q, ok := queue.(*fakeQueue); ok && q.onIdle == nil {
+		q.onIdle = func(convID, text string, attachments []valueobject.Attachment, opts appjob.SendOptions) {
+			_, _, _ = turns.Run(context.Background(), convID, "", "", text, attachments, opts, nil)
+		}
+		q.canStart = func(convID string) bool { return !turns.Busy(convID) }
 	}
 	return New(context.Background(), rooms, turns, queue, steers, uploads, fakeProjects{}, nil, nil, nil), rooms, turns
 }
@@ -587,20 +607,21 @@ type fakeSteers struct {
 	mu     sync.Mutex
 	taken  bool
 	err    error
+	record *entity.Message
 	inputs []valueobject.UserInput
 }
 
-func (f *fakeSteers) SteerInput(_ context.Context, _ string, in valueobject.UserInput) (bool, error) {
+func (f *fakeSteers) SteerInput(_ context.Context, _ string, in valueobject.UserInput) (bool, *entity.Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
-		return false, f.err
+		return false, nil, f.err
 	}
 	if !f.taken {
-		return false, nil
+		return false, f.record, nil
 	}
 	f.inputs = append(f.inputs, in)
-	return true, nil
+	return true, f.record, nil
 }
 
 // A busy room takes the prompt through its running turn: the tool reports a
@@ -645,6 +666,27 @@ func TestSendToBusyRoomWithAFullMailboxRefuses(t *testing.T) {
 	}
 	if len(after) != len(before) {
 		t.Fatalf("a refused steer wrote %d messages", len(after)-len(before))
+	}
+}
+
+// When a live steer wrote the acceptance line but lost the end-of-turn race,
+// the queue fallback carries that same row. Nothing downstream gets the chance
+// to write a second provenance line for the same prompt.
+func TestSteerFallbackCarriesTheSameAcceptanceRecord(t *testing.T) {
+	rec, err := entity.NewUserMessage(valueobject.UserInput{Text: "status please"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steers := &fakeSteers{record: &rec}
+	q := &fakeQueue{}
+	app, _, turns := setupSteer(t, q, nil, steers)
+	turns.busy["c_other"] = true
+	out, err := app.Send(t.Context(), "c_self", SendInput{Thread: "c_other", Text: "status please"})
+	if err != nil || out["delivery"] != "queued" {
+		t.Fatalf("fallback = %v, %v, want queued", out, err)
+	}
+	if len(q.accepted) != 1 || q.accepted[0] == nil || q.accepted[0].ID() != rec.ID() {
+		t.Fatalf("fallback accepted records = %+v, want the steer's row", q.accepted)
 	}
 }
 

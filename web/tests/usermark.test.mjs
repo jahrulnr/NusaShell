@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import './env.mjs';
-import { markedUser, withRefSentinels, applyRefHighlights, stripRefSentinels } from '../lib/usermark.js';
+import { lexUser, markedUser, userMarked, withRefSentinels, applyRefHighlights, stripRefSentinels } from '../lib/usermark.js';
 import { splitReplyQuote } from '../lib/turn.js';
 import { referencesFromStored } from '../lib/references.js';
 
@@ -41,6 +41,54 @@ test('a mermaid fence stays a code block — never a mounted diagram', () => {
   assert.match(html, /class="codeblock"/);
   assert.match(html, /data-lang="mermaid"/);
   assert.doesNotMatch(html, /data-diagram/);
+});
+
+// The relayed message behind B-092: prose, a fenced block with a blank line
+// and long lines inside it, then prose. The owner saw it render as bare mono
+// text with its header and background gone.
+const FENCED = 'ada di sini:\n\n```\nB-088 — kontrol ikut tergulir. Di pickers.js:153, flex-1 min-h-0 overflow-y-auto membungkus semua isi setelah pencarian.\n\nB-089 — mengiklankan yang server tidak sediakan.\n```\n\nini tadi dari pa';
+
+test('a fenced block in a typed message is a code block between two paragraphs', () => {
+  // A whole-message fallback would lex to one paragraph; the fence must not reach it.
+  const types = markedUser.lexer(FENCED).filter((t) => t.type !== 'space').map((t) => t.type);
+  assert.deepEqual(types, ['paragraph', 'code', 'paragraph']);
+});
+
+test('the code block carries the render pass nonce on each piece of its chrome', () => {
+  // stripForeignChrome keeps only what carries the pass nonce; without these
+  // marks the block's class, copy button, and language are stripped.
+  const html = userMarked('ns1x').parse(FENCED);
+  assert.match(html, /<div class="codeblock" data-ns="ns1x"><header>/);
+  assert.match(html, /<button type="button" class="copybtn" data-copy data-ns="ns1x">Copy<\/button>/);
+  assert.match(html, /<code data-lang="" data-ns="ns1x">/);
+});
+
+test('a local picture in a typed message carries the pass nonce', () => {
+  assert.match(userMarked('ns1x').parse('![](~/Pictures/cat.jpg)'), /class="md-media"[^>]*data-ns="ns1x"/);
+});
+
+test('the lexer profile writes no pass mark', () => {
+  assert.doesNotMatch(parse(FENCED), /data-ns/);
+});
+
+test('a lexer that throws makes the message one plain paragraph, and the console names it', (t) => {
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  const out = lexUser(FENCED, { lexer() { throw new Error('forced'); } });
+  assert.equal(out.fallback, true);
+  assert.deepEqual(out.tokens.map((x) => x.type), ['paragraph']);
+  assert.equal(out.tokens[0].raw, FENCED);
+  assert.equal(warnings.length, 1);
+  assert.match(String(warnings[0][0]), /fell back to plain text/);
+});
+
+test('a lexer that works is not marked as a fallback', (t) => {
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  const out = lexUser(FENCED);
+  assert.equal(out.fallback, false);
+  assert.deepEqual(out.tokens.filter((x) => x.type !== 'space').map((x) => x.type), ['paragraph', 'code', 'paragraph']);
+  assert.equal(warnings.length, 0);
 });
 
 test('raw HTML passes through to the sanitizer unchanged', () => {

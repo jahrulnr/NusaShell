@@ -54,13 +54,48 @@ const { default: DOMPurify } = await import('/vendor/dompurify/purify.es.mjs');
 if (!DOMPurify.addHook) DOMPurify.addHook = () => {};
 const { Header } = await import('../components/chat.js');
 
+function headerRoom(items) {
+  return {
+    id: 'c_hdr', key: 'c_hdr', info: { title: 'Thread', workspace: '' }, command: null,
+    steers: [], queue: [], files: [], quotes: [], refs: [], draft: '',
+    catalog: { status: 'ready', items },
+  };
+}
+
 test('a running command does not put its busy label in the header', () => {
   const host = doc.createElement('div');
   doc.body.appendChild(host);
   try {
-    const room = { id: 'c_hdr', info: { title: 'Thread', workspace: '' }, command: running(), steers: [], queue: [], files: [], quotes: [], refs: [], draft: '', catalog: { status: 'ready', items: [] } };
+    const room = headerRoom([]);
+    room.command = running();
     render(html`<${Header} room=${room} browser=${{ open: false }} pane=${''} setPane=${() => {}} />`, host);
     assert.equal(host.textContent.includes('Compacting'), false, 'the header must not carry the command busy label');
+  } finally {
+    render(null, host);
+    host.remove();
+  }
+});
+
+test('Compact history is the native row, and an agent-reported compact does not get that button', async () => {
+  globalThis.innerHeight = 800;
+  globalThis.addEventListener = globalThis.addEventListener || (() => {});
+  globalThis.removeEventListener = globalThis.removeEventListener || (() => {});
+  const host = doc.createElement('div');
+  doc.body.appendChild(host);
+  const openMenu = async () => {
+    const button = [...host.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Thread actions');
+    assert.ok(button, 'the thread menu is not there');
+    if (!host.textContent.includes('Rename')) button.click();
+    await new Promise((resume) => setTimeout(resume, 0));
+  };
+  try {
+    render(html`<${Header} room=${headerRoom([{ name: 'compact', source: 'native', enabled: true }])} browser=${{ open: false }} pane=${''} setPane=${() => {}} />`, host);
+    await openMenu();
+    assert.ok(host.textContent.includes('Compact history'), 'a harness compact stays in the thread menu');
+    render(html`<${Header} room=${headerRoom([{ name: 'compact', source: 'agent', enabled: true }, { name: 'clear', source: 'native', enabled: true }])} browser=${{ open: false }} pane=${''} setPane=${() => {}} />`, host);
+    await openMenu();
+    assert.ok(host.textContent.includes('Rename'), 'the menu is open');
+    assert.equal(host.textContent.includes('Compact history'), false, 'an agent compact is not the native action');
   } finally {
     render(null, host);
     host.remove();

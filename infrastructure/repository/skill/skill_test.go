@@ -212,7 +212,7 @@ func TestListAcrossReadsFixedRootsOnce(t *testing.T) {
 	writeSkill(t, filepath.Join(focus, ".agents", "skills"), "focus-only", "---\nname: focus-only\ndescription: Focus\n---\n")
 	writeSkill(t, filepath.Join(focus, ".agents", "skills"), "base", "---\nname: base\ndescription: Focus wins\n---\n")
 	others := make([]string, 0, 8)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		dir := t.TempDir()
 		writeSkill(t, filepath.Join(dir, ".agents", "skills"), fmt.Sprintf("other-%d", i), fmt.Sprintf("---\nname: other-%d\ndescription: Other\n---\n", i))
 		others = append(others, dir)

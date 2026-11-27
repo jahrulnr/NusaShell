@@ -56,21 +56,26 @@ type roomAgent struct {
 	err         error
 	empty       bool
 	unavailable bool // the state, answered without an error
+	source      dservice.OptionsSource
 	calls       int
 }
 
-func (a *roomAgent) AgentOptions(context.Context, string) ([]dservice.AgentOption, dservice.OptionsState, error) {
+func (a *roomAgent) AgentOptions(context.Context, string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
 	a.calls++
 	if a.err != nil {
-		return nil, dservice.OptionsUnavailable, a.err
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, a.err
 	}
 	if a.unavailable {
-		return nil, dservice.OptionsUnavailable, nil
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, nil
 	}
 	if a.empty {
-		return nil, dservice.OptionsEmpty, nil
+		return nil, dservice.OptionsEmpty, dservice.OptionsSourceSession, nil
 	}
-	return a.opts, dservice.OptionsReady, nil
+	source := a.source
+	if source == dservice.OptionsSourceNone {
+		source = dservice.OptionsSourceSession
+	}
+	return a.opts, dservice.OptionsReady, source, nil
 }
 
 func (a *roomAgent) SetAgentOption(context.Context, string, string, string) (bool, error) {
@@ -137,6 +142,20 @@ func TestAgentRoomReportsItsOptionsAndNoEffort(t *testing.T) {
 	}
 	if _, ok := body["agentOptionsUnreadable"]; ok {
 		t.Fatal("a readable agent room carries agentOptionsUnreadable")
+	}
+}
+
+// A list that did not come from the live session is marked as fallback evidence
+// on the wire: a picker may show it, but never as the options in force now.
+func TestAgentOptionsWireMarksCatalogSource(t *testing.T) {
+	reads := roomReads{info: drepo.ConversationInfo{ID: "c_room", AgentID: "fake"}}
+	agent := &roomAgent{
+		source: dservice.OptionsSourceCatalog,
+		opts:   []dservice.AgentOption{{ID: "mode", Name: "Mode", Type: "select", Current: "build"}},
+	}
+	got := agentRoomOptions(t, getRoom(t, reads, agent))
+	if got.Source != string(dservice.OptionsSourceCatalog) {
+		t.Fatalf("agentOptions source = %q, want catalog", got.Source)
 	}
 }
 

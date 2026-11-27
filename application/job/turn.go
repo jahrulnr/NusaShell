@@ -155,17 +155,15 @@ func (d Deps) runTurn(ctx context.Context, convID string, conv *aggregate.Conver
 					}
 					continue
 				}
+				if input.input.Relay != nil {
+					// Relay acceptance writes provenance before delivery. Meeting
+					// one without its record means the accepting room broke that
+					// contract; folding it as a new line would hide the defect.
+					return apperror.NewInternalError("relayed steer has no acceptance record", nil)
+				}
 				user, err := entity.NewUserMessage(input.input)
 				if err != nil {
 					return err
-				}
-				// A relayed prompt is born with its provenance: the line the
-				// model reads on the next call is the same one the transcript
-				// attributes to the sending thread, and there is only one of
-				// them — the head is rendered from the record, never stored.
-				if input.input.Relay != nil {
-					user.SetUserType(enum.LLMUserTypeRelay)
-					user.SetRelay(*input.input.Relay)
 				}
 				conv.Append(user)
 				committed, err := d.Convs.AppendMessage(ctx, convID, user)

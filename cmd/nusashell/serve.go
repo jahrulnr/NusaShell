@@ -330,7 +330,7 @@ func serve(args []string, svc system.Service) (serveErr error) {
 			return eng.conversations.Cancel(context.Background(), convID) == nil
 		},
 		func(convID, text string) bool {
-			taken, err := eng.conversations.SteerInput(context.Background(), convID, valueobject.UserInput{Text: text})
+			taken, _, err := eng.conversations.SteerInput(context.Background(), convID, valueobject.UserInput{Text: text})
 			return err == nil && taken
 		},
 	)

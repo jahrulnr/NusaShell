@@ -7,6 +7,7 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
+	dservice "github.com/jahrulnr/nusashell/infrastructure/domain/service"
 	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
@@ -104,35 +105,155 @@ func TestCommandCatalogMatrix(t *testing.T) {
 	}
 	app.UseLiveTurns(nil)
 
-	// An agent room manages its own context: no compaction, but clear and fork
-	// stay available.
-	agentRoom, err := aggregate.NewConversation("")
+	// An agent room without an agent-reported compact has no compact row at
+	// all: native compaction belongs to harness rooms only.
+	agentRoom := seedAgentCommandRoom(t, app)
+	rows, err = app.Commands(t.Context(), agentRoom)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := agentRoom.BindAgent("a_external"); err != nil {
-		t.Fatal(err)
-	}
-	agentRoom.SetTitle("agent thread")
-	agentRoom.Append(userMessage(t, "hi"))
-	if err := app.deps.Convs.Save(t.Context(), agentRoom); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := app.deps.Convs.AppendMessage(t.Context(), agentRoom.ID(), userMessage(t, "hi")); err != nil {
-		t.Fatal(err)
-	}
-	rows, err = app.Commands(t.Context(), agentRoom.ID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r := row(t, rows, CommandCompact); r.Enabled || r.Reason != reasonAgentContext {
-		t.Fatalf("agent room compact = %+v", r)
+	if hasCommand(rows, CommandCompact) {
+		t.Fatalf("an agent room without the agent command still carries compact: %+v", rows)
 	}
 	if r := row(t, rows, CommandClear); !r.Enabled {
 		t.Fatalf("agent room clear = %+v", r)
 	}
 	if r := row(t, rows, CommandFork); !r.Enabled {
 		t.Fatalf("agent room fork = %+v", r)
+	}
+}
+
+type commandListingRuntime struct {
+	dservice.AgentRuntime
+	commands []dservice.AgentCommand
+}
+
+func (r commandListingRuntime) Commands(string) []dservice.AgentCommand {
+	return append([]dservice.AgentCommand(nil), r.commands...)
+}
+
+func seedAgentCommandRoom(t *testing.T, app *ConversationApp) string {
+	t.Helper()
+	room, err := aggregate.NewConversation("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := room.BindAgent("a_external"); err != nil {
+		t.Fatal(err)
+	}
+	room.SetTitle("agent thread")
+	if err := app.deps.Convs.Save(t.Context(), room); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.deps.Convs.AppendMessage(t.Context(), room.ID(), userMessage(t, "hi")); err != nil {
+		t.Fatal(err)
+	}
+	return room.ID()
+}
+
+func hasCommand(rows []Command, name string) bool {
+	for _, r := range rows {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// A compact command in an agent room belongs to the agent's own catalog:
+// present and enabled when the session offers it, absent when it does not,
+// and never a disabled native row claiming what the agent manages.
+func TestAgentCompactFollowsTheAgentCatalog(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	room := seedAgentCommandRoom(t, app)
+
+	app.deps.AgentRuntime = commandListingRuntime{}
+	rows, err := app.Commands(t.Context(), room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCommand(rows, CommandCompact) {
+		t.Fatalf("agent without compact still has a row: %+v", rows)
+	}
+
+	app.deps.AgentRuntime = commandListingRuntime{commands: []dservice.AgentCommand{{Name: CommandCompact, Description: "Compact the agent session"}}}
+	rows, err = app.Commands(t.Context(), room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := row(t, rows, CommandCompact)
+	if r.Source != CommandSourceAgent || !r.Enabled || r.Reason != "" {
+		t.Fatalf("agent compact row = %+v", r)
+	}
+
+	app.UseLiveTurns(func(string) bool { return true })
+	defer app.UseLiveTurns(nil)
+	rows, err = app.Commands(t.Context(), room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = row(t, rows, CommandCompact)
+	if r.Enabled || r.Reason != reasonBusy {
+		t.Fatalf("busy agent compact row = %+v", r)
+	}
+}
+
+// The proxy rule is general: the catalog carries only the thread commands we
+// own plus the commands the session reported — never an agent-looking row we
+// invented — and when the agent claims a colliding name, its row wins.
+func TestAgentCommandCatalogMirrorsOnlyWhatTheSessionReports(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	room := seedAgentCommandRoom(t, app)
+	app.deps.AgentRuntime = commandListingRuntime{commands: []dservice.AgentCommand{
+		{Name: "review", Description: "Review the working tree"},
+		{Name: CommandClear, Description: "The agent's own clear"},
+	}}
+	rows, err := app.Commands(t.Context(), room)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCommand(rows, CommandCompact) {
+		t.Fatalf("an unreported compact was invented: %+v", rows)
+	}
+	if r := row(t, rows, CommandClear); r.Source != CommandSourceAgent || r.Description != "The agent's own clear" {
+		t.Fatalf("colliding clear must be the agent's row: %+v", rows)
+	}
+	if r := row(t, rows, CommandFork); r.Source != CommandSourceNative {
+		t.Fatalf("unclaimed fork must remain the thread command: %+v", rows)
+	}
+	if r := row(t, rows, "review"); r.Source != CommandSourceAgent {
+		t.Fatalf("reported review missing: %+v", rows)
+	}
+	for _, r := range rows {
+		if r.Source == CommandSourceAgent && r.Name != "review" && r.Name != CommandClear {
+			t.Fatalf("unreported agent command invented: %+v", rows)
+		}
+	}
+}
+
+// Thread commands are still real actions in an agent room: they operate on
+// NusaShell's own history even though context commands belong to the agent.
+func TestAgentRoomThreadCommandsStillRun(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	room := seedAgentCommandRoom(t, app)
+
+	res, err := app.RunCommand(t.Context(), room, CommandInput{Name: CommandClear, Confirm: true})
+	if err != nil {
+		t.Fatalf("clear in an agent room: %v", err)
+	}
+	if res.Conversation.MessageCount != 0 {
+		t.Fatalf("clear left history behind: %+v", res.Conversation)
+	}
+
+	if _, err := app.deps.Convs.AppendMessage(t.Context(), room, userMessage(t, "copy me")); err != nil {
+		t.Fatal(err)
+	}
+	res, err = app.RunCommand(t.Context(), room, CommandInput{Name: CommandFork})
+	if err != nil {
+		t.Fatalf("fork in an agent room: %v", err)
+	}
+	if res.Conversation.ID == room || res.Conversation.MessageCount == 0 || res.Conversation.AgentID != "a_external" {
+		t.Fatalf("fork result = %+v", res.Conversation)
 	}
 }
 

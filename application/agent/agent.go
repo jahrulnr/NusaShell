@@ -180,7 +180,7 @@ func (app *AgentApp) checkDefaults(ctx context.Context, id string, defaults valu
 		}
 		return err
 	}
-	options, _, err := app.runtime.Options(ctx, stored, "")
+	options, _, _, err := app.runtime.Options(ctx, stored, "")
 	if err != nil {
 		return apperror.New(502, "could not check the defaults against the agent", err)
 	}
@@ -325,13 +325,13 @@ func (app *AgentApp) Models(ctx context.Context, id string) ([]Model, error) {
 // Each agent defines its own set — the ids, names, and values are the
 // agent's, not ours — so the owner's UI is generated from this rather than
 // from a fixed list.
-func (app *AgentApp) Options(ctx context.Context, id string) ([]dservice.AgentOption, dservice.OptionsState, error) {
+func (app *AgentApp) Options(ctx context.Context, id string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
 	if app.runtime == nil {
-		return nil, dservice.OptionsUnavailable, apperror.New(503, "agent runtime unavailable", nil)
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, apperror.New(503, "agent runtime unavailable", nil)
 	}
 	a, err := app.agents.Load(ctx, id)
 	if err != nil {
-		return nil, dservice.OptionsUnavailable, err
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, err
 	}
 	return app.runtime.Options(ctx, a, "")
 }

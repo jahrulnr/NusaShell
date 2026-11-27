@@ -11,6 +11,7 @@ import (
 	appjob "github.com/jahrulnr/nusashell/application/job"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/enum"
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
+	apperror "github.com/jahrulnr/nusashell/infrastructure/error"
 )
 
 // A message accepted for a busy room is in history before its turn starts: the
@@ -61,7 +62,7 @@ func TestRecordedRelayReachesTheNextAgentTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := busyTurn(t, app, rt, "c_ride")
-	taken, err := app.SteerInput(ctx, "c_ride", valueobject.UserInput{
+	taken, _, err := app.SteerInput(ctx, "c_ride", valueobject.UserInput{
 		Text:  "verdict from PA",
 		Relay: &valueobject.Relay{ID: "c_pa", Label: "coyote"},
 	})
@@ -223,4 +224,63 @@ func addModel(t *testing.T, app *ConversationApp, prov *aggregate.Provider, id s
 	if err := app.deps.Providers.Save(t.Context(), prov); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// An idle room's relay starts a new turn through the same acceptance boundary:
+// the row exists as soon as the send is accepted and the turn never writes a
+// second copy.
+func TestIdleRelayTurnWritesOneLine(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_idleone", "gw1", "m1", "seed", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Enqueue(ctx, "c_idleone", "", "", "idle relay verdict", nil, appjob.SendOptions{
+		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation},
+		Relay:  &valueobject.Relay{ID: "c_pa", Label: "coyote", Title: "PA"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows := userRowsWithText(t, app, "c_idleone", "idle relay verdict")
+	if len(rows) != 1 || rows[0].UserType() != enum.LLMUserTypeRelay || rows[0].Relay().ID != "c_pa" {
+		t.Fatalf("accepted idle relay rows = %+v, want one relay line", rows)
+	}
+	waitIdle(t, app, "c_idleone")
+	if rows := userRowsWithText(t, app, "c_idleone", "idle relay verdict"); len(rows) != 1 {
+		t.Fatalf("the new turn wrote %d lines, want one", len(rows))
+	}
+}
+
+// A full queue refuses before the acceptance row exists: the sender can retry
+// later without risking a duplicate prompt in history.
+func TestFullQueueRefusesRelayBeforeWriting(t *testing.T) {
+	app, _ := fixture(t, okHandler)
+	ctx := t.Context()
+	if _, err := app.Send(ctx, "c_fullrelay", "gw1", "m1", "seed", nil, appjob.SendOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg.MailboxCap = 1
+	running := newWedgeJob()
+	queued := newWedgeJob()
+	app.post("c_fullrelay", running)
+	select {
+	case <-running.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the running job never started")
+	}
+	app.post("c_fullrelay", queued)
+	waitFor(t, "the queued job occupying the mailbox", func() bool { return app.QueueDepth("c_fullrelay") == 1 })
+	_, err := app.Enqueue(ctx, "c_fullrelay", "", "", "must not be written", nil, appjob.SendOptions{
+		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation},
+		Relay:  &valueobject.Relay{ID: "c_pa", Label: "coyote"},
+	})
+	if apperror.As(err).StatusCode() != 429 {
+		t.Fatalf("full relay queue = %v, want 429", err)
+	}
+	if rows := userRowsWithText(t, app, "c_fullrelay", "must not be written"); len(rows) != 0 {
+		t.Fatalf("a full-queue refusal wrote %d rows", len(rows))
+	}
+	close(running.release)
+	close(queued.release)
+	waitIdle(t, app, "c_fullrelay")
 }

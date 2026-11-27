@@ -96,7 +96,7 @@ func (stubAgentRuntime) Prompt(_ context.Context, p dservice.AgentPrompt, _ even
 	return nil
 }
 
-func (stubAgentRuntime) Steer(context.Context, string, valueobject.UserInput, func()) bool {
+func (stubAgentRuntime) Steer(context.Context, string, valueobject.UserInput, string, func()) bool {
 	return false
 }
 

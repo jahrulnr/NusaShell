@@ -43,10 +43,13 @@ type Edit struct {
 // Send.Steer.
 func (j *Edit) Steer(text string) { j.steers.push(text) }
 
-func (j *Edit) SteerInput(in valueobject.UserInput, before func() *entity.Message) bool {
-	_, err := j.steers.SubmitBefore(in, j.Deps.Config.MailboxCap, before)
+func (j *Edit) SteerInput(in valueobject.UserInput, record *entity.Message) bool {
+	_, err := j.steers.SubmitBefore(in, j.Deps.Config.MailboxCap, record)
 	return err == nil
 }
+
+// SteerInputAvailable reports whether the mailbox has room right now.
+func (j *Edit) SteerInputAvailable() bool { return j.steers.available(j.Deps.Config.MailboxCap) }
 
 // RecallSteer withdraws the newest un-fired steering input.
 func (j *Edit) RecallSteer() (string, bool) { return j.steers.popLast() }

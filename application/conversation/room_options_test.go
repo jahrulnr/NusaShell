@@ -45,7 +45,7 @@ func TestRoomOptionReadingIgnoresAParkedPick(t *testing.T) {
 // roomMode answers the mode the room's option reading holds as current.
 func roomMode(t *testing.T, app *ConversationApp, convID string) string {
 	t.Helper()
-	opts, _, err := app.AgentOptions(t.Context(), convID)
+	opts, _, _, err := app.AgentOptions(t.Context(), convID)
 	if err != nil {
 		t.Fatal(err)
 	}

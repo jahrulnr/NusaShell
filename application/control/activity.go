@@ -1,5 +1,7 @@
 package appcontrol
 
+import "slices"
+
 import "time"
 
 // activityCap bounds the cross-thread activity log — enough history to
@@ -49,8 +51,8 @@ func (a *App) Activity(f ActivityFilter) []ActivityEntry {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := make([]ActivityEntry, 0, min(len(a.activity), 64))
-	for i := len(a.activity) - 1; i >= 0; i-- {
-		e := a.activity[i]
+	for _, e := range slices.Backward(a.activity) {
+
 		if f.Caller != "" && e.Caller != f.Caller {
 			continue
 		}

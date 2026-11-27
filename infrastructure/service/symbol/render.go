@@ -148,8 +148,8 @@ func RenderDetail(syms []svc.Symbol, pol Policy) (string, []svc.Symbol) {
 		}
 		depth := strings.Count(p, "/")
 		top := p
-		if i := strings.IndexByte(p, '/'); i >= 0 {
-			top = p[:i]
+		if before, _, ok := strings.Cut(p, "/"); ok {
+			top = before
 		}
 		files = append(files, fileBlock{path: p, topDir: top, depth: depth, syms: ss})
 	}
@@ -201,10 +201,7 @@ func RenderDetail(syms []svc.Symbol, pol Policy) (string, []svc.Symbol) {
 			}
 		}
 		for d, c := range caps {
-			share := budget * len(filesInDir(d, files)) / total
-			if share > capChars {
-				share = capChars
-			}
+			share := min(budget*len(filesInDir(d, files))/total, capChars)
 			c.reserve = share
 		}
 	}

@@ -341,6 +341,10 @@ func (s *server) handle(msg message) {
 		}
 		_ = json.Unmarshal(msg.Params, &req)
 		trace(fmt.Sprintf("config %s %v", req.ConfigID, req.Value))
+		if os.Getenv("FAKE_ACP_REFUSE_CONFIG") == req.ConfigID {
+			s.write(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "error": map[string]any{"code": -32602, "message": "config value rejected"}})
+			return
+		}
 		s.mu.Lock()
 		s.values[req.ConfigID] = req.Value
 		if req.ConfigID == "model" {

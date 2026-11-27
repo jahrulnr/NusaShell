@@ -24,6 +24,11 @@ type decideWorld struct {
 	catalog    []repository.Skill
 	calls      []string
 	commitFail bool
+	// The hooks cancel a request at the exact step a client disconnect can
+	// reach, so the doubles can prove what still commits afterwards.
+	afterWrite        func()
+	afterArchive      func()
+	afterOwnershipGet func()
 	// elsewhere names a skill that is live only in some other workspace
 	// folder, so the focus catalog does not carry it.
 	elsewhere map[string]string
@@ -149,7 +154,11 @@ func (d decideOwnership) Get(ctx context.Context, root enum.SkillRoot, name stri
 	if row, ok := d.w.rows[string(root)+"/"+name]; ok {
 		// a copy, as the proposals double does: the database knows nothing of
 		// in-memory mutation, and a double that aliases cannot detect it
-		return aggregate.NewSkillOwnership(row.Root(), row.Name(), row.Level(), row.Digest())
+		copied, err := aggregate.NewSkillOwnership(row.Root(), row.Name(), row.Level(), row.Digest())
+		if d.w.afterOwnershipGet != nil {
+			d.w.afterOwnershipGet()
+		}
+		return copied, err
 	}
 	return nil, apperror.NewNotFoundError("row", nil)
 }
@@ -165,6 +174,9 @@ func (d decideOwnership) List(ctx context.Context) ([]*aggregate.SkillOwnership,
 	return out, nil
 }
 func (d decideOwnership) Save(ctx context.Context, o *aggregate.SkillOwnership, expectDigest string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// The same compare-and-swap the SQL store keeps: a double that ignores
 	// its arguments passes a caller that sends the wrong expectDigest, which
 	// is exactly the bug a move must not be able to hide.
@@ -190,9 +202,23 @@ type decideDecisions struct{ w *decideWorld }
 
 func (d decideDecisions) Commit(ctx context.Context, p *aggregate.SkillProposal, row *aggregate.SkillOwnership) error {
 	d.w.writeOrder("commit")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if d.w.commitFail {
 		d.w.commitFail = false
 		return fmt.Errorf("a simulated commit failure")
+	}
+	if row != nil {
+		key := string(row.Root()) + "/" + row.Name()
+		cur, exists := d.w.rows[key]
+		if p.Op() == enum.SkillProposalCreate {
+			if exists {
+				return apperror.New(409, "the skill's name was taken while the decision was written", nil)
+			}
+		} else if !exists || cur.Digest() != p.TargetDigest() || cur.Level() != p.TargetLevel() {
+			return apperror.New(409, "the ownership row moved while the decision was written", nil)
+		}
 	}
 	d.w.proposals[p.ID()] = p
 	if row != nil {
@@ -215,6 +241,9 @@ func (d decideWriter) Write(ctx context.Context, root enum.SkillRoot, doc reposi
 	written := repository.SkillWritten{Path: key + "/SKILL.md", Digest: digest}
 	cur, exists := d.w.files[key]
 	if exists && skillDigestString(cur) == digest {
+		if d.w.afterWrite != nil {
+			d.w.afterWrite()
+		}
 		return written, nil
 	}
 	if expectDigest == "" {
@@ -225,6 +254,9 @@ func (d decideWriter) Write(ctx context.Context, root enum.SkillRoot, doc reposi
 		return written, apperror.New(409, "changed", nil)
 	}
 	d.w.files[key] = rendered
+	if d.w.afterWrite != nil {
+		d.w.afterWrite()
+	}
 	return written, nil
 }
 func (d decideWriter) Digest(doc repository.SkillDocument) (string, error) {
@@ -244,6 +276,9 @@ func (d decideWriter) Archive(ctx context.Context, root enum.SkillRoot, name, ex
 	}
 	d.w.writeOrder("archive")
 	delete(d.w.files, key)
+	if d.w.afterArchive != nil {
+		d.w.afterArchive()
+	}
 	return nil
 }
 
@@ -369,6 +404,88 @@ func decideProposal(t *testing.T, op enum.SkillProposalOp) *aggregate.SkillPropo
 
 func decideInput(id, action string) DecideInput {
 	return DecideInput{ID: id, Action: action, Now: validateTurnAt.AddDate(0, 0, 1)}
+}
+
+func TestDecideAcceptCommitSurvivesClientCancellation(t *testing.T) {
+	w, deps := decideSetup()
+	p := decideProposal(t, enum.SkillProposalCreate)
+	w.proposals[p.ID()] = p
+	ctx, cancel := context.WithCancel(context.Background())
+	w.afterWrite = cancel
+	if err := Decide(ctx, deps, decideInput(p.ID(), "accept")); err != nil {
+		t.Fatalf("accept with a client that disconnected after the write: %v", err)
+	}
+	if got := w.proposals[p.ID()].Status(); got != enum.SkillProposalAccepted {
+		t.Fatalf("proposal status = %s after the client disconnected; the decision must still commit", got)
+	}
+}
+
+func TestDecideDismissCommitSurvivesClientCancellation(t *testing.T) {
+	w, deps, p := decideLeftover(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	w.afterArchive = cancel
+	in := decideInput(p.ID(), "dismiss")
+	in.Reason = "not needed"
+	if err := Decide(ctx, deps, in); err != nil {
+		t.Fatalf("dismiss with a client that disconnected after the archive: %v", err)
+	}
+	if got := w.proposals[p.ID()].Status(); got != enum.SkillProposalDismissed {
+		t.Fatalf("proposal status = %s after the client disconnected; the decision must still commit", got)
+	}
+}
+
+func TestDecideDismissCommitFailureStatesTheArchiveConditionally(t *testing.T) {
+	w, deps, p := decideLeftover(t)
+	w.commitFail = true
+	in := decideInput(p.ID(), "dismiss")
+	in.Reason = "not needed"
+	err := Decide(context.Background(), deps, in)
+	if apperror.As(err).StatusCode() != 500 {
+		t.Fatalf("dismiss commit failure = %v, want a 500", err)
+	}
+	for _, want := range []string{"archived", "exactly as the loop wrote it", "decision was not recorded", "trying the dismissal again is safe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("dismiss failure missing %q: %q", want, err.Error())
+		}
+	}
+}
+
+func TestDecideDismissCommitFailureDoesNotPromiseArchiveForEditedFile(t *testing.T) {
+	w, deps, p := decideLeftover(t)
+	w.files["nusashell/"+p.Name()] += "owner edit"
+	w.commitFail = true
+	in := decideInput(p.ID(), "dismiss")
+	in.Reason = "not needed"
+	err := Decide(context.Background(), deps, in)
+	if apperror.As(err).StatusCode() != 500 {
+		t.Fatalf("dismiss commit failure = %v, want a 500", err)
+	}
+	for _, want := range []string{"left in place", "exactly as the loop wrote it", "decision was not recorded", "trying the dismissal again is safe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("edited-file dismiss failure missing %q: %q", want, err.Error())
+		}
+	}
+	if strings.Contains(err.Error(), "was archived because") {
+		t.Errorf("an edited file must not be promised as archived: %q", err.Error())
+	}
+}
+
+func TestDecideAcceptOwnershipRaceAfterWriteIsAPartialWrite(t *testing.T) {
+	w, deps := decideSetup()
+	decidePatchWorld(t, w)
+	// The owner takes the skill back after the accept's checks and file write,
+	// while the decision commit is still open.
+	w.afterWrite = func() {
+		row := w.rows["nusashell/release-notes"]
+		w.rows["nusashell/release-notes"], _ = aggregate.NewSkillOwnership(row.Root(), row.Name(), enum.SkillLevelUser, row.Digest())
+	}
+	err := Decide(context.Background(), deps, decideInput("sprop_test", "accept"))
+	if apperror.As(err).StatusCode() != 500 {
+		t.Fatalf("accept racing a level move after the write = %v, want a partial-write 500", err)
+	}
+	if !strings.Contains(err.Error(), "wrote the skill file") || !strings.Contains(err.Error(), "dismiss it") || !strings.Contains(err.Error(), "level") {
+		t.Errorf("partial-write error does not state the recovery path: %q", err.Error())
+	}
 }
 
 func TestDecideAcceptsACreate(t *testing.T) {
@@ -938,7 +1055,7 @@ func TestReleaseOwnFileKeepsAPatchLeftover(t *testing.T) {
 	if err != nil || !st.own[p.ID()] {
 		t.Fatalf("the leftover must be the loop's own before release: own %v, %v", st.own[p.ID()], err)
 	}
-	if err := releaseOwnFile(context.Background(), deps.Writer, st, p); err != nil {
+	if _, err := releaseOwnFile(context.Background(), deps.Writer, st, p); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if _, ok := w.files["nusashell/release-notes"]; !ok {

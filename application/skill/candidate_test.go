@@ -424,7 +424,7 @@ func TestCandidateDigestHonorsTheCapAndDropsOldestRoundsFirst(t *testing.T) {
 	// first, the newest survive, the anchor is never touched, and the digest
 	// says what it dropped.
 	msgs := []entity.Message{newMsg(t, "m1", enum.RoleUser, candidateOwnerLine)}
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		msgs = append(msgs, finalReply(t, fmt.Sprintf("r%02d", i), fmt.Sprintf("round-%02d ", i)+strings.Repeat("a", 600)))
 	}
 	conv := room(t, msgs...)
@@ -457,7 +457,7 @@ func TestCandidateDigestDropsRoundsBeforeEarlierOwnerLines(t *testing.T) {
 	// Earlier owner lines are evidence; rounds are not. While a round can
 	// still go, no earlier line is touched.
 	msgs := []entity.Message{newMsg(t, "m1", enum.RoleUser, candidateOwnerLine)}
-	for i := 0; i < 56; i++ {
+	for i := range 56 {
 		msgs = append(msgs, finalReply(t, fmt.Sprintf("r%02d", i), strings.Repeat("a", 700)))
 	}
 	conv := room(t, msgs...)
@@ -486,7 +486,7 @@ func TestCandidateDigestOmitsTheDroppedRoundsCalls(t *testing.T) {
 	// cite a call it never saw, because the facts come from the same source
 	// as the digest.
 	msgs := []entity.Message{newMsg(t, "m1", enum.RoleUser, candidateOwnerLine)}
-	for i := 0; i < 56; i++ {
+	for i := range 56 {
 		msgs = append(msgs, callRound(t, fmt.Sprintf("r%02d", i), "bash", strings.Repeat("o", 700), false))
 	}
 	msgs = append(msgs, finalReply(t, "r99", "done"))

@@ -1,18 +1,16 @@
-// Native slash commands: the actions NusaShell owns in the composer. The
-// server's catalog (GET /api/commands) decides which commands a room offers
-// and whether they are available; the names here are what the client reserves
-// on a draft's first line, so a recognized command never reaches a model or an
-// agent — not even when the room refuses it.
+// Slash commands. The room catalog (GET /api/commands) is the only list of
+// what a room offers and which source owns each name. The client reserves
+// two thread commands — clear and fork — and only when the catalog has not
+// listed them. Everything else, compact included, is native only when this
+// room's catalog says source "native". An agent row is a turn.
 import { useEffect } from '/vendor/preact/htm-preact.mjs';
 import { state, emit, useStore } from './store.js';
 import { api, errorText } from './api.js';
 
-// NATIVE_COMMANDS is the reserved set: the name, and the icon its row draws.
-export const NATIVE_COMMANDS = [
-  { name: 'compact', icon: 'compress' },
-  { name: 'clear', icon: 'eraser' },
-  { name: 'fork', icon: 'branch' },
-];
+// Thread commands act on this app's own room. They are not a catalog, and
+// they are not an icon table: a row's icon comes from its source.
+const THREAD_COMMANDS = ['clear', 'fork'];
+const SOURCE_ICON = { native: 'slash', agent: 'bot' };
 
 // COMMAND_BUSY is what the composer and the header say while a command runs.
 const COMMAND_BUSY = { compact: 'Compacting', clear: 'Clearing', fork: 'Forking' };
@@ -27,48 +25,43 @@ export function parseCommand(text) {
   return m ? { name: m[1], args: (m[2] || '').trim() } : null;
 }
 
-// isNativeCommand says whether a first-line name is reserved. The room's
-// catalog is asked too, so a command the server adds later is recognized
-// without a client change.
+// isNativeCommand says whether a first-line name is a native action. The
+// catalog row decides. A thread command with no row yet stays reserved, so
+// clear and fork never become a turn while the catalog is still unread.
+// An agent row wins even when the name is clear or fork.
 export function isNativeCommand(r, name) {
   if (!name) return false;
-  if (NATIVE_COMMANDS.some((c) => c.name === name)) return true;
-  return (r?.catalog?.items || []).some((c) => c.source === 'native' && c.name === name);
+  const row = (r?.catalog?.items || []).find((c) => c.name === name);
+  if (row) return row.source === 'native';
+  return THREAD_COMMANDS.includes(name);
 }
 
-// catalogRow is the room's own verdict on a command, when the catalog carries
-// it. Absent (never read, or a read that failed) leaves the decision to the
-// server, which enforces every precondition anyway.
+// catalogRow is the room's own verdict on a command, the first row of that
+// name. The catalog is already one row per name; this does not pick a winner.
 export function catalogRow(r, name) {
-  const items = r?.catalog?.items || [];
-  return items.find((c) => c.name === name && c.source === 'native') || items.find((c) => c.name === name) || null;
+  return (r?.catalog?.items || []).find((c) => c.name === name) || null;
 }
 
-// commandChoices is the catalog as the "/" menu renders it: native rows first,
-// then the agent's own, one row per name (native wins a collision), each with
-// its source and this room's verdict. A query narrows it by name prefix.
+// commandChoices is the catalog as the "/" menu renders it, in the catalog's
+// order. A query narrows it by name prefix. The icon is the row's source.
 export function commandChoices(r, query = '') {
   const q = String(query || '').toLowerCase();
-  const byName = new Map();
+  const rows = [];
   for (const c of r?.catalog?.items || []) {
     const name = String(c?.name || '');
     if (!name) continue;
-    const prev = byName.get(name);
-    if (!prev || (prev.source !== 'native' && c.source === 'native')) byName.set(name, c);
-  }
-  const rows = [...byName.values()].map((c) => {
+    if (q && !name.toLowerCase().startsWith(q)) continue;
     const native = c.source === 'native';
-    return {
-      kind: 'command', id: c.name, name: c.name, native,
+    rows.push({
+      kind: 'command', id: name, name, native,
       source: native ? 'NusaShell' : agentName(r),
       detail: [c.description, c.hint].filter(Boolean).join(' · '),
       enabled: c.enabled !== false,
       reason: c.reason || '',
-      icon: native ? NATIVE_COMMANDS.find((x) => x.name === c.name)?.icon || 'slash' : 'bot',
-    };
-  });
-  const matched = q ? rows.filter((c) => c.name.toLowerCase().startsWith(q)) : rows;
-  return [...matched.filter((c) => c.native), ...matched.filter((c) => !c.native)];
+      icon: SOURCE_ICON[c.source] || 'slash',
+    });
+  }
+  return rows;
 }
 
 // agentName is the source label of an agent command: the room's own agent.

@@ -60,7 +60,7 @@ func openCreate(t *testing.T, w *decideWorld, name string) {
 // pass before the model is asked anything.
 func TestTheQueueHoldsAtThreeAcceptableProposals(t *testing.T) {
 	w, gen := candidatePatchWorld(t, "rd1", "rd1")
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		openCreate(t, w, fmt.Sprintf("fresh-%d", i))
 	}
 	outcome := Candidate(context.Background(), candidateDeps(w, gen), candidateInput(candidateRoom(t, candidateOwnerLine)))
@@ -90,7 +90,7 @@ func TestStaleProposalsDoNotHoldTheQueue(t *testing.T) {
 // is not acceptable and does not hold the queue.
 func TestACreateTakenSinceItWasProposedDoesNotHoldTheQueue(t *testing.T) {
 	w, gen := candidatePatchWorld(t, "rd1", "rd1")
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		name := fmt.Sprintf("taken-%d", i)
 		openCreate(t, w, name)
 		w.catalog = append(w.catalog, repository.Skill{
@@ -156,7 +156,7 @@ func (brokenOwnership) List(context.Context) ([]*aggregate.SkillOwnership, error
 // would hide the queue from the owner or let it grow past its limit.
 func TestUnreadableOwnershipFailsTheQueueCheck(t *testing.T) {
 	w, gen := candidatePatchWorld(t, "rd1", "rd1")
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		openCreate(t, w, fmt.Sprintf("fresh-%d", i))
 	}
 	deps := candidateDeps(w, gen)

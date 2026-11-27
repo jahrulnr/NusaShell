@@ -105,7 +105,11 @@ export class Element extends Node {
     this.namespaceURI = ns || 'http://www.w3.org/1999/xhtml';
     this.attributes = {};
     this.className = '';
-    this.style = {};
+    this.style = {
+      setProperty(name, value) { this[name] = value == null ? '' : String(value); },
+      removeProperty(name) { delete this[name]; },
+      getPropertyValue(name) { return this[name] || ''; },
+    };
     this.scrollTop = 0;
     this.classList = new ClassList(this); this.onclick = null; this.oninput = null; this.onchange = null; this.onkeydown = null; this.onscroll = null;
   }

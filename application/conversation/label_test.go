@@ -45,7 +45,7 @@ func TestConcurrentRoomCreationGetsDistinctLabels(t *testing.T) {
 	errs := make([]error, rooms)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := 0; i < rooms; i++ {
+	for i := range rooms {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -58,7 +58,7 @@ func TestConcurrentRoomCreationGetsDistinctLabels(t *testing.T) {
 	wg.Wait()
 
 	owner := make(map[string]string, rooms)
-	for i := 0; i < rooms; i++ {
+	for i := range rooms {
 		if errs[i] != nil {
 			t.Fatalf("room %d: %v", i, errs[i])
 		}

@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-//go:embed all:skill-creator all:tool-creator all:nusashell all:coding-workflow
+//go:embed all:skill-creator all:tool-creator all:nusashell all:coding-workflow all:playrole
 var embedded embed.FS
 
 // Builtins returns the embedded skill tree for application installation.

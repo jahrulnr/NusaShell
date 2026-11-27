@@ -180,10 +180,11 @@ func (j *Send) rescueFailed(step, msgID string, err error) {
 	j.Deps.Log.Warn("relay rescue failed", "conversation", j.ConvID(), "message", msgID, "step", step, "error", err)
 }
 
-// rescueSteers writes the line a relayed prompt would have got from the fold,
-// for every relayed input this turn did not consume. An owner's steer keeps the
-// established rule — the caller decides what an unfired steer becomes — because
-// only a relay carries a record the receiving room did not type.
+// rescueSteers delivers what acceptance already recorded but this turn did not
+// consume. It never writes provenance: acceptance owns the one relay line. An
+// owner's steer keeps the established rule — the caller decides what an unfired
+// steer becomes — because only a relay carries a record the receiving room did
+// not type.
 func (j *Send) rescueSteers() {
 	for _, e := range j.mailbox().drainPending() {
 		if e.input.Relay == nil {
@@ -202,14 +203,12 @@ func (j *Send) rescueSteers() {
 			}
 			continue
 		}
-		msg, err := entity.NewUserMessage(e.input)
-		if err != nil {
-			continue
-		}
-		msg.SetUserType(enum.LLMUserTypeRelay)
-		msg.SetRelay(*e.input.Relay)
-		if _, err := j.Deps.Convs.AppendMessage(context.WithoutCancel(j.Ctx), j.ConvID(), msg); err != nil {
-			j.rescueFailed("record", msg.ID(), err)
+		// A relay without its acceptance record cannot be rescued honestly:
+		// writing a fresh row here would be a second provenance writer and
+		// would hide the acceptance failure. The mailbox rejects this shape,
+		// so reaching it is a loud invariant breach.
+		if j.Deps.Log != nil {
+			j.Deps.Log.Error("relayed steer has no acceptance record", "conversation", j.ConvID(), "relay", e.input.Relay.ID)
 		}
 	}
 }
@@ -242,10 +241,13 @@ func (j *Send) Steer(text string) { j.mailbox().push(text) }
 // SteerInput buffers a full input — text with its selections, uploads, marks
 // and relay record — so the fold can write one line carrying all of it. It
 // reports whether the mailbox took it; a full mailbox buffered nothing.
-func (j *Send) SteerInput(in valueobject.UserInput, before func() *entity.Message) bool {
-	_, err := j.mailbox().SubmitBefore(in, j.Deps.Config.MailboxCap, before)
+func (j *Send) SteerInput(in valueobject.UserInput, record *entity.Message) bool {
+	_, err := j.mailbox().SubmitBefore(in, j.Deps.Config.MailboxCap, record)
 	return err == nil
 }
+
+// SteerInputAvailable reports whether the mailbox has room right now.
+func (j *Send) SteerInputAvailable() bool { return j.mailbox().available(j.Deps.Config.MailboxCap) }
 
 // RecallSteer withdraws the newest un-fired steering input.
 func (j *Send) RecallSteer() (string, bool) { return j.mailbox().popLast() }
@@ -470,13 +472,21 @@ func (j *Send) Execute(execCtx context.Context) (err error) {
 				user.SetUserType(enum.LLMUserTypeSystem)
 			}
 			if origin, ok := j.Opts.Origin.Normalized(); ok && origin.Kind == enum.TurnOriginConversation {
+				if !fresh {
+					return apperror.NewInternalError("relayed send has no acceptance record", nil)
+				}
+				// A freshly spawned room does not exist when control accepts the
+				// prompt, so its first line is written here with the room. Every
+				// send to an existing room carries AcceptedRecord instead.
 				user.SetUserType(enum.LLMUserTypeRelay)
 				if j.Opts.Relay != nil {
 					user.SetRelay(*j.Opts.Relay)
 				}
 			}
 		}
-		conv.Append(user)
+		if !hasMessage(conv, user.ID()) {
+			conv.Append(user)
+		}
 		if fresh {
 			// Bind before the first write — a failed send still leaves a
 			// room that can retry with providerID/modelID "".

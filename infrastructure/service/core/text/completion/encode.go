@@ -1,8 +1,10 @@
 package textcompletion
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/aggregate"
@@ -19,7 +21,6 @@ import (
 func encodeRequest(conv *aggregate.Conversation, model entity.Model, stream bool, fileRoot wire.MediaRoot, endpoint string) (*RequestBody, error) {
 	body := &RequestBody{Model: model.ID(), Stream: stream}
 	body.PromptCacheKey = conv.ID()
-	body.PromptCacheOption = RequestPromptCacheOption{TTL: "30m"}
 	if stream {
 		body.StreamOptions = &StreamOptions{IncludeUsage: true} // else usage never arrives
 	}
@@ -302,13 +303,61 @@ func encodeAttachment(a valueobject.Attachment, fileRoot wire.MediaRoot) (any, e
 			return nil, err
 		}
 		return map[string]any{"type": "video_url", "video_url": map[string]any{"url": u}}, nil // OpenRouter extension
-	default: // file, text, anything else
-		u, err := wire.ResolveURI(a, fileRoot)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"type": "file", "file": map[string]any{
-			"filename": safeAttachmentName(a.Name()), "file_data": u,
-		}}, nil
+	default:
+		// A chat-completions wire has no portable document part: OpenAI sends
+		// "file", and DeepSeek answers `file content parts are not supported
+		// here` for the whole turn — one relayed .md report killed the turn it
+		// arrived in. Text the model can read is inlined instead, under the
+		// prompt where it belongs; anything else is named, not silently dropped.
+		return textAttachmentPart(a, fileRoot)
 	}
+}
+
+// inlineTextLimit bounds what is pasted into a prompt: a report is a few tens
+// of kilobytes, and a file past this is better named than pasted.
+const inlineTextLimit = 256 << 10
+
+// textAttachmentPart renders an attachment as text the model can read: a
+// text-shaped file arrives whole inside an <attachment> block, and anything
+// else leaves a line saying what it was — a wire without a document part must
+// never lose the fact that a file came with the message.
+func textAttachmentPart(a valueobject.Attachment, fileRoot wire.MediaRoot) (any, error) {
+	name := safeAttachmentName(a.Name())
+	if name == "" {
+		name = "attachment"
+	}
+	media := a.MediaType()
+	if !readableAsText(media, name) {
+		return map[string]any{"type": "text", "text": "(attached file: " + name + ", " + media + " — not shown inline)"}, nil
+	}
+	data, _, err := wire.ResolveBase64(a, fileRoot)
+	raw, derr := base64.StdEncoding.DecodeString(data)
+	if err != nil || derr != nil {
+		return map[string]any{"type": "text", "text": "(attached file: " + name + ", " + media + " — cannot be read here)"}, nil
+	}
+	if len(raw) > inlineTextLimit {
+		return map[string]any{"type": "text", "text": "(attached file: " + name + ", " + media + " — too large to inline, " + strconv.Itoa(len(raw)) + " bytes)"}, nil
+	}
+	body := strings.ReplaceAll(string(raw), "</attachment", "<\\/attachment")
+	return map[string]any{"type": "text", "text": "<attachment name=\"" + name + "\" media=\"" + media + "\">\n" + body + "\n</attachment>"}, nil
+}
+
+// readableAsText reports whether a file's bytes are words a model reads, rather
+// than a format only a document parser could open.
+func readableAsText(media, name string) bool {
+	switch strings.ToLower(media) {
+	case "application/json", "application/xml", "application/yaml", "application/x-yaml",
+		"application/javascript", "application/typescript", "application/x-sh", "application/sql":
+		return true
+	}
+	if strings.HasPrefix(strings.ToLower(media), "text/") {
+		return true
+	}
+	switch strings.ToLower(path.Ext(name)) {
+	case ".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".csv", ".tsv",
+		".xml", ".html", ".htm", ".css", ".js", ".ts", ".tsx", ".jsx", ".go", ".py",
+		".sh", ".sql", ".ini", ".conf", ".log":
+		return true
+	}
+	return false
 }

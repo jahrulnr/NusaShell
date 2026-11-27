@@ -48,7 +48,7 @@ func TestActivityRing(t *testing.T) {
 
 	// The bound holds: writing past activityCap drops the oldest.
 	app.Clear()
-	for i := 0; i < activityCap+50; i++ {
+	for range activityCap + 50 {
 		app.note("c_a", "wait", "c_b", time.Now(), nil)
 	}
 	if got := app.Activity(ActivityFilter{}); len(got) != activityCap {
@@ -57,15 +57,13 @@ func TestActivityRing(t *testing.T) {
 
 	// Concurrent writers and readers stay safe and bounded (-race).
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
 				app.note("c_a", "send", "c_b", time.Now(), nil)
 				app.Activity(ActivityFilter{Limit: 5})
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if got := app.Activity(ActivityFilter{}); len(got) != activityCap {

@@ -1009,9 +1009,9 @@ func (l *statsLog) Close() error { return nil }
 
 func (l *statsLog) last(t *testing.T, kind string) map[string]any {
 	t.Helper()
-	for i := len(l.recs) - 1; i >= 0; i-- {
-		if l.recs[i].kind == kind {
-			return l.recs[i].entry
+	for _, v := range slices.Backward(l.recs) {
+		if v.kind == kind {
+			return v.entry
 		}
 	}
 	t.Fatalf("no %s record logged", kind)

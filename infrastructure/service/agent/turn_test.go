@@ -166,7 +166,7 @@ func TestUsageUpdateWaitsOutASteer(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatal("an update went out while a steer was in flight")
 	}
-	sink.release(valueobject.UserInput{Text: "more"}, true, nil)
+	sink.release(valueobject.UserInput{Text: "more"}, "", true, nil)
 	// The owner's input lands first, then what the agent said meanwhile.
 	if len(got) != 2 || got[0].Kind() != enum.TurnEventSteer || got[1].Kind() != enum.TurnEventContext {
 		t.Fatalf("events after release = %v", got)

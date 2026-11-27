@@ -32,7 +32,6 @@ const (
 const (
 	reasonNoRoom        = "Send a message first"
 	reasonBusy          = "Wait for the turn to finish"
-	reasonAgentContext  = "The agent manages its own context"
 	reasonNothingToFold = "Nothing to compact yet"
 	reasonEmptyThread   = "This thread is empty"
 	reasonNothingToFork = "Nothing to fork yet"
@@ -145,10 +144,11 @@ func (app *ConversationApp) busy(convID string) bool {
 	return fn != nil && fn(convID)
 }
 
-// Commands is the room's slash-command catalog: the native commands, then the
-// room's agent commands, one row per name — native wins a collision — each
-// with this room's availability. Without a conversation id it answers the
-// native set with every row off: a composer with no room yet.
+// Commands is the room's slash-command catalog. A harness room carries the
+// native commands; an agent room carries the thread commands NusaShell owns
+// plus exactly the commands its agent session reports, with the agent winning
+// a claimed name. Without a conversation id it answers the native set with
+// every row off: a composer with no room yet.
 func (app *ConversationApp) Commands(ctx context.Context, convID string) ([]Command, error) {
 	rows := nativeCommands()
 	if convID == "" {
@@ -163,6 +163,23 @@ func (app *ConversationApp) Commands(ctx context.Context, convID string) ([]Comm
 		return nil, err
 	}
 	busy := app.busy(convID)
+	agentCommands := app.AgentCommands(convID)
+	if info.AgentID != "" {
+		// In an agent room NusaShell proxies the agent's command surface.
+		// Context operations are never invented natively, and a name the agent
+		// claims belongs to the agent — even when it collides with a thread
+		// command we own. Compact is the harness's context operation, so it is
+		// always absent here unless the agent itself reports it below.
+		claimed := map[string]bool{}
+		for _, c := range agentCommands {
+			if c.Name != "" {
+				claimed[c.Name] = true
+			}
+		}
+		rows = slices.DeleteFunc(rows, func(c Command) bool {
+			return c.Name == CommandCompact || claimed[c.Name]
+		})
+	}
 	// Foldability is the aggregate's decision; ask it once, unless the room
 	// cannot fold at all (a live turn, an agent room).
 	canFold := false
@@ -178,26 +195,27 @@ func (app *ConversationApp) Commands(ctx context.Context, convID string) ([]Comm
 	for _, row := range rows {
 		seen[row.Name] = true
 	}
-	for _, c := range app.AgentCommands(convID) {
+	for _, c := range agentCommands {
 		if c.Name == "" || seen[c.Name] {
 			continue
 		}
 		seen[c.Name] = true
-		rows = append(rows, Command{Name: c.Name, Description: c.Description, Hint: c.Hint, Source: CommandSourceAgent, Enabled: true})
+		enabled, reason := true, ""
+		if busy {
+			enabled, reason = false, reasonBusy
+		}
+		rows = append(rows, Command{Name: c.Name, Description: c.Description, Hint: c.Hint, Source: CommandSourceAgent, Enabled: enabled, Reason: reason})
 	}
 	return rows, nil
 }
 
 // availability is the server's verdict on one native command in one room. The
-// order is the reason that matters most: a live turn refuses everything, an
-// agent room has no foldable tail of ours, and an empty room has nothing to act
-// on.
+// order is the reason that matters most: a live turn refuses everything, and
+// an empty room has nothing to act on.
 func availability(name string, info drepo.ConversationInfo, busy, canFold bool) (bool, string) {
 	switch {
 	case busy:
 		return false, reasonBusy
-	case name == CommandCompact && info.AgentID != "":
-		return false, reasonAgentContext
 	case info.MessageCount == 0:
 		return false, emptyReason(name)
 	case name == CommandCompact && !canFold:
@@ -272,7 +290,7 @@ func (app *ConversationApp) RunCommand(ctx context.Context, convID string, in Co
 	switch name {
 	case CommandCompact:
 		if info.AgentID != "" {
-			return CommandResult{}, apperror.NewCoded(409, "unavailable", reasonAgentContext, nil)
+			return CommandResult{}, apperror.NewCoded(409, "unavailable", "native compaction belongs to harness rooms; use the agent's own compact command when it reports one", nil)
 		}
 		canFold, err := app.CanCompact(ctx, convID)
 		if err != nil {

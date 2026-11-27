@@ -1467,10 +1467,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data, status]
+                required: [data, status, source]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
                   status: { $ref: "#/components/schemas/OptionsStatus" }
+                  source: { $ref: "#/components/schemas/OptionsSource" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2363,10 +2364,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data, status]
+                required: [data, status, source]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
                   status: { $ref: "#/components/schemas/OptionsStatus" }
+                  source: { $ref: "#/components/schemas/OptionsSource" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
         "404": { $ref: "#/components/responses/NotFound" }
     put:
@@ -2391,10 +2393,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data, status]
+                required: [data, status, source]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
                   status: { $ref: "#/components/schemas/OptionsStatus" }
+                  source: { $ref: "#/components/schemas/OptionsSource" }
         "202":
           description: |
             The pick is taken but not applied yet. A turn fixes its runtime and
@@ -2404,10 +2407,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data, status]
+                required: [data, status, source]
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/AgentOption" } }
                   status: { $ref: "#/components/schemas/OptionsStatus" }
+                  source: { $ref: "#/components/schemas/OptionsSource" }
                   pending: { $ref: "#/components/schemas/Pending" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/ForbiddenOrigin" }
@@ -2419,16 +2423,18 @@ paths:
       tags: [conversations]
       summary: The composer's slash-command catalog
       description: |
-        The native commands (`compact`, `clear`, `fork`) followed by the room's
-        agent commands, one row per name — a native name wins a collision.
-        `source` says who owns a row; `enabled`/`reason` are the server's
-        verdict for the room.
+        A harness room carries the native commands (`compact`, `clear`,
+        `fork`). An agent room carries the thread commands NusaShell owns
+        (`clear`, `fork`) plus exactly the commands its agent session reports;
+        context operations are never invented for it, so `compact` exists there
+        only as an agent-reported row. An agent-reported name wins a collision
+        with a native thread command. `source` says who owns a row;
+        `enabled`/`reason` are the server's verdict for the room.
 
         Without `conversationId` every native row is off with
-        `reason: "Send a message first"`. A live transport turn turns all of
-        them off, an agent room cannot fold its own context, and an empty room
-        has nothing to act on — each with its own reason. An agent command is
-        always enabled: the agent decides for itself.
+        `reason: "Send a message first"`. A live transport turn turns rows off
+        with `reason: "Wait for the turn to finish"`; an empty harness room
+        has nothing to act on.
       parameters:
         - name: conversationId
           in: query
@@ -2484,9 +2490,9 @@ paths:
         Every precondition is enforced here rather than by the transport: a
         live transport turn refuses every command (`409 busy`), `clear`
         requires `confirm: true` or the word `confirm` as its only argument
-        (`409 confirmation_required`), an agent room cannot compact
-        (`409 unavailable`), and a room with nothing to act on answers
-        `400 nothing_to_*`. Arguments are fixed in this version — `compact` and
+        (`409 confirmation_required`), native compaction does not apply to an
+        agent room (`409 unavailable`), and a room with nothing to act on
+        answers `400 nothing_to_*`. Arguments are fixed in this version — `compact` and
         `fork` take none, `clear` only `confirm` — and anything else, like an
         unknown name, is `400 invalid_argument`. A recognized command is never
         downgraded to text.
@@ -4760,6 +4766,16 @@ components:
               value: { type: string }
               name: { type: string }
               description: { type: string }
+    OptionsSource:
+      type: string
+      enum: [session, catalog, agent-default]
+      description: |
+        Where the offered list came from. `session` is the room's live agent
+        session and is the only source a client may present as the options in
+        force now. `catalog` is the stored list a real session last reported,
+        and `agent-default` is the agent's probe/default answer; both are
+        fallback evidence for an idle room and must be labelled as such rather
+        than as the live session's options.
     OptionsStatus:
       type: string
       enum: [ready, empty]

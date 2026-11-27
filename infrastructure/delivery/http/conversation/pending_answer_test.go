@@ -86,8 +86,8 @@ func (r *liveRoom) Pending(_ context.Context, convID string) (drepo.PendingSelec
 	return *r.pending, true, nil
 }
 
-func (r *liveRoom) AgentOptions(context.Context, string) ([]dservice.AgentOption, dservice.OptionsState, error) {
-	return []dservice.AgentOption{{ID: "mode", Name: "Mode", Type: "select", Current: "ask"}}, dservice.OptionsReady, nil
+func (r *liveRoom) AgentOptions(context.Context, string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
+	return []dservice.AgentOption{{ID: "mode", Name: "Mode", Type: "select", Current: "ask"}}, dservice.OptionsReady, dservice.OptionsSourceSession, nil
 }
 
 func (r *liveRoom) SetAgentOption(_ context.Context, _ string, id, value string) (bool, error) {
@@ -168,6 +168,9 @@ func TestIdlePickAnswersTheStateTheWriteLeft(t *testing.T) {
 	rec := serveRoom(t, room, http.MethodPut, "/api/conversations/c_room/agent-options", putMode)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("idle pick = %d, want 200 — it applied at once: %s", rec.Code, rec.Body.String())
+	}
+	if fields := bodyFields(t, rec); string(fields["source"]) != `"session"` {
+		t.Fatalf("agent-options answer source = %s, want session", fields["source"])
 	}
 	var answer struct {
 		Pending *pendingDTO `json:"pending"`

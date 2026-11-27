@@ -59,7 +59,7 @@ func TestComposeInstallsAndRegistersSkills(t *testing.T) {
 	if permissions["project_context"] != enum.ToolPermissionSystem {
 		t.Fatalf("project_context not registered system-only: %v", permissions)
 	}
-	for _, name := range []string{"skill-creator", "tool-creator", "nusashell", "coding-workflow"} {
+	for _, name := range []string{"skill-creator", "tool-creator", "nusashell", "coding-workflow", "playrole"} {
 		if _, err := os.Stat(filepath.Join(cfg.Storage.Dir, "builtin-skills", name, "SKILL.md")); err != nil {
 			t.Fatal(err)
 		}

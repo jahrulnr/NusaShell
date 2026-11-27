@@ -133,7 +133,11 @@ func (d Deps) runAgentTurn(ctx context.Context, convID string, conv *aggregate.C
 								in.receipt.markPersisted()
 							}
 						}
-						if !d.AgentRuntime.Steer(live, convID, in.input, settle) {
+						recordID := ""
+						if in.record != nil {
+							recordID = in.record.ID()
+						}
+						if !d.AgentRuntime.Steer(live, convID, in.input, recordID, settle) {
 							steers.requeue(entries[i:])
 							// Leave subsequent input pending behind the
 							// first missed steer — a later attempt must not

@@ -16,7 +16,7 @@ import (
 // AgentSurface is a room's agent session: its options and approval rules.
 // *appconversation.ConversationApp satisfies it.
 type AgentSurface interface {
-	AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, dservice.OptionsState, error)
+	AgentOptions(ctx context.Context, convID string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error)
 	// SetAgentOption validates the pick and parks it for the room's next turn;
 	// parked is what the answer renders as 202 rather than "applied".
 	SetAgentOption(ctx context.Context, convID, id, value string) (parked bool, err error)
@@ -48,7 +48,7 @@ type agentServer struct {
 }
 
 func (a *agentServer) options(c *gin.Context) {
-	opts, state, err := a.svc.AgentOptions(c.Request.Context(), c.Param("id"))
+	opts, state, source, err := a.svc.AgentOptions(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		transport.RespondError(c, err)
 		return
@@ -57,7 +57,7 @@ func (a *agentServer) options(c *gin.Context) {
 	// travels with err and became the error response above. The HTTP
 	// status already says the request failed; the body's job is to
 	// describe the list — never re-add "unavailable" as a wire value.
-	c.JSON(http.StatusOK, gin.H{"data": opts, "status": state})
+	c.JSON(http.StatusOK, gin.H{"data": opts, "status": state, "source": source})
 }
 
 func (a *agentServer) setOption(c *gin.Context) {
@@ -75,7 +75,7 @@ func (a *agentServer) setOption(c *gin.Context) {
 		transport.RespondError(c, err)
 		return
 	}
-	opts, state, err := a.svc.AgentOptions(ctx, c.Param("id"))
+	opts, state, source, err := a.svc.AgentOptions(ctx, c.Param("id"))
 	if err != nil {
 		transport.RespondError(c, err)
 		return
@@ -92,7 +92,7 @@ func (a *agentServer) setOption(c *gin.Context) {
 	if parked && (pending != nil || unreadable) {
 		status = http.StatusAccepted
 	}
-	answer := gin.H{"data": opts, "status": state, "pending": pending}
+	answer := gin.H{"data": opts, "status": state, "source": source, "pending": pending}
 	if unreadable {
 		answer["pendingUnreadable"] = true
 	}

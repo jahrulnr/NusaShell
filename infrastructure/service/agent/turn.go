@@ -133,7 +133,7 @@ func (t *turnSink) gate() bool {
 // sent and announced, after delivered settles the caller's receipt; then
 // the held updates apply. A turn that ended meanwhile records nothing, and
 // release reports the steer as not taken.
-func (t *turnSink) release(input valueobject.UserInput, accepted bool, delivered func()) bool {
+func (t *turnSink) release(input valueobject.UserInput, recordID string, accepted bool, delivered func()) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.gated = false
@@ -148,7 +148,11 @@ func (t *turnSink) release(input valueobject.UserInput, accepted bool, delivered
 			SteerAttachments: input.Attachments,
 			SteerContext:     strings.TrimSpace(valueobject.ReferenceNote(input.References) + "\n\n" + valueobject.AnnotationNote(input.Annotations)),
 		})
-		t.emit(event.NewSteerEvent(input.Text, input.Attachments...))
+		if recordID != "" {
+			t.emit(event.NewRecordedSteerEvent(input.Text, recordID, input.Attachments...))
+		} else {
+			t.emit(event.NewSteerEvent(input.Text, input.Attachments...))
+		}
 	}
 	held := t.held
 	t.held = nil

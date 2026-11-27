@@ -47,7 +47,7 @@ func TestAgentPointerLeadsItsAction(t *testing.T) {
 	s := &pointerSession{}
 	app := &App{browser: &pointerBrowser{s: s}}
 	half, x := 0.5, 300.0
-	if _, err := app.Click(ctx, "c", ClickInput{Point: Point{X: &half, Y: &half}}); err != nil {
+	if _, err := app.Click(ctx, "c", ClickInput{X: &half, Y: &half}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := app.Hover(ctx, "c", Point{X: &x, Y: &x}); err != nil {

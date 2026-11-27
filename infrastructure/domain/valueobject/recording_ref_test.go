@@ -37,7 +37,7 @@ func TestRecordingNoteWithoutSummary(t *testing.T) {
 // crowd the message itself.
 func TestRecordingNoteBounds(t *testing.T) {
 	var lines []string
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		lines = append(lines, strings.Repeat("x", 200))
 	}
 	summary := clipText(strings.Join(lines, "\n"), recordingNoteMaxLines, recordingNoteMaxBytes)

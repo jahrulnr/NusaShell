@@ -21,7 +21,7 @@ func TestRoomReadingKeepsAnEmptyLiveSessionEmpty(t *testing.T) {
 	rt.emptyLive = true
 	rt.mu.Unlock()
 
-	opts, state, err := app.AgentOptions(ctx, "c_empty")
+	opts, state, _, err := app.AgentOptions(ctx, "c_empty")
 	if err != nil {
 		t.Fatal(err)
 	}

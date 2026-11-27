@@ -72,7 +72,7 @@ func (app *ConversationApp) wake(convID string, settled bool) {
 	app.machineTurns[convID]++
 	app.wakeQueued[convID] = true
 	app.mu.Unlock()
-	if err := app.post(convID, &appjob.Wake{Ctx: context.Background(), Deps: app.depsSnapshot()}); err != nil {
+	if _, err := app.post(convID, &appjob.Wake{Ctx: context.Background(), Deps: app.depsSnapshot()}); err != nil {
 		// Nothing was queued: the record waits for the next natural turn.
 		app.mu.Lock()
 		delete(app.wakeQueued, convID)

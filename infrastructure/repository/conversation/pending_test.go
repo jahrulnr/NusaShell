@@ -140,7 +140,7 @@ func TestClearPendingSelectionLeavesANewerGeneration(t *testing.T) {
 func TestClearAndSaveDoNotLoseANewerGeneration(t *testing.T) {
 	r, _ := parkedRoom(t)
 	effort := enum.EffortMax
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		stored, ok, err := r.PendingSelection(t.Context(), "c_park")
 		if err != nil || !ok {
 			t.Fatalf("round %d: pending = %+v, %v, %v", i, stored, ok, err)

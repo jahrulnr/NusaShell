@@ -92,9 +92,13 @@ export function Popover({ open, onClose, children, class: cls = '', placement = 
     (fit?.side || prefer) === 'top' ? 'sm:bottom-full sm:mb-2' : 'sm:top-full sm:mt-1',
     align === 'end' ? 'sm:right-0' : 'sm:left-0',
   );
+  // --panel-room is the cap this panel was given, so a child can take a
+  // fraction of it (the model picker's control band) without reading the
+  // panel's own height, which stays auto until the cap binds.
+  const room = fit ? fit.room + 'px' : '75dvh';
   return html`
     <div class="fixed inset-0 z-40 bg-black/40 sm:hidden" aria-hidden="true" onClick=${onClose}></div>
-    <div ref=${ref} role="dialog" aria-label=${label} style=${fit ? { maxHeight: fit.room + 'px' } : undefined}
+    <div ref=${ref} role="dialog" aria-label=${label} style=${{ '--panel-room': room, ...(fit ? { maxHeight: room } : {}) }}
       class=${cx('z-50 bg-raised border border-line rounded-xl shadow-pop text-[13px]',
         scroll === 'list' ? 'flex flex-col overflow-hidden' : 'overflow-auto',
         'fixed inset-x-2 bottom-2 max-h-[75dvh] sm:absolute sm:inset-x-auto sm:bottom-auto', pos, cls)}>

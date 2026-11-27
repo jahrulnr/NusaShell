@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -198,12 +199,8 @@ func mergeSelection(stored, next repo.PendingSelection) repo.PendingSelection {
 	}
 	if len(next.Options) > 0 {
 		merged := make(map[string]string, len(out.Options)+len(next.Options))
-		for id, v := range out.Options {
-			merged[id] = v
-		}
-		for id, v := range next.Options {
-			merged[id] = v
-		}
+		maps.Copy(merged, out.Options)
+		maps.Copy(merged, next.Options)
 		out.Options = merged
 	}
 	return out

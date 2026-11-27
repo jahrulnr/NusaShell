@@ -423,3 +423,26 @@ func TestQueueFull(t *testing.T) {
 		t.Fatalf("control jobs bypass the cap: %v", err)
 	}
 }
+
+// The accepted position is decided with the append itself: zero means nothing
+// was ahead (the next turn), while jobs behind a running one number their wait.
+// Reading depth after the fact cannot distinguish "already taken" from "not yet
+// taken", so the wire must use this acceptance-time answer.
+func TestSubmitWithPositionCountsOnlyWorkAhead(t *testing.T) {
+	w := New(Options{})
+	defer w.Terminate()
+	first := &blockingJob{started: make(chan struct{}), interrupted: make(chan struct{})}
+	pos, err := w.SubmitWithPosition(first)
+	if err != nil || pos != 0 {
+		t.Fatalf("first position = %d, %v; want zero", pos, err)
+	}
+	waitClosed(t, first.started, "first job start")
+	pos, err = w.SubmitWithPosition(&seqJob{id: 1})
+	if err != nil || pos != 1 {
+		t.Fatalf("second position = %d, %v; want one", pos, err)
+	}
+	pos, err = w.SubmitWithPosition(&seqJob{id: 2})
+	if err != nil || pos != 2 {
+		t.Fatalf("third position = %d, %v; want two", pos, err)
+	}
+}

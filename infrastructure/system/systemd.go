@@ -443,11 +443,11 @@ func writeFileAtomic(path string, raw []byte, mode os.FileMode) error {
 // the ones that matter — the directives are what this reports.
 func extraUnitLines(existing, rendered string) []string {
 	kept := map[string]bool{}
-	for _, line := range strings.Split(rendered, "\n") {
+	for line := range strings.SplitSeq(rendered, "\n") {
 		kept[strings.TrimSpace(line)] = true
 	}
 	var extra []string
-	for _, line := range strings.Split(existing, "\n") {
+	for line := range strings.SplitSeq(existing, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || kept[trimmed] {
 			continue

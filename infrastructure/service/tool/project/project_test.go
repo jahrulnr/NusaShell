@@ -152,7 +152,7 @@ func TestExecuteIsDeterministic(t *testing.T) {
 // the cut marker.
 func TestMapStaysWithinBudget(t *testing.T) {
 	tool, ctx, dir := mkTool(t)
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		write(t, dir, fmt.Sprintf("dir-%02d/f.go", i), "x")
 	}
 	out, err := tool.Execute(ctx, entity.ToolCall{}, nil)

@@ -72,7 +72,7 @@ type PendingSelection struct {
 	Options    map[string]string `json:"options,omitempty"`
 	// AcceptedAt is when the owner's latest pick was taken — the answer a 202
 	// carries, and what a surface shows a returning owner.
-	AcceptedAt time.Time `json:"acceptedAt,omitempty"`
+	AcceptedAt time.Time `json:"acceptedAt"`
 }
 
 // Empty reports that no pick survives in the selection — the one definition

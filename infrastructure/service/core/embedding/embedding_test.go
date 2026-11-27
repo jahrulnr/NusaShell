@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,9 +48,9 @@ func TestRESTBatchesAndOrdersByIndex(t *testing.T) {
 			t.Errorf("%s %+v", r.URL.Path, body)
 		}
 		var data []string
-		for i := len(body.Input) - 1; i >= 0; i-- { // reversed on purpose
+		for i, v := range slices.Backward(body.Input) { // reversed on purpose
 			var n int
-			fmt.Sscanf(body.Input[i], "t%d", &n)
+			fmt.Sscanf(v, "t%d", &n)
 			data = append(data, fmt.Sprintf(`{"index":%d,"embedding":[%d,1]}`, i, n))
 		}
 		fmt.Fprintf(w, `{"data":[%s]}`, strings.Join(data, ","))

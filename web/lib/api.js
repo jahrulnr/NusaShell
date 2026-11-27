@@ -11,10 +11,13 @@ export const TIMEOUT_MS = 30_000;
 export const LONG_TIMEOUT_MS = 10 * 60_000;
 
 export class ApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, problem = false) {
     super(message);
     this.status = status;
     this.code = code;
+    // problem is true when the body was our own problem document (it carried
+    // a code): the status is then the server's answer, not a gateway's.
+    this.problem = problem;
   }
 }
 
@@ -57,7 +60,7 @@ async function request(method, path, { body, timeout = TIMEOUT_MS, signal, keepa
   try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
   if (res.status === 401 && data?.code === 'unauthenticated' && !path.startsWith('/api/auth/')) unauthenticated();
   if (!res.ok) {
-    throw new ApiError(res.status, data?.code || 'http_' + res.status, data?.detail || data?.title || `Request failed (HTTP ${res.status})`);
+    throw new ApiError(res.status, data?.code || 'http_' + res.status, data?.detail || data?.title || `Request failed (HTTP ${res.status})`, Boolean(data?.code));
   }
   return data;
 }
@@ -141,6 +144,12 @@ export const api = {
   // retries, because the same digest sent again answers 409 again.
   moveSkillLevel: (name, { workspace = '', level, digest }) =>
     request('POST', `/api/skills/${id(name)}/level` + q({ workspace }), { body: { level, digest } }),
+  // skillProposals is the queue above the Skills list. Reading writes nothing.
+  // decideSkillProposal records one decision. Dismiss sends the owner's reason;
+  // this page does not send accept, which needs a body the wire does not give.
+  skillProposals: (workspace = '') => request('GET', '/api/skill-proposals' + q({ workspace })),
+  decideSkillProposal: (pid, { workspace = '', action, reason }) =>
+    request('POST', `/api/skill-proposals/${id(pid)}/decide` + q({ workspace }), { body: { action, reason } }),
   webSearch: () => request('GET', '/api/websearch'),
   updateWebSearch: (values) => request('PATCH', '/api/websearch', { body: values }),
   setWebSearchKey: (source, value) => request('PUT', `/api/websearch/keys/${id(source)}`, { body: { value } }),

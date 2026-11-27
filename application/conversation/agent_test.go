@@ -217,14 +217,14 @@ func (a *scriptedAgent) retiredSessions(t *testing.T, want int) []string {
 }
 func (a *scriptedAgent) Warm(context.Context, *aggregate.Agent) error { return nil }
 func (a *scriptedAgent) ReapIdle(time.Duration)                       {}
-func (a *scriptedAgent) Options(context.Context, *aggregate.Agent, string) ([]dservice.AgentOption, dservice.OptionsState, error) {
+func (a *scriptedAgent) Options(context.Context, *aggregate.Agent, string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.emptyLive {
-		return nil, dservice.OptionsEmpty, nil
+		return nil, dservice.OptionsEmpty, dservice.OptionsSourceSession, nil
 	}
 	if a.options != nil {
-		return a.options, dservice.OptionsReady, nil
+		return a.options, dservice.OptionsReady, dservice.OptionsSourceSession, nil
 	}
 	// The catalog a real agent reports. The picker and the store now validate
 	// against it, so the scripted agent has to offer what a test picks.
@@ -232,7 +232,7 @@ func (a *scriptedAgent) Options(context.Context, *aggregate.Agent, string) ([]ds
 		{ID: "mode", Name: "Mode", Category: "mode", Type: "select", Current: "ask",
 			Choices: []dservice.OptionChoice{{Value: "ask", Name: "Ask"}, {Value: "build", Name: "Build"}}},
 		{ID: "strict", Name: "Strict", Category: "behavior", Type: "boolean", Current: "false"},
-	}, dservice.OptionsReady, nil
+	}, dservice.OptionsReady, dservice.OptionsSourceSession, nil
 }
 func (a *scriptedAgent) SetOption(_ context.Context, _, _, value string) error {
 	a.mu.Lock()
@@ -246,7 +246,7 @@ func (a *scriptedAgent) SetOption(_ context.Context, _, _, value string) error {
 }
 func (a *scriptedAgent) Commands(string) []dservice.AgentCommand { return nil }
 func (a *scriptedAgent) Status(string) dservice.AgentStatus      { return dservice.AgentStatus{} }
-func (a *scriptedAgent) Steer(_ context.Context, _ string, input valueobject.UserInput, delivered func()) bool {
+func (a *scriptedAgent) Steer(_ context.Context, _ string, input valueobject.UserInput, _ string, delivered func()) bool {
 	if !a.steerable {
 		return false
 	}
@@ -894,7 +894,7 @@ func TestAgentOptionsNeverReportACurrentOutsideItsChoices(t *testing.T) {
 	if _, err := app.Annotate(ctx, "c_opt", Annotation{AgentOption: &poison}); err != nil {
 		t.Fatal(err)
 	}
-	opts, _, err := app.AgentOptions(ctx, "c_opt")
+	opts, _, _, err := app.AgentOptions(ctx, "c_opt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1155,7 +1155,7 @@ func TestSetAgentOptionStoresAKnownUnofferedPickAsDeferred(t *testing.T) {
 	if _, err := app.SetAgentOption(ctx, "c_opt", "effort", "high"); err != nil {
 		t.Fatalf("a known-but-unoffered pick was refused: %v", err)
 	}
-	list, _, err := app.AgentOptions(ctx, "c_opt")
+	list, _, _, err := app.AgentOptions(ctx, "c_opt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1236,7 +1236,7 @@ func TestDeferredPickRejoinsTheOfferedListWhenItMaterializes(t *testing.T) {
 	if _, err := app.Annotate(ctx, "c_opt", Annotation{AgentOption: &[2]string{"effort", "high"}}); err != nil {
 		t.Fatal(err)
 	}
-	list, _, err := app.AgentOptions(ctx, "c_opt")
+	list, _, _, err := app.AgentOptions(ctx, "c_opt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1252,7 +1252,7 @@ func TestDeferredPickRejoinsTheOfferedListWhenItMaterializes(t *testing.T) {
 			Choices: []dservice.OptionChoice{{Value: "low"}, {Value: "high"}}},
 	}
 	rt.mu.Unlock()
-	list, _, err = app.AgentOptions(ctx, "c_opt")
+	list, _, _, err = app.AgentOptions(ctx, "c_opt")
 	if err != nil {
 		t.Fatal(err)
 	}

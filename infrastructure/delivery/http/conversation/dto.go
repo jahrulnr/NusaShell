@@ -94,6 +94,7 @@ type conversationDTO struct {
 // agent-options route answers with, so one reader serves both.
 type agentOptionsDTO struct {
 	Status string           `json:"status"`
+	Source string           `json:"source"`
 	Data   []agentOptionDTO `json:"data"`
 }
 

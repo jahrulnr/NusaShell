@@ -13,23 +13,52 @@
 import { Marked } from '/vendor/marked/marked.esm.js';
 import { KIND_LABEL } from './references.js';
 import { renderImage } from './mdlinks.js';
+import { NONCE_ATTR } from './mdchrome.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export const markedUser = new Marked({ gfm: true, breaks: true });
-markedUser.use({
-  renderer: {
-    code({ text, lang }) {
-      const language = (lang || '').trim().split(/\s+/)[0].toLowerCase();
-      return `<div class="codeblock"><header><span>${esc(language || 'text')}</span>`
-        + `<button type="button" class="copybtn" data-copy>Copy</button></header>`
-        + `<pre><code data-lang="${esc(language)}">${esc(text)}</code></pre></div>`;
+// userMarked is the owner-typed profile for one render pass. The chrome its
+// renderers write (the code block, its copy button, a local picture) carries
+// that pass's nonce, as the assistant profile's does in lib/markdown.js.
+// Without it, stripForeignChrome (lib/mdchrome.js) takes the class and data
+// attributes off the renderer's own output, and the block loses its header,
+// background, and copy button. An empty nonce writes no mark; markedUser, which
+// only lexes and backs the string-level tests, uses that form.
+export function userMarked(nonce = '') {
+  const ns = nonce ? ` ${NONCE_ATTR}="${esc(nonce)}"` : '';
+  const profile = new Marked({ gfm: true, breaks: true });
+  profile.use({
+    renderer: {
+      code({ text, lang }) {
+        const language = (lang || '').trim().split(/\s+/)[0].toLowerCase();
+        return `<div class="codeblock"${ns}><header><span>${esc(language || 'text')}</span>`
+          + `<button type="button" class="copybtn" data-copy${ns}>Copy</button></header>`
+          + `<pre><code data-lang="${esc(language)}"${ns}>${esc(text)}</code></pre></div>`;
+      },
+      // A typed ![](path) shows a local file the same way assistant prose
+      // does; a remote address stays a link and is never fetched.
+      image: (token) => renderImage(token, nonce),
     },
-    // A typed ![](path) shows a local file the same way assistant prose
-    // does; a remote address stays a link and is never fetched.
-    image: renderImage,
-  },
-});
+  });
+  return profile;
+}
+
+export const markedUser = userMarked();
+
+// lexUser is the lexing step of the owner profile. A lexer that throws is the
+// last resort: the whole text becomes one plain paragraph. That failure has to
+// be visible, so the caller marks the message and the console names it.
+export function lexUser(src, profile = markedUser) {
+  try {
+    return { tokens: profile.lexer(src), fallback: false };
+  } catch (err) {
+    console.warn('[markdown] an owner message fell back to plain text:', err?.message ?? err);
+    return {
+      tokens: [{ type: 'paragraph', raw: src, text: src, tokens: [{ type: 'text', raw: src, text: src }] }],
+      fallback: true,
+    };
+  }
+}
 
 // Sentinels are private-use bytes nobody types and the parser treats as
 // ordinary text. Reference N's label is wrapped by a start and an end

@@ -526,9 +526,13 @@ func workspaceNote(cwd string, extra []string) string {
 	}
 	var b strings.Builder
 	b.WriteString("\nThis thread works in several folders, not only the current directory. ")
-	b.WriteString("The primary folder, where commands start, is " + cwd + ". It also works in:\n")
+	b.WriteString("The primary folder, where commands start, is ")
+	b.WriteString(cwd)
+	b.WriteString(". It also works in:\n")
 	for _, dir := range extra {
-		b.WriteString("- " + dir + "\n")
+		b.WriteString("- ")
+		b.WriteString(dir)
+		b.WriteString("\n")
 	}
 	b.WriteString("Read, search, and change files in all of them by absolute path, as the task needs.\n")
 	return b.String()
@@ -543,7 +547,8 @@ func builtinSkillsNote(dir string) string {
 	}
 	dir = filepath.Clean(dir)
 	return "\nNusaShell's builtin skills are installed under " + dir + ". When relevant, read " +
-		filepath.Join(dir, "nusashell", "SKILL.md") + " or " + filepath.Join(dir, "coding-workflow", "SKILL.md") +
+		filepath.Join(dir, "nusashell", "SKILL.md") + ", " + filepath.Join(dir, "coding-workflow", "SKILL.md") +
+		", or, when the owner assigns this thread a team role, " + filepath.Join(dir, "playrole", "SKILL.md") +
 		" as ordinary files with your own file tools.\n"
 }
 
@@ -612,6 +617,18 @@ func (r *Runtime) Prompt(ctx context.Context, in dservice.AgentPrompt, onEvent e
 				// session's current value instead of failing on a record
 				// nothing here can fix.
 				if errors.Is(err, errOptionValueNotOffered) {
+					continue
+				}
+				if errors.Is(err, errOptionRefused) {
+					// The setting failed, not the prompt. Drop the stored pick so
+					// later turns do not fail the same way, tell the owner, and
+					// continue on the session's current value.
+					_ = in.Conversation.SetAgentOption(pick.ID, "")
+					if onEvent != nil {
+						onEvent(event.NewNoticeEvent(enum.NoticeWarning, "Option not applied",
+							fmt.Sprintf("the agent refused `%s`; it was not applied", pick.ID)))
+					}
+					r.log.Warn("agent option pick refused; dropping it", "conversation", in.Conversation.ID(), "option", pick.ID, "error", err)
 					continue
 				}
 				return err
@@ -1199,7 +1216,7 @@ func (r *Runtime) forgetProc(p *proc) {
 // _session/steering extension, or as a second prompt to an agent that
 // takes prompts mid-turn. The agent's updates wait while the steering
 // call is in flight, so the input is recorded before the answer to it.
-func (r *Runtime) Steer(ctx context.Context, conversationID string, input valueobject.UserInput, delivered func()) bool {
+func (r *Runtime) Steer(ctx context.Context, conversationID string, input valueobject.UserInput, recordID string, delivered func()) bool {
 	r.mu.Lock()
 	s := r.sessions[conversationID]
 	r.mu.Unlock()
@@ -1223,11 +1240,11 @@ func (r *Runtime) Steer(ctx context.Context, conversationID string, input valueo
 		if err != nil || !res.Accepted() {
 			r.log.Info("agent did not take steering", "conversation", conversationID, "outcome", res.Outcome, "error", err)
 		}
-		return t.release(input, err == nil && res.Accepted(), delivered)
+		return t.release(input, recordID, err == nil && res.Accepted(), delivered)
 	case caps.SupportsMidTurn():
 		// The agent answers a mid-turn prompt only when the turn ends, with
 		// the turn's own stop reason: sending it is the delivery.
-		if !t.gate() || !t.release(input, true, delivered) {
+		if !t.gate() || !t.release(input, recordID, true, delivered) {
 			return false
 		}
 		go func() {
@@ -1691,7 +1708,7 @@ func sensitivePath(p string) bool {
 // options, and the picker must not read a transient as "no options". An
 // empty probe, on the other hand, is the best statement available for an
 // agent nobody runs: it stays ready.
-func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationID string) ([]dservice.AgentOption, dservice.OptionsState, error) {
+func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationID string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error) {
 	r.mu.Lock()
 	s := r.sessions[conversationID]
 	r.mu.Unlock()
@@ -1699,9 +1716,9 @@ func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationI
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if opts := sessionOptions(s.configs, s.modes); len(opts) > 0 {
-			return opts, dservice.OptionsReady, nil
+			return opts, dservice.OptionsReady, dservice.OptionsSourceSession, nil
 		}
-		return nil, dservice.OptionsEmpty, nil
+		return nil, dservice.OptionsEmpty, dservice.OptionsSourceSession, nil
 	}
 	// Stored before the probe: the catalog holds the list a real session
 	// last reported — a throwaway probe session can offer less (codex's
@@ -1710,15 +1727,15 @@ func (r *Runtime) Options(ctx context.Context, a *aggregate.Agent, conversationI
 		if cat, err := r.opts.Catalog.Catalog(ctx, a.ID()); err != nil {
 			r.log.Warn("the agent catalog could not be read", "agent", a.ID(), "error", err)
 		} else if len(cat.Options) > 0 {
-			return slices.Clone(cat.Options), dservice.OptionsReady, nil
+			return slices.Clone(cat.Options), dservice.OptionsReady, dservice.OptionsSourceCatalog, nil
 		}
 	}
 	if _, err := r.Models(ctx, a); err != nil {
-		return nil, dservice.OptionsUnavailable, err
+		return nil, dservice.OptionsUnavailable, dservice.OptionsSourceNone, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return slices.Clone(r.models[a.ID()].options), dservice.OptionsReady, nil
+	return slices.Clone(r.models[a.ID()].options), dservice.OptionsReady, dservice.OptionsSourceAgentDefault, nil
 }
 
 // SetOption applies an option to the room's live session; without one the
@@ -1739,6 +1756,11 @@ func (r *Runtime) SetOption(ctx context.Context, conversationID, id, value strin
 // a turn that inherited such a pick from an older session skips it, because a
 // stale record must not fail a turn the owner can no longer fix from there.
 var errOptionValueNotOffered = errors.New("option value not offered")
+
+// errOptionRefused marks a SetConfig/SetMode answer the agent rejected. The
+// pick is the thing that failed, not the prompt, so a turn drops it with a
+// notice instead of failing.
+var errOptionRefused = errors.New("agent refused option change")
 
 // optionOutcome is what applyOption did with one pick. Step 5 turns the
 // deferred kind into stored-pick semantics; the turn already must not count
@@ -1827,7 +1849,7 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 	if legacy {
 		seq, err := s.proc.client.SetMode(ctx, s.acpID, value)
 		if err != nil {
-			return optionDeferred, apperror.New(502, "agent refused the mode change", err)
+			return optionDeferred, apperror.New(502, "agent refused the mode change", errors.Join(errOptionRefused, err))
 		}
 		s.mu.Lock()
 		if seq > s.modesSeq {
@@ -1844,7 +1866,7 @@ func (r *Runtime) applyOption(ctx context.Context, s *session, id, value string)
 	}
 	state, err := s.proc.client.SetConfig(ctx, s.acpID, id, v)
 	if err != nil {
-		return optionDeferred, apperror.New(502, "agent refused the option change", err)
+		return optionDeferred, apperror.New(502, "agent refused the option change", errors.Join(errOptionRefused, err))
 	}
 	s.mu.Lock()
 	if i < 0 {

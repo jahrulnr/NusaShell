@@ -35,48 +35,63 @@ func (app *ConversationApp) Steer(ctx context.Context, convID string, message st
 // SteerInput carries a full input — text with its selections, uploads, marks,
 // and the relay record when another thread sent it — into the room's running
 // turn. found=false means no live turn takes input here, so the caller falls
-// back to its queue; a full mailbox is a 429 with nothing written.
+// back to its queue. The returned record is the acceptance line this call
+// wrote: when a race keeps the live turn from taking the input, the fallback
+// queue carries the same line instead of writing another.
 //
-// An agent room gets one extra step: the agent writes its own reply-side row
-// from the text alone, so the provenance line is written before the text is
-// handed over. Without it a relayed prompt reaching a busy agent room would
-// arrive with no attribution at all.
-func (app *ConversationApp) SteerInput(ctx context.Context, convID string, in valueobject.UserInput) (bool, error) {
+// A relayed prompt is recorded before it is handed over, whatever runtime the
+// room runs. If the uncontended mailbox is already full the refusal happens
+// before that write; a capacity race after the write is not a refusal — the
+// caller falls back to the queue with the record.
+func (app *ConversationApp) SteerInput(ctx context.Context, convID string, in valueobject.UserInput) (bool, *entity.Message, error) {
 	if strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0 {
-		return false, apperror.New(400, "empty steer", fmt.Errorf("steer has no text or uploads"))
+		return false, nil, apperror.New(400, "empty steer", fmt.Errorf("steer has no text or uploads"))
 	}
 	app.mu.Lock()
 	w := app.workers[convID]
 	app.mu.Unlock()
 	if w == nil {
-		return false, nil
+		return false, nil, nil
 	}
-	// The line is written when the room accepts the prompt, whatever runtime it
-	// runs: a stop between accept and the turn that would read it must be able to
-	// delay delivery, never to lose it. The turn then reads this line instead of
-	// writing its own.
-	var before func() *entity.Message
 	if in.Relay != nil {
-		before = func() *entity.Message { return app.persistRelayLine(ctx, convID, in) }
+		found, available := w.SteerInputAvailable()
+		if !found {
+			return false, nil, nil
+		}
+		if !available {
+			return true, nil, apperror.New(429, "that thread's steering mailbox is full — nothing was written; try again once its turn folds the input it holds", nil)
+		}
 	}
-	found, accepted := w.SteerInput(in, before)
+	var record *entity.Message
+	if in.Relay != nil {
+		var err error
+		record, err = app.persistRelayLine(ctx, convID, in)
+		if err != nil {
+			return false, nil, err
+		}
+	}
+	found, accepted := w.SteerInput(in, record)
 	if !found {
-		return false, nil
+		return false, record, nil
 	}
 	if !accepted {
-		return true, apperror.New(429, "that thread's steering mailbox is full — nothing was written; try again once its turn folds the input it holds", nil)
+		if in.Relay != nil {
+			// The preflight lost a race. The line already exists, so this is no
+			// longer a clean 429: the queue can accept the same record instead.
+			return false, record, nil
+		}
+		return true, nil, apperror.New(429, "that thread's steering mailbox is full — nothing was written; try again once its turn folds the input it holds", nil)
 	}
-	return true, nil
+	return true, record, nil
 }
 
-// persistRelayLine writes the provenance line for a relayed prompt an agent
-// room takes mid-turn: one relay-typed user message, the same shape a relayed
-// send writes. The text itself reaches the agent through the steer, so the line
-// is the record, not a second copy of the prompt path.
-func (app *ConversationApp) persistRelayLine(ctx context.Context, convID string, in valueobject.UserInput) *entity.Message {
+// persistRelayLine is the room's one writer of a relayed prompt's provenance:
+// one relay-typed user message carrying relay{id,label,title}. Delivery paths
+// decide when the prompt runs; they never decide whether this line exists.
+func (app *ConversationApp) persistRelayLine(ctx context.Context, convID string, in valueobject.UserInput) (*entity.Message, error) {
 	msg, err := entity.NewUserMessage(in)
 	if err != nil {
-		return nil
+		return nil, apperror.New(400, "invalid relayed message", err)
 	}
 	msg.SetUserType(enum.LLMUserTypeRelay)
 	msg.SetRelay(*in.Relay)
@@ -84,9 +99,9 @@ func (app *ConversationApp) persistRelayLine(ctx context.Context, convID string,
 	// pairs them and draws one bubble, never the row plus a second live copy.
 	msg.SetInputID(msg.ID())
 	if _, err := app.depsSnapshot().Convs.AppendMessage(context.WithoutCancel(ctx), convID, msg); err != nil {
-		return nil
+		return nil, apperror.New(500, "could not record the accepted message", err)
 	}
-	return &msg
+	return &msg, nil
 }
 
 // RecallSteer withdraws the newest unconsumed steering input so the

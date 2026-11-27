@@ -50,7 +50,7 @@ type Turns interface {
 // turn took it — false means there was none, and the caller falls back to the
 // room's queue — and reports a full mailbox as a 429, never as a silent drop.
 type Steers interface {
-	SteerInput(ctx context.Context, convID string, in valueobject.UserInput) (bool, error)
+	SteerInput(ctx context.Context, convID string, in valueobject.UserInput) (bool, *entity.Message, error)
 }
 
 // Queue accepts a message for a busy room and names how many wait. The worker
@@ -392,20 +392,20 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 		return nil, err
 	}
 	relay := a.relayOrigin(ctx, self)
-	// A busy room takes the message through its running turn: the fold writes
-	// one user-role line that carries the provenance record, so the receiver can
-	// attribute the prompt and reads it on its next model call. The queue stays
+	// A busy room takes the message through its running turn. Acceptance writes
+	// the relay line before delivery; the fold only uses that stored line, so
+	// steer, queue, and turn are timings of one provenance mode. The queue stays
 	// the fallback for the moment no live turn can take input — a turn that just
 	// ended, a shutdown — never the default.
 	if a.turns.Busy(info.ID) {
-		out, err := a.steerSend(ctx, self, info, text, attachments, relay)
+		out, record, err := a.steerSend(ctx, self, info, text, attachments, relay)
 		if err != nil {
 			return refused(err)
 		}
 		if out != nil {
 			return out, nil
 		}
-		out, err = a.queueSend(ctx, self, info, text, attachments, relay)
+		out, err = a.queueSend(ctx, self, info, text, attachments, relay, record)
 		if err != nil {
 			return refused(err)
 		}
@@ -414,50 +414,53 @@ func (a *App) Send(ctx context.Context, self string, in SendInput) (result map[s
 	if a.queue != nil && a.queue.QueueDepth(info.ID) > 0 {
 		// Someone else is already waiting: keep arrival order instead of
 		// starting a second turn ahead of them.
-		out, err := a.queueSend(ctx, self, info, text, attachments, relay)
+		out, err := a.queueSend(ctx, self, info, text, attachments, relay, nil)
 		if err != nil {
 			return refused(err)
 		}
 		return out, nil
 	}
-	a.start(info.ID, "", "", "", text, attachments, "", "", relay)
-	return map[string]any{"threadId": info.ID, "delivery": "turn", "afterSeq": info.MessageCount - 1,
-		"thread": a.thread(self, info)}, nil
+	out, err := a.queueSend(ctx, self, info, text, attachments, relay, nil)
+	if err != nil {
+		return refused(err)
+	}
+	return out, nil
 }
 
 // steerSend folds the prompt into the room's running turn. It answers nil with
 // no error when no live turn took it, so the caller falls back to the queue; an
 // error is the refusal itself — a full mailbox is a 429 and nothing was
 // written.
-func (a *App) steerSend(ctx context.Context, self string, info drepo.ConversationInfo, text string, attachments []valueobject.Attachment, relay *valueobject.Relay) (map[string]any, error) {
+func (a *App) steerSend(ctx context.Context, self string, info drepo.ConversationInfo, text string, attachments []valueobject.Attachment, relay *valueobject.Relay) (map[string]any, *entity.Message, error) {
 	if a.steers == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	taken, err := a.steers.SteerInput(ctx, info.ID, valueobject.UserInput{
+	taken, record, err := a.steers.SteerInput(ctx, info.ID, valueobject.UserInput{
 		Text:        text,
 		Attachments: attachments,
 		Relay:       relay,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !taken {
-		return nil, nil
+		return nil, record, nil
 	}
-	return map[string]any{"threadId": info.ID, "delivery": "steer", "thread": a.thread(self, info)}, nil
+	return map[string]any{"threadId": info.ID, "delivery": "steer", "thread": a.thread(self, info)}, record, nil
 }
 
 // queueSend hands the message to the room's worker queue and reports only what
 // happened: it waits, at this position. Queued is an acceptance, not a promise
 // — nothing here says when the turn runs, and a stop before it does loses the
 // message.
-func (a *App) queueSend(ctx context.Context, self string, info drepo.ConversationInfo, text string, attachments []valueobject.Attachment, relay *valueobject.Relay) (map[string]any, error) {
+func (a *App) queueSend(ctx context.Context, self string, info drepo.ConversationInfo, text string, attachments []valueobject.Attachment, relay *valueobject.Relay, accepted *entity.Message) (map[string]any, error) {
 	if a.queue == nil {
 		return nil, apperror.New(503, "thread delivery is unavailable in this build", nil)
 	}
 	position, err := a.queue.Enqueue(ctx, info.ID, "", "", text, attachments, appjob.SendOptions{
-		Origin: valueobject.TurnOrigin{Kind: enum.TurnOriginConversation},
-		Relay:  relay,
+		Origin:         valueobject.TurnOrigin{Kind: enum.TurnOriginConversation},
+		Relay:          relay,
+		AcceptedRecord: accepted,
 	})
 	if err != nil {
 		// The app's refusal carries the code; a full queue also names the

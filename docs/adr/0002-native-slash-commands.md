@@ -53,14 +53,18 @@ native catalog merged with the room's agent commands, native first:
 ] }
 ```
 
-- `source` is `native` or `agent`. An agent command whose name collides with a
-  native one is **omitted** — native wins, one row per name.
+- `source` is `native` or `agent`. In an agent room an agent-reported command
+  whose name collides with a native thread command wins — NusaShell proxies the
+  agent's surface and never masks it with a name it invented. Context commands
+  such as `compact` are native only in harness rooms; in an agent room they
+  exist only when the agent session reports them. `clear` and `fork` remain
+  native thread commands because they act on NusaShell's own state.
 - An agent row exists only while the room's agent session reports it. The
   process is reaped when idle, and a resumed session may not publish its
   commands again, so the row can disappear from the menu until the next
-  session; only native rows are always listed.
-- `enabled`/`reason` are the server's verdict for this room; an agent command is
-  always `enabled: true` (the agent decides), a native one follows the matrix below.
+  session; an agent room that reports nothing carries only the thread commands.
+- `enabled`/`reason` are the server's verdict for this room; a live turn turns
+  rows off with the busy reason.
 - Without `conversationId`: native only, every row `enabled: false`,
   `reason: "Send a message first"`.
 - `GET /api/conversations/{id}/commands` is removed; the client moves to the
@@ -91,9 +95,10 @@ new rules.
    transcript; `/compact` writes only the checkpoint the existing compaction writes.
 3. A refused or unavailable command keeps the client's draft; only a `200`
    clears it.
-4. `compact` keeps today's meaning exactly: provider rooms only, `canCompact`
-   required, the same checkpoint dialogue on the room worker. Agent rooms report
-   `enabled: false` with `reason: "The agent manages its own context"`.
+4. Native `compact` keeps today's meaning exactly: harness/provider rooms only,
+   `canCompact` required, the same checkpoint dialogue on the room worker. An
+   agent room carries no native compact row — the agent's own catalog may carry
+   one instead, and an unreported command is absent rather than disabled.
 5. `clear` empties one room without changing its identity: every message, sealed
    segment, and conversation-owned tool-output file is removed; the room record
    keeps id, title, provider/model/effort/upstream (or agent binding and its
@@ -122,7 +127,7 @@ new rules.
 |---|---|---|---|
 | Fresh composer (no room) | off: Send a message first | off: same | off: same |
 | Live turn | off: Wait for the turn to finish | off: same | off: same |
-| Agent room | off: The agent manages its own context | on | on |
+| Agent room | absent unless the agent reports it | on unless the agent claims the name | on unless the agent claims the name |
 | Empty room | off: Nothing to compact yet | off: This thread is empty | off: Nothing to fork yet |
 | No new foldable history | off: Nothing to compact yet | — | — |
 
@@ -145,9 +150,9 @@ Enter; it never falls back to sending the text.
 - Breaking change: `POST /api/conversations/{id}/compactions` and
   `GET /api/conversations/{id}/commands` go away; the header button and the
   composer both call the command endpoint.
-- Native names are reserved: a room cannot send a first-line `/compact` as
-  prose to its model. An agent name is not reserved — it still rides the turn.
-  Documented in the composer hint.
+- Native names are reserved only where the room's catalog carries them as
+  native rows. An agent-reported name is not a native action — it still rides
+  the agent turn as its command prompt. Documented in the composer hint.
 - `fork` duplicates history and tool-output files on disk; storage grows with
   each fork, and deleting the fork later is the owner's cleanup.
 

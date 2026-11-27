@@ -67,8 +67,7 @@ func setup(t *testing.T, emb Embedder) (*App, *time.Time, *bool) {
 }
 
 func code(err error) int {
-	var ae *apperror.AppError
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[*apperror.AppError](err); ok {
 		return ae.StatusCode()
 	}
 	return 0

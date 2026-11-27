@@ -83,7 +83,7 @@ func TestWorkerTurnRunsBlindWhenThePoolIsFull(t *testing.T) {
 	h := newHub(t, stubSender{})
 	// Fill every slot with journals the surface opened.
 	seals := make([]func(bool, error), 0, maxActiveTurns)
-	for i := 0; i < maxActiveTurns; i++ {
+	for i := range maxActiveTurns {
 		_, seal := h.Open("c_full", "send", valueobject.TurnOrigin{Kind: enum.TurnOriginConversation})
 		if seal == nil {
 			t.Fatalf("slot %d was refused before the pool was full", i)

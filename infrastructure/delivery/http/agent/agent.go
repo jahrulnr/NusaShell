@@ -26,7 +26,7 @@ type Service interface {
 	Models(ctx context.Context, id string) ([]appagent.Model, error)
 	// Options reports the session options the agent offers — its modes and
 	// config options — before any room exists.
-	Options(ctx context.Context, id string) ([]dservice.AgentOption, dservice.OptionsState, error)
+	Options(ctx context.Context, id string) ([]dservice.AgentOption, dservice.OptionsState, dservice.OptionsSource, error)
 	Status(ctx context.Context, id string) (appagent.Status, error)
 	Authenticate(ctx context.Context, id, methodID string) error
 	Logout(ctx context.Context, id string) error
@@ -166,12 +166,12 @@ func (s *server) options(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, state, err := s.svc.Options(c.Request.Context(), id)
+	out, state, source, err := s.svc.Options(c.Request.Context(), id)
 	if err != nil {
 		transport.RespondError(c, err)
 		return
 	}
-	c.JSON(200, gin.H{"data": out, "status": state})
+	c.JSON(200, gin.H{"data": out, "status": state, "source": source})
 }
 
 func (s *server) status(c *gin.Context) {

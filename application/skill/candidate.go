@@ -276,7 +276,7 @@ func retireSuperseded(ctx context.Context, deps CandidateDeps, workspace, name s
 	if err := held.Supersede(st.supersedeCause(held), now); err != nil {
 		return "", err
 	}
-	if err := releaseOwnFile(ctx, deps.Writer, st, held); err != nil {
+	if _, err := releaseOwnFile(ctx, deps.Writer, st, held); err != nil {
 		return "", err
 	}
 	if err := deps.Decisions.Commit(ctx, held, nil); err != nil {

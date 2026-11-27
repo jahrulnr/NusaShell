@@ -439,7 +439,7 @@ func TestOptionsAndCommands(t *testing.T) {
 	rt, in := setup(t, "hello")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +453,7 @@ func TestOptionsAndCommands(t *testing.T) {
 	if len(cmds) == 0 || cmds[0].Name != "compact" {
 		t.Fatalf("commands = %+v", cmds)
 	}
-	live, _, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	live, _, _, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	var mode *dservice.AgentOption
 	for i := range live {
 		if live[i].Category == "mode" {
@@ -467,7 +467,7 @@ func TestOptionsAndCommands(t *testing.T) {
 	if err := rt.SetOption(ctx, in.Conversation.ID(), mode.ID, next); err != nil {
 		t.Fatal(err)
 	}
-	after, _, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	after, _, _, _ := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	for _, o := range after {
 		if o.ID == mode.ID && o.Current != next {
 			t.Fatalf("mode after set = %q, want %q", o.Current, next)
@@ -482,7 +482,7 @@ func liveMode(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentP
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +498,7 @@ func liveMode(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentP
 // currentOption answers one option's current value on the live session.
 func currentOption(t *testing.T, ctx context.Context, rt *Runtime, in dservice.AgentPrompt, id string) string {
 	t.Helper()
-	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +595,7 @@ func TestConfigOptionUpdateReplacesTheOfferedList(t *testing.T) {
 	if len(ids) != 2 || ids[0].ID != "mode" || ids[1].ID != "model" {
 		t.Fatalf("session configs = %+v, want [mode model]", ids)
 	}
-	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +837,7 @@ func TestSessionSystemPrompt(t *testing.T) {
 	if !strings.Contains(string(raw), `"systemPrompt":{"mode":"append"`) || !strings.Contains(got, "NusaShell") {
 		t.Fatalf("session/new = %s", raw)
 	}
-	for _, name := range []string{"nusashell", "coding-workflow"} {
+	for _, name := range []string{"nusashell", "coding-workflow", "playrole"} {
 		if path := filepath.Join(skillsDir, name, "SKILL.md"); !strings.Contains(got, path) {
 			t.Fatalf("session instructions do not name %s: %s", path, raw)
 		}
@@ -931,7 +931,7 @@ func TestSteerIntoRunningTurn(t *testing.T) {
 	}
 	delivered := 0
 	deadline := time.Now().Add(3 * time.Second)
-	for !rt.Steer(ctx, convID, input, func() { delivered++ }) {
+	for !rt.Steer(ctx, convID, input, "", func() { delivered++ }) {
 		if time.Now().After(deadline) {
 			t.Fatal("the running turn never took the steer")
 		}
@@ -997,7 +997,7 @@ func TestSteerUnsupported(t *testing.T) {
 	convID := in.Conversation.ID()
 	go func() { _ = rt.Prompt(ctx, in, nil, nil) }()
 	time.Sleep(300 * time.Millisecond)
-	if rt.Steer(ctx, convID, valueobject.UserInput{Text: "go left"}, func() { t.Error("delivered without support") }) {
+	if rt.Steer(ctx, convID, valueobject.UserInput{Text: "go left"}, "", func() { t.Error("delivered without support") }) {
 		t.Fatal("steer taken by an agent without support")
 	}
 	cancel()
@@ -1074,7 +1074,7 @@ func TestSelectModelRefreshesTheOfferedListWithoutAChange(t *testing.T) {
 	if !strings.Contains(readTrace(t, trace), "config model fake-fast") {
 		t.Fatal("no refresh set_config_option ran on an unchanged model pick")
 	}
-	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1176,7 +1176,7 @@ func TestCatalogSurvivesARestart(t *testing.T) {
 	// A "restart": a new runtime on the same store has no live session.
 	rt2 := New(Options{ClientName: "nusashell-test", ClientVersion: "0", Catalog: store})
 	t.Cleanup(func() { _ = rt2.Shutdown(context.Background()) })
-	opts, _, err := rt2.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt2.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1202,7 +1202,7 @@ func TestOptionsEmptyWhenLiveSurfaceShrinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A live session with its full surface answers ready — never empty.
-	opts, state, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, state, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil || state != dservice.OptionsReady || len(opts) == 0 {
 		t.Fatalf("full session = %d options, state %q, %v — want ready non-empty", len(opts), state, err)
 	}
@@ -1223,7 +1223,7 @@ func TestOptionsEmptyWhenLiveSurfaceShrinks(t *testing.T) {
 	// since updates apply on the reader goroutine.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		opts, state, err = rt.Options(ctx, in.Agent, in.Conversation.ID())
+		opts, state, _, err = rt.Options(ctx, in.Agent, in.Conversation.ID())
 		if err == nil && state == dservice.OptionsEmpty {
 			break
 		}
@@ -1258,7 +1258,7 @@ func TestStoredCatalogWinsOverTheProbe(t *testing.T) {
 	rt, in := setupCatalog(t, "hello", store)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1380,7 +1380,7 @@ func TestBooleanOptionGatedOnTheAdvertisedCapability(t *testing.T) {
 	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	opts, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1394,12 +1394,63 @@ func TestBooleanOptionGatedOnTheAdvertisedCapability(t *testing.T) {
 	if err := rt.SetOption(ctx, in.Conversation.ID(), "cap_bool", "true"); err != nil {
 		t.Fatalf("a boolean pick was refused: %v", err)
 	}
-	opts, _, _ = rt.Options(ctx, in.Agent, in.Conversation.ID())
+	opts, _, _, _ = rt.Options(ctx, in.Agent, in.Conversation.ID())
 	i = slices.IndexFunc(opts, func(o dservice.AgentOption) bool { return o.ID == "cap_bool" })
 	if i < 0 || opts[i].Current != "true" {
 		t.Fatalf("after the pick cap_bool = %+v, want current true", opts[i:])
 	}
 	if err := rt.SetOption(ctx, in.Conversation.ID(), "cap_bool", "maybe"); err == nil {
 		t.Fatal("a non-boolean value was taken")
+	}
+}
+
+// A stored pick the agent refuses is a failed setting, never a failed prompt:
+// the turn continues, the owner gets a notice, and the pick is cleaned so the
+// next turn does not hit the same refusal.
+func TestRefusedStoredOptionDropsPickAndTurnContinues(t *testing.T) {
+	t.Setenv("FAKE_ACP_REFUSE_CONFIG", "strict")
+	rt, in := setup(t, "hello")
+	if err := in.Conversation.SetAgentOption("strict", "true"); err != nil {
+		t.Fatal(err)
+	}
+	in.Options = in.Conversation.AgentOptions()
+	rec := &recorder{}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := rt.Prompt(ctx, in, rec.handle, nil); err != nil {
+		t.Fatalf("a refused option failed the turn: %v", err)
+	}
+	if got := in.Conversation.AgentOptions(); len(got) != 0 {
+		t.Fatalf("stored picks after refusal = %+v, want cleaned", got)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	found := false
+	for _, ev := range rec.events {
+		if ev.Kind() == enum.TurnEventNotice && ev.Delta() == "the agent refused `strict`; it was not applied" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("notice missing in %+v", rec.events)
+	}
+}
+
+// The options contract names its evidence: a probe/default answer before the
+// room runs is not the same thing as the live session's answer afterwards.
+func TestOptionsSourceSeparatesDefaultsFromTheLiveSession(t *testing.T) {
+	rt, in := setup(t, "hello")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, _, source, err := rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil || source != dservice.OptionsSourceAgentDefault {
+		t.Fatalf("before a session source=%q err=%v, want agent-default", source, err)
+	}
+	if err := rt.Prompt(ctx, in, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, _, source, err = rt.Options(ctx, in.Agent, in.Conversation.ID())
+	if err != nil || source != dservice.OptionsSourceSession {
+		t.Fatalf("live session source=%q err=%v, want session", source, err)
 	}
 }

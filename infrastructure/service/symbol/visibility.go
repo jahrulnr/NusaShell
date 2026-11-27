@@ -73,7 +73,7 @@ func utf8First(s string) (rune, bool) {
 func ExportedNames(src []byte) map[string]bool {
 	out := map[string]bool{}
 	for _, m := range reExportBr.FindAllSubmatch(src, -1) {
-		for _, item := range strings.Split(string(m[1]), ",") {
+		for item := range strings.SplitSeq(string(m[1]), ",") {
 			item = strings.TrimSpace(item)
 			if i := strings.Index(item, " as "); i >= 0 {
 				item = strings.TrimSpace(item[i+4:])

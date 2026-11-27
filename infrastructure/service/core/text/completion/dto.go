@@ -8,7 +8,9 @@ import "encoding/json"
 // by OpenRouter, DeepSeek, Groq, and the compatible long tail. Field names
 // here are wire names; domain mapping lives in encode/decode.
 
-// Prompt Cache Option
+// RequestPromptCacheOption is the provider cache-control extension. It stays
+// optional because providers disagree about the accepted TTL vocabulary; the
+// request must not send it until capability and configuration are explicit.
 type RequestPromptCacheOption struct {
 	TTL string `json:"ttl,omitempty"`
 }
@@ -18,7 +20,7 @@ type RequestPromptCacheOption struct {
 type RequestBody struct {
 	Model             string                     `json:"model"`
 	PromptCacheKey    string                     `json:"prompt_cache_key,omitempty"`
-	PromptCacheOption RequestPromptCacheOption   `json:"prompt_cache_options"`
+	PromptCacheOption *RequestPromptCacheOption  `json:"prompt_cache_options,omitempty"`
 	Messages          []MessageBody              `json:"messages"`
 	Tools             []ToolBody                 `json:"tools,omitempty"`
 	Stream            bool                       `json:"stream,omitempty"`

@@ -51,9 +51,9 @@ export function ModelPicker({ room }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const bodyRef = useRef();
-  // A changed filter is a new target: the body starts at its top. A refresh
-  // of what fills it — models, session options, upstreams — is not, so this
-  // listens to the query alone and never touches scroll or focus otherwise.
+  // A changed filter is a new target: the list starts at its top. Effort,
+  // upstream, and session options live in the band under the list, so a
+  // refresh of those never moves this scroll.
   useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [q]);
   const [upstreams, setUpstreams] = useState({ status: 'idle', list: [] });
   const sel = selection(room);
@@ -150,7 +150,7 @@ export function ModelPicker({ room }) {
         <input autofocus value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search models"
           class="flex-1 bg-transparent outline-none text-[13px]" />
       </div>
-      <div ref=${bodyRef} class="flex-1 min-h-0 overflow-y-auto">
+      <div ref=${bodyRef} data-scroll="list" class="flex-1 min-h-0 overflow-y-auto">
       <div class="py-1">
         ${loading && !groups.length && html`<div class="flex items-center gap-2 px-3 py-3 text-muted"><${Spinner} /> Loading providers…</div>`}
         ${provs.status === 'error' && html`<div class="p-2"><${ErrorBlock} title="Providers unavailable" message=${provs.error} onRetry=${loadProviders} /></div>`}
@@ -196,7 +196,9 @@ export function ModelPicker({ room }) {
           </button>`}
         </div>`)}
       </div>
-      ${cur && html`<div class="shrink-0 border-t border-line px-3 py-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
+      </div>
+      ${(cur || sel.agentId) && html`<div data-scroll="controls" class="shrink-0 min-h-0 overflow-y-auto border-t border-line bg-raised" style=${{ maxHeight: 'calc(var(--panel-room) * 0.4)' }}>
+      ${cur && html`<div class="px-3 py-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
         <label class="flex flex-col gap-1 min-w-0 only-of-type:col-span-full">
           <span class="text-xs text-muted truncate">Reasoning effort</span>
           <${Select} dense label="Reasoning effort" class="w-full" value=${sel.effort || 'default'}
@@ -210,7 +212,7 @@ export function ModelPicker({ room }) {
             onChange=${(v) => setSelection(room, { upstream: v })} />
         </label>`}
       </div>`}
-      ${sel.agentId && html`<div class="shrink-0 border-t border-line px-3 py-2.5 flex flex-col gap-2">
+      ${sel.agentId && html`<div class="px-3 py-2.5 flex flex-col gap-2">
         ${agentOpts.status === 'loading' && html`<div class="flex items-center gap-2 text-faint text-xs"><${Spinner} size=${12} /> Asking the agent…</div>`}
         <${AgentOptionsNotice} room=${room} />
         ${agentOpts.status === 'ready' && !agentOpts.list.length && (agentOpts.report === 'empty'
@@ -244,7 +246,7 @@ export function ModelPicker({ room }) {
           ? 'Applies to the next turn.'
           : !room.id ? 'Applies to the thread this message starts.' : ''}</p>`}
       </div>`}
-      </div>
+      </div>`}
       <div class="shrink-0 bg-raised flex border-t border-line">
         <a href=${'#/settings/providers' + (sel.providerId ? '/' + encodeURIComponent(sel.providerId) : '')} onClick=${() => setOpen(false)}
           class="flex-1 flex items-center gap-2 px-3 h-9 text-muted hover:text-fg hover:bg-hover">

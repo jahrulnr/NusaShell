@@ -6,6 +6,7 @@ import { useStore, setPref, toast, emit, state, askConfirm } from '../lib/store.
 import { api, errorText, setCsrf } from '../lib/api.js';
 import { loadProviders, navigate, deleteAllRooms } from '../lib/chat.js';
 import { useSettingsDoc, getPath } from '../lib/settings.js';
+import { ensureSkillsRoute, skillsRouteState, watchSkillsRoute } from '../lib/skills.js';
 import { API_STYLES, STYLE_SHORT, MODEL_TYPES, UNUSED_MODEL_TYPES } from '../lib/providers.js';
 import { Icon } from './icons.js';
 import { cx, Button, Checkbox, Dialog, Select, Toggle, ErrorBlock, Spinner, fmtTokens } from './ui.js';
@@ -47,10 +48,31 @@ export const SECTION_GROUPS = [
 const SECTIONS = SECTION_GROUPS.flatMap((g) => g.items);
 const sectionOf = (id) => SECTIONS.find((x) => x.id === id) || SECTIONS[0];
 
+// The nav and the page share one answer: a server that has no skills route
+// must not keep a row that opens an error.
+function useSkillsRoute() {
+  const [route, setRoute] = useState(skillsRouteState());
+  useEffect(() => {
+    setRoute(skillsRouteState());
+    ensureSkillsRoute();
+    return watchSkillsRoute(setRoute);
+  }, []);
+  return route;
+}
+
+// Skills has a row only once the server has answered for it. Until then the
+// row is absent: a row that appears and then vanishes is worse than one that
+// arrives a moment late.
+function groupsFor(route) {
+  if (route === 'offered') return SECTION_GROUPS;
+  return SECTION_GROUPS.map((g) => ({ ...g, items: g.items.filter((item) => item.id !== 'skills') }));
+}
+
 // SettingsNav is the sidebar while Settings is open: back to the threads,
 // then every settings page by group.
 export function SettingsNav() {
   const s = useStore();
+  const skillsRoute = useSkillsRoute();
   const current = sectionOf(s.route.section).id;
   return html`<nav aria-label="Settings" class="flex flex-col h-full w-full bg-panel">
     <div class="flex items-center gap-1 px-2 h-12 shrink-0">
@@ -60,7 +82,7 @@ export function SettingsNav() {
     </div>
     <div class="px-4 pb-2 text-[15px] font-semibold">Settings</div>
     <div class="flex-1 min-h-0 overflow-y-auto px-2 pb-3">
-      ${SECTION_GROUPS.map((g) => html`<div key=${g.label} class="mt-2">
+      ${groupsFor(skillsRoute).map((g) => html`<div key=${g.label} class="mt-2">
         <div class="px-2.5 pt-2 pb-1 text-xs text-faint">${g.label}</div>
         <ul class="flex flex-col gap-px">${g.items.map((x) => html`<li key=${x.id}>
           <a href=${'#/settings/' + x.id} aria-current=${x.id === current ? 'page' : undefined}
@@ -76,12 +98,22 @@ export function SettingsNav() {
 
 export function SettingsView() {
   const s = useStore();
+  const skillsRoute = useSkillsRoute();
   const section = sectionOf(s.route.section).id;
+  const hidden = skillsRoute === 'missing' && section === 'skills';
+  // A link to a page this server does not have lands on the first page,
+  // not on an empty one. replaceState keeps Back from returning to the dead link.
+  useEffect(() => {
+    if (!hidden) return;
+    const first = '#/settings/' + SECTIONS[0].id;
+    history.replaceState(null, '', first);
+    navigate(first);
+  }, [hidden]);
   return html`<div class="flex flex-col h-full">
     <header class="flex items-center gap-1 h-12 px-2 sm:px-4 border-b border-line shrink-0">
       <${MenuButton} />
-      <span class="text-muted">Settings</span><span class="text-faint mx-1">/</span>
-      <span class="font-medium">${sectionOf(section).label}</span>
+      <span class="text-muted">Settings</span>
+      ${!hidden && html`<span class="text-faint mx-1">/</span><span class="font-medium">${sectionOf(section).label}</span>`}
     </header>
     <div class="flex-1 min-h-0 overflow-y-auto">
       <div class="mx-auto w-full max-w-3xl px-4 sm:px-6 py-6 sm:py-8">
@@ -91,7 +123,7 @@ export function SettingsView() {
         ${section === 'channels' && html`<${Channels} />`}
         ${section === 'automations' && html`<${Automations} arg=${s.route.arg} />`}
         ${section === 'memory' && html`<${Memory} />`}
-        ${section === 'skills' && html`<${Skills} />`}
+        ${!hidden && section === 'skills' && html`<${Skills} />`}
         ${section === 'web' && html`<${WebSearch} />`}
         ${section === 'general' && html`<${General} />`}
         ${section === 'tools' && html`<${Tools} />`}

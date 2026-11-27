@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/entity"
@@ -94,13 +95,7 @@ func (tool *Tool) Execute(ctx context.Context, call entity.ToolCall, _ dservice.
 	}
 	_ = json.Unmarshal([]byte(call.Input()), &in)
 	if len(in.Folders) == 0 && in.Path != "" && in.Path != dir {
-		allowed := false
-		for _, e := range extras {
-			if e == in.Path {
-				allowed = true
-				break
-			}
-		}
+		allowed := slices.Contains(extras, in.Path)
 		if !allowed {
 			return dservice.ToolResult{Text: fmt.Sprintf(
 				"symbol_map: %s is not a folder bound to this conversation — allowed: %s",

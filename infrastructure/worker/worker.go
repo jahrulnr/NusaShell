@@ -59,7 +59,8 @@ type Steerable interface {
 // delivers it the same way — the job folds it at its own safe point.
 type InputSteerable interface {
 	Steerable
-	SteerInput(in valueobject.UserInput, before func() *entity.Message) bool
+	SteerInput(in valueobject.UserInput, record *entity.Message) bool
+	SteerInputAvailable() bool
 }
 
 var (
@@ -125,19 +126,32 @@ func New(opts Options) *Worker {
 // Submit queues a job FIFO. ErrFull when the queue is at capacity,
 // ErrClosed once the worker is dead.
 func (w *Worker) Submit(j Job) error {
+	_, err := w.SubmitWithPosition(j)
+	return err
+}
+
+// SubmitWithPosition is Submit plus the job's accepted position, decided in the
+// same critical section as the append: zero when nothing is ahead of it (the
+// next turn), otherwise its one-based waiting position. Reading Depth after the
+// append cannot say that — the loop may already have taken the job, or not yet.
+func (w *Worker) SubmitWithPosition(j Job) (int, error) {
 	w.mu.Lock()
 	switch {
 	case w.dead:
 		w.mu.Unlock()
-		return ErrClosed
+		return 0, ErrClosed
 	case len(w.queue) >= w.opts.QueueCap:
 		w.mu.Unlock()
-		return ErrFull
+		return 0, ErrFull
+	}
+	position := 0
+	if w.running != nil || len(w.queue) != 0 {
+		position = len(w.queue) + 1
 	}
 	w.queue = append(w.queue, j)
 	w.mu.Unlock()
 	w.signal()
-	return nil
+	return position, nil
 }
 
 // Preempt queues a job ahead of everything waiting and interrupts the
@@ -189,7 +203,7 @@ func (w *Worker) Steer(text string) bool {
 // SteerInput buffers a full input on the running job. found is false when the
 // running job takes no steering at all — the caller falls back to its queue;
 // accepted is false when the job's mailbox was full and buffered nothing.
-func (w *Worker) SteerInput(in valueobject.UserInput, before func() *entity.Message) (found, accepted bool) {
+func (w *Worker) SteerInput(in valueobject.UserInput, record *entity.Message) (found, accepted bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.unwind || w.dead {
@@ -199,7 +213,23 @@ func (w *Worker) SteerInput(in valueobject.UserInput, before func() *entity.Mess
 	if !ok {
 		return false, false
 	}
-	return true, s.SteerInput(in, before)
+	return true, s.SteerInput(in, record)
+}
+
+// SteerInputAvailable reports whether the running job both takes full input and
+// has mailbox room right now. It is only a preflight: SteerInput makes the final
+// atomic decision.
+func (w *Worker) SteerInputAvailable() (found, available bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.unwind || w.dead {
+		return false, false
+	}
+	s, ok := w.running.(InputSteerable)
+	if !ok {
+		return false, false
+	}
+	return true, s.SteerInputAvailable()
 }
 
 func (w *Worker) RecallSteer() (string, bool) {

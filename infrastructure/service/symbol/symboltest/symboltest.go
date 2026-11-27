@@ -173,7 +173,7 @@ func Run(t *testing.T, factory func() svc.SymbolIndex) {
 	t.Run("SkipRules", func(t *testing.T) {
 		idx := factory()
 		big := strings.Repeat("func f%d() {}\n", 40000)
-		for i := 0; i < 40000; i++ {
+		for i := range 40000 {
 			// cheap way to make distinct-but-valid-ish content
 			_ = i
 			break

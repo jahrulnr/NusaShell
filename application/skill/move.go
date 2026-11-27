@@ -86,7 +86,7 @@ func MoveLevel(ctx context.Context, deps MoveDeps, in MoveInput) error {
 	if err := row.MoveLevel(level, entry.Digest); err != nil {
 		return apperror.New(400, err.Error(), nil)
 	}
-	if err := deps.Ownership.Save(ctx, row, expect); err != nil {
+	if err := deps.Ownership.Save(context.WithoutCancel(ctx), row, expect); err != nil {
 		if apperror.As(err).StatusCode() == 409 {
 			return apperror.New(409, "this skill's ownership changed while the page was open — reload the page and try again", nil)
 		}

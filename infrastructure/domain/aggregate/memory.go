@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -198,12 +199,7 @@ func (m *Memory) Purgeable(now time.Time) bool {
 
 // VisibleFrom reports whether a thread with the given scopes sees it.
 func (m *Memory) VisibleFrom(scopes []valueobject.MemoryScope) bool {
-	for _, s := range scopes {
-		if s == m.scope {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(scopes, m.scope)
 }
 
 func memoryNameOf(name string) (string, error) {

@@ -315,8 +315,8 @@ tool.
 
 ## Authoring skills and custom executables
 
-`skill-creator`, `tool-creator`, `nusashell`, and `coding-workflow` are
-builtin skills with source under `assets/skills/`. Read them with
+`skill-creator`, `tool-creator`, `nusashell`, `coding-workflow`, and
+`playrole` are builtin skills with source under `assets/skills/`. Read them with
 `read_skill` and use the returned skill directory for script paths. Do not
 edit the application-owned builtin copy; it is refreshed from the binary.
 NusaShell discovers `name` and `description` from `SKILL.md`; it does not

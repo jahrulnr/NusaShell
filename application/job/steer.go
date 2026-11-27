@@ -11,7 +11,12 @@ import (
 
 // ErrMailboxFull answers a submission the mailbox has no room for. Nothing was
 // buffered: the caller reports the refusal instead of losing the input.
-var ErrMailboxFull = errors.New("steering mailbox full")
+var (
+	ErrMailboxFull = errors.New("steering mailbox full")
+	// ErrRelayRecordMissing refuses a relayed input whose accepting room did not
+	// write its provenance line first.
+	ErrRelayRecordMissing = errors.New("relayed input has no acceptance record")
+)
 
 // SteeringState is the outcome slot one submitted input occupies.
 // Pending input still waits in the mailbox and can be recalled; claimed
@@ -103,6 +108,15 @@ type SteeringInput struct {
 // NewSteeringInput creates an empty mailbox.
 func NewSteeringInput() *SteeringInput { return &SteeringInput{} }
 
+// available reports whether one more input fits the mailbox right now. It is a
+// preflight for accept paths that must not write before a refusal; SubmitBefore
+// still enforces the same cap atomically.
+func (s *SteeringInput) available(limit int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return limit <= 0 || len(s.pending) < limit
+}
+
 // Submit buffers input — text and its optional selected references,
 // uploads and annotations — and returns the receipt that tracks its
 // outcome.
@@ -113,34 +127,22 @@ func (s *SteeringInput) Submit(input valueobject.UserInput) *SteeringReceipt {
 
 // SubmitBefore is Submit with two bounds the relay path needs. A limit above
 // zero refuses the submission once that many inputs already wait, without
-// buffering anything. A before hook runs after the input is buffered and before
-// the turn is told it arrived, so a record the delivery depends on is never
-// written after the text went out.
-func (s *SteeringInput) SubmitBefore(input valueobject.UserInput, limit int, before func() *entity.Message) (*SteeringReceipt, error) {
+// buffering anything. record is the acceptance line the room already wrote for
+// this input: it travels with the entry from the start, so no fold can meet a
+// relayed input before its provenance. A relayed input without that line is a
+// broken acceptance and is refused rather than delivered unrecorded.
+func (s *SteeringInput) SubmitBefore(input valueobject.UserInput, limit int, record *entity.Message) (*SteeringReceipt, error) {
+	if input.Relay != nil && record == nil {
+		return nil, ErrRelayRecordMissing
+	}
 	r := newSteeringReceipt()
 	s.mu.Lock()
 	if limit > 0 && len(s.pending) >= limit {
 		s.mu.Unlock()
 		return nil, ErrMailboxFull
 	}
-	entry := steeringEntry{input: input, receipt: r}
-	s.pending = append(s.pending, entry)
+	s.pending = append(s.pending, steeringEntry{input: input, receipt: r, record: record})
 	s.mu.Unlock()
-	if before != nil {
-		if record := before(); record != nil {
-			// The line exists already: every later delivery of this input uses it
-			// instead of writing another. The entry is found by identity of its
-			// receipt, so a concurrent claim cannot take the wrong one.
-			s.mu.Lock()
-			for i := range s.pending {
-				if s.pending[i].receipt == r {
-					s.pending[i].record = record
-					break
-				}
-			}
-			s.mu.Unlock()
-		}
-	}
 	s.notify()
 	return r, nil
 }
