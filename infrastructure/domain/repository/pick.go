@@ -11,7 +11,7 @@ import (
 type Picks interface {
 	// Save assigns the pick its id and stores it.
 	Save(ctx context.Context, p valueobject.Pick) (valueobject.Pick, error)
-	// Get is a 404 apperror for an id that was never saved.
+	// Get is not found, with a stable error identity, for an id that was never saved.
 	Get(ctx context.Context, id string) (valueobject.Pick, error)
 	// Purge removes every stored pick — called only once the threads
 	// that owned them are gone.

@@ -230,10 +230,6 @@ type Hub struct {
 	jobControlCancel func(convID string) bool
 	jobControlSteer  func(convID, turnID string, in valueobject.UserInput) (*appjob.SteeringReceipt, bool)
 	jobControlRecall func(convID, turnID, inputID string) bool
-	// jobControlMu serializes a journal-only steer or recall with its
-	// forward. The forward runs without h.mu — the worker it reaches can
-	// re-enter the hub through the turn's event stream.
-	jobControlMu sync.Mutex
 	// finished run after every turn ends (see OnFinished); events see
 	// every turn event (see OnEvent).
 	finished []func(convID, kind string, origin valueobject.TurnOrigin, external bool, err error)

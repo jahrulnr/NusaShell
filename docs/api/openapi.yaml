@@ -119,6 +119,12 @@ tags:
     description: Files, references, and uploads inside a thread's folders.
   - name: skills
     description: The Skills page, the level each learned skill answers to, and the proposals waiting on the owner.
+  - name: memory
+    description: Memories the owner lists and rewrites.
+  - name: websearch
+    description: Web search settings, source keys, and a test search or fetch.
+  - name: media
+    description: Media the owner calls directly, starting with speech to text.
 
 # Every operation needs an owner session unless it says `security: []`,
 # but only when `server.auth` requires a login at all (see the security
@@ -3514,6 +3520,233 @@ paths:
                 overage: 1234
         "500": { $ref: "#/components/responses/Internal" }
 
+  /api/memories:
+    get:
+      operationId: listMemories
+      tags: [memory]
+      summary: List memories
+      description: |
+        One page of memories, newest first, or most relevant first when `q`
+        is set. An empty `status` is the live ones (active and stale).
+      parameters:
+        - { name: scope, in: query, schema: { type: string }, description: "`global`, `project:<id>`, or `room:<id>`. Empty is every scope." }
+        - { name: type, in: query, schema: { type: string, enum: [user, feedback, project, reference] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, stale, archived] }, description: Empty is the live ones. }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Memory" } }
+                  page: { $ref: "#/components/schemas/Page" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+
+  /api/memories/{memoryId}:
+    parameters:
+      - { name: memoryId, in: path, required: true, schema: { type: string, minLength: 1 } }
+    put:
+      operationId: updateMemory
+      tags: [memory]
+      summary: Rewrite a memory
+      description: |
+        Rewrites `type`, `description`, and `body`. Name and scope stay; a
+        body `name` or `scope` is not applied. Text that looks like a
+        credential is refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, description, body]
+              additionalProperties: false
+              properties:
+                scope: { type: string, description: "Not applied. Name and scope stay." }
+                type: { type: string, enum: [user, feedback, project, reference] }
+                name: { type: string, description: "Not applied." }
+                description: { type: string }
+                body: { type: string }
+      responses:
+        "200":
+          description: The memory.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/websearch:
+    get:
+      operationId: getWebSearch
+      tags: [websearch]
+      summary: Web search settings
+      description: Effective settings. Key values never leave; a keyed source reports where its key lives.
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSearchStatus" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+    patch:
+      operationId: updateWebSearch
+      tags: [websearch]
+      summary: Change web search behavior
+      description: |
+        One change of keys relative to `websearch.`. Values are JSON. All
+        land or none do. A key is `enabled`, `backend`, `provider`,
+        `model`, `limit`, `timeout`, `max_response_bytes`, `max_raw_bytes`,
+        `user_agent`, `brave.enabled`, `serper.enabled`, `tavily.enabled`,
+        `github.enabled`, or `github.search_issues`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: true
+      responses:
+        "200":
+          description: The settings after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSearchStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+
+  /api/websearch/keys/{source}:
+    parameters:
+      - { name: source, in: path, required: true, schema: { type: string, enum: [brave, serper, tavily, github] } }
+    put:
+      operationId: setWebSearchKey
+      tags: [websearch]
+      summary: Store a search source key
+      description: |
+        An `env:NAME` reference is kept as given. Any other value goes in
+        the vault and the config points at it. A source that does nothing
+        without a key is turned on. The value never comes back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              additionalProperties: false
+              properties:
+                value: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: The settings after the key is stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSearchStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: clearWebSearchKey
+      tags: [websearch]
+      summary: Forget a search source key
+      description: The reference leaves the config and a vaulted value leaves the vault.
+      responses:
+        "200":
+          description: The settings after the key is forgotten.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSearchStatus" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/websearch/test:
+    post:
+      operationId: testWebSearch
+      tags: [websearch]
+      summary: Run one search or fetch
+      description: |
+        Runs the real tool. A failed call is an answer (`error` in the
+        body), not an HTTP error. An empty query or URL, or an unknown
+        tool, is `400`. A tool that is not available is `409`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tool]
+              additionalProperties: false
+              properties:
+                tool: { type: string, enum: [search, fetch] }
+                query: { type: string }
+                limit: { type: integer }
+                url: { type: string }
+                maxBytes: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: What the tool returned, and how long it took.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [durationMs]
+                properties:
+                  output: { description: The tool document, as JSON. }
+                  text: { type: string }
+                  error: { type: string }
+                  durationMs: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/transcriptions:
+    post:
+      operationId: transcribeAudio
+      tags: [media]
+      summary: Transcribe a recording
+      description: |
+        Speech to text on the model Settings assigns to transcription.
+        Multipart field `audio` (an audio type, or `video/webm`), at most
+        25 MB, and optional `language` (ISO-639-1).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio: { type: string, format: binary }
+                language: { type: string }
+      responses:
+        "200":
+          description: The words.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text]
+                properties:
+                  text: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/ForbiddenOrigin" }
+        "413": { $ref: "#/components/responses/InputTooLarge" }
+        "415":
+          description: The recording is not audio.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -5169,6 +5402,77 @@ components:
         origin: { type: string }
         type: { type: string }
         data: { description: The event's own payload. }
+    Memory:
+      type: object
+      required: [id, scope, type, name, description, body, source, status, freshness, createdAt, updatedAt, verifiedAt, recalls]
+      properties:
+        id: { type: string }
+        scope: { type: string, description: "`global`, `project:<id>`, or `room:<id>`." }
+        type: { type: string, enum: [user, feedback, project, reference] }
+        name: { type: string }
+        description: { type: string }
+        body: { type: string }
+        source: { type: string, enum: [owner, agent, consolidation] }
+        origin: { type: string }
+        status: { type: string, enum: [active, stale, archived] }
+        reason: { type: string }
+        freshness: { type: string, enum: [fresh, aging, stale] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        verifiedAt: { type: string, format: date-time }
+        recalledAt: { type: string, format: date-time }
+        recalls: { type: integer }
+        archivedAt: { type: string, format: date-time }
+    WebSearchStatus:
+      type: object
+      required: [enabled, backend, provider, model, limit, timeout, maxResponseBytes, maxRawBytes, userAgent, searchIssues, sources, defaults, providers]
+      properties:
+        enabled: { type: boolean }
+        backend: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        providerProblem: { type: string }
+        limit: { type: integer }
+        timeout: { type: string }
+        maxResponseBytes: { type: integer, format: int64 }
+        maxRawBytes: { type: integer, format: int64 }
+        userAgent: { type: string }
+        searchIssues: { type: boolean }
+        sources:
+          type: array
+          items:
+            type: object
+            required: [id, label, enabled, active]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              enabled: { type: boolean }
+              fixed: { type: boolean }
+              keyed: { type: boolean }
+              needsKey: { type: boolean }
+              keyState: { type: string, enum: [unset, env, vaulted, missing] }
+              saved: { type: boolean }
+              keyEnv: { type: string }
+              active: { type: boolean }
+              note: { type: string }
+        defaults:
+          type: object
+          required: [limit, timeout, maxResponseBytes, maxRawBytes, userAgent]
+          properties:
+            limit: { type: integer }
+            timeout: { type: string }
+            maxResponseBytes: { type: integer, format: int64 }
+            maxRawBytes: { type: integer, format: int64 }
+            userAgent: { type: string }
+        providers:
+          type: array
+          items:
+            type: object
+            required: [id, native]
+            properties:
+              id: { type: string }
+              native: { type: boolean }
+              needsModel: { type: boolean }
 
   responses:
     BadRequest:

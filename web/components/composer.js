@@ -210,9 +210,9 @@ export function Composer({ room, hero = false }) {
   const hasText = !!r.draft.trim();
   const fileInput = useRef();
   const [dragging, setDragging] = useState(false);
-  // On a phone the row is the field and its three buttons; the pickers live in
-  // a tray that folds out above them, the way a chat app stacks its extras,
-  // instead of being squeezed into one line.
+  // On a phone the row is the field, its buttons, and the context ring. The
+  // pickers live in a tray that folds out above them. The ring stays in the
+  // row at every width, so the tray never draws a second one.
   const [options, setOptions] = useState(false);
   const uploading = r.files.some((f) => f.status === 'uploading');
   const readyFiles = r.files.filter((f) => f.status === 'ready');
@@ -438,7 +438,6 @@ export function Composer({ room, hero = false }) {
       ${options && html`<div class="sm:hidden flex flex-wrap items-center gap-1.5 px-2 pt-2">
         <${WorkspacePicker} room=${r} />
         <${AgentOptions} room=${r} />
-        <${ContextMeter} room=${r} />
       </div>`}
       <div class="flex items-center gap-1 px-2 pb-2 pt-1">
         <input ref=${fileInput} type="file" multiple class="hidden" onChange=${(e) => { attachFiles(r, [...e.target.files]); e.target.value = ''; }} />
@@ -449,8 +448,8 @@ export function Composer({ room, hero = false }) {
         <div class="flex-1"></div>
         <div class="hidden sm:flex items-center gap-1 min-w-0">
           <${AgentOptions} room=${r} />
-          <${ContextMeter} room=${r} />
         </div>
+        <${ContextMeter} room=${r} />
         <button type="button" onClick=${() => setOptions(!options)} aria-expanded=${options} aria-label="Composer options"
           title="Model, workspace, context" class="sm:hidden size-8 shrink-0 inline-flex items-center justify-center rounded-lg hover:bg-hover ${options ? 'text-fg bg-hover' : 'text-muted'}">
           <${Icon} name="sliders" size=${16} />

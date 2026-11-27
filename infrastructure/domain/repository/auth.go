@@ -6,16 +6,16 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
-// Auth stores the owner's password hash and login sessions. Errors carry
-// the apperror contract — a missing owner or session surfaces as 404.
+// Auth stores the owner's password hash and login sessions. A missing
+// owner or session is not found, reported with a stable error identity.
 type Auth interface {
-	// OwnerPasswordHash returns the stored hash; 404 when none is set.
+	// OwnerPasswordHash returns the stored hash; not found when none is set.
 	OwnerPasswordHash(ctx context.Context) (string, error)
 	// SetOwnerPasswordHash replaces the hash.
 	SetOwnerPasswordHash(ctx context.Context, hash string) error
 	// SaveSession inserts or updates a session by token hash.
 	SaveSession(ctx context.Context, s valueobject.Session) error
-	// Session loads a session by token hash; 404 when absent.
+	// Session loads a session by token hash; not found when absent.
 	Session(ctx context.Context, tokenHash string) (valueobject.Session, error)
 	// DeleteSession removes one session; absent is not an error.
 	DeleteSession(ctx context.Context, tokenHash string) error

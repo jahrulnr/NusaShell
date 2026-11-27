@@ -62,8 +62,8 @@ type VideoProgress func(status string)
 // VideoModelService are one-attempt translators for generation surfaces,
 // the media siblings of TextModelService: endpoint and credentials come
 // from prov per call, and which provider and model to use is the
-// application's decision. Failures return apperror.IAppError with a
-// frontend-safe Message.
+// application's decision. Failures report a stable error identity, with a
+// message safe to show.
 type ImageModelService interface {
 	GenerateImage(ctx context.Context, prov *aggregate.Provider, model entity.Model, req ImageRequest) ([]Media, error)
 }

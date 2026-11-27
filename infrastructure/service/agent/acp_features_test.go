@@ -266,6 +266,35 @@ func TestAgentFileLinksStayInsideTheFolders(t *testing.T) {
 	}
 }
 
+// A linked file nobody stated a type for is read the way every other caller
+// reads one: the bytes decide and the name is only the tie-breaker. An
+// extension that says nothing — or that lies — still shows a picture as a
+// picture instead of plain bytes.
+func TestAgentLinkedFileIsSniffedWhenItsTypeIsUnstated(t *testing.T) {
+	dir := t.TempDir()
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	silent := filepath.Join(dir, "chart.bin")
+	lying := filepath.Join(dir, "chart.txt")
+	for _, path := range []string{silent, lying} {
+		if err := os.WriteFile(path, png, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sink := newTurnSink(context.Background(), nil, nil)
+	sink.folders = []string{dir}
+	sink.addMedia(contentBlock("resource_link", "file://"+silent))
+	sink.addMedia(contentBlock("resource_link", "file://"+lying))
+	if len(sink.parts) != 2 {
+		t.Fatalf("parts = %+v", sink.parts)
+	}
+	for _, part := range sink.parts {
+		a, ok := part.Media()
+		if !ok || a.MediaType() != "image/png" {
+			t.Fatalf("media = %+v, want image/png from the bytes", a)
+		}
+	}
+}
+
 func TestAgentMediaIsBounded(t *testing.T) {
 	dir := t.TempDir()
 	sink := newTurnSink(context.Background(), nil, nil)

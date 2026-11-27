@@ -13,8 +13,8 @@ func AgentSecretKey(agentID, envName string) string {
 	return "agent/" + agentID + "/env/" + envName
 }
 
-// Agent is the store of configured external agents. Errors carry the
-// apperror contract — a missing id surfaces as 404.
+// Agent is the store of configured external agents. A missing id is not
+// found, reported with a stable error identity.
 //
 // Environment values are secret material by default: a literal passed to
 // Save is moved into the SecretStore and the record keeps a reference.

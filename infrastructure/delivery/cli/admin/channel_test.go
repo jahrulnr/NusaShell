@@ -102,6 +102,18 @@ func TestChannelCommands(t *testing.T) {
 		f.body["type"] != "poll" {
 		t.Fatalf("stdin send body = %v", f.body)
 	}
+	// Telegram starts a message too: the same route, its own body — no file,
+	// and a forum topic when the chat has one.
+	if code, _, errOut = runChannel(t, srv, "", "telegram", "send", "--to", "42", "--text", "hi", "--thread", "7"); code != 0 {
+		t.Fatalf("telegram send: %s", errOut)
+	}
+	if f.path != "/api/channels/telegram/send" || f.body["target"] != "42" || f.body["text"] != "hi" ||
+		f.body["type"] != "text" || f.body["thread"] != "7" {
+		t.Fatalf("telegram send body = %v", f.body)
+	}
+	if code, _, _ = runChannel(t, srv, "", "telegram", "send", "--to", "42"); code != 2 {
+		t.Fatal("telegram send --to without text must be a usage error")
+	}
 	if code, _, _ = runChannel(t, srv, "", "whatsapp", "send", "--to", "6281"); code != 2 {
 		t.Fatal("send --to without content must be a usage error")
 	}

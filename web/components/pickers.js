@@ -391,7 +391,7 @@ export function ContextMeter({ room }) {
   const r = 7, len = 2 * Math.PI * r;
   const pct = view.hollow ? 0 : view.pct;
   const color = pct >= 90 ? 'var(--bad)' : pct >= 70 ? 'var(--warn)' : 'var(--accent)';
-  return html`<span class="group relative inline-flex items-center justify-center size-8" tabindex="0" role="img" aria-label=${view.text}>
+  return html`<span class="group relative inline-flex shrink-0 items-center justify-center size-8" tabindex="0" role="img" aria-label=${view.text}>
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
       <circle cx="9" cy="9" r=${r} fill="none" stroke="var(--line)" stroke-width="2.5" />
       ${!view.hollow && pct > 0 && html`<circle cx="9" cy="9" r=${r} fill="none" stroke=${color} stroke-width="2.5" stroke-linecap="round"

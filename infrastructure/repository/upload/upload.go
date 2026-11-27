@@ -131,6 +131,15 @@ func (s *Store) attachment(dir string, m meta) (valueobject.Attachment, error) {
 // Delete removes one upload and everything stored under its id. A valid id that
 // no longer exists is already the requested state and answers nil, so cleanup
 // stays idempotent; an id that is not an upload id is a 404.
+//
+// The id is the whole address on purpose: this store is not room-scoped, and it
+// does not need to be. Every id is minted here and handed to exactly one caller,
+// which either stores the attachment on its message or takes its own copy back
+// after a refusal — so a caller only ever holds ids this store gave it, and the
+// one bulk path is Purge, which runs once the rooms that referenced the files
+// are gone. What such an id must never be is caller-shaped: the id check keeps
+// Delete inside the root, which is why a room id, a path, or an absolute path
+// answers not-found instead of naming a directory to remove.
 func (s *Store) Delete(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err

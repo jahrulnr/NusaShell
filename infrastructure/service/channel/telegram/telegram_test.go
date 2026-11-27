@@ -28,6 +28,7 @@ type botAPI struct {
 	actions int
 	files   map[string][]byte // file_id → bytes, served by getFile and /file/
 	calls   []apiCall         // every call but polling, typing and sendMessage
+	refuse  *apiError         // when set, sendMessage answers this Bot API error
 }
 
 // apiCall is one recorded Bot API call; a multipart upload records its
@@ -90,8 +91,15 @@ func (b *botAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(q)
 	case "sendMessage":
 		b.mu.Lock()
-		b.sent = append(b.sent, params)
+		ref := b.refuse
+		if ref == nil {
+			b.sent = append(b.sent, params)
+		}
 		b.mu.Unlock()
+		if ref != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": ref.code, "description": ref.desc})
+			return
+		}
 		reply(tgMessage{MessageID: 1})
 	case "sendChatAction":
 		b.mu.Lock()

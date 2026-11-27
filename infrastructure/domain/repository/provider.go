@@ -23,8 +23,8 @@ type ProviderSnapshot struct {
 
 // Provider is a separate aggregate root persisted on its own — credentials,
 // endpoint, and model catalog are managed independently so updates propagate
-// to every conversation referencing it by id. Errors carry the apperror
-// contract — a missing id surfaces as 404.
+// to every conversation referencing it by id. A missing id is not found,
+// reported with a stable error identity.
 //
 // Secret material is the implementation's call: apiKey may be persisted
 // inline, outsourced to a secret store, or stripped and re-injected from the
@@ -46,7 +46,7 @@ type Provider interface {
 	// resolves — ref resolution is the adapter's rule, read here
 	// non-fatally. A record whose credential doesn't resolve still
 	// loads; one that can't even decode returns a snapshot with nil
-	// Provider. 404 when absent.
+	// Provider. Not found, with a stable error identity, when absent.
 	Inspect(ctx context.Context, id string) (ProviderSnapshot, error)
 
 	// InspectList is List for the management plane: every record appears,

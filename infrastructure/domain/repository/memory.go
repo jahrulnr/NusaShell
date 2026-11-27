@@ -29,8 +29,8 @@ type MemoryHit struct {
 }
 
 // Memories keeps memories. A name is unique among a scope's live
-// memories: saving a second live one under it is a 409. Errors follow the
-// apperror contract — a missing memory is a 404.
+// memories: saving a second live one under it is a conflict. A missing
+// memory is not found, reported with a stable error identity.
 type Memories interface {
 	// Save upserts by id. Changing a memory's text drops its embedding.
 	Save(ctx context.Context, m *aggregate.Memory) error
@@ -59,8 +59,8 @@ type MemoryProposalKey struct {
 	Name  string
 }
 
-// MemoryProposals keeps memory suggestions. Errors follow the apperror
-// contract — a missing suggestion is a 404.
+// MemoryProposals keeps memory suggestions. A missing suggestion is not
+// found, reported with a stable error identity.
 type MemoryProposals interface {
 	// Add stores a new pending suggestion.
 	Add(ctx context.Context, p *aggregate.MemoryProposal) error
@@ -69,7 +69,7 @@ type MemoryProposals interface {
 	List(ctx context.Context, statuses []enum.MemoryProposalStatus, limit int) ([]*aggregate.MemoryProposal, error)
 	CountPending(ctx context.Context) (int, error)
 	// Decide stores the decision on a suggestion that is still pending;
-	// one decided meanwhile is a 409, so a decision is made once.
+	// one decided meanwhile is a conflict, so a decision is made once.
 	Decide(ctx context.Context, p *aggregate.MemoryProposal) error
 	// Seen reports whether the suggestion is pending already, or was
 	// decided since the time for the same thread — the owner said no, and

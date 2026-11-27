@@ -7,8 +7,8 @@ import (
 )
 
 // ThreadViews keeps the owner's view of each thread across reloads and
-// devices: one opaque document per key, written by the WebUI. Errors
-// carry the apperror contract — a key with no document surfaces as 404.
+// devices: one opaque document per key, written by the WebUI. A key with
+// no document is not found, reported with a stable error identity.
 type ThreadViews interface {
 	// Get returns the stored document and when it was written.
 	Get(ctx context.Context, key string) (json.RawMessage, time.Time, error)

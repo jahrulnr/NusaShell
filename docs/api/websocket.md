@@ -622,12 +622,16 @@ resync) change no room state and send nothing.
 
 - `state` — `"opened"` when the room gained a live turn; `"completed"`
   or `"failed"` mirroring the turn's terminal type when it ended.
-- `kind` — `"send"` or `"edit"`, the command that opened the turn.
-- `payload.requestId` — the **opening command's** requestId. The
-  issuing tab receives the same notice and recognizes its own by this
-  field — its send/edit flow already refreshes, so only foreign
-  notices drive discovery work. Opaque to every other tab. The frame
-  itself carries no top-level `requestId` — it answers no command.
+- `kind` — `"send"`, `"edit"`, or `"resume"`.
+- `payload.requestId` — the opening command's id when a socket opened
+  the turn, and empty when a queue or machine turn did. The field
+  stays; it is not dropped. An empty id matches no tab's pending
+  bubble. The issuing tab recognizes its own notice by this field —
+  its send, edit, or resume flow already refreshes, so only a foreign
+  notice drives discovery. Opaque to every other tab. The frame itself
+  carries no top-level `requestId` — it answers no command.
+- `payload.origin` — where the turn came from: `"web"`, `"channel"`,
+  `"automation"`, `"conversation"`, or `"completion"`.
 
 ### Room queue
 

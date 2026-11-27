@@ -195,8 +195,8 @@ type Covered struct {
 }
 
 // Conversation is the conversation store port. Ordering contract: Save
-// creates/upserts the record and must precede AppendMessage. Errors carry
-// the apperror contract — a missing convID surfaces as 404, distinct from
+// creates/upserts the record and must precede AppendMessage. A missing
+// convID is not found, reported with a stable error identity, distinct from
 // corruption or I/O failures.
 type Conversation interface {
 	// Save upserts the conversation-level record: id, providerID/modelID binding,
@@ -207,7 +207,7 @@ type Conversation interface {
 	//
 	// Save owns the label invariant: a new room with no label is given the
 	// first one no other room holds, and a label another room already holds is
-	// refused (409) — both decided under the lock that writes the record, so
+	// refused as a conflict — both decided under the lock that writes the record, so
 	// concurrent creations and renames cannot end up sharing a handle. The
 	// aggregate's label is updated to the label stored.
 	Save(ctx context.Context, conv *aggregate.Conversation) error
@@ -250,8 +250,8 @@ type Conversation interface {
 	// after it. A target in the live tail truncates active.jsonl. A target
 	// in a sealed segment promotes that segment — plus every earlier one —
 	// back into active.jsonl so the model regains the full context of that
-	// era; later segments and the old active tail are deleted. 404 when the
-	// id is nowhere in history, 400 when it belongs to a non-user message.
+	// era; later segments and the old active tail are deleted. Not found when the
+	// id is nowhere in history, invalid when it belongs to a non-user message.
 	RewriteFrom(ctx context.Context, convID, msgID, content string) error
 
 	// SavePendingSelection parks the room's runtime and session-option picks

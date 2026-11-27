@@ -56,7 +56,7 @@ type ChatIndex interface {
 	// a live one, and an older copy never replaces a newer one; the receipt
 	// and the explicit mark are kept.
 	Save(ctx context.Context, m ChatMessage) error
-	// Get returns one message; 404 when it is not kept.
+	// Get returns one message; not found, with a stable error identity, when it is not kept.
 	Get(ctx context.Context, channel, chat, id string) (ChatMessage, error)
 	// Revoke clears a message deleted for everyone, so it can no longer be
 	// found or read. An unknown message is not an error.

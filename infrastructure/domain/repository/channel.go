@@ -9,8 +9,8 @@ import (
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
 )
 
-// ChannelLink stores which room answers each external chat. Errors carry
-// the apperror contract — a missing chat surfaces as 404.
+// ChannelLink stores which room answers each external chat. A missing
+// chat is not found, reported with a stable error identity.
 type ChannelLink interface {
 	// Find returns the link of one chat.
 	Find(ctx context.Context, chat valueobject.ChatRef) (*aggregate.ChannelLink, error)
@@ -41,7 +41,7 @@ type InboundLog interface {
 // ChannelSettings stores each channel's own settings document. The shape
 // belongs to the channel adapter; the store keeps it opaque.
 type ChannelSettings interface {
-	// Get returns the stored document; 404 when the channel has none yet.
+	// Get returns the stored document; not found, with a stable error identity, when the channel has none yet.
 	Get(ctx context.Context, channel string) (json.RawMessage, error)
 	// Put replaces the stored document.
 	Put(ctx context.Context, channel string, doc json.RawMessage) error

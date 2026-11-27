@@ -57,6 +57,16 @@ const until = async (ok, message, ms = 1000) => {
   }
 };
 
+// A case names itself. Comparing a DOM node with assert.equal makes the runner
+// print the node, and this shim's tree points at itself, so that print never
+// returns and the failure is the file, not the case. The check stays the same.
+const sameNode = (actual, expected, message) => assert.equal(actual === expected, true, message);
+const nodeGone = (node, message) => assert.equal(node == null, true, message);
+
+// Well under the 150s stop. A green case is a few hundred milliseconds; a case
+// that stalls names itself here instead of holding the file.
+const CASE_MS = 10_000;
+
 // computedOverflowY is the overflow a Tailwind utility class declares on an
 // element. The shim has no stylesheet, so this reads the class contract, not
 // the compiled CSS: a regression of the panel to overflow-auto fails here
@@ -156,7 +166,7 @@ const modelPickKeepsPanel = async () => {
     mo.disconnect();
 
     assert.equal(doc.contains(dialog), true, 'the panel never left the document');
-    assert.equal(doc.querySelector('[role="dialog"]'), dialog, 'same node, not a remount');
+    sameNode(doc.querySelector('[role="dialog"]'), dialog, 'same node, not a remount');
     // The pick reloaded the room's data behind the panel; a refresh like that
     // must not move the scroll or steal the focus.
     assert.equal(body.scrollTop, 37, 'scroll did not jump');
@@ -200,11 +210,11 @@ const agentChipFlow = async () => {
     answer = { data: [], status: 'ready' };
     await chat.loadAgentOptions(r, { force: true });
     await until(() => chip() === null, 'a definitive empty answer hides the chip');
-    assert.equal(panel(), null, 'the panel goes with its chip');
+    nodeGone(panel(), 'the panel goes with its chip');
     answer = { data: [MODE] };
     await chat.loadAgentOptions(r, { force: true });
     await until(() => chip(), 'the chip shows again once the agent offers an option');
-    assert.equal(panel(), null, 'and the panel does not reopen by itself');
+    nodeGone(panel(), 'and the panel does not reopen by itself');
   } finally {
     render(null, host);
     host.remove();
@@ -319,7 +329,7 @@ const agentPanelAnswers = async () => {
     await until(() => /reports no options right now/.test(panel().textContent), 'a transient empty answer says so');
     const refresh = () => [...(panel()?.querySelectorAll('button') || [])].find((b) => b.textContent.trim() === 'Refresh');
     assert.ok(refresh(), 'an empty answer offers Refresh, because nothing failed');
-    assert.equal(retry(), undefined, 'an empty answer does not say Retry; Retry is for a failed read');
+    assert.equal(retry() === undefined, true, 'an empty answer does not say Retry; Retry is for a failed read');
     assert.doesNotMatch(panel().textContent, FOOTER, 'an empty list has no footer');
     assert.doesNotMatch(panel().textContent, STALE, 'a good answer clears the stale warning');
   } finally {
@@ -457,9 +467,9 @@ const searchStartsAtTop = async () => {
     input.dispatchEvent(new Ev('input', { bubbles: true }));
     await sleep(30);
     const live = doc.querySelector('[role="dialog"] [data-scroll="list"]');
-    assert.equal(live, body, 'a filter must not rebuild the list scroller');
+    sameNode(live, body, 'a filter must not rebuild the list scroller');
     assert.equal(live.scrollTop, 0, 'a changed filter starts the body at its top');
-    assert.equal(doc.activeElement, input, 'typing never moves the focus');
+    sameNode(doc.activeElement, input, 'typing never moves the focus');
   } finally {
     render(null, host);
     host.remove();
@@ -582,28 +592,28 @@ const catalogTickKeepsScroll = async () => {
     emit();
     await sleep(160);
     const live = doc.querySelector('[role="dialog"] [data-scroll="list"]');
-    assert.equal(live, body, 'an unchanged catalog keeps the list scroller');
+    sameNode(live, body, 'an unchanged catalog keeps the list scroller');
     assert.equal(live.scrollTop, 64, 'an unchanged catalog leaves the scroll where the owner put it');
     const after = rows();
     assert.equal(after.length, before.length);
-    after.forEach((row, i) => assert.equal(row, before[i], 'an unchanged catalog does not rebuild the model list'));
+    after.forEach((row, i) => sameNode(row, before[i], 'an unchanged catalog does not rebuild the model list'));
   } finally {
     render(null, host);
     host.remove();
   }
 };
 
-test('an unchanged catalog keeps the model list and its scroll', catalogTickKeepsScroll);
-test('reasoning effort stays put while the model list scrolls', effortStaysWithTheList);
-test('a new room keeps the agent options out of the model list', freshRoomOptionsStay);
-test('the panel says a pick applies next turn only while the record parks it', agentHintFollowsRecord);
-test('the options panel answers a read, an empty answer, and a failure, and a failure offers Retry', agentPanelAnswers);
-test('the model picker offers Retry for a failed options read, and the retry reads again', pickerAgentFailure);
-test('an open options panel carries the outage inline: no toast repeats it, and each failed Retry counts in the panel', outageInPanel);
-test('the inline surface registers in the commit that mounts the panel, before any read can answer', registersAtMount);
+test('an unchanged catalog keeps the model list and its scroll', { timeout: CASE_MS }, catalogTickKeepsScroll);
+test('reasoning effort stays put while the model list scrolls', { timeout: CASE_MS }, effortStaysWithTheList);
+test('a new room keeps the agent options out of the model list', { timeout: CASE_MS }, freshRoomOptionsStay);
+test('the panel says a pick applies next turn only while the record parks it', { timeout: CASE_MS }, agentHintFollowsRecord);
+test('the options panel answers a read, an empty answer, and a failure, and a failure offers Retry', { timeout: CASE_MS }, agentPanelAnswers);
+test('the model picker offers Retry for a failed options read, and the retry reads again', { timeout: CASE_MS }, pickerAgentFailure);
+test('an open options panel carries the outage inline: no toast repeats it, and each failed Retry counts in the panel', { timeout: CASE_MS }, outageInPanel);
+test('the inline surface registers in the commit that mounts the panel, before any read can answer', { timeout: CASE_MS }, registersAtMount);
 
 for (const layout of ['sheet', 'desktop']) {
-  test(`a model pick inside the panel keeps the panel, its scroll, its focus, and every control (${layout})`, () => inLayout(layout, modelPickKeepsPanel));
-  test(`a panel whose chip hides closes with it, and does not reopen when the chip returns (${layout})`, () => inLayout(layout, agentChipFlow));
-  test(`typing in the search field starts the body at its top (${layout})`, () => inLayout(layout, searchStartsAtTop));
+  test(`a model pick inside the panel keeps the panel, its scroll, its focus, and every control (${layout})`, { timeout: CASE_MS }, () => inLayout(layout, modelPickKeepsPanel));
+  test(`a panel whose chip hides closes with it, and does not reopen when the chip returns (${layout})`, { timeout: CASE_MS }, () => inLayout(layout, agentChipFlow));
+  test(`typing in the search field starts the body at its top (${layout})`, { timeout: CASE_MS }, () => inLayout(layout, searchStartsAtTop));
 }

@@ -11,7 +11,7 @@ import (
 type MCPServer interface {
 	Create(ctx context.Context, s *aggregate.MCPServer) error
 	// Update saves s when the stored copy is still at readAt; otherwise
-	// 409.
+	// a conflict, reported with a stable error identity.
 	Update(ctx context.Context, s *aggregate.MCPServer, readAt time.Time) error
 	Get(ctx context.Context, id string) (*aggregate.MCPServer, error)
 	List(ctx context.Context) ([]aggregate.MCPServer, error)

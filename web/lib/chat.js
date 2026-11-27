@@ -1969,18 +1969,18 @@ async function onTerminal(r, f) {
     if (r.failed === unconfirmed.failure) r.failed = null;
     r.unconfirmedRetry = null;
   }
-  // Prepend in reverse submission order so recovered inputs keep their order.
-  // An explicit Steer never becomes an ordinary queued send.
-  let steerReturned = false;
+  // A pending or claimed steer is the server's next turn. This tab does not
+  // put that text or its files back in the draft, does not toast, and does
+  // not send it. An explicit recall still returns that one input. A steer
+  // this snapshot does not name stays on the tray until its answer.
+  const handedOff = [];
   for (const s of [...(p.steering || [])].reverse()) {
     const mine = r.steers.find((x) => x.inputId === s.inputId);
     if (!mine) continue;
-    const unconsumed = s.state === 'pending' || s.state === 'claimed';
-    if (unconsumed || s.state === 'recalled') restoreDraft(r, mine.text, mine.references, mine.files);
-    if (unconsumed) steerReturned = true;
+    if (s.state === 'recalled') restoreDraft(r, mine.text, mine.references, mine.files);
+    else if (s.state === 'pending' || s.state === 'claimed') handedOff.push(mine);
     r.steers = r.steers.filter((x) => x !== mine);
   }
-  if (steerReturned) toast('The turn ended before it could use your steer. Your input is back in the draft.', 'info');
   // A command can still be in flight after this snapshot. Keep the tray row
   // until that answer arrives: an unaccepted steer is queued from the error,
   // and any other rejection still restores the draft.
@@ -1998,6 +1998,9 @@ async function onTerminal(r, f) {
     home.queue = [...r.queue, ...home.queue];
     if (home.queue.length) home.held = true;
     home.steers = [...r.steers, ...home.steers];
+    // The room is gone, so the server has no next turn to run. The inputs it
+    // would have taken come home with the draft.
+    for (const s of handedOff) restoreDraft(home, s.text, s.references, s.files);
     for (const s of r.steers) {
       const req = requests.get(s.inputId);
       if (req) req.key = home.key;

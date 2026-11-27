@@ -34,6 +34,7 @@ $` + EnvAddr + `, else the configured port).
   whatsapp send --to T --text S
   whatsapp send --to T --file PATH [--caption S]
   whatsapp send < request.json  any message type (see below)
+  telegram send --to CHAT_ID --text S [--thread TOPIC]  starts a message
   whatsapp search [flags] [text]  kept messages, newest first (JSON)
       -n N  page size 1-500 (50)   --cursor C  nextCursor of the last page
       --chat JID  --sender JID     --raw  include WhatsApp's own payload
@@ -103,6 +104,7 @@ func Channel(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var (
 		enabled, readReceipts, sendTyping, raw, tokenStdin bool
 		policy, allow, groups, to, text, file, caption     string
+		thread                                             string
 		cursor, chat, sender                               string
 		allowAdd, allowRemove, groupAdd, groupRemove       repeated
 		retention, pacing, queueCap, limit, page           int
@@ -132,6 +134,7 @@ func Channel(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fs.StringVar(&text, "text", "", "")
 		fs.StringVar(&file, "file", "", "")
 		fs.StringVar(&caption, "caption", "", "")
+		fs.StringVar(&thread, "thread", "", "")
 	case "search":
 		fs.IntVar(&limit, "n", 50, "")
 		fs.StringVar(&cursor, "cursor", "", "")
@@ -224,6 +227,11 @@ func Channel(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				}
 			case text != "":
 				req["type"], req["text"] = "text", text
+				if thread != "" {
+					// A forum message carries its topic, or it lands in the
+					// forum's main stream instead of the thread it answers.
+					req["thread"] = thread
+				}
 			default:
 				fmt.Fprintf(stderr, "%s: send --to needs --text or --file\n", CLIName)
 				return 2

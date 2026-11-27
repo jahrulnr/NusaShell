@@ -1060,7 +1060,7 @@ test('steer carries the full draft — references, uploads, annotations — and 
   assert.equal(r.files[1].pickId, 'pk_1');
 });
 
-test('an unconsumed attachment-only steer returns to the draft, not the queue', async () => {
+test('an unconsumed attachment-only steer stays off the draft and does not start a turn', async () => {
   const { r, cmd } = await openBusyThread();
   const files = [{ key: 'k1', status: 'ready', id: 'u_1', name: 'shot.png', mediaType: 'image/png' }];
   assert.equal(chat.submit(r, '', [], files, 't2'), true);
@@ -1068,15 +1068,28 @@ test('an unconsumed attachment-only steer returns to the draft, not the queue', 
   assert.equal(steer.type, 'turn.steer');
   assert.equal(steer.payload.content, '');
   assert.deepEqual(steer.payload.uploads, ['u_1']);
+  const draft = r.draft;
+  const kept = r.files.slice();
   terminal(cmd, 'turn.completed', 'c_1', { userMessagePersisted: true, steering: [{ inputId: steer.requestId, state: 'pending' }] }, 't2');
   await sleep(60);
   assert.equal(r.steers.length, 0);
-  assert.deepEqual(r.files, files);
+  assert.equal(r.draft, draft);
+  assert.deepEqual(r.files, kept);
   assert.equal(r.queue.length, 0);
-  assert.equal(sentTurns().length, 1, 'steer must not start a new turn');
-  assert.match(state.toasts.at(-1).message, /back in the draft/);
-  assert.equal(state.toasts.at(-1).kind, 'info');
+  assert.equal(sentTurns().length, 1, 'a pending steer must not start a turn');
+  assert.equal(state.toasts.some((t) => /back in the draft/.test(t.message)), false);
   assert.equal(state.toasts.some((t) => t.kind === 'error'), false);
+});
+
+test('an explicit recall returns that steer to the draft', async () => {
+  const { r } = await openBusyThread();
+  r.draft = 'kept';
+  assert.equal(chat.submit(r, 'bring back', [], [], 't2'), true);
+  const steer = ws.sent.at(-1);
+  ws.serve({ type: 'turn.steer_recalled', conversationId: 'c_1', turnId: 't2', seq: 2, payload: { inputId: steer.requestId } });
+  assert.equal(r.steers.length, 0);
+  assert.equal(r.draft, 'bring back\nkept');
+  assert.equal(sentTurns().length, 1, 'a recall does not start a turn');
 });
 
 test('a steer the server never accepted is one ordinary send after the turn ends', async () => {
@@ -1229,10 +1242,11 @@ test('steer receipts after reconnect reconcile pending, then a failed snapshot',
   assert.equal(r.failed?.status, 502);
   assert.equal(r.steers.length, 0);
   assert.equal(r.queue.length, 0);
-  assert.equal(r.draft, 'é @dog\nnewer');
-  assert.deepEqual(r.refs.map((x) => [x.id, x.start, x.end]), [['c_dog', 2, 6]]);
-  assert.deepEqual(r.files, files);
+  assert.equal(r.draft, 'newer', 'a reconnect does not restore a claimed steer into the draft');
+  assert.equal(r.files.length, 0);
+  assert.equal(r.refs.length, 0);
   assert.equal(sentTurns().length, 1, 'no automatic send after a failed snapshot');
+  assert.equal(state.toasts.some((t) => /back in the draft/.test(t.message)), false);
 });
 
 test('a never-saved first turn returns its queue, steers, and draft to home', async () => {

@@ -22,10 +22,10 @@ type TextModelService interface {
 	// by finished, so callers consume both modes uniformly. onEvent may be
 	// nil.
 	//
-	// Failures return apperror.IAppError — the application routes on
-	// StatusCode(): 429 tries another provider, 401/403 marks a provider dead,
-	// 413 compacts rather than falls back. Message is frontend-safe;
-	// upstream detail stays in Cause.
+	// Failures report a stable error identity. The application routes on
+	// that identity: rate-limited tries another provider, a dead credential
+	// marks a provider dead, context overflow compacts rather than falls
+	// back. The message is safe to show; upstream detail stays internal.
 	Send(ctx context.Context, conv *aggregate.Conversation, prov *aggregate.Provider, model entity.Model, onEvent event.TurnEventHandler) error
 }
 

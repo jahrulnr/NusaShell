@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"slices"
 	"time"
 
 	"github.com/jahrulnr/nusashell/infrastructure/domain/valueobject"
@@ -99,16 +98,6 @@ type messageInputPayload struct {
 	// RecordingID names a browser recording to attach; turn.steer
 	// rejects it — a recording belongs to a new message.
 	RecordingID string `json:"recordingId,omitempty"`
-}
-
-// equal reports whether a retried command carries the same input —
-// requestIds dedupe only when the whole payload is identical.
-func (p messageInputPayload) equal(q messageInputPayload) bool {
-	return p.Content == q.Content &&
-		slices.Equal(p.References, q.References) &&
-		slices.Equal(p.Uploads, q.Uploads) &&
-		slices.Equal(p.Annotations, q.Annotations) &&
-		p.RecordingID == q.RecordingID
 }
 
 type annotationPayload struct {

@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime"
 	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -424,7 +426,13 @@ func (t *turnSink) link(uri, name, mediaType string) (valueobject.Attachment, er
 		return valueobject.Attachment{}, fmt.Errorf("outside the session's folders")
 	}
 	if mediaType == "" {
-		if mediaType = mime.TypeByExtension(filepath.Ext(path)); mediaType == "" {
+		// Nobody stated a type. Ask the one sniffer every caller uses — the
+		// bytes first, the file's own name as the tie-breaker — instead of
+		// trusting an extension that may be missing or wrong. A file that
+		// cannot be read keeps the name's answer, then plain bytes.
+		if head := headOf(path); len(head) > 0 {
+			mediaType = dservice.SniffMediaType(head, path)
+		} else if mediaType = mime.TypeByExtension(filepath.Ext(path)); mediaType == "" {
 			mediaType = "application/octet-stream"
 		}
 	}
@@ -437,6 +445,20 @@ func (t *turnSink) link(uri, name, mediaType string) (valueobject.Attachment, er
 	}
 	a.SetName(name)
 	return a, nil
+}
+
+// headOf reads the first bytes of a local file for the media sniffer, which
+// needs no more than that. A file that cannot be read answers nil: its name is
+// then the only thing left to go on.
+func headOf(path string) []byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	return head[:n]
 }
 
 // beginYield marks the turn as asked to stop at its next safe point; false

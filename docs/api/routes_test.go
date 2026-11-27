@@ -25,19 +25,11 @@ var httpMethods = map[string]bool{
 // openapi.yaml. The test fails when an entry becomes documented or unmounted,
 // so the list cannot rot into a second, invisible contract.
 var legacyRouteDocDebt = map[string]string{
-	"GET /api/memories":                       "pre-existing memory list surface; documentation debt",
 	"POST /api/memories":                      "pre-existing memory creation surface; documentation debt",
-	"PUT /api/memories/{}":                    "pre-existing memory update surface; documentation debt",
 	"DELETE /api/memories/{}":                 "pre-existing memory deletion surface; documentation debt",
 	"POST /api/memories/{}/actions":           "pre-existing memory action surface; documentation debt",
 	"GET /api/memory-suggestions":             "pre-existing memory-suggestion list surface; documentation debt",
 	"POST /api/memory-suggestions/{}/actions": "pre-existing memory-suggestion decision surface; documentation debt",
-	"GET /api/websearch":                      "pre-existing websearch status surface; documentation debt",
-	"PATCH /api/websearch":                    "pre-existing websearch settings surface; documentation debt",
-	"PUT /api/websearch/keys/{}":              "pre-existing websearch key write surface; documentation debt",
-	"DELETE /api/websearch/keys/{}":           "pre-existing websearch key delete surface; documentation debt",
-	"POST /api/websearch/test":                "pre-existing websearch test surface; documentation debt",
-	"POST /api/transcriptions":                "pre-existing transcription surface; documentation debt",
 }
 
 // intentionallyAbsent is the contract's negative space. These are not
